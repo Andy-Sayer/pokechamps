@@ -13,6 +13,7 @@
     "server": "npm -w @pokechamps/server start",
     "server:dev": "npm -w @pokechamps/server run dev",
     "server:docker": "docker compose up --build",
+    "server:docker:watch": "docker compose watch",
     "server:docker:down": "docker compose down",
     "refresh-data": "npm -w @pokechamps/core run refresh-data",
     "refresh-pikalytics": "npm -w @pokechamps/core run refresh-pikalytics",
