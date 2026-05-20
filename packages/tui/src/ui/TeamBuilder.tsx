@@ -7,10 +7,11 @@ import { MAX_IVS } from '@pokechamps/core/domain/types.js';
 import {
   searchLegalSpecies, getSpecies, getItem, getNature, getLearnset, loadFormat, toId,
 } from '@pokechamps/core/domain/data.js';
-import { saveTeam } from '@pokechamps/core/domain/storage.js';
 import { evFromSp } from '@pokechamps/core/domain/pikalytics.js';
+import type { Stores } from '@pokechamps/core/storage/index.js';
 
 export interface TeamBuilderProps {
+  stores: Stores;
   onDone: (team: PokemonSet[], name: string) => void;
   onCancel: () => void;
 }
@@ -89,7 +90,7 @@ function natureItems(): Array<{ label: string; value: string }> {
   });
 }
 
-export function TeamBuilder({ onDone, onCancel }: TeamBuilderProps) {
+export function TeamBuilder({ stores, onDone, onCancel }: TeamBuilderProps) {
   const [team, setTeam] = useState<PokemonSet[]>([]);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [step, setStep] = useState<Step>('species');
@@ -370,7 +371,11 @@ export function TeamBuilder({ onDone, onCancel }: TeamBuilderProps) {
                   onSubmit={value => {
                     const name = value.trim() || teamName;
                     setTeamName(name);
-                    saveTeam(name, team);
+                    // Fire-and-forget save; UI advances optimistically.
+                    void stores.teams.save(name, team).catch(err => {
+                      // eslint-disable-next-line no-console
+                      console.error('saveTeam failed', err);
+                    });
                     onDone(team, name);
                   }}
                 />

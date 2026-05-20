@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import SelectInput from 'ink-select-input';
 import type { Match } from '@pokechamps/core/domain/types.js';
-import { listMatches } from '@pokechamps/core/domain/storage.js';
+import type { Stores, MatchSummary } from '@pokechamps/core/storage/index.js';
 
 export interface MatchHistoryProps {
+  stores: Stores;
   onExit: () => void;
 }
 
@@ -20,10 +21,20 @@ function fmtDate(iso: string | undefined): string {
   try { return new Date(iso).toLocaleString(); } catch { return iso; }
 }
 
-export function MatchHistory({ onExit }: MatchHistoryProps) {
-  const matches = useMemo(() => listMatches(), []);
+export function MatchHistory({ stores, onExit }: MatchHistoryProps) {
+  // null = still loading, [] = loaded but empty. The loading state is
+  // necessary because the (async) MatchStore.list resolves after first paint.
+  const [summaries, setSummaries] = useState<MatchSummary[] | null>(null);
   const [selected, setSelected] = useState<{ id: string; match: Match } | null>(null);
   const [turnCursor, setTurnCursor] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    stores.matches.list().then(list => {
+      if (!cancelled) setSummaries(list);
+    });
+    return () => { cancelled = true; };
+  }, [stores]);
 
   useInput((_input, key) => {
     if (key.escape) {
@@ -36,7 +47,17 @@ export function MatchHistory({ onExit }: MatchHistoryProps) {
     }
   });
 
-  if (matches.length === 0) {
+  if (summaries === null) {
+    return (
+      <Box flexDirection="column" padding={1}>
+        <Text bold color="cyan">Match history</Text>
+        <Text dimColor>(loading…)</Text>
+        <Text dimColor>[ESC] back</Text>
+      </Box>
+    );
+  }
+
+  if (summaries.length === 0) {
     return (
       <Box flexDirection="column" padding={1}>
         <Text bold color="cyan">Match history</Text>
@@ -81,22 +102,24 @@ export function MatchHistory({ onExit }: MatchHistoryProps) {
     );
   }
 
-  const items = matches.map(m => ({
-    label: `${outcomeGlyph(m.match.outcome)} ${m.id}  ${fmtDate(m.match.startedAt)}  ·  ${m.match.opponentTeam.slice(0, 3).map(o => o.species).join('/')}…`,
+  const items = summaries.map(m => ({
+    label: `${outcomeGlyph(m.outcome)} ${m.id}  ${fmtDate(m.startedAt)}  ·  ${(m.opponentTeamSpecies ?? []).slice(0, 3).join('/')}…`,
     value: m.id,
   }));
 
   return (
     <Box flexDirection="column" padding={1}>
-      <Text bold color="cyan">Match history ({matches.length})</Text>
+      <Text bold color="cyan">Match history ({summaries.length})</Text>
       <Text dimColor>↑/↓ pick · Enter view · ESC back</Text>
       <Box marginTop={1}>
         <SelectInput
           items={items}
           isFocused
           onSelect={item => {
-            const m = matches.find(x => x.id === item.value);
-            if (m) { setSelected({ id: m.id, match: m.match }); setTurnCursor(0); }
+            // Lazy-load the full Match only when the user drills in.
+            stores.matches.get(item.value as string).then(m => {
+              if (m) { setSelected({ id: m.id, match: m }); setTurnCursor(0); }
+            });
           }}
         />
       </Box>

@@ -2973,6 +2973,155 @@
         "pct": 20.303
       },
       "featuredSets": []
+    },
+    "Aggron": {
+      "rank": 0,
+      "usage": 0,
+      "baseStats": {
+        "hp": 70,
+        "atk": 110,
+        "def": 180,
+        "spa": 60,
+        "spd": 60,
+        "spe": 50
+      },
+      "moves": [
+        {
+          "name": "Body Press",
+          "pct": 73.331
+        },
+        {
+          "name": "Heavy Slam",
+          "pct": 63.076
+        },
+        {
+          "name": "Protect",
+          "pct": 57.951
+        },
+        {
+          "name": "Rock Slide",
+          "pct": 51.596
+        },
+        {
+          "name": "Iron Defense",
+          "pct": 38.311
+        },
+        {
+          "name": "Iron Head",
+          "pct": 29.841
+        },
+        {
+          "name": "Head Smash",
+          "pct": 29.362
+        },
+        {
+          "name": "Stone Edge",
+          "pct": 6.669
+        },
+        {
+          "name": "Earthquake",
+          "pct": 6.333
+        },
+        {
+          "name": "Thunder Wave",
+          "pct": 4.002
+        }
+      ],
+      "abilities": [
+        {
+          "name": "Sturdy",
+          "pct": 56.085
+        },
+        {
+          "name": "Rock Head",
+          "pct": 31.475
+        },
+        {
+          "name": "Heavy Metal",
+          "pct": 12.44
+        }
+      ],
+      "items": [
+        {
+          "name": "Metal Coat",
+          "pct": 25.926
+        },
+        {
+          "name": "Leftovers",
+          "pct": 20.598
+        },
+        {
+          "name": "Hard Stone",
+          "pct": 15.02
+        },
+        {
+          "name": "Focus Sash",
+          "pct": 9.77
+        },
+        {
+          "name": "Chople Berry",
+          "pct": 5.577
+        },
+        {
+          "name": "Quick Claw",
+          "pct": 5.121
+        },
+        {
+          "name": "Lum Berry",
+          "pct": 3.277
+        },
+        {
+          "name": "Black Belt",
+          "pct": 3.102
+        },
+        {
+          "name": "Sitrus Berry",
+          "pct": 2.66
+        },
+        {
+          "name": "Choice Scarf",
+          "pct": 2.625
+        }
+      ],
+      "teammates": [
+        {
+          "name": "Incineroar",
+          "pct": 39.994
+        },
+        {
+          "name": "Farigiraf",
+          "pct": 37.845
+        },
+        {
+          "name": "Sinistcha",
+          "pct": 34.355
+        },
+        {
+          "name": "Drampa-Mega",
+          "pct": 24.435
+        },
+        {
+          "name": "Pelipper",
+          "pct": 23.637
+        },
+        {
+          "name": "Tyranitar-Mega",
+          "pct": 20.356
+        }
+      ],
+      "topSpread": {
+        "nature": "Adamant",
+        "sp": [
+          32,
+          32,
+          2,
+          0,
+          0,
+          0
+        ],
+        "pct": 22.799
+      },
+      "featuredSets": []
     }
   }
 }

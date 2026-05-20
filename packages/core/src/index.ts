@@ -17,3 +17,4 @@ export * from './domain/typechart.js';
 export * from './domain/storage.js';
 export * from './domain/damage.js';
 export * from './domain/gimmicks/index.js';
+export * from './storage/index.js';

@@ -3,16 +3,17 @@ import { Box, Text, useInput, usePaste } from 'ink';
 import TextInput from 'ink-text-input';
 import type { PokemonSet } from '@pokechamps/core/domain/types.js';
 import { parseShowdownTeam } from '@pokechamps/core/domain/showdown.js';
-import { saveTeam } from '@pokechamps/core/domain/storage.js';
+import type { Stores } from '@pokechamps/core/storage/index.js';
 
 export interface TeamPasteProps {
+  stores: Stores;
   onDone: (team: PokemonSet[], name: string) => void;
   onCancel: () => void;
 }
 
 type Phase = 'paste' | 'name' | 'saved';
 
-export function TeamPaste({ onDone, onCancel }: TeamPasteProps) {
+export function TeamPaste({ stores, onDone, onCancel }: TeamPasteProps) {
   const [buffer, setBuffer] = useState('');
   const [team, setTeam] = useState<PokemonSet[]>([]);
   const [phase, setPhase] = useState<Phase>('paste');
@@ -93,7 +94,12 @@ export function TeamPaste({ onDone, onCancel }: TeamPasteProps) {
           onChange={setName}
           onSubmit={value => {
             const safe = value.trim() || 'my-team';
-            saveTeam(safe, team);
+            // Fire-and-forget: local save should never block the UI; on
+            // failure surface to console (no in-screen affordance for it yet).
+            void stores.teams.save(safe, team).catch(err => {
+              // eslint-disable-next-line no-console
+              console.error('saveTeam failed', err);
+            });
             setName(safe);
             setPhase('saved');
             onDone(team, safe);

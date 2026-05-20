@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { render, Box, Text, useApp } from 'ink';
 import type { PokemonSet, OpponentEntry, Match } from '@pokechamps/core/domain/types.js';
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
+import { defaultStores } from '@pokechamps/core/storage/index.js';
 import { MainMenu } from './ui/MainMenu.js';
 import { TeamPaste } from './ui/TeamPaste.js';
 import { TeamPicker } from './ui/TeamPicker.js';
@@ -11,6 +12,10 @@ import { OpponentLeadPicker } from './ui/OpponentLeadPicker.js';
 import { BattleScreen } from './ui/BattleScreen.js';
 import { TeamBuilder } from './ui/TeamBuilder.js';
 import { MatchHistory } from './ui/MatchHistory.js';
+
+// Single Stores instance for the whole app. Phase 3 will swap defaultStores()
+// for a config-driven factory (file vs http) without touching screen props.
+const stores = defaultStores();
 
 type Route =
   | { kind: 'menu' }
@@ -37,16 +42,17 @@ function App() {
     }} />;
   }
   if (route.kind === 'history') {
-    return <MatchHistory onExit={() => setRoute({ kind: 'menu' })} />;
+    return <MatchHistory stores={stores} onExit={() => setRoute({ kind: 'menu' })} />;
   }
   if (route.kind === 'edit-team') {
-    return <TeamPaste onDone={() => setRoute({ kind: 'menu' })} onCancel={() => setRoute({ kind: 'menu' })} />;
+    return <TeamPaste stores={stores} onDone={() => setRoute({ kind: 'menu' })} onCancel={() => setRoute({ kind: 'menu' })} />;
   }
   if (route.kind === 'team-builder') {
-    return <TeamBuilder onDone={() => setRoute({ kind: 'menu' })} onCancel={() => setRoute({ kind: 'menu' })} />;
+    return <TeamBuilder stores={stores} onDone={() => setRoute({ kind: 'menu' })} onCancel={() => setRoute({ kind: 'menu' })} />;
   }
   if (route.kind === 'pick-team') {
     return <TeamPicker
+      stores={stores}
       onPick={(team, name) => setRoute({ kind: 'opponent', myTeam: team, teamName: name })}
       onCreateNew={() => setRoute({ kind: 'edit-team' })}
       onCancel={() => setRoute({ kind: 'menu' })}
@@ -54,12 +60,14 @@ function App() {
   }
   if (route.kind === 'opponent') {
     return <OpponentInput
+      stores={stores}
       onDone={opp => setRoute({ kind: 'bring', myTeam: route.myTeam, opponent: opp, teamName: route.teamName })}
       onCancel={() => setRoute({ kind: 'menu' })}
     />;
   }
   if (route.kind === 'bring') {
     return <BringPicker
+      stores={stores}
       myTeam={route.myTeam}
       opponent={route.opponent}
       onConfirm={indices => setRoute({
@@ -74,6 +82,7 @@ function App() {
   }
   if (route.kind === 'opponent-lead') {
     return <OpponentLeadPicker
+      stores={stores}
       opponent={route.opponent}
       onConfirm={leadIndices => {
         const match: Match = {
@@ -95,7 +104,7 @@ function App() {
     />;
   }
   if (route.kind === 'battle') {
-    return <BattleScreen match={route.match} onEnd={intent => setRoute(intent === 'new-match' ? { kind: 'pick-team' } : { kind: 'menu' })} />;
+    return <BattleScreen stores={stores} match={route.match} onEnd={intent => setRoute(intent === 'new-match' ? { kind: 'pick-team' } : { kind: 'menu' })} />;
   }
   return <Text>Unknown route</Text>;
 }

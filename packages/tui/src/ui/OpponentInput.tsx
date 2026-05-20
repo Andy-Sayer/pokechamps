@@ -3,9 +3,10 @@ import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import type { OpponentEntry } from '@pokechamps/core/domain/types.js';
 import { searchLegalSpecies, toId } from '@pokechamps/core/domain/data.js';
-import { fetchAndCache } from '@pokechamps/core/domain/pikalyticsFetch.js';
+import type { Stores } from '@pokechamps/core/storage/index.js';
 
 export interface OpponentInputProps {
+  stores: Stores;
   onDone: (opp: OpponentEntry[]) => void;
   onCancel: () => void;
 }
@@ -13,7 +14,7 @@ export interface OpponentInputProps {
 const SIZE = 6;
 const SUGGESTION_LIMIT = 8;
 
-export function OpponentInput({ onDone, onCancel }: OpponentInputProps) {
+export function OpponentInput({ stores, onDone, onCancel }: OpponentInputProps) {
   const [species, setSpecies] = useState<string[]>(Array(SIZE).fill(''));
   const [activeIdx, setActiveIdx] = useState(0);
   const [value, setValue] = useState('');
@@ -60,7 +61,7 @@ export function OpponentInput({ onDone, onCancel }: OpponentInputProps) {
     // Fire-and-forget background Pikalytics fetch for this species — by the
     // time the user reaches the bring/battle screens, off-meta species often
     // have data ready.
-    fetchAndCache(name);
+    stores.pikalytics.fetchAndCache(name);
     if (activeIdx < SIZE - 1) {
       setActiveIdx(activeIdx + 1);
     } else if (next.every(s => s.trim())) {

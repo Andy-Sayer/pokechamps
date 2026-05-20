@@ -7,12 +7,10 @@ import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
 import { inferSpread, mostLikely } from '@pokechamps/core/domain/inference.js';
 import { maxHpFor } from '@pokechamps/core/domain/damage.js';
 import { endOfTurn } from '@pokechamps/core/domain/endOfTurn.js';
-import { saveMatch } from '@pokechamps/core/domain/storage.js';
 import { inferOpponentSpeeds, applySpeedInference, actualSpeed, predictTurnOrder } from '@pokechamps/core/domain/speed.js';
 import { reviewLastTurn } from '@pokechamps/core/ai/prompts.js';
 import { isAvailable as aiAvailable } from '@pokechamps/core/ai/client.js';
-import { getPikalytics } from '@pokechamps/core/domain/pikalytics.js';
-import { fetchAndCache, isFetching, onPikalyticsChange } from '@pokechamps/core/domain/pikalyticsFetch.js';
+import type { Stores } from '@pokechamps/core/storage/index.js';
 import { getSpecies } from '@pokechamps/core/domain/data.js';
 import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs } from '@pokechamps/core/domain/hazards.js';
@@ -20,11 +18,20 @@ import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokec
 import { predictOffense, predictThreat, speedVerdict, type SpeedVerdict } from '@pokechamps/core/domain/predictions.js';
 
 export interface BattleScreenProps {
+  stores: Stores;
   match: Match;
   // Optional `intent` lets the user pick "new match" from the match-end
   // menu and have the parent route accordingly. Default behaviour is back
   // to main menu.
   onEnd: (intent?: 'menu' | 'new-match') => void;
+}
+
+// fire-and-forget snapshot save with an error surface via setMessage. Local
+// file writes shouldn't block the UI, but we want save failures to be loud.
+function saveMatchAsync(stores: Stores, match: Match, setMessage: (s: string) => void): void {
+  void stores.matches.update(match.id, match).catch(err => {
+    setMessage(`Save failed: ${err?.message ?? err}`);
+  });
 }
 
 // Eligible replacements for a given side+slot: team mons that aren't fainted
@@ -182,7 +189,7 @@ function shortName(name: string, width = 12): string {
   return name.length <= width ? name : name.slice(0, width);
 }
 
-export function BattleScreen({ match: initial, onEnd }: BattleScreenProps) {
+export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProps) {
   const [match, setMatch] = useState<Match>(initial);
   const [input, setInput] = useState('');
   const [draftActions, setDraftActions] = useState<MoveAction[]>([]);
@@ -214,10 +221,10 @@ export function BattleScreen({ match: initial, onEnd }: BattleScreenProps) {
   // the cache, and subscribe to cache changes for re-renders.
   useEffect(() => {
     for (const opp of match.opponentTeam) {
-      if (!getPikalytics(opp.species)) fetchAndCache(opp.species);
+      if (!stores.pikalytics.get(opp.species)) stores.pikalytics.fetchAndCache(opp.species);
     }
-    return onPikalyticsChange(() => setPikTick(t => t + 1));
-  }, [match.opponentTeam]);
+    return stores.pikalytics.onChange(() => setPikTick(t => t + 1));
+  }, [match.opponentTeam, stores]);
   void pikTick; // exists only to trigger re-renders
 
   const field: FieldState = match.field ?? NEUTRAL_FIELD;
@@ -442,7 +449,7 @@ export function BattleScreen({ match: initial, onEnd }: BattleScreenProps) {
     setMatch(next);
     setActiveIdx(nextActive);
     setDraftActions([]);
-    saveMatch(next);
+    saveMatchAsync(stores, next, setMessage);
     setPendingReplacement(next.outcome ? null : findPendingReplacement(next, nextActive));
     setMessage(`Turn ${turnIndex} logged. ${inferenceNotes.join(' · ')}${eotNote}`);
   };
@@ -457,7 +464,7 @@ export function BattleScreen({ match: initial, onEnd }: BattleScreenProps) {
     }
     const next: Match = { ...match, field: nextField };
     setMatch(next);
-    saveMatch(next);
+    saveMatchAsync(stores, next, setMessage);
     setMessage(`Hazard updated.`);
   };
 
@@ -684,7 +691,7 @@ export function BattleScreen({ match: initial, onEnd }: BattleScreenProps) {
     next.outcome = detectOutcome(next);
     setMatch(next);
     setActiveIdx(nextActive);
-    saveMatch(next);
+    saveMatchAsync(stores, next, setMessage);
     setPendingReplacement(next.outcome ? null : findPendingReplacement(next, nextActive));
     setMessage(
       update.hpPercent != null || update.hpRaw != null ? `HP set.` :
@@ -726,8 +733,8 @@ export function BattleScreen({ match: initial, onEnd }: BattleScreenProps) {
     if (match.outcome) {
       if (key.escape) onEnd();
       if (ch === 's') {
-        const path = saveMatch(match);
-        setMessage(`Snapshot saved to ${path}`);
+        saveMatchAsync(stores, match, setMessage);
+        setMessage(`Snapshot saved (${match.id}).`);
       }
       return;
     }
@@ -747,8 +754,8 @@ export function BattleScreen({ match: initial, onEnd }: BattleScreenProps) {
     if (ch === 'i') { setInfoPickerOpen(true); return; }
     if (key.escape) onEnd();
     if (ch === 's') {
-      const path = saveMatch(match);
-      setMessage(`Snapshot saved to ${path}`);
+      saveMatchAsync(stores, match, setMessage);
+      setMessage(`Snapshot saved (${match.id}).`);
     }
     if (ch === 'n') finalizeTurn();
     if (ch === 'c') setShowCrits(c => !c);
@@ -881,8 +888,8 @@ export function BattleScreen({ match: initial, onEnd }: BattleScreenProps) {
             ]}
             onSelect={item => {
               if (item.value === 'save') {
-                const path = saveMatch(match);
-                setMessage(`Snapshot saved to ${path}`);
+                saveMatchAsync(stores, match, setMessage);
+                setMessage(`Snapshot saved (${match.id}).`);
               } else if (item.value === 'new') {
                 onEnd('new-match');
               } else {
@@ -944,6 +951,7 @@ export function BattleScreen({ match: initial, onEnd }: BattleScreenProps) {
             return (
               <OppRow
                 key={`o-${i}`}
+                stores={stores}
                 index={i}
                 entry={o}
                 marker={slotMarker}
@@ -1039,7 +1047,7 @@ export function BattleScreen({ match: initial, onEnd }: BattleScreenProps) {
 
       {/* Opp info detail panel — populated after the picker selects an opp. */}
       {infoOpenForOpp != null && (
-        <OppInfoPanel index={infoOpenForOpp} entry={match.opponentTeam[infoOpenForOpp]!} />
+        <OppInfoPanel stores={stores} index={infoOpenForOpp} entry={match.opponentTeam[infoOpenForOpp]!} />
       )}
 
       {/* Replacement picker — takes focus when an active slot is empty
@@ -1187,14 +1195,15 @@ function actionToLine(a: MoveAction, match: Match): string {
 // One row of the opp roster: name, brought marker, types from Pikalytics
 // items/abilities/moves/speed-bounds.
 interface OppRowProps {
+  stores: Stores;
   index: number;
   entry: OpponentEntry;
   marker: string;
   color?: string;
 }
-function OppRow({ entry, marker, color }: OppRowProps) {
-  const pik = getPikalytics(entry.species);
-  const fetching = !pik && isFetching(entry.species);
+function OppRow({ stores, entry, marker, color }: OppRowProps) {
+  const pik = stores.pikalytics.get(entry.species);
+  const fetching = !pik && stores.pikalytics.isFetching(entry.species);
   const topItem = pik?.items.find(i => i.name.toLowerCase() !== 'other');
   const speed =
     entry.speedFloor != null && entry.speedCeiling != null ? `${entry.speedFloor}–${entry.speedCeiling}` :
@@ -1314,9 +1323,9 @@ function MatchupRow({ marker, opp, offense, offenseCrit, threat, verdict, dim, a
 // Detail panel for one opp — shows everything we know: Pikalytics top
 // items/abilities/moves with %, observed knownMoves, the top inferred
 // candidate spread, and base stats. Read-only; close via Esc/i.
-interface OppInfoPanelProps { index: number; entry: OpponentEntry }
-function OppInfoPanel({ index, entry }: OppInfoPanelProps) {
-  const pik = getPikalytics(entry.species);
+interface OppInfoPanelProps { stores: Stores; index: number; entry: OpponentEntry }
+function OppInfoPanel({ stores, index, entry }: OppInfoPanelProps) {
+  const pik = stores.pikalytics.get(entry.species);
   const species = getSpecies(entry.species) as any;
   const bs = species?.baseStats;
   const types = (species?.types as string[] | undefined) ?? [];

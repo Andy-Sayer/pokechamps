@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { OpponentEntry } from '@pokechamps/core/domain/types.js';
 import { speciesTypes } from '@pokechamps/core/domain/typechart.js';
-import { getPikalytics } from '@pokechamps/core/domain/pikalytics.js';
+import type { Stores } from '@pokechamps/core/storage/index.js';
 
 export interface OpponentLeadPickerProps {
+  stores: Stores;
   opponent: OpponentEntry[];
   onConfirm: (indices: [number, number]) => void;
   onCancel: () => void;
@@ -16,7 +17,7 @@ const LEAD_SIZE = 2;
 // the 2 leads up front; the back two reveal themselves via switches or
 // forced send-ins after a faint. This picker captures just the leads —
 // the BattleScreen grows the "brought" set as more opp mons appear on field.
-export function OpponentLeadPicker({ opponent, onConfirm, onCancel }: OpponentLeadPickerProps) {
+export function OpponentLeadPicker({ stores, opponent, onConfirm, onCancel }: OpponentLeadPickerProps) {
   const [cursor, setCursor] = useState(0);
   const [chosen, setChosen] = useState<Set<number>>(new Set());
 
@@ -43,7 +44,7 @@ export function OpponentLeadPicker({ opponent, onConfirm, onCancel }: OpponentLe
       <Text dimColor>The other 2 of their bring will reveal as they switch in or come in on a faint.</Text>
       <Box flexDirection="column" marginTop={1}>
         {opponent.map((o, i) => {
-          const pik = getPikalytics(o.species);
+          const pik = stores.pikalytics.get(o.species);
           const item = pik?.items[0];
           const ability = pik?.abilities[0];
           const selected = chosen.has(i);

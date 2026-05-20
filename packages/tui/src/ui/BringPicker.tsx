@@ -3,11 +3,13 @@ import { Box, Text, useInput } from 'ink';
 import type { PokemonSet, OpponentEntry } from '@pokechamps/core/domain/types.js';
 import { scoreBrings, matchupGrid, type BringScore } from '@pokechamps/core/domain/bring.js';
 import { speciesTypes } from '@pokechamps/core/domain/typechart.js';
-import { getPikalytics, pikalyticsAvailable } from '@pokechamps/core/domain/pikalytics.js';
+import { pikalyticsAvailable } from '@pokechamps/core/domain/pikalytics.js';
 import { explainBring } from '@pokechamps/core/ai/prompts.js';
 import { isAvailable } from '@pokechamps/core/ai/client.js';
+import type { Stores } from '@pokechamps/core/storage/index.js';
 
 export interface BringPickerProps {
+  stores: Stores;
   myTeam: PokemonSet[];
   opponent: OpponentEntry[];
   onConfirm: (indices: [number, number, number, number]) => void;
@@ -39,7 +41,7 @@ function shortName(name: string, width = 8): string {
   return name.length <= width ? name.padEnd(width) : name.slice(0, width);
 }
 
-export function BringPicker({ myTeam, opponent, onConfirm, onCancel }: BringPickerProps) {
+export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: BringPickerProps) {
   const [brings, setBrings] = useState<BringScore[]>([]);
   const [cursor, setCursor] = useState(0);
   const [explanation, setExplanation] = useState<string | null>(null);
@@ -86,7 +88,7 @@ export function BringPicker({ myTeam, opponent, onConfirm, onCancel }: BringPick
           ))}
           <Box marginTop={1}><Text bold>Opponent</Text></Box>
           {opponent.map((o, i) => {
-            const pik = getPikalytics(o.species);
+            const pik = stores.pikalytics.get(o.species);
             const item = pik?.items[0];
             const ability = pik?.abilities[0];
             return (
