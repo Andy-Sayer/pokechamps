@@ -1,0 +1,20 @@
+{
+  "name": "pokechamps",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pokemon Champions / VGC battle assistant — bring decisions, damage prediction, opponent stat inference.",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "start": "npm -w @pokechamps/tui start",
+    "typecheck": "npm -w @pokechamps/core run typecheck && npm -w @pokechamps/tui run typecheck",
+    "refresh-data": "npm -w @pokechamps/core run refresh-data",
+    "refresh-pikalytics": "npm -w @pokechamps/core run refresh-pikalytics",
+    "demo-team": "npm -w @pokechamps/core run demo-team",
+    "validate-format": "npm -w @pokechamps/core run validate-format",
+    "test": "npm -w @pokechamps/core test",
+    "test:watch": "npm -w @pokechamps/core run test:watch"
+  }
+}

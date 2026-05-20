@@ -1,0 +1,15 @@
+node_modules/
+dist/
+matches/
+.env
+.env.local
+*.log
+
+# editor / OS cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Claude Code per-project local settings (machine-specific)
+.claude/settings.local.json

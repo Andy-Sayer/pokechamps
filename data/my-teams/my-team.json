@@ -1,0 +1,176 @@
+[
+  {
+    "species": "Charizard",
+    "level": 50,
+    "item": "Charizardite Y",
+    "ability": "Solar Power",
+    "nature": "Adamant",
+    "evs": {
+      "hp": 252,
+      "atk": 0,
+      "def": 12,
+      "spa": 0,
+      "spd": 252,
+      "spe": 0
+    },
+    "ivs": {
+      "hp": 31,
+      "atk": 31,
+      "def": 31,
+      "spa": 31,
+      "spd": 31,
+      "spe": 31
+    },
+    "moves": [
+      "Air Cutter",
+      "Attract",
+      "Wing Attack",
+      "Dual Wingbeat"
+    ]
+  },
+  {
+    "species": "Absol",
+    "level": 50,
+    "item": "Absolite",
+    "ability": "Super Luck",
+    "nature": "Bashful",
+    "evs": {
+      "hp": 0,
+      "atk": 0,
+      "def": 0,
+      "spa": 0,
+      "spd": 0,
+      "spe": 0
+    },
+    "ivs": {
+      "hp": 31,
+      "atk": 31,
+      "def": 31,
+      "spa": 31,
+      "spd": 31,
+      "spe": 31
+    },
+    "moves": [
+      "Aerial Ace",
+      "Air Slash",
+      "Assurance",
+      "Attract"
+    ]
+  },
+  {
+    "species": "Abomasnow",
+    "level": 50,
+    "item": "Abomasite",
+    "ability": "Snow Warning",
+    "nature": "Adamant",
+    "evs": {
+      "hp": 0,
+      "atk": 0,
+      "def": 0,
+      "spa": 0,
+      "spd": 0,
+      "spe": 0
+    },
+    "ivs": {
+      "hp": 31,
+      "atk": 31,
+      "def": 31,
+      "spa": 31,
+      "spd": 31,
+      "spe": 31
+    },
+    "moves": [
+      "Attract",
+      "Aurora Veil",
+      "Avalanche",
+      "Blizzard"
+    ]
+  },
+  {
+    "species": "Aegislash",
+    "level": 50,
+    "item": "Aerodactylite",
+    "ability": "Stance Change",
+    "nature": "Adamant",
+    "evs": {
+      "hp": 0,
+      "atk": 0,
+      "def": 0,
+      "spa": 0,
+      "spd": 0,
+      "spe": 0
+    },
+    "ivs": {
+      "hp": 31,
+      "atk": 31,
+      "def": 31,
+      "spa": 31,
+      "spd": 31,
+      "spe": 31
+    },
+    "moves": [
+      "Aerial Ace",
+      "After You",
+      "Air Slash",
+      "Attract"
+    ]
+  },
+  {
+    "species": "Aerodactyl",
+    "level": 50,
+    "item": "Aggronite",
+    "ability": "Rock Head",
+    "nature": "Adamant",
+    "evs": {
+      "hp": 0,
+      "atk": 0,
+      "def": 0,
+      "spa": 0,
+      "spd": 0,
+      "spe": 0
+    },
+    "ivs": {
+      "hp": 31,
+      "atk": 31,
+      "def": 31,
+      "spa": 31,
+      "spd": 31,
+      "spe": 31
+    },
+    "moves": [
+      "Aerial Ace",
+      "Agility",
+      "Air Cutter",
+      "Ancient Power"
+    ]
+  },
+  {
+    "species": "Aggron",
+    "level": 50,
+    "item": "Alakazite",
+    "ability": "Sturdy",
+    "nature": "Adamant",
+    "evs": {
+      "hp": 0,
+      "atk": 0,
+      "def": 0,
+      "spa": 0,
+      "spd": 0,
+      "spe": 0
+    },
+    "ivs": {
+      "hp": 31,
+      "atk": 31,
+      "def": 31,
+      "spa": 31,
+      "spd": 31,
+      "spe": 31
+    },
+    "moves": [
+      "Aerial Ace",
+      "Ancient Power",
+      "Aqua Tail",
+      "Attract"
+    ]
+  }
+]

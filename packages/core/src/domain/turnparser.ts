@@ -1,0 +1,478 @@
+import type { MoveAction, FieldSide, FieldSlot, PokemonSet, OpponentEntry } from './types.js';
+import { toId } from './data.js';
+
+// Single-line turn syntax (case-insensitive on the actor tokens):
+//
+// ACTIONS (logged into the turn's draftActions list, applied on `n`):
+//   <actor> > <move> > <target>[ > <dmg>]
+//   <actor> > switch > <species|teamRef>
+//
+// STATE UPDATES (mutate state immediately, do not enter the turn log):
+//   <ref> = <pct>[%]              set HP
+//   <ref> ko | <ref> fainted      mark fainted (HP -> 0)
+//   <ref> in <slot>               bring this teamIndex into the given slot
+//
+// <actor>      m1 | m2 | o1 | o2   (optionally suffixed with +mega)
+// <target>     m1 | m2 | o1 | o2 | spread | self
+// <slot>       m1 | m2 | o1 | o2   (active slot only)
+// <ref>        m1..m6 | o1..o6    (1/2 = active slot ref via activeIdx; 3-6 = direct team index)
+// <species>    a species name; resolves to a team index for the actor's side
+// <teamRef>    my1..my6 / op1..op6 (1-based index into the side's team)
+// <dmg>        integer percent, optional trailing %, or "X raw" for raw damage
+//
+// Examples (all valid):
+//   m1 > Astral Barrage > o2 > 67
+//   m1+mega > Flamethrower > o2 > 45
+//   o1 > Sucker Punch > m1 > 41%
+//   m1 > switch > Garchomp
+//   o2 > switch > op4
+//   m1 > Protect > self
+//   o3 = 45%
+//   m1 = 50
+//   o2 ko
+//   o3 in o1
+
+export interface ParseContext {
+  myTeam: PokemonSet[];
+  opponentTeam: OpponentEntry[];
+  // The mons currently in each active slot, as indices into the side's team.
+  // Used to resolve "m1"/"o2" to a teamIndex when no explicit slot is known.
+  myActiveTeamIndex: [number | null, number | null];
+  theirActiveTeamIndex: [number | null, number | null];
+  // Team indices of fainted mons on my side. (Opp fainted lives on
+  // opponentTeam[i].fainted directly.)
+  myFainted?: number[];
+}
+
+// Side-scoped hazard updates emit a different StateUpdate variant — no
+// teamIndex involved. Caller (BattleScreen) routes hazards to field.myHazards
+// / field.theirHazards instead of per-mon storage.
+export interface HazardUpdate {
+  side: FieldSide;
+  verb: 'rocks' | 'spikes' | 'tspikes' | 'web';
+  arg: 'on' | 'off' | number;
+}
+
+export interface StateUpdate {
+  side: FieldSide;
+  teamIndex: number;
+  hpPercent?: number;     // set HP to: percent (for opp targets or explicit `%` on mine)
+  hpRaw?: number;         // set HP to: raw HP (for mine targets)
+  healPercent?: number;   // +N% (capped at full)
+  healRaw?: number;       // +N raw HP (for mine; converted via maxHpFor)
+  damagePercent?: number; // -N% (clamped at 0)
+  damageRaw?: number;     // -N raw HP for mine (clamped at 0)
+  namedHeal?: 'sitrus';   // shorthand resolved at apply time using species maxHp
+  // Stage deltas to add to current boosts; clamped to [-6, +6] per stat in apply.
+  boosts?: Partial<Record<'atk' | 'def' | 'spa' | 'spd' | 'spe' | 'acc' | 'eva', number>>;
+  // Named after-attack item triggers — apply layer resolves to boosts/HP/item.
+  namedTrigger?: 'wp' | 'sash' | 'balloon';
+  // Status set/clear.
+  status?: 'brn' | 'par' | 'psn' | 'tox' | 'slp' | 'frz';
+  cureStatus?: boolean;
+  fainted?: boolean;
+  bringIntoSlot?: 0 | 1;
+}
+
+export type ParseResult =
+  | { ok: true; kind: 'action'; actions: MoveAction[] }
+  | { ok: true; kind: 'state'; update: StateUpdate }
+  | { ok: true; kind: 'hazard'; update: HazardUpdate }
+  | { ok: false; error: string };
+
+// Actor token: side + slot + zero or more `+<modifier>` suffixes.
+// Modifiers accepted today: `mega` (this turn's mega evolution) and `crit`
+// (the move was a critical hit).
+const ACTOR_RE = /^(m|o)([12])((?:\+[a-z]+)*)$/i;
+
+export interface ActorRef { side: FieldSide; slot: FieldSlot; mega: boolean; crit: boolean }
+
+export function parseActor(raw: string): ActorRef | null {
+  const m = raw.trim().toLowerCase().match(ACTOR_RE);
+  if (!m) return null;
+  const mods = (m[3] ?? '').split('+').filter(Boolean);
+  return {
+    side: m[1] === 'm' ? 'mine' : 'theirs',
+    slot: (parseInt(m[2]!, 10) - 1) as FieldSlot,
+    mega: mods.includes('mega'),
+    crit: mods.includes('crit'),
+  };
+}
+
+interface TargetRef { kind: 'slot'; side: FieldSide; slot: FieldSlot }
+
+function parseTarget(raw: string): TargetRef | 'self' | 'allies' | 'foes' | null {
+  const t = raw.trim().toLowerCase();
+  if (t === 'self') return 'self';
+  if (t === 'spread' || t === 'foes') return 'foes';
+  if (t === 'allies') return 'allies';
+  const m = t.match(ACTOR_RE);
+  if (!m) return null;
+  return {
+    kind: 'slot',
+    side: m[1] === 'm' ? 'mine' : 'theirs',
+    slot: (parseInt(m[2]!, 10) - 1) as FieldSlot,
+  };
+}
+
+function activeTeamIndex(ctx: ParseContext, side: FieldSide, slot: FieldSlot): number | null {
+  return side === 'mine' ? ctx.myActiveTeamIndex[slot] : ctx.theirActiveTeamIndex[slot];
+}
+
+// State-line reference: oN/mN where N=1..6.
+//   N=1: slot 0 (active) — resolves through activeIdx
+//   N=2: slot 1 (active) — resolves through activeIdx
+//   N=3..6: direct team-index reference (1-indexed → 0-indexed)
+// Returns the team index, or null if N=1/2 and that slot is empty.
+function resolveStateRef(side: FieldSide, n: number, ctx: ParseContext): number | null {
+  if (n <= 2) return activeTeamIndex(ctx, side, (n - 1) as FieldSlot);
+  return n - 1;
+}
+
+function resolveTeamRef(token: string, ctx: ParseContext, side: FieldSide): number | null {
+  const m = token.trim().toLowerCase().match(/^(my|op)([1-6])$/);
+  if (m) {
+    const expectSide: FieldSide = m[1] === 'my' ? 'mine' : 'theirs';
+    if (expectSide !== side) return null;
+    return parseInt(m[2]!, 10) - 1;
+  }
+  // Otherwise treat as species name; look up the matching slot on that side.
+  const id = toId(token);
+  const team = side === 'mine' ? ctx.myTeam : ctx.opponentTeam;
+  for (let i = 0; i < team.length; i++) {
+    const speciesId = toId(side === 'mine' ? (team[i] as PokemonSet).species : (team[i] as OpponentEntry).species);
+    if (speciesId === id) return i;
+  }
+  return null;
+}
+
+// The damage slot's bare number means REMAINING HP after the action — the
+// natural unit per target side:
+//   target on opp side  → number is the new HP% remaining (0..100)
+//   target on mine side → number is the new raw HP value
+// Explicit suffixes still work as overrides for the rare "damage dealt"
+// style of entry:
+//   `80 raw` → damageRaw (damage dealt in raw HP, opp target convention)
+//   `60%`    → forces percent interpretation regardless of side
+function parseDamage(
+  token: string | undefined,
+  targetSide: FieldSide | undefined,
+): Pick<MoveAction, 'damageHpPercent' | 'damageRaw' | 'targetRemainingHpPercent' | 'targetRemainingHpRaw'> {
+  if (!token) return {};
+  const t = token.trim().toLowerCase();
+  const rawDealt = t.match(/^(\d+)\s*raw$/);
+  if (rawDealt) return { damageRaw: parseInt(rawDealt[1]!, 10) };
+  const explicitPct = t.match(/^(\d+(?:\.\d+)?)%$/);
+  if (explicitPct) return { targetRemainingHpPercent: parseFloat(explicitPct[1]!) };
+  const bare = t.match(/^(\d+(?:\.\d+)?)$/);
+  if (bare) {
+    const v = parseFloat(bare[1]!);
+    if (targetSide === 'mine') return { targetRemainingHpRaw: v };
+    return { targetRemainingHpPercent: v };
+  }
+  return {};
+}
+
+// Try the state-line shapes first. Returns null if the line doesn't look like
+// a state update (so the caller falls through to action parsing).
+function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
+  const trimmed = line.trim();
+  const sideFor = (ch: string): FieldSide => (ch.toLowerCase() === 'm' ? 'mine' : 'theirs');
+
+  // Hazards — side-scoped, no slot ref.
+  //   "m rocks on" / "m rocks off"
+  //   "o spikes 2" / "o spikes off"
+  //   "o tspikes 1"
+  //   "o web on"
+  const hazMatch = trimmed.match(/^([mo])\s+(rocks|spikes|tspikes|web)\s+(on|off|\d+)$/i);
+  if (hazMatch) {
+    const side = sideFor(hazMatch[1]!);
+    const verb = hazMatch[2]!.toLowerCase() as HazardUpdate['verb'];
+    const argRaw = hazMatch[3]!.toLowerCase();
+    const arg: 'on' | 'off' | number = argRaw === 'on' ? 'on' : argRaw === 'off' ? 'off' : parseInt(argRaw, 10);
+    return { ok: true, kind: 'hazard', update: { side, verb, arg } };
+  }
+
+  // "o3 = 45" / "o3 = 45%" / "m1 = 145" / "m1 = 50%"
+  // For opp: bare number = % remaining; explicit `%` also means %.
+  // For mine: bare number = raw HP; explicit `%` means percent.
+  const hpMatch = trimmed.match(/^([mo])([1-6])\s*=\s*(\d+(?:\.\d+)?)(%?)$/i);
+  if (hpMatch) {
+    const side = sideFor(hpMatch[1]!);
+    const n = parseInt(hpMatch[2]!, 10);
+    const teamIndex = resolveStateRef(side, n, ctx);
+    if (teamIndex == null) {
+      return { ok: false, error: `${hpMatch[1]}${hpMatch[2]} has no active mon to update` };
+    }
+    const value = parseFloat(hpMatch[3]!);
+    const explicitPct = hpMatch[4] === '%';
+    if (side === 'mine' && !explicitPct) {
+      return { ok: true, kind: 'state', update: { side, teamIndex, hpRaw: Math.max(0, value) } };
+    }
+    const hpPercent = Math.max(0, Math.min(100, value));
+    return { ok: true, kind: 'state', update: { side, teamIndex, hpPercent } };
+  }
+
+  // "o1 +2 atk" / "m1 -1 def" / multi-stat "o1 +2 atk +2 spa".
+  // Any number of (+|-)<digits> <stat> repetitions after the ref token.
+  const boostHeader = trimmed.match(/^([mo])([1-6])\s+([+-].*)$/i);
+  if (boostHeader && /[+-]\s*\d+\s+(atk|def|spa|spd|spe|acc|eva)\b/i.test(boostHeader[3]!)) {
+    const side = sideFor(boostHeader[1]!);
+    const n = parseInt(boostHeader[2]!, 10);
+    const teamIndex = resolveStateRef(side, n, ctx);
+    if (teamIndex == null) {
+      return { ok: false, error: `${boostHeader[1]}${boostHeader[2]} has no active mon to boost` };
+    }
+    const boosts: NonNullable<StateUpdate['boosts']> = {};
+    const rest = boostHeader[3]!;
+    const re = /([+-])\s*(\d+)\s+(atk|def|spa|spd|spe|acc|eva)/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(rest)) !== null) {
+      const sign = m[1] === '+' ? 1 : -1;
+      const mag = parseInt(m[2]!, 10);
+      const stat = m[3]!.toLowerCase() as keyof NonNullable<StateUpdate['boosts']>;
+      boosts[stat] = (boosts[stat] ?? 0) + sign * mag;
+    }
+    if (Object.keys(boosts).length === 0) {
+      return { ok: false, error: `couldn't parse any "+N stat" / "-N stat" pairs` };
+    }
+    return { ok: true, kind: 'state', update: { side, teamIndex, boosts } };
+  }
+
+  // "o1 damage 25" / "m1 damage 30" — counterpart to heal.
+  const dmgMatch = trimmed.match(/^([mo])([1-6])\s+damage\s+(\d+(?:\.\d+)?)$/i);
+  if (dmgMatch) {
+    const side = sideFor(dmgMatch[1]!);
+    const n = parseInt(dmgMatch[2]!, 10);
+    const teamIndex = resolveStateRef(side, n, ctx);
+    if (teamIndex == null) {
+      return { ok: false, error: `${dmgMatch[1]}${dmgMatch[2]} has no active mon to damage` };
+    }
+    const v = parseFloat(dmgMatch[3]!);
+    if (side === 'mine') return { ok: true, kind: 'state', update: { side, teamIndex, damageRaw: Math.max(0, v) } };
+    return { ok: true, kind: 'state', update: { side, teamIndex, damagePercent: Math.max(0, v) } };
+  }
+
+  // Status set / cure: "o1 brn" / "m1 par" / "o1 cure".
+  const statusMatch = trimmed.match(/^([mo])([1-6])\s+(brn|par|psn|tox|slp|frz|cure)$/i);
+  if (statusMatch) {
+    const side = sideFor(statusMatch[1]!);
+    const n = parseInt(statusMatch[2]!, 10);
+    const teamIndex = resolveStateRef(side, n, ctx);
+    if (teamIndex == null) {
+      return { ok: false, error: `${statusMatch[1]}${statusMatch[2]} has no active mon` };
+    }
+    const verb = statusMatch[3]!.toLowerCase();
+    if (verb === 'cure') {
+      return { ok: true, kind: 'state', update: { side, teamIndex, cureStatus: true } };
+    }
+    return { ok: true, kind: 'state', update: { side, teamIndex, status: verb as StateUpdate['status'] } };
+  }
+
+  // Named after-attack triggers: wp / sash / balloon.
+  const triggerMatch = trimmed.match(/^([mo])([1-6])\s+(wp|sash|balloon)$/i);
+  if (triggerMatch) {
+    const side = sideFor(triggerMatch[1]!);
+    const n = parseInt(triggerMatch[2]!, 10);
+    const teamIndex = resolveStateRef(side, n, ctx);
+    if (teamIndex == null) {
+      return { ok: false, error: `${triggerMatch[1]}${triggerMatch[2]} has no active mon` };
+    }
+    const t = triggerMatch[3]!.toLowerCase() as 'wp' | 'sash' | 'balloon';
+    return { ok: true, kind: 'state', update: { side, teamIndex, namedTrigger: t } };
+  }
+
+  // "o1 heal 25" / "m1 heal 30" — units side-aware (% for opp, raw for mine).
+  const healMatch = trimmed.match(/^([mo])([1-6])\s+heal\s+(\d+(?:\.\d+)?)$/i);
+  if (healMatch) {
+    const side = sideFor(healMatch[1]!);
+    const n = parseInt(healMatch[2]!, 10);
+    const teamIndex = resolveStateRef(side, n, ctx);
+    if (teamIndex == null) {
+      return { ok: false, error: `${healMatch[1]}${healMatch[2]} has no active mon to heal` };
+    }
+    const v = parseFloat(healMatch[3]!);
+    if (side === 'mine') return { ok: true, kind: 'state', update: { side, teamIndex, healRaw: Math.max(0, v) } };
+    return { ok: true, kind: 'state', update: { side, teamIndex, healPercent: Math.max(0, v) } };
+  }
+
+  // "o1 sitrus" — named berry shortcut; apply layer resolves to a real number
+  // using the species' maxHp because parser doesn't know base stats.
+  const namedHealMatch = trimmed.match(/^([mo])([1-6])\s+(sitrus)$/i);
+  if (namedHealMatch) {
+    const side = sideFor(namedHealMatch[1]!);
+    const n = parseInt(namedHealMatch[2]!, 10);
+    const teamIndex = resolveStateRef(side, n, ctx);
+    if (teamIndex == null) {
+      return { ok: false, error: `${namedHealMatch[1]}${namedHealMatch[2]} has no active mon to heal` };
+    }
+    return { ok: true, kind: 'state', update: { side, teamIndex, namedHeal: 'sitrus' } };
+  }
+
+  // "o2 fainted" / "o2 ko"
+  const koMatch = trimmed.match(/^([mo])([1-6])\s+(?:ko|fainted)$/i);
+  if (koMatch) {
+    const side = sideFor(koMatch[1]!);
+    const n = parseInt(koMatch[2]!, 10);
+    const teamIndex = resolveStateRef(side, n, ctx);
+    if (teamIndex == null) {
+      return { ok: false, error: `${koMatch[1]}${koMatch[2]} has no active mon to mark fainted` };
+    }
+    return { ok: true, kind: 'state', update: { side, teamIndex, fainted: true, hpPercent: 0 } };
+  }
+
+  // "o3 in o1" — bring teamIndex on left into the active slot on right.
+  const inMatch = trimmed.match(/^([mo])([1-6])\s+in\s+([mo])([12])$/i);
+  if (inMatch) {
+    const sideL = sideFor(inMatch[1]!);
+    const sideR = sideFor(inMatch[3]!);
+    if (sideL !== sideR) return { ok: false, error: '"X in Y" must be the same side (e.g. o3 in o1)' };
+    const n = parseInt(inMatch[2]!, 10);
+    const slot = (parseInt(inMatch[4]!, 10) - 1) as 0 | 1;
+    const teamIndex = resolveStateRef(sideL, n, ctx);
+    if (teamIndex == null) {
+      return { ok: false, error: `couldn't resolve ${inMatch[1]}${inMatch[2]} as a team index` };
+    }
+    return { ok: true, kind: 'state', update: { side: sideL, teamIndex, bringIntoSlot: slot } };
+  }
+
+  return null;
+}
+
+export function parseTurnLine(line: string, ctx: ParseContext, order: number): ParseResult {
+  // State updates take precedence: they're disambiguated by `=`, `ko`/`fainted`,
+  // or `in`, none of which appear in action syntax.
+  const state = tryParseState(line, ctx);
+  if (state) return state;
+
+  const parts = line.split('>').map(s => s.trim()).filter(p => p.length > 0);
+  if (parts.length < 2) return { ok: false, error: 'expected at least "<actor> > <move>"' };
+
+  const actor = parseActor(parts[0]!);
+  if (!actor) return { ok: false, error: `bad actor "${parts[0]}" — expected m1/m2/o1/o2 (optionally +mega)` };
+
+  const verb = parts[1]!;
+  const verbLc = verb.toLowerCase();
+
+  // Switch form: <actor> > switch > <target species or teamRef>
+  if (verbLc === 'switch') {
+    if (parts.length < 3) return { ok: false, error: 'switch needs a target: "<actor> > switch > <species|my3>"' };
+    const target = parts[2]!;
+    const idx = resolveTeamRef(target, ctx, actor.side);
+    if (idx == null) {
+      return { ok: false, error: `couldn't resolve switch target "${target}" on ${actor.side === 'mine' ? 'my' : 'opp'} team` };
+    }
+    return {
+      ok: true,
+      kind: 'action',
+      actions: [{
+        side: actor.side,
+        attackerSlot: actor.slot,
+        kind: 'switch',
+        move: 'switch',
+        attackerTeamIndex: activeTeamIndex(ctx, actor.side, actor.slot) ?? undefined,
+        targetTeamIndex: idx,
+        target: { side: actor.side, slot: actor.slot },
+        order,
+        mega: actor.mega || undefined,
+      }],
+    };
+  }
+
+  // Move form: <actor> > <move> > <target>[ > <dmg>]
+  if (parts.length < 3) return { ok: false, error: 'move line needs a target: "<actor> > <move> > <target> [> dmg]"' };
+
+  // Refuse if the actor slot is empty (no one there) or the mon in it is
+  // fainted. A fainted mon can't act; an empty slot needs a "X in Y"
+  // replacement first.
+  const attackerTeamIndex = activeTeamIndex(ctx, actor.side, actor.slot);
+  if (attackerTeamIndex == null) {
+    return { ok: false, error: `${parts[0]} has no active mon — bring one in first (e.g. "o3 in o1")` };
+  }
+  const attackerIsFainted =
+    actor.side === 'mine'
+      ? (ctx.myFainted ?? []).includes(attackerTeamIndex)
+      : !!ctx.opponentTeam[attackerTeamIndex]?.fainted;
+  if (attackerIsFainted) {
+    return { ok: false, error: `${parts[0]} is fainted and can't act` };
+  }
+
+  const targetTok = parts[2]!;
+  const parsedTarget = parseTarget(targetTok);
+  if (parsedTarget == null) return { ok: false, error: `bad target "${targetTok}"` };
+
+  // Spread / foes target with per-target damage list:
+  //   "m1 > Heat Wave > spread > o1:40, o2:35"
+  // Parser emits one action per target with shared order + move; the rest of
+  // the pipeline (finalize, inference, history) treats each as its own observation.
+  if ((parsedTarget === 'foes') && parts[3]) {
+    const spreadActions = parseSpreadDamage(parts[3], ctx);
+    if (spreadActions.ok === false) return spreadActions;
+    const actions: MoveAction[] = spreadActions.entries.map(e => ({
+      side: actor.side,
+      attackerSlot: actor.slot,
+      kind: 'move',
+      move: verb,
+      attackerTeamIndex,
+      targetTeamIndex: e.targetTeamIndex,
+      target: { side: e.targetSide, slot: e.targetSlot },
+      order,
+      mega: actor.mega || undefined,
+      critical: actor.crit || undefined,
+      ...e.dmg,
+    }));
+    return { ok: true, kind: 'action', actions };
+  }
+
+  const damageTargetSide: FieldSide | undefined =
+    typeof parsedTarget === 'object' ? parsedTarget.side : undefined;
+  const dmg = parseDamage(parts[3], damageTargetSide);
+
+  const target: MoveAction['target'] =
+    typeof parsedTarget === 'string'
+      ? parsedTarget
+      : { side: parsedTarget.side, slot: parsedTarget.slot };
+
+  const targetTeamIndex =
+    typeof parsedTarget === 'object'
+      ? activeTeamIndex(ctx, parsedTarget.side, parsedTarget.slot)
+      : null;
+
+  return {
+    ok: true,
+    kind: 'action',
+    actions: [{
+      side: actor.side,
+      attackerSlot: actor.slot,
+      kind: 'move',
+      move: verb,
+      attackerTeamIndex: attackerTeamIndex ?? undefined,
+      targetTeamIndex: targetTeamIndex ?? undefined,
+      target,
+      order,
+      mega: actor.mega || undefined,
+      critical: actor.crit || undefined,
+      ...dmg,
+    }],
+  };
+}
+
+// Spread damage syntax: "o1:40, o2:35" / "o1:40,o2:35" / per-target side-aware
+// unit (raw for mN, percent for oN). Returns one entry per target.
+function parseSpreadDamage(token: string, ctx: ParseContext):
+  | { ok: true; entries: Array<{ targetSide: FieldSide; targetSlot: FieldSlot; targetTeamIndex: number | undefined; dmg: ReturnType<typeof parseDamage> }> }
+  | { ok: false; error: string }
+{
+  const entries: Array<{ targetSide: FieldSide; targetSlot: FieldSlot; targetTeamIndex: number | undefined; dmg: ReturnType<typeof parseDamage> }> = [];
+  for (const raw of token.split(',').map(s => s.trim()).filter(Boolean)) {
+    const m = raw.match(/^([mo])([12])\s*:\s*(.+)$/i);
+    if (!m) return { ok: false, error: `spread damage must look like "o1:40, o2:35" — got "${raw}"` };
+    const side: FieldSide = m[1]!.toLowerCase() === 'm' ? 'mine' : 'theirs';
+    const slot = (parseInt(m[2]!, 10) - 1) as FieldSlot;
+    const dmg = parseDamage(m[3]!, side);
+    const teamIdx = activeTeamIndex(ctx, side, slot);
+    entries.push({ targetSide: side, targetSlot: slot, targetTeamIndex: teamIdx ?? undefined, dmg });
+  }
+  if (entries.length === 0) return { ok: false, error: 'spread damage needs at least one "oN:value" entry' };
+  return { ok: true, entries };
+}

@@ -1,0 +1,28 @@
+{
+  "name": "@pokechamps/tui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Ink/React TUI client for PokeChamps. Reads from @pokechamps/core; uses a Storage impl (file or http) selected at runtime.",
+  "main": "src/cli.tsx",
+  "bin": {
+    "pokechamps": "./src/cli.tsx"
+  },
+  "scripts": {
+    "start": "tsx src/cli.tsx",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@pokechamps/core": "*",
+    "ink": "^7.0.3",
+    "ink-select-input": "^6.2.0",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "@types/react": "^19.1.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

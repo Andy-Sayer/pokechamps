@@ -1,0 +1,2978 @@
+{
+  "format": "gen9championsvgc2026regma",
+  "fetchedAt": "2026-05-18",
+  "topPokemon": [
+    "Sneasler",
+    "Garchomp",
+    "Kingambit",
+    "Basculegion",
+    "Incineroar",
+    "Sinistcha",
+    "Floette-Mega",
+    "Charizard-Mega-Y",
+    "Pelipper",
+    "Aerodactyl"
+  ],
+  "pokemon": {
+    "Sneasler": {
+      "rank": 1,
+      "usage": 43.8,
+      "baseStats": {
+        "hp": 80,
+        "atk": 130,
+        "def": 60,
+        "spa": 40,
+        "spd": 80,
+        "spe": 120
+      },
+      "moves": [
+        {
+          "name": "Close Combat",
+          "pct": 99.54
+        },
+        {
+          "name": "Dire Claw",
+          "pct": 96.68
+        },
+        {
+          "name": "Fake Out",
+          "pct": 91.503
+        },
+        {
+          "name": "Protect",
+          "pct": 74.844
+        },
+        {
+          "name": "Coaching",
+          "pct": 12.065
+        },
+        {
+          "name": "Rock Tomb",
+          "pct": 4.978
+        },
+        {
+          "name": "Rock Slide",
+          "pct": 4.913
+        },
+        {
+          "name": "Other",
+          "pct": 15.476
+        }
+      ],
+      "abilities": [
+        {
+          "name": "Unburden",
+          "pct": 89.809
+        },
+        {
+          "name": "Poison Touch",
+          "pct": 8.563
+        },
+        {
+          "name": "Pressure",
+          "pct": 1.629
+        }
+      ],
+      "items": [
+        {
+          "name": "White Herb",
+          "pct": 77.193
+        },
+        {
+          "name": "Focus Sash",
+          "pct": 20.016
+        },
+        {
+          "name": "Other",
+          "pct": 2.791
+        }
+      ],
+      "teammates": [
+        {
+          "name": "Kingambit",
+          "pct": 45.494
+        },
+        {
+          "name": "Basculegion",
+          "pct": 43.196
+        },
+        {
+          "name": "Garchomp",
+          "pct": 43.143
+        },
+        {
+          "name": "Incineroar",
+          "pct": 29.98
+        },
+        {
+          "name": "Floette-Mega",
+          "pct": 24.79
+        },
+        {
+          "name": "Sinistcha",
+          "pct": 22.563
+        }
+      ],
+      "topSpread": {
+        "nature": "Jolly",
+        "sp": [
+          2,
+          32,
+          0,
+          0,
+          0,
+          32
+        ],
+        "pct": 22.88
+      },
+      "featuredSets": [
+        {
+          "player": "eldanger10",
+          "record": "10 - 3 - 0",
+          "item": "White Herb",
+          "ability": "Unburden",
+          "moves": [
+            "Protect",
+            "Fake Out",
+            "Close Combat",
+            "Dire Claw"
+          ]
+        },
+        {
+          "player": "Cactusmax",
+          "record": "8 - 2 - 0",
+          "item": "White Herb",
+          "ability": "Unburden",
+          "moves": [
+            "Fake Out",
+            "Close Combat",
+            "Dire Claw",
+            "Coaching"
+          ]
+        },
+        {
+          "player": "Sneaselpink",
+          "record": "7 - 0 - 0",
+          "item": "White Herb",
+          "ability": "Unburden",
+          "moves": [
+            "Fake Out",
+            "Close Combat",
+            "Dire Claw",
+            "Quick Guard"
+          ]
+        },
+        {
+          "player": "BowlingVGC",
+          "record": "7 - 2 - 0",
+          "item": "White Herb",
+          "ability": "Unburden",
+          "moves": [
+            "Fake Out",
+            "Dire Claw",
+            "Close Combat",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Florens44",
+          "record": "8 - 1 - 0",
+          "item": "Focus Sash",
+          "ability": "Poison Touch",
+          "moves": [
+            "Close Combat",
+            "Dire Claw",
+            "Fake Out",
+            "Coaching"
+          ]
+        },
+        {
+          "player": "Darkip_8",
+          "record": "7 - 1 - 0",
+          "item": "White Herb",
+          "ability": "Unburden",
+          "moves": [
+            "Fake Out",
+            "Close Combat",
+            "Dire Claw",
+            "Protect"
+          ]
+        },
+        {
+          "player": "LeCehlou",
+          "record": "7 - 2 - 0",
+          "item": "White Herb",
+          "ability": "Unburden",
+          "moves": [
+            "Fake Out",
+            "Close Combat",
+            "Dire Claw",
+            "Coaching"
+          ]
+        },
+        {
+          "player": "Kenepa21",
+          "record": "6 - 0 - 0",
+          "item": "White Herb",
+          "ability": "Unburden",
+          "moves": [
+            "Dire Claw",
+            "Close Combat",
+            "Fake Out",
+            "Protect"
+          ]
+        },
+        {
+          "player": "HyogaVGC",
+          "record": "6 - 0 - 0",
+          "item": "White Herb",
+          "ability": "Unburden",
+          "moves": [
+            "Close Combat",
+            "Gunk Shot",
+            "Fake Out",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Inge",
+          "record": "9 - 3 - 0",
+          "item": "Focus Sash",
+          "ability": "Unburden",
+          "moves": [
+            "Close Combat",
+            "Dire Claw",
+            "Coaching",
+            "Fake Out"
+          ]
+        }
+      ]
+    },
+    "Garchomp": {
+      "rank": 2,
+      "usage": 40.4,
+      "baseStats": {
+        "hp": 108,
+        "atk": 130,
+        "def": 95,
+        "spa": 80,
+        "spd": 85,
+        "spe": 102
+      },
+      "moves": [
+        {
+          "name": "Earthquake",
+          "pct": 91.473
+        },
+        {
+          "name": "Rock Slide",
+          "pct": 81.635
+        },
+        {
+          "name": "Dragon Claw",
+          "pct": 80.884
+        },
+        {
+          "name": "Protect",
+          "pct": 70.665
+        },
+        {
+          "name": "Stomping Tantrum",
+          "pct": 46.718
+        },
+        {
+          "name": "Swords Dance",
+          "pct": 5.256
+        },
+        {
+          "name": "Scale Shot",
+          "pct": 4.095
+        },
+        {
+          "name": "Other",
+          "pct": 19.275
+        }
+      ],
+      "abilities": [
+        {
+          "name": "Rough Skin",
+          "pct": 93.852
+        },
+        {
+          "name": "Sand Veil",
+          "pct": 6.148
+        }
+      ],
+      "items": [
+        {
+          "name": "Choice Scarf",
+          "pct": 27.89
+        },
+        {
+          "name": "Sitrus Berry",
+          "pct": 16.534
+        },
+        {
+          "name": "Soft Sand",
+          "pct": 13.314
+        },
+        {
+          "name": "White Herb",
+          "pct": 12.468
+        },
+        {
+          "name": "Haban Berry",
+          "pct": 9.664
+        },
+        {
+          "name": "Lum Berry",
+          "pct": 6.429
+        },
+        {
+          "name": "Focus Sash",
+          "pct": 2.832
+        },
+        {
+          "name": "Roseli Berry",
+          "pct": 2.48
+        },
+        {
+          "name": "Bright Powder",
+          "pct": 2.136
+        },
+        {
+          "name": "Dragon Fang",
+          "pct": 2.13
+        }
+      ],
+      "teammates": [
+        {
+          "name": "Sneasler",
+          "pct": 46.767
+        },
+        {
+          "name": "Kingambit",
+          "pct": 45.485
+        },
+        {
+          "name": "Basculegion",
+          "pct": 38.819
+        },
+        {
+          "name": "Charizard-Mega-Y",
+          "pct": 33.45
+        },
+        {
+          "name": "Floette-Mega",
+          "pct": 32.344
+        },
+        {
+          "name": "Incineroar",
+          "pct": 30.96
+        }
+      ],
+      "topSpread": {
+        "nature": "Jolly",
+        "sp": [
+          2,
+          32,
+          0,
+          0,
+          0,
+          32
+        ],
+        "pct": 18.938
+      },
+      "featuredSets": [
+        {
+          "player": "ShrimpTheShrimp",
+          "record": "11 - 2 - 0",
+          "item": "White Herb",
+          "ability": "Sand Veil",
+          "moves": [
+            "Protect",
+            "Earthquake",
+            "Outrage",
+            "Rock Slide"
+          ]
+        },
+        {
+          "player": "Duxlemon",
+          "record": "9 - 1 - 0",
+          "item": "Sitrus Berry",
+          "ability": "Rough Skin",
+          "moves": [
+            "Earthquake",
+            "Dragon Claw",
+            "Rock Tomb",
+            "Protect"
+          ]
+        },
+        {
+          "player": "EgoDeath",
+          "record": "9 - 1 - 0",
+          "item": "Choice Scarf",
+          "ability": "Rough Skin",
+          "moves": [
+            "Rock Slide",
+            "Dragon Claw",
+            "Earthquake",
+            "Stomping Tantrum"
+          ]
+        },
+        {
+          "player": "MarvVGC",
+          "record": "7 - 1 - 0",
+          "item": "Soft Sand",
+          "ability": "Rough Skin",
+          "moves": [
+            "Earthquake",
+            "Dragon Claw",
+            "Stomping Tantrum",
+            "Protect"
+          ]
+        },
+        {
+          "player": "[DNR] Isaac Moreira",
+          "record": "7 - 1 - 0",
+          "item": "Sitrus Berry",
+          "ability": "Rough Skin",
+          "moves": [
+            "Protect",
+            "Dragon Claw",
+            "Earthquake",
+            "Rock Slide"
+          ]
+        },
+        {
+          "player": "Florens44",
+          "record": "8 - 1 - 0",
+          "item": "White Herb",
+          "ability": "Rough Skin",
+          "moves": [
+            "Earthquake",
+            "Scale Shot",
+            "Rock Slide",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Darkip_8",
+          "record": "7 - 1 - 0",
+          "item": "Choice Scarf",
+          "ability": "Rough Skin",
+          "moves": [
+            "Dragon Claw",
+            "Rock Tomb",
+            "Stomping Tantrum",
+            "Earthquake"
+          ]
+        },
+        {
+          "player": "Oscar P",
+          "record": "9 - 3 - 0",
+          "item": "Soft Sand",
+          "ability": "Rough Skin",
+          "moves": [
+            "Earthquake",
+            "Rock Tomb",
+            "Dragon Claw",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Scarlett01",
+          "record": "8 - 3 - 0",
+          "item": "Soft Sand",
+          "ability": "Rough Skin",
+          "moves": [
+            "Rock Slide",
+            "Earthquake",
+            "Stomping Tantrum",
+            "Protect"
+          ]
+        },
+        {
+          "player": "JovenColo",
+          "record": "6 - 1 - 0",
+          "item": "Haban Berry",
+          "ability": "Sand Veil",
+          "moves": [
+            "Dragon Claw",
+            "Earthquake",
+            "Protect",
+            "Rock Slide"
+          ]
+        }
+      ]
+    },
+    "Kingambit": {
+      "rank": 3,
+      "usage": 38.21,
+      "baseStats": {
+        "hp": 100,
+        "atk": 135,
+        "def": 120,
+        "spa": 60,
+        "spd": 85,
+        "spe": 50
+      },
+      "moves": [
+        {
+          "name": "Sucker Punch",
+          "pct": 99.301
+        },
+        {
+          "name": "Kowtow Cleave",
+          "pct": 88.285
+        },
+        {
+          "name": "Protect",
+          "pct": 84.469
+        },
+        {
+          "name": "Iron Head",
+          "pct": 55.076
+        },
+        {
+          "name": "Low Kick",
+          "pct": 53.788
+        },
+        {
+          "name": "Other",
+          "pct": 19.082
+        }
+      ],
+      "abilities": [
+        {
+          "name": "Defiant",
+          "pct": 94.119
+        },
+        {
+          "name": "Supreme Overlord",
+          "pct": 5.869
+        },
+        {
+          "name": "Pressure",
+          "pct": 0.012
+        }
+      ],
+      "items": [
+        {
+          "name": "Chople Berry",
+          "pct": 51.916
+        },
+        {
+          "name": "Black Glasses",
+          "pct": 40.626
+        },
+        {
+          "name": "Focus Sash",
+          "pct": 4.087
+        },
+        {
+          "name": "Other",
+          "pct": 3.371
+        }
+      ],
+      "teammates": [
+        {
+          "name": "Sneasler",
+          "pct": 52.142
+        },
+        {
+          "name": "Basculegion",
+          "pct": 51.962
+        },
+        {
+          "name": "Garchomp",
+          "pct": 48.093
+        },
+        {
+          "name": "Floette-Mega",
+          "pct": 26.398
+        },
+        {
+          "name": "Charizard-Mega-Y",
+          "pct": 24.379
+        },
+        {
+          "name": "Incineroar",
+          "pct": 19.161
+        }
+      ],
+      "topSpread": {
+        "nature": "Adamant",
+        "sp": [
+          32,
+          32,
+          0,
+          0,
+          2,
+          0
+        ],
+        "pct": 7.82
+      },
+      "featuredSets": [
+        {
+          "player": "SableyeVGC",
+          "record": "10 - 1 - 0",
+          "item": "Chople Berry",
+          "ability": "Defiant",
+          "moves": [
+            "Kowtow Cleave",
+            "Sucker Punch",
+            "Low Kick",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Duxlemon",
+          "record": "9 - 1 - 0",
+          "item": "Chople Berry",
+          "ability": "Defiant",
+          "moves": [
+            "Kowtow Cleave",
+            "Sucker Punch",
+            "Protect",
+            "Iron Head"
+          ]
+        },
+        {
+          "player": "EgoDeath",
+          "record": "9 - 1 - 0",
+          "item": "Chople Berry",
+          "ability": "Defiant",
+          "moves": [
+            "Sucker Punch",
+            "Kowtow Cleave",
+            "Swords Dance",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Limitester",
+          "record": "9 - 1 - 0",
+          "item": "Chople Berry",
+          "ability": "Defiant",
+          "moves": [
+            "Protect",
+            "Low Kick",
+            "Sucker Punch",
+            "Kowtow Cleave"
+          ]
+        },
+        {
+          "player": "eldanger10",
+          "record": "10 - 3 - 0",
+          "item": "Chople Berry",
+          "ability": "Defiant",
+          "moves": [
+            "Protect",
+            "Kowtow Cleave",
+            "Iron Head",
+            "Sucker Punch"
+          ]
+        },
+        {
+          "player": "[DNR] Isaac Moreira",
+          "record": "7 - 1 - 0",
+          "item": "Black Glasses",
+          "ability": "Defiant",
+          "moves": [
+            "Protect",
+            "Kowtow Cleave",
+            "Iron Head",
+            "Sucker Punch"
+          ]
+        },
+        {
+          "player": "QueerCrocodile",
+          "record": "7 - 1 - 0",
+          "item": "Black Glasses",
+          "ability": "Defiant",
+          "moves": [
+            "Kowtow Cleave",
+            "Sucker Punch",
+            "Iron Head",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Florens44",
+          "record": "8 - 1 - 0",
+          "item": "Black Glasses",
+          "ability": "Defiant",
+          "moves": [
+            "Kowtow Cleave",
+            "Sucker Punch",
+            "Swords Dance",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Darkip_8",
+          "record": "7 - 1 - 0",
+          "item": "Chople Berry",
+          "ability": "Defiant",
+          "moves": [
+            "Kowtow Cleave",
+            "Sucker Punch",
+            "Iron Head",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Kenepa21",
+          "record": "6 - 0 - 0",
+          "item": "Chople Berry",
+          "ability": "Defiant",
+          "moves": [
+            "Kowtow Cleave",
+            "Sucker Punch",
+            "Iron Head",
+            "Protect"
+          ]
+        }
+      ]
+    },
+    "Basculegion": {
+      "rank": 4,
+      "usage": 38.16,
+      "baseStats": {
+        "hp": 120,
+        "atk": 112,
+        "def": 65,
+        "spa": 80,
+        "spd": 75,
+        "spe": 78
+      },
+      "moves": [
+        {
+          "name": "Last Respects",
+          "pct": 99.478
+        },
+        {
+          "name": "Aqua Jet",
+          "pct": 91.689
+        },
+        {
+          "name": "Wave Crash",
+          "pct": 76.377
+        },
+        {
+          "name": "Flip Turn",
+          "pct": 52.361
+        },
+        {
+          "name": "Protect",
+          "pct": 47.541
+        },
+        {
+          "name": "Liquidation",
+          "pct": 23.486
+        },
+        {
+          "name": "Other",
+          "pct": 9.067
+        }
+      ],
+      "abilities": [
+        {
+          "name": "Adaptability",
+          "pct": 85.99
+        },
+        {
+          "name": "Swift Swim",
+          "pct": 13.906
+        },
+        {
+          "name": "Mold Breaker",
+          "pct": 0.103
+        }
+      ],
+      "items": [
+        {
+          "name": "Choice Scarf",
+          "pct": 48.412
+        },
+        {
+          "name": "Focus Sash",
+          "pct": 25.058
+        },
+        {
+          "name": "Mystic Water",
+          "pct": 10.4
+        },
+        {
+          "name": "Sitrus Berry",
+          "pct": 8.41
+        },
+        {
+          "name": "Kasib Berry",
+          "pct": 4.529
+        },
+        {
+          "name": "Other",
+          "pct": 3.19
+        }
+      ],
+      "teammates": [
+        {
+          "name": "Kingambit",
+          "pct": 52.039
+        },
+        {
+          "name": "Sneasler",
+          "pct": 49.582
+        },
+        {
+          "name": "Garchomp",
+          "pct": 41.105
+        },
+        {
+          "name": "Floette-Mega",
+          "pct": 28.115
+        },
+        {
+          "name": "Pelipper",
+          "pct": 27.355
+        },
+        {
+          "name": "Archaludon",
+          "pct": 23.945
+        }
+      ],
+      "topSpread": {
+        "nature": "Adamant",
+        "sp": [
+          2,
+          32,
+          0,
+          0,
+          0,
+          32
+        ],
+        "pct": 16.068
+      },
+      "featuredSets": [
+        {
+          "player": "SableyeVGC",
+          "record": "10 - 1 - 0",
+          "item": "Choice Scarf",
+          "ability": "Adaptability",
+          "moves": [
+            "Wave Crash",
+            "Last Respects",
+            "Flip Turn",
+            "Aqua Jet"
+          ]
+        },
+        {
+          "player": "Duxlemon",
+          "record": "9 - 1 - 0",
+          "item": "Focus Sash",
+          "ability": "Adaptability",
+          "moves": [
+            "Liquidation",
+            "Last Respects",
+            "Aqua Jet",
+            "Protect"
+          ]
+        },
+        {
+          "player": "EgoDeath",
+          "record": "9 - 1 - 0",
+          "item": "Focus Sash",
+          "ability": "Adaptability",
+          "moves": [
+            "Liquidation",
+            "Protect",
+            "Last Respects",
+            "Aqua Jet"
+          ]
+        },
+        {
+          "player": "eldanger10",
+          "record": "10 - 3 - 0",
+          "item": "Focus Sash",
+          "ability": "Adaptability",
+          "moves": [
+            "Protect",
+            "Liquidation",
+            "Last Respects",
+            "Aqua Jet"
+          ]
+        },
+        {
+          "player": "Sherpa",
+          "record": "10 - 1 - 0",
+          "item": "Choice Scarf",
+          "ability": "Adaptability",
+          "moves": [
+            "Wave Crash",
+            "Last Respects",
+            "Flip Turn",
+            "Aqua Jet"
+          ]
+        },
+        {
+          "player": "Sneaselpink",
+          "record": "7 - 0 - 0",
+          "item": "Colbur Berry",
+          "ability": "Adaptability",
+          "moves": [
+            "Wave Crash",
+            "Aqua Jet",
+            "Protect",
+            "Last Respects"
+          ]
+        },
+        {
+          "player": "QueerCrocodile",
+          "record": "7 - 1 - 0",
+          "item": "Choice Scarf",
+          "ability": "Adaptability",
+          "moves": [
+            "Wave Crash",
+            "Last Respects",
+            "Aqua Jet",
+            "Flip Turn"
+          ]
+        },
+        {
+          "player": "BowlingVGC",
+          "record": "7 - 2 - 0",
+          "item": "Choice Scarf",
+          "ability": "Adaptability",
+          "moves": [
+            "Aqua Jet",
+            "Wave Crash",
+            "Last Respects",
+            "Flip Turn"
+          ]
+        },
+        {
+          "player": "Hari",
+          "record": "7 - 1 - 0",
+          "item": "Choice Scarf",
+          "ability": "Swift Swim",
+          "moves": [
+            "Wave Crash",
+            "Last Respects",
+            "Aqua Jet",
+            "Flip Turn"
+          ]
+        },
+        {
+          "player": "Raichu123",
+          "record": "7 - 2 - 0",
+          "item": "Choice Scarf",
+          "ability": "Adaptability",
+          "moves": [
+            "Flip Turn",
+            "Wave Crash",
+            "Last Respects",
+            "Aqua Jet"
+          ]
+        }
+      ]
+    },
+    "Incineroar": {
+      "rank": 5,
+      "usage": 35.84,
+      "baseStats": {
+        "hp": 95,
+        "atk": 115,
+        "def": 90,
+        "spa": 80,
+        "spd": 90,
+        "spe": 60
+      },
+      "moves": [
+        {
+          "name": "Fake Out",
+          "pct": 99.665
+        },
+        {
+          "name": "Parting Shot",
+          "pct": 94.863
+        },
+        {
+          "name": "Flare Blitz",
+          "pct": 88.532
+        },
+        {
+          "name": "Throat Chop",
+          "pct": 41.396
+        },
+        {
+          "name": "Darkest Lariat",
+          "pct": 39.095
+        },
+        {
+          "name": "Protect",
+          "pct": 12.218
+        },
+        {
+          "name": "Will-O-Wisp",
+          "pct": 6.427
+        },
+        {
+          "name": "Other",
+          "pct": 17.804
+        }
+      ],
+      "abilities": [
+        {
+          "name": "Intimidate",
+          "pct": 99.185
+        },
+        {
+          "name": "Blaze",
+          "pct": 0.815
+        }
+      ],
+      "items": [
+        {
+          "name": "Sitrus Berry",
+          "pct": 48.214
+        },
+        {
+          "name": "Chople Berry",
+          "pct": 23.126
+        },
+        {
+          "name": "Shuca Berry",
+          "pct": 9.337
+        },
+        {
+          "name": "Leftovers",
+          "pct": 4.842
+        },
+        {
+          "name": "Lum Berry",
+          "pct": 3.729
+        },
+        {
+          "name": "White Herb",
+          "pct": 3.635
+        },
+        {
+          "name": "Passho Berry",
+          "pct": 3.616
+        },
+        {
+          "name": "Other",
+          "pct": 3.501
+        }
+      ],
+      "teammates": [
+        {
+          "name": "Sinistcha",
+          "pct": 38.299
+        },
+        {
+          "name": "Sneasler",
+          "pct": 36.64
+        },
+        {
+          "name": "Garchomp",
+          "pct": 34.906
+        },
+        {
+          "name": "Basculegion",
+          "pct": 23.099
+        },
+        {
+          "name": "Floette-Mega",
+          "pct": 21.659
+        },
+        {
+          "name": "Kingambit",
+          "pct": 20.431
+        }
+      ],
+      "topSpread": {
+        "nature": "Careful",
+        "sp": [
+          32,
+          0,
+          14,
+          0,
+          20,
+          0
+        ],
+        "pct": 3.224
+      },
+      "featuredSets": [
+        {
+          "player": "TurboMatt",
+          "record": "11 - 1 - 0",
+          "item": "Passho Berry",
+          "ability": "Intimidate",
+          "moves": [
+            "Throat Chop",
+            "Fake Out",
+            "Parting Shot",
+            "Protect"
+          ]
+        },
+        {
+          "player": "ShrimpTheShrimp",
+          "record": "11 - 2 - 0",
+          "item": "Chople Berry",
+          "ability": "Intimidate",
+          "moves": [
+            "Throat Chop",
+            "Flare Blitz",
+            "Fake Out",
+            "Parting Shot"
+          ]
+        },
+        {
+          "player": "SableyeVGC",
+          "record": "10 - 1 - 0",
+          "item": "Sitrus Berry",
+          "ability": "Intimidate",
+          "moves": [
+            "Flare Blitz",
+            "Parting Shot",
+            "Taunt",
+            "Fake Out"
+          ]
+        },
+        {
+          "player": "Limitester",
+          "record": "9 - 1 - 0",
+          "item": "Sitrus Berry",
+          "ability": "Intimidate",
+          "moves": [
+            "Protect",
+            "Fake Out",
+            "Flare Blitz",
+            "Parting Shot"
+          ]
+        },
+        {
+          "player": "Cactusmax",
+          "record": "8 - 2 - 0",
+          "item": "Chople Berry",
+          "ability": "Intimidate",
+          "moves": [
+            "Fake Out",
+            "Flare Blitz",
+            "Throat Chop",
+            "Parting Shot"
+          ]
+        },
+        {
+          "player": "Gunslinger",
+          "record": "9 - 3 - 0",
+          "item": "Passho Berry",
+          "ability": "Intimidate",
+          "moves": [
+            "Fake Out",
+            "Parting Shot",
+            "Throat Chop",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Desu",
+          "record": "9 - 2 - 0",
+          "item": "Passho Berry",
+          "ability": "Intimidate",
+          "moves": [
+            "Fake Out",
+            "Protect",
+            "Parting Shot",
+            "Throat Chop"
+          ]
+        },
+        {
+          "player": "Hari",
+          "record": "7 - 1 - 0",
+          "item": "Sitrus Berry",
+          "ability": "Intimidate",
+          "moves": [
+            "Flare Blitz",
+            "Helping Hand",
+            "Parting Shot",
+            "Fake Out"
+          ]
+        },
+        {
+          "player": "LeCehlou",
+          "record": "7 - 2 - 0",
+          "item": "Chople Berry",
+          "ability": "Intimidate",
+          "moves": [
+            "Fake Out",
+            "Parting Shot",
+            "Roar",
+            "Flare Blitz"
+          ]
+        },
+        {
+          "player": "Altkyle",
+          "record": "5 - 0 - 0",
+          "item": "Sitrus Berry",
+          "ability": "Intimidate",
+          "moves": [
+            "Fake Out",
+            "Flare Blitz",
+            "Throat Chop",
+            "Parting Shot"
+          ]
+        }
+      ]
+    },
+    "Sinistcha": {
+      "rank": 6,
+      "usage": 26.87,
+      "baseStats": {
+        "hp": 71,
+        "atk": 60,
+        "def": 106,
+        "spa": 121,
+        "spd": 80,
+        "spe": 70
+      },
+      "moves": [
+        {
+          "name": "Matcha Gotcha",
+          "pct": 97.381
+        },
+        {
+          "name": "Rage Powder",
+          "pct": 95.048
+        },
+        {
+          "name": "Trick Room",
+          "pct": 70.002
+        },
+        {
+          "name": "Life Dew",
+          "pct": 55.096
+        },
+        {
+          "name": "Protect",
+          "pct": 39.709
+        },
+        {
+          "name": "Shadow Ball",
+          "pct": 19.464
+        },
+        {
+          "name": "Strength Sap",
+          "pct": 15.84
+        },
+        {
+          "name": "Other",
+          "pct": 7.461
+        }
+      ],
+      "abilities": [
+        {
+          "name": "Hospitality",
+          "pct": 98.902
+        },
+        {
+          "name": "Heatproof",
+          "pct": 1.098
+        }
+      ],
+      "items": [
+        {
+          "name": "Sitrus Berry",
+          "pct": 46.229
+        },
+        {
+          "name": "Leftovers",
+          "pct": 13.757
+        },
+        {
+          "name": "Colbur Berry",
+          "pct": 10.436
+        },
+        {
+          "name": "Occa Berry",
+          "pct": 7.753
+        },
+        {
+          "name": "Kasib Berry",
+          "pct": 7.64
+        },
+        {
+          "name": "Mental Herb",
+          "pct": 5.68
+        },
+        {
+          "name": "Coba Berry",
+          "pct": 2.701
+        },
+        {
+          "name": "Focus Sash",
+          "pct": 2.224
+        },
+        {
+          "name": "Other",
+          "pct": 3.582
+        }
+      ],
+      "teammates": [
+        {
+          "name": "Incineroar",
+          "pct": 51.078
+        },
+        {
+          "name": "Sneasler",
+          "pct": 36.776
+        },
+        {
+          "name": "Kingambit",
+          "pct": 24.787
+        },
+        {
+          "name": "Garchomp",
+          "pct": 22.602
+        },
+        {
+          "name": "Basculegion",
+          "pct": 22.037
+        },
+        {
+          "name": "Pelipper",
+          "pct": 21.53
+        }
+      ],
+      "topSpread": {
+        "nature": "Bold",
+        "sp": [
+          32,
+          0,
+          4,
+          0,
+          30,
+          0
+        ],
+        "pct": 6.361
+      },
+      "featuredSets": [
+        {
+          "player": "TurboMatt",
+          "record": "11 - 1 - 0",
+          "item": "Colbur Berry",
+          "ability": "Hospitality",
+          "moves": [
+            "Matcha Gotcha",
+            "Rage Powder",
+            "Trick Room",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Cactusmax",
+          "record": "8 - 2 - 0",
+          "item": "Sitrus Berry",
+          "ability": "Hospitality",
+          "moves": [
+            "Matcha Gotcha",
+            "Rage Powder",
+            "Life Dew",
+            "Trick Room"
+          ]
+        },
+        {
+          "player": "Gunslinger",
+          "record": "9 - 3 - 0",
+          "item": "Kasib Berry",
+          "ability": "Hospitality",
+          "moves": [
+            "Protect",
+            "Trick Room",
+            "Rage Powder",
+            "Matcha Gotcha"
+          ]
+        },
+        {
+          "player": "Desu",
+          "record": "9 - 2 - 0",
+          "item": "Kasib Berry",
+          "ability": "Hospitality",
+          "moves": [
+            "Protect",
+            "Matcha Gotcha",
+            "Life Dew",
+            "Rage Powder"
+          ]
+        },
+        {
+          "player": "Hari",
+          "record": "7 - 1 - 0",
+          "item": "Kasib Berry",
+          "ability": "Hospitality",
+          "moves": [
+            "Matcha Gotcha",
+            "Life Dew",
+            "Rage Powder",
+            "Trick Room"
+          ]
+        },
+        {
+          "player": "LeCehlou",
+          "record": "7 - 2 - 0",
+          "item": "Kesib Berry",
+          "ability": "Hospitality",
+          "moves": [
+            "Matcha Gotcha",
+            "Rage Powder",
+            "Life Dew",
+            "Trick Room"
+          ]
+        },
+        {
+          "player": "JUNIA",
+          "record": "7 - 1 - 0",
+          "item": "Sitrus Berry",
+          "ability": "Hospitality",
+          "moves": [
+            "Protect",
+            "Matcha Gotcha",
+            "Strength Sap",
+            "Rage Powder"
+          ]
+        },
+        {
+          "player": "Quecle",
+          "record": "7 - 2 - 0",
+          "item": "Sitrus Berry",
+          "ability": "Hospitality",
+          "moves": [
+            "Matcha Gotcha",
+            "Trick Room",
+            "Rage Powder",
+            "Life Dew"
+          ]
+        },
+        {
+          "player": "joethefenix",
+          "record": "6 - 2 - 0",
+          "item": "Kasib Berry",
+          "ability": "Hospitality",
+          "moves": [
+            "Matcha Gotcha",
+            "Life Dew",
+            "Trick Room",
+            "Rage Powder"
+          ]
+        },
+        {
+          "player": "LenVGC",
+          "record": "7 - 3 - 0",
+          "item": "Kasib Berry",
+          "ability": "Hospitality",
+          "moves": [
+            "Matcha Gotcha",
+            "Rage Powder",
+            "Trick Room",
+            "Protect"
+          ]
+        }
+      ]
+    },
+    "Floette-Mega": {
+      "rank": 7,
+      "usage": 21.37,
+      "baseStats": {
+        "hp": 74,
+        "atk": 85,
+        "def": 87,
+        "spa": 155,
+        "spd": 148,
+        "spe": 102
+      },
+      "moves": [
+        {
+          "name": "Protect",
+          "pct": 99.294
+        },
+        {
+          "name": "Dazzling Gleam",
+          "pct": 96.248
+        },
+        {
+          "name": "Moonblast",
+          "pct": 83.337
+        },
+        {
+          "name": "Calm Mind",
+          "pct": 53.465
+        },
+        {
+          "name": "Light of Ruin",
+          "pct": 44.954
+        },
+        {
+          "name": "Draining Kiss",
+          "pct": 16.162
+        },
+        {
+          "name": "Other",
+          "pct": 6.54
+        }
+      ],
+      "abilities": [
+        {
+          "name": "Fairy Aura",
+          "pct": 100
+        }
+      ],
+      "items": [
+        {
+          "name": "Floettite",
+          "pct": 100
+        }
+      ],
+      "teammates": [
+        {
+          "name": "Garchomp",
+          "pct": 61.16
+        },
+        {
+          "name": "Sneasler",
+          "pct": 50.813
+        },
+        {
+          "name": "Basculegion",
+          "pct": 50.206
+        },
+        {
+          "name": "Kingambit",
+          "pct": 47.209
+        },
+        {
+          "name": "Incineroar",
+          "pct": 36.327
+        },
+        {
+          "name": "Aerodactyl",
+          "pct": 28.175
+        }
+      ],
+      "topSpread": {
+        "nature": "Timid",
+        "sp": [
+          2,
+          0,
+          0,
+          32,
+          0,
+          32
+        ],
+        "pct": 7.967
+      },
+      "featuredSets": []
+    },
+    "Charizard-Mega-Y": {
+      "rank": 8,
+      "usage": 17.86,
+      "baseStats": {
+        "hp": 78,
+        "atk": 104,
+        "def": 78,
+        "spa": 159,
+        "spd": 115,
+        "spe": 100
+      },
+      "moves": [
+        {
+          "name": "Heat Wave",
+          "pct": 99.217
+        },
+        {
+          "name": "Protect",
+          "pct": 99.192
+        },
+        {
+          "name": "Solar Beam",
+          "pct": 87.215
+        },
+        {
+          "name": "Weather Ball",
+          "pct": 76.782
+        },
+        {
+          "name": "Air Slash",
+          "pct": 11.861
+        },
+        {
+          "name": "Overheat",
+          "pct": 11.729
+        },
+        {
+          "name": "Other",
+          "pct": 14.003
+        }
+      ],
+      "abilities": [
+        {
+          "name": "Drought",
+          "pct": 100
+        }
+      ],
+      "items": [
+        {
+          "name": "Charizardite Y",
+          "pct": 100
+        }
+      ],
+      "teammates": [
+        {
+          "name": "Garchomp",
+          "pct": 75.662
+        },
+        {
+          "name": "Kingambit",
+          "pct": 52.153
+        },
+        {
+          "name": "Basculegion",
+          "pct": 46.252
+        },
+        {
+          "name": "Sneasler",
+          "pct": 44.467
+        },
+        {
+          "name": "Incineroar",
+          "pct": 33.17
+        },
+        {
+          "name": "Whimsicott",
+          "pct": 25.028
+        }
+      ],
+      "topSpread": {
+        "nature": "Timid",
+        "sp": [
+          2,
+          0,
+          0,
+          32,
+          0,
+          32
+        ],
+        "pct": 12.197
+      },
+      "featuredSets": []
+    },
+    "Pelipper": {
+      "rank": 9,
+      "usage": 15.69,
+      "baseStats": {
+        "hp": 60,
+        "atk": 50,
+        "def": 100,
+        "spa": 95,
+        "spd": 70,
+        "spe": 65
+      },
+      "moves": [
+        {
+          "name": "Hurricane",
+          "pct": 97.5
+        },
+        {
+          "name": "Weather Ball",
+          "pct": 86.846
+        },
+        {
+          "name": "Tailwind",
+          "pct": 75.875
+        },
+        {
+          "name": "Protect",
+          "pct": 50.806
+        },
+        {
+          "name": "Wide Guard",
+          "pct": 44.236
+        },
+        {
+          "name": "Muddy Water",
+          "pct": 12.193
+        },
+        {
+          "name": "U-turn",
+          "pct": 9.111
+        },
+        {
+          "name": "Icy Wind",
+          "pct": 6.082
+        },
+        {
+          "name": "Other",
+          "pct": 17.35
+        }
+      ],
+      "abilities": [
+        {
+          "name": "Drizzle",
+          "pct": 99.695
+        },
+        {
+          "name": "Keen Eye",
+          "pct": 0.193
+        },
+        {
+          "name": "Rain Dish",
+          "pct": 0.111
+        }
+      ],
+      "items": [
+        {
+          "name": "Focus Sash",
+          "pct": 52.412
+        },
+        {
+          "name": "Sitrus Berry",
+          "pct": 24.272
+        },
+        {
+          "name": "Choice Scarf",
+          "pct": 9.643
+        },
+        {
+          "name": "Mystic Water",
+          "pct": 4.462
+        },
+        {
+          "name": "Leftovers",
+          "pct": 2.618
+        },
+        {
+          "name": "Wacan Berry",
+          "pct": 1.928
+        },
+        {
+          "name": "Other",
+          "pct": 4.665
+        }
+      ],
+      "teammates": [
+        {
+          "name": "Archaludon",
+          "pct": 68.385
+        },
+        {
+          "name": "Basculegion",
+          "pct": 66.542
+        },
+        {
+          "name": "Sneasler",
+          "pct": 38.25
+        },
+        {
+          "name": "Sinistcha",
+          "pct": 36.882
+        },
+        {
+          "name": "Incineroar",
+          "pct": 33.246
+        },
+        {
+          "name": "Dragonite-Mega",
+          "pct": 25.672
+        }
+      ],
+      "topSpread": {
+        "nature": "Timid",
+        "sp": [
+          2,
+          0,
+          0,
+          32,
+          0,
+          32
+        ],
+        "pct": 16.464
+      },
+      "featuredSets": [
+        {
+          "player": "BowlingVGC",
+          "record": "7 - 2 - 0",
+          "item": "Sitrus Berry",
+          "ability": "Drizzle",
+          "moves": [
+            "Wide Guard",
+            "Weather Ball",
+            "Hurricane",
+            "Tailwind"
+          ]
+        },
+        {
+          "player": "Raichu123",
+          "record": "7 - 2 - 0",
+          "item": "Sitrus Berry",
+          "ability": "Drizzle",
+          "moves": [
+            "Weather Ball",
+            "Hurricane",
+            "Tailwind",
+            "Wide Guard"
+          ]
+        },
+        {
+          "player": "HyogaVGC",
+          "record": "6 - 0 - 0",
+          "item": "Sitrus Berry",
+          "ability": "Drizzle",
+          "moves": [
+            "Weather Ball",
+            "Hurricane",
+            "Wide Guard",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Everett98",
+          "record": "8 - 2 - 0",
+          "item": "Sitrus Berry",
+          "ability": "Drizzle",
+          "moves": [
+            "Weather Ball",
+            "Hurricane",
+            "Tailwind",
+            "Wide Guard"
+          ]
+        },
+        {
+          "player": "Altkyle",
+          "record": "5 - 0 - 0",
+          "item": "Focus Sash",
+          "ability": "Drizzle",
+          "moves": [
+            "Hurricane",
+            "Weather Ball",
+            "Tailwind",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Mattivik",
+          "record": "8 - 1 - 0",
+          "item": "Sitrus Berry",
+          "ability": "Drizzle",
+          "moves": [
+            "Tailwind",
+            "Weather Ball",
+            "Hurricane",
+            "Wide Guard"
+          ]
+        },
+        {
+          "player": "joethefenix",
+          "record": "6 - 2 - 0",
+          "item": "Focus Sash",
+          "ability": "Drizzle",
+          "moves": [
+            "Hurricane",
+            "Tailwind",
+            "Protect",
+            "Weather Ball"
+          ]
+        },
+        {
+          "player": "Altkyle",
+          "record": "7 - 1 - 0",
+          "item": "Focus Sash",
+          "ability": "Drizzle",
+          "moves": [
+            "Hurricane",
+            "Weather Ball",
+            "Tailwind",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Altkyle",
+          "record": "6 - 1 - 0",
+          "item": "Focus Sash",
+          "ability": "Drizzle",
+          "moves": [
+            "Hurricane",
+            "Weather Ball",
+            "Tailwind",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Iaoth",
+          "record": "7 - 3 - 0",
+          "item": "Focus Sash",
+          "ability": "Drizzle",
+          "moves": [
+            "Tailwind",
+            "Hurricane",
+            "Weather Ball",
+            "Wide Guard"
+          ]
+        }
+      ]
+    },
+    "Aerodactyl": {
+      "rank": 0,
+      "usage": 0,
+      "baseStats": {
+        "hp": 80,
+        "atk": 105,
+        "def": 65,
+        "spa": 60,
+        "spd": 75,
+        "spe": 130
+      },
+      "moves": [
+        {
+          "name": "Rock Slide",
+          "pct": 99.123
+        },
+        {
+          "name": "Tailwind",
+          "pct": 97.838
+        },
+        {
+          "name": "Protect",
+          "pct": 88.06
+        },
+        {
+          "name": "Dual Wingbeat",
+          "pct": 84.138
+        },
+        {
+          "name": "Wide Guard",
+          "pct": 21.012
+        },
+        {
+          "name": "Other",
+          "pct": 9.829
+        }
+      ],
+      "abilities": [
+        {
+          "name": "Unnerve",
+          "pct": 92.571
+        },
+        {
+          "name": "Rock Head",
+          "pct": 5.533
+        },
+        {
+          "name": "Pressure",
+          "pct": 1.895
+        }
+      ],
+      "items": [
+        {
+          "name": "Focus Sash",
+          "pct": 87.066
+        },
+        {
+          "name": "Sitrus Berry",
+          "pct": 4.232
+        },
+        {
+          "name": "Lum Berry",
+          "pct": 3.382
+        },
+        {
+          "name": "Hard Stone",
+          "pct": 2.115
+        },
+        {
+          "name": "Other",
+          "pct": 3.204
+        }
+      ],
+      "teammates": [
+        {
+          "name": "Garchomp",
+          "pct": 52.892
+        },
+        {
+          "name": "Sneasler",
+          "pct": 46.965
+        },
+        {
+          "name": "Kingambit",
+          "pct": 41.954
+        },
+        {
+          "name": "Floette-Mega",
+          "pct": 39.461
+        },
+        {
+          "name": "Incineroar",
+          "pct": 33.98
+        },
+        {
+          "name": "Basculegion",
+          "pct": 31.432
+        }
+      ],
+      "topSpread": {
+        "nature": "Jolly",
+        "sp": [
+          2,
+          32,
+          0,
+          0,
+          0,
+          32
+        ],
+        "pct": 55.117
+      },
+      "featuredSets": [
+        {
+          "player": "MarvVGC",
+          "record": "7 - 1 - 0",
+          "item": "Focus Sash",
+          "ability": "Unnerve",
+          "moves": [
+            "Rock Slide",
+            "Dual Wingbeat",
+            "Tailwind",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Samuel T",
+          "record": "8 - 2 - 0",
+          "item": "Focus Sash",
+          "ability": "Unnerve",
+          "moves": [
+            "Rock Slide",
+            "Dual Wingbeat",
+            "Tailwind",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Samuel T",
+          "record": "10 - 1 - 0",
+          "item": "Focus Sash",
+          "ability": "Unnerve",
+          "moves": [
+            "Rock Slide",
+            "Dual Wingbeat",
+            "Tailwind",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Darkip_8",
+          "record": "7 - 1 - 0",
+          "item": "Focus Sash",
+          "ability": "Unnerve",
+          "moves": [
+            "Rock Slide",
+            "Dual Wingbeat",
+            "Tailwind",
+            "Protect"
+          ]
+        },
+        {
+          "player": "JuanPabla",
+          "record": "5 - 1 - 0",
+          "item": "Focus Sash",
+          "ability": "Unnerve",
+          "moves": [
+            "Rock Slide",
+            "Wide Guard",
+            "Tailwind",
+            "Protect"
+          ]
+        },
+        {
+          "player": "LeonVGC",
+          "record": "8 - 1 - 0",
+          "item": "Focus Sash",
+          "ability": "Unnerve",
+          "moves": [
+            "Rock Slide",
+            "Dual Wingbeat",
+            "Tailwind",
+            "Protect"
+          ]
+        },
+        {
+          "player": "averagememer57",
+          "record": "7 - 3 - 0",
+          "item": "Focus Sash",
+          "ability": "Unnerve",
+          "moves": [
+            "Rock Slide",
+            "Tailwind",
+            "Wide Guard",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Giancarlo Abiera",
+          "record": "4 - 3 - 0",
+          "item": "Focus Sash",
+          "ability": "Unnerve",
+          "moves": [
+            "Rock Slide",
+            "Dual Wingbeat",
+            "Tailwind",
+            "Protect"
+          ]
+        },
+        {
+          "player": "DJGamer511",
+          "record": "8 - 2 - 0",
+          "item": "Focus Sash",
+          "ability": "Unnerve",
+          "moves": [
+            "Rock Slide",
+            "Dual Wingbeat",
+            "Tailwind",
+            "Protect"
+          ]
+        },
+        {
+          "player": "Losandy",
+          "record": "3 - 1 - 0",
+          "item": "Focus Sash",
+          "ability": "Unnerve",
+          "moves": [
+            "Dual Wingbeat",
+            "Rock Slide",
+            "Tailwind",
+            "Protect"
+          ]
+        }
+      ]
+    },
+    "Aegislash": {
+      "rank": 0,
+      "usage": 0,
+      "baseStats": {
+        "hp": 60,
+        "atk": 50,
+        "def": 140,
+        "spa": 50,
+        "spd": 140,
+        "spe": 60
+      },
+      "moves": [
+        {
+          "name": "King's Shield",
+          "pct": 90.668
+        },
+        {
+          "name": "Shadow Sneak",
+          "pct": 75.875
+        },
+        {
+          "name": "Poltergeist",
+          "pct": 73.194
+        },
+        {
+          "name": "Iron Head",
+          "pct": 40.872
+        },
+        {
+          "name": "Close Combat",
+          "pct": 26.011
+        },
+        {
+          "name": "Sacred Sword",
+          "pct": 25.525
+        },
+        {
+          "name": "Wide Guard",
+          "pct": 22.885
+        },
+        {
+          "name": "Shadow Ball",
+          "pct": 18.342
+        },
+        {
+          "name": "Flash Cannon",
+          "pct": 15.22
+        },
+        {
+          "name": "Other",
+          "pct": 11.407
+        }
+      ],
+      "abilities": [
+        {
+          "name": "Stance Change",
+          "pct": 100
+        }
+      ],
+      "items": [
+        {
+          "name": "Spell Tag",
+          "pct": 50.333
+        },
+        {
+          "name": "Leftovers",
+          "pct": 14.675
+        },
+        {
+          "name": "Focus Sash",
+          "pct": 13.614
+        },
+        {
+          "name": "Colbur Berry",
+          "pct": 4.362
+        },
+        {
+          "name": "White Herb",
+          "pct": 4.123
+        },
+        {
+          "name": "Sitrus Berry",
+          "pct": 2.799
+        },
+        {
+          "name": "Kasib Berry",
+          "pct": 2.187
+        },
+        {
+          "name": "Metal Coat",
+          "pct": 2.077
+        },
+        {
+          "name": "Occa Berry",
+          "pct": 1.813
+        },
+        {
+          "name": "Other",
+          "pct": 4.016
+        }
+      ],
+      "teammates": [
+        {
+          "name": "Garchomp",
+          "pct": 50.622
+        },
+        {
+          "name": "Floette-Mega",
+          "pct": 31.804
+        },
+        {
+          "name": "Sneasler",
+          "pct": 27.445
+        },
+        {
+          "name": "Incineroar",
+          "pct": 26.651
+        },
+        {
+          "name": "Rotom-Wash",
+          "pct": 26.281
+        },
+        {
+          "name": "Basculegion",
+          "pct": 21.96
+        }
+      ],
+      "topSpread": {
+        "nature": "Adamant",
+        "sp": [
+          2,
+          32,
+          0,
+          0,
+          0,
+          32
+        ],
+        "pct": 10.217
+      },
+      "featuredSets": [
+        {
+          "player": "[DNR] Isaac Moreira",
+          "record": "7 - 1 - 0",
+          "item": "Spell Tag",
+          "ability": "Stance Change",
+          "moves": [
+            "King's Shield",
+            "Poltergeist",
+            "Sacred Sword",
+            "Shadow Sneak"
+          ]
+        },
+        {
+          "player": "MarvVGC",
+          "record": "7 - 1 - 0",
+          "item": "Spell Tag",
+          "ability": "Stance Change",
+          "moves": [
+            "Poltergeist",
+            "Sacred Sword",
+            "Shadow Sneak",
+            "King's Shield"
+          ]
+        },
+        {
+          "player": "Samuel T",
+          "record": "8 - 2 - 0",
+          "item": "Spell Tag",
+          "ability": "Stance Change",
+          "moves": [
+            "Poltergeist",
+            "Iron Head",
+            "King's Shield",
+            "Shadow Sneak"
+          ]
+        },
+        {
+          "player": "Caio A",
+          "record": "7 - 1 - 0",
+          "item": "Spell Tag",
+          "ability": "Stance Change",
+          "moves": [
+            "King's Shield",
+            "Iron Head",
+            "Poltergeist",
+            "Shadow Sneak"
+          ]
+        },
+        {
+          "player": "Samuel T",
+          "record": "10 - 1 - 0",
+          "item": "Spell Tag",
+          "ability": "Stance Change",
+          "moves": [
+            "Poltergeist",
+            "Iron Head",
+            "King's Shield",
+            "Shadow Sneak"
+          ]
+        },
+        {
+          "player": "rickinch",
+          "record": "4 - 0 - 0",
+          "item": "Colbur Berry",
+          "ability": "Stance Change",
+          "moves": [
+            "Poltergeist",
+            "Shadow Sneak",
+            "Sacred Sword",
+            "King's Shield"
+          ]
+        },
+        {
+          "player": "Risten Labba",
+          "record": "6 - 1 - 0",
+          "item": "Focus Sash",
+          "ability": "Stance Change",
+          "moves": [
+            "King's Shield",
+            "Poltergeist",
+            "Shadow Sneak",
+            "Close Combat"
+          ]
+        },
+        {
+          "player": "Scarlett01",
+          "record": "8 - 3 - 0",
+          "item": "Focus Sash",
+          "ability": "Stance Change",
+          "moves": [
+            "Poltergeist",
+            "Close Combat",
+            "Shadow Sneak",
+            "Wide Guard"
+          ]
+        },
+        {
+          "player": "SlyAbby",
+          "record": "7 - 2 - 0",
+          "item": "Spell Tag",
+          "ability": "Stance Change",
+          "moves": [
+            "Poltergeist",
+            "Shadow Sneak",
+            "Sacred Sword",
+            "King's Shield"
+          ]
+        },
+        {
+          "player": "squib",
+          "record": "7 - 3 - 0",
+          "item": "Focus Sash",
+          "ability": "Stance Change",
+          "moves": [
+            "Poltergeist",
+            "Shadow Sneak",
+            "Wide Guard",
+            "Close Combat"
+          ]
+        }
+      ]
+    },
+    "Alakazam": {
+      "rank": 0,
+      "usage": 0,
+      "baseStats": {
+        "hp": 55,
+        "atk": 50,
+        "def": 45,
+        "spa": 135,
+        "spd": 95,
+        "spe": 120
+      },
+      "moves": [
+        {
+          "name": "Psychic",
+          "pct": 85.54
+        },
+        {
+          "name": "Speed Swap",
+          "pct": 75.563
+        },
+        {
+          "name": "Light Screen",
+          "pct": 64.645
+        },
+        {
+          "name": "Reflect",
+          "pct": 59.677
+        },
+        {
+          "name": "Protect",
+          "pct": 23.962
+        },
+        {
+          "name": "Dazzling Gleam",
+          "pct": 14.573
+        },
+        {
+          "name": "Encore",
+          "pct": 13.275
+        },
+        {
+          "name": "Expanding Force",
+          "pct": 9.209
+        },
+        {
+          "name": "Shadow Ball",
+          "pct": 8.811
+        },
+        {
+          "name": "Focus Blast",
+          "pct": 8.688
+        }
+      ],
+      "abilities": [
+        {
+          "name": "Inner Focus",
+          "pct": 88.174
+        },
+        {
+          "name": "Magic Guard",
+          "pct": 8.018
+        },
+        {
+          "name": "Synchronize",
+          "pct": 3.808
+        }
+      ],
+      "items": [
+        {
+          "name": "Focus Sash",
+          "pct": 50.09
+        },
+        {
+          "name": "Colbur Berry",
+          "pct": 35.988
+        },
+        {
+          "name": "Mental Herb",
+          "pct": 3.878
+        },
+        {
+          "name": "Twisted Spoon",
+          "pct": 2.394
+        },
+        {
+          "name": "Choice Scarf",
+          "pct": 2.35
+        },
+        {
+          "name": "Sitrus Berry",
+          "pct": 2.325
+        },
+        {
+          "name": "Other",
+          "pct": 2.976
+        }
+      ],
+      "teammates": [
+        {
+          "name": "Sinistcha",
+          "pct": 58.21
+        },
+        {
+          "name": "Drampa-Mega",
+          "pct": 39.328
+        },
+        {
+          "name": "Basculegion",
+          "pct": 37.389
+        },
+        {
+          "name": "Pelipper",
+          "pct": 36.664
+        },
+        {
+          "name": "Scizor-Mega",
+          "pct": 24.057
+        },
+        {
+          "name": "Incineroar",
+          "pct": 21.498
+        }
+      ],
+      "topSpread": {
+        "nature": "Timid",
+        "sp": [
+          2,
+          0,
+          0,
+          32,
+          0,
+          32
+        ],
+        "pct": 29.505
+      },
+      "featuredSets": []
+    },
+    "Alcremie": {
+      "rank": 0,
+      "usage": 0,
+      "baseStats": {
+        "hp": 65,
+        "atk": 60,
+        "def": 75,
+        "spa": 110,
+        "spd": 121,
+        "spe": 64
+      },
+      "moves": [
+        {
+          "name": "Decorate",
+          "pct": 95.774
+        },
+        {
+          "name": "Dazzling Gleam",
+          "pct": 56.47
+        },
+        {
+          "name": "Protect",
+          "pct": 50.398
+        },
+        {
+          "name": "Helping Hand",
+          "pct": 26.465
+        },
+        {
+          "name": "Aromatic Mist",
+          "pct": 22.731
+        },
+        {
+          "name": "Entrainment",
+          "pct": 21.986
+        },
+        {
+          "name": "Charm",
+          "pct": 18.22
+        },
+        {
+          "name": "Encore",
+          "pct": 17.148
+        },
+        {
+          "name": "Mystical Fire",
+          "pct": 16.937
+        },
+        {
+          "name": "Alluring Voice",
+          "pct": 10.863
+        }
+      ],
+      "abilities": [
+        {
+          "name": "Aroma Veil",
+          "pct": 71.402
+        },
+        {
+          "name": "Sweet Veil",
+          "pct": 28.598
+        }
+      ],
+      "items": [
+        {
+          "name": "Choice Scarf",
+          "pct": 33.971
+        },
+        {
+          "name": "Leftovers",
+          "pct": 16.555
+        },
+        {
+          "name": "Sitrus Berry",
+          "pct": 12.24
+        },
+        {
+          "name": "Focus Sash",
+          "pct": 10.03
+        },
+        {
+          "name": "Kebia Berry",
+          "pct": 9.939
+        },
+        {
+          "name": "Babiri Berry",
+          "pct": 5.854
+        },
+        {
+          "name": "Mental Herb",
+          "pct": 3.695
+        },
+        {
+          "name": "Bright Powder",
+          "pct": 2.956
+        },
+        {
+          "name": "Other",
+          "pct": 4.76
+        }
+      ],
+      "teammates": [
+        {
+          "name": "Incineroar",
+          "pct": 30.087
+        },
+        {
+          "name": "Sableye",
+          "pct": 26.881
+        },
+        {
+          "name": "Slowbro-Mega",
+          "pct": 23.293
+        },
+        {
+          "name": "Sneasler",
+          "pct": 22.197
+        },
+        {
+          "name": "Klefki",
+          "pct": 22.142
+        },
+        {
+          "name": "Sinistcha",
+          "pct": 21.906
+        }
+      ],
+      "topSpread": {
+        "nature": "Timid",
+        "sp": [
+          32,
+          0,
+          2,
+          0,
+          0,
+          32
+        ],
+        "pct": 22.948
+      },
+      "featuredSets": []
+    },
+    "Abomasnow": {
+      "rank": 0,
+      "usage": 0,
+      "baseStats": {
+        "hp": 90,
+        "atk": 92,
+        "def": 75,
+        "spa": 92,
+        "spd": 85,
+        "spe": 60
+      },
+      "moves": [
+        {
+          "name": "Blizzard",
+          "pct": 82.872
+        },
+        {
+          "name": "Aurora Veil",
+          "pct": 76.298
+        },
+        {
+          "name": "Protect",
+          "pct": 56.856
+        },
+        {
+          "name": "Giga Drain",
+          "pct": 37.358
+        },
+        {
+          "name": "Ice Shard",
+          "pct": 25.854
+        },
+        {
+          "name": "Energy Ball",
+          "pct": 22.963
+        },
+        {
+          "name": "Icy Wind",
+          "pct": 12.314
+        },
+        {
+          "name": "Earth Power",
+          "pct": 12.194
+        },
+        {
+          "name": "Wood Hammer",
+          "pct": 11.307
+        },
+        {
+          "name": "Leech Seed",
+          "pct": 9.518
+        }
+      ],
+      "abilities": [
+        {
+          "name": "Snow Warning",
+          "pct": 98.839
+        },
+        {
+          "name": "Soundproof",
+          "pct": 1.161
+        }
+      ],
+      "items": [
+        {
+          "name": "Focus Sash",
+          "pct": 25.398
+        },
+        {
+          "name": "Occa Berry",
+          "pct": 17.556
+        },
+        {
+          "name": "Choice Scarf",
+          "pct": 11.623
+        },
+        {
+          "name": "Leftovers",
+          "pct": 10.971
+        },
+        {
+          "name": "Never-Melt Ice",
+          "pct": 10.495
+        },
+        {
+          "name": "Mental Herb",
+          "pct": 5.342
+        },
+        {
+          "name": "Coba Berry",
+          "pct": 4.914
+        },
+        {
+          "name": "Sitrus Berry",
+          "pct": 3.851
+        },
+        {
+          "name": "Quick Claw",
+          "pct": 2.396
+        },
+        {
+          "name": "Bright Powder",
+          "pct": 2.071
+        }
+      ],
+      "teammates": [
+        {
+          "name": "Incineroar",
+          "pct": 33.12
+        },
+        {
+          "name": "Sneasler",
+          "pct": 28.588
+        },
+        {
+          "name": "Kingambit",
+          "pct": 27.08
+        },
+        {
+          "name": "Farigiraf",
+          "pct": 21.505
+        },
+        {
+          "name": "Crabominable-Mega",
+          "pct": 20.695
+        },
+        {
+          "name": "Sinistcha",
+          "pct": 19.879
+        }
+      ],
+      "topSpread": {
+        "nature": "Quiet",
+        "sp": [
+          32,
+          0,
+          2,
+          32,
+          0,
+          0
+        ],
+        "pct": 10.337
+      },
+      "featuredSets": []
+    },
+    "Absol": {
+      "rank": 0,
+      "usage": 0,
+      "baseStats": {
+        "hp": 65,
+        "atk": 130,
+        "def": 60,
+        "spa": 75,
+        "spd": 60,
+        "spe": 75
+      },
+      "moves": [
+        {
+          "name": "Sucker Punch",
+          "pct": 76.099
+        },
+        {
+          "name": "Night Slash",
+          "pct": 74.884
+        },
+        {
+          "name": "Close Combat",
+          "pct": 68.933
+        },
+        {
+          "name": "Protect",
+          "pct": 66.133
+        },
+        {
+          "name": "Psycho Cut",
+          "pct": 14.87
+        },
+        {
+          "name": "Nothing",
+          "pct": 13.48
+        },
+        {
+          "name": "Play Rough",
+          "pct": 9.286
+        },
+        {
+          "name": "Shadow Claw",
+          "pct": 9.175
+        },
+        {
+          "name": "Knock Off",
+          "pct": 8.851
+        },
+        {
+          "name": "Shadow Sneak",
+          "pct": 7.136
+        }
+      ],
+      "abilities": [
+        {
+          "name": "Super Luck",
+          "pct": 85.659
+        },
+        {
+          "name": "Pressure",
+          "pct": 10.127
+        },
+        {
+          "name": "Justified",
+          "pct": 4.214
+        }
+      ],
+      "items": [
+        {
+          "name": "Scope Lens",
+          "pct": 76.642
+        },
+        {
+          "name": "Nothing",
+          "pct": 9.216
+        },
+        {
+          "name": "Focus Sash",
+          "pct": 4.166
+        },
+        {
+          "name": "Choice Scarf",
+          "pct": 4.099
+        },
+        {
+          "name": "Black Glasses",
+          "pct": 2.505
+        },
+        {
+          "name": "Other",
+          "pct": 3.372
+        }
+      ],
+      "teammates": [
+        {
+          "name": "Aerodactyl",
+          "pct": 31.578
+        },
+        {
+          "name": "Aggron-Mega",
+          "pct": 31.298
+        },
+        {
+          "name": "Farigiraf",
+          "pct": 30.917
+        },
+        {
+          "name": "Sinistcha",
+          "pct": 30.512
+        },
+        {
+          "name": "Whimsicott",
+          "pct": 24.4
+        },
+        {
+          "name": "Basculegion",
+          "pct": 24.356
+        }
+      ],
+      "topSpread": {
+        "nature": "Adamant",
+        "sp": [
+          2,
+          32,
+          0,
+          0,
+          0,
+          32
+        ],
+        "pct": 20.303
+      },
+      "featuredSets": []
+    }
+  }
+}

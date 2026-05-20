@@ -1,0 +1,72 @@
+{
+  "__notes": "Pokemon Champions Regulation Set M-A (April 8 2026 - June 17 2026). Source: MetaVGC legal list (https://metavgc.com/guides/pokemon-champions-format-legal-pokemon-items-moves). Active gimmick is 'mega' — one Mega Evolution per side per battle. Held items must be unique across the team. Some item ids (e.g. dragoninite, excadrite) refer to Champions-specific mega stones that may not exist in @pkmn/dex yet — they'll pass legality checks but won't damage-calculate correctly until the dex is patched.",
+  "level": 50,
+  "teamSize": 6,
+  "bringSize": 4,
+  "gameType": "doubles",
+  "gimmick": "mega",
+  "gimmickAllowancePerSide": 1,
+  "openTeamSheets": true,
+  "itemClause": true,
+  "speciesClause": true,
+  "legality": {
+    "allow": [
+      "abomasnow", "absol", "aegislash", "aerodactyl", "aggron", "alakazam", "alcremie",
+      "altaria", "ampharos", "appletun", "araquanid", "arbok", "arcanine", "archaludon",
+      "ariados", "armarouge", "aromatisse", "audino", "aurorus", "avalugg", "azumarill",
+      "banette", "basculegion", "bastiodon", "beartic", "beedrill", "bellibolt", "blastoise",
+      "camerupt", "castform", "ceruledge", "chandelure", "charizard", "chesnaught", "chimecho",
+      "clawitzer", "clefable", "cofagrigus", "conkeldurr", "corviknight", "crabominable",
+      "decidueye", "dedenne", "delphox", "diggersby", "ditto", "dragapult", "dragonite",
+      "drampa", "emboar", "emolga", "empoleon", "espathra", "espeon", "excadrill", "farigiraf",
+      "feraligatr", "flapple", "flareon", "floette", "florges", "forretress", "froslass",
+      "furfrou", "gallade", "garbodor", "garchomp", "gardevoir", "garganacl", "gengar",
+      "glaceon", "glalie", "glimmora", "gliscor", "golurk", "goodra", "gourgeist", "greninja",
+      "gyarados", "hatterene", "hawlucha", "heliolisk", "heracross", "hippowdon", "houndoom",
+      "hydrapple", "hydreigon", "incineroar", "infernape", "jolteon", "kangaskhan", "kingambit",
+      "kleavor", "klefki", "kommoo", "krookodile", "leafeon", "liepard", "lopunny", "lucario",
+      "luxray", "lycanroc", "machamp", "mamoswine", "manectric", "maushold", "medicham",
+      "meganium", "meowscarada", "meowstic", "milotic", "mimikyu", "morpeko", "mrrime",
+      "mudsdale", "ninetales", "noivern", "oranguru", "orthworm", "palafin", "pangoro",
+      "passimian", "patrat", "pelipper", "pidgeot", "pikachu", "pinsir", "politoed",
+      "polteageist", "primarina", "quaquaval", "raichu", "rampardos", "reuniclus", "rhyperior",
+      "roserade", "rotom", "runerigus", "sableye", "salazzle", "samurott", "sandaconda",
+      "scizor", "scovillain", "serperior", "sharpedo", "simipour", "simisage", "simisear",
+      "sinistcha", "skarmory", "skeledirge", "slowbro", "slowking", "slurpuff", "sneasler",
+      "snorlax", "spiritomb", "starmie", "steelix", "stunfisk", "sylveon", "talonflame",
+      "tauros", "tinkaton", "torkoal", "torterra", "toucannon", "toxapex", "toxicroak",
+      "trevenant", "tsareena", "typhlosion", "tyranitar", "tyrantrum", "umbreon", "vanilluxe",
+      "vaporeon", "venusaur", "victreebel", "vivillon", "volcarona", "weavile", "whimsicott",
+      "wyrdeer", "zoroark"
+    ],
+    "ban": []
+  },
+  "items": {
+    "allow": [
+      "abomasite", "absolite", "aerodactylite", "aggronite", "alakazite", "altarianite",
+      "ampharosite", "aspearberry", "audinite", "babiriberry", "banettite", "beedrillite",
+      "blackbelt", "blackglasses", "blastoisinite", "brightpowder", "cameruptite",
+      "chandelurite", "charcoal", "charizarditex", "charizarditey", "chartiberry",
+      "cheriberry", "chesnaughtite", "chestoberry", "chilanberry", "chimechite", "choicescarf",
+      "chopleberry", "clefablite", "cobaberry", "colburberry", "crabominite", "delphoxite",
+      "dragonfang", "dragoninite", "drampanite", "emboarite", "excadrite", "fairyfeather",
+      "feraligite", "floettite", "focusband", "focussash", "froslassite", "galladite",
+      "garchompite", "gardevoirite", "gengarite", "glalitite", "glimmoranite", "golurkite",
+      "greninjite", "gyaradosite", "habanberry", "hardstone", "hawluchanite", "heracronite",
+      "houndoominite", "kangaskhanite", "kasibberry", "kebiaberry", "kingsrock", "leftovers",
+      "leppaberry", "lightball", "lopunnite", "lucarionite", "lumberry", "magnet", "manectite",
+      "medichamite", "meganiumite", "mentalherb", "meowsticite", "metalcoat", "miracleseed",
+      "mysticwater", "nevermeltice", "occaberry", "oranberry", "passhoberry", "payapaberry",
+      "pechaberry", "persimberry", "pidgeotite", "pinsirite", "poisonbarb", "quickclaw",
+      "rawstberry", "rindoberry", "roseliberry", "sablenite", "scizorite", "scopelens",
+      "scovillainite", "sharpbeak", "sharpedonite", "shellbell", "shucaberry", "silkscarf",
+      "silverpowder", "sitrusberry", "skarmorite", "slowbronite", "softsand", "spelltag",
+      "starminite", "steelixite", "tangaberry", "twistedspoon", "tyranitarite", "venusaurite",
+      "victreebelite", "wacanberry", "whiteherb", "yacheberry"
+    ],
+    "ban": []
+  },
+  "moves": {
+    "ban": []
+  }
+}
