@@ -1,6 +1,13 @@
 node_modules/
 dist/
 matches/
+
+# Server runtime sqlite data (native dev) — Docker uses a named volume
+.data/
+.data-test/
+packages/server/.data/
+packages/server/.data-test/
+
 .env
 .env.local
 *.log
