@@ -1,0 +1,35 @@
+# Dev environment. `docker compose up` builds the server image, mounts the
+# host workspace for hot-reload, exposes the API on :3000, and persists
+# sqlite + other runtime files in a named volume so they survive `down`.
+#
+# Edit anything under packages/server/src/ or packages/core/src/ on the host
+# and tsx --watch inside the container restarts the server within a second.
+
+services:
+  server:
+    build: .
+    image: pokechamps-server:dev
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: info
+      PORT: "3000"
+      # JWT_SECRET will move to a .env file once Phase 2.2 lands. For now
+      # the server doesn't read it — placeholder for muscle memory.
+      JWT_SECRET: dev-secret-change-me-before-prod
+      # Phase 2.1 will use this to point at the sqlite file inside the volume.
+      DATABASE_URL: file:/app/.data/pokechamps.db
+    volumes:
+      # Bind-mount the whole repo so source edits are picked up live.
+      - ./:/app
+      # Mask the host node_modules with a named volume so the container's
+      # Linux-native installs aren't clobbered by the host's (likely Windows)
+      # node_modules. Same trick for each workspace's nested node_modules.
+      - server_node_modules:/app/node_modules
+      # Persist sqlite + any other server-side runtime state across `down`.
+      - server_data:/app/.data
+
+volumes:
+  server_node_modules:
+  server_data:

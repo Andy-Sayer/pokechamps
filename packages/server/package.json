@@ -1,0 +1,22 @@
+{
+  "name": "@pokechamps/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PokeChamps HTTP/WS backend. Fastify + sqlite + JWT auth. Hosts the authoritative match state; tui/web clients connect via REST + WebSocket.",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "tsx --watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@pokechamps/core": "*",
+    "fastify": "^5.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

@@ -9,7 +9,11 @@
   ],
   "scripts": {
     "start": "npm -w @pokechamps/tui start",
-    "typecheck": "npm -w @pokechamps/core run typecheck && npm -w @pokechamps/tui run typecheck",
+    "typecheck": "npm -w @pokechamps/core run typecheck && npm -w @pokechamps/tui run typecheck && npm -w @pokechamps/server run typecheck",
+    "server": "npm -w @pokechamps/server start",
+    "server:dev": "npm -w @pokechamps/server run dev",
+    "server:docker": "docker compose up --build",
+    "server:docker:down": "docker compose down",
     "refresh-data": "npm -w @pokechamps/core run refresh-data",
     "refresh-pikalytics": "npm -w @pokechamps/core run refresh-pikalytics",
     "demo-team": "npm -w @pokechamps/core run demo-team",
