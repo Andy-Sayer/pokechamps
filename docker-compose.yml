@@ -1,9 +1,16 @@
-# Dev environment. `docker compose up` builds the server image, mounts the
-# host workspace for hot-reload, exposes the API on :3000, and persists
-# sqlite + other runtime files in a named volume so they survive `down`.
+# Dev environment using Compose Watch (Docker Compose v2.22+). Instead of
+# bind-mounting the whole repo (which relies on inotify making it through
+# WSL2's translation layer — historically flaky on Windows), Compose Watch
+# syncs file changes directly into the container.
 #
-# Edit anything under packages/server/src/ or packages/core/src/ on the host
-# and tsx --watch inside the container restarts the server within a second.
+# Run with:
+#   docker compose watch       — boots the stack AND syncs file changes
+#   docker compose down        — stops + removes containers (volumes persist)
+#
+# Sync semantics:
+#   - source edits under packages/{server,core}/src/  →  copied into the
+#     container; tsx --watch inside the container detects and restarts.
+#   - package.json / Dockerfile changes  →  trigger a full image rebuild.
 
 services:
   server:
@@ -15,20 +22,39 @@ services:
       NODE_ENV: development
       LOG_LEVEL: info
       PORT: "3000"
-      # JWT_SECRET will move to a .env file once Phase 2.2 lands. For now
-      # the server doesn't read it — placeholder for muscle memory.
       JWT_SECRET: dev-secret-change-me-before-prod
-      # Phase 2.1 will use this to point at the sqlite file inside the volume.
       DATABASE_URL: file:/app/.data/pokechamps.db
     volumes:
-      # Bind-mount the whole repo so source edits are picked up live.
-      - ./:/app
-      # Mask the host node_modules with a named volume so the container's
-      # Linux-native installs aren't clobbered by the host's (likely Windows)
-      # node_modules. Same trick for each workspace's nested node_modules.
-      - server_node_modules:/app/node_modules
       # Persist sqlite + any other server-side runtime state across `down`.
       - server_data:/app/.data
+      # Keep the container's node_modules separate from anything the host
+      # might have in packages/*/node_modules. Sync below avoids overwriting
+      # this path because we don't list it as a sync target.
+      - server_node_modules:/app/node_modules
+
+    develop:
+      watch:
+        # Source edits: sync the file into the container; tsx --watch picks
+        # up the change and restarts the server in-place.
+        - action: sync
+          path: ./packages/server/src
+          target: /app/packages/server/src
+        - action: sync
+          path: ./packages/core/src
+          target: /app/packages/core/src
+
+        # Anything that changes the dependency tree needs a fresh image —
+        # npm install runs in the build stage.
+        - action: rebuild
+          path: ./package.json
+        - action: rebuild
+          path: ./package-lock.json
+        - action: rebuild
+          path: ./packages/server/package.json
+        - action: rebuild
+          path: ./packages/core/package.json
+        - action: rebuild
+          path: ./Dockerfile
 
 volumes:
   server_node_modules:
