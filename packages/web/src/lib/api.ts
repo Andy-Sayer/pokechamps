@@ -180,3 +180,13 @@ export function listMatches(): Promise<MatchSummary[]> {
 export function getMatch(id: string): Promise<Match> {
   return request<Match>(`/matches/${encodeURIComponent(id)}`);
 }
+
+// Mint a single-use ticket for the live WebSocket. We use this so the
+// long-lived JWT never appears in a URL (which would leak it to access
+// logs / browser history / Referer headers).
+export function getLiveTicket(id: string): Promise<{ ticket: string; expiresInMs: number }> {
+  return request<{ ticket: string; expiresInMs: number }>(
+    `/matches/${encodeURIComponent(id)}/live-ticket`,
+    { method: 'POST' },
+  );
+}

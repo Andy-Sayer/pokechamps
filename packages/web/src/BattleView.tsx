@@ -56,15 +56,17 @@ export function BattleView({ matchId, onBack, onSessionExpired }: BattleViewProp
         setError(msg);
       });
 
-    const token = getToken();
-    if (!token) {
+    if (!getToken()) {
       onSessionExpired();
       return () => {
         cancelled = true;
       };
     }
 
-    const sub = subscribeLiveMatch(getBaseUrl(), token, matchId, {
+    // Ticket-based auth: subscribeLiveMatch mints a single-use ticket via
+    // POST /matches/:id/live-ticket before opening the WS, so the long-lived
+    // JWT never enters the URL.
+    const sub = subscribeLiveMatch(getBaseUrl(), matchId, {
       onMatch: (m) => {
         if (cancelled) return;
         // Same id → simple replace, no merge. The server is the source of truth.

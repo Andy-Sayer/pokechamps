@@ -26,6 +26,7 @@ interface LiveParams {
 
 interface LiveQuery {
   token?: string;
+  ticket?: string;
 }
 
 const wsMatchRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
@@ -35,15 +36,22 @@ const wsMatchRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     '/:id/live',
     { websocket: true },
     async (socket: WebSocket, request: FastifyRequest<{ Params: LiveParams; Querystring: LiveQuery }>) => {
-      // Resolve user from header OR ?token=. Close with a 4401 frame if neither
-      // resolves — the browser side maps these custom codes to error states.
-      const user = await verifyTokenForLive(app, request);
-      if (!user) {
+      // Resolve user from header OR ?ticket= / ?token=. Close with a 4401
+      // frame if nothing resolves — the browser side maps these custom codes
+      // to error states.
+      const auth = await verifyTokenForLive(app, request);
+      if (!auth) {
         socket.close(4401, 'unauthorized');
         return;
       }
-
       const matchId = request.params.id;
+      // Ticket scope check: tickets are minted for a specific (user, match).
+      // If the client uses a ticket on a different match's upgrade URL, reject.
+      if (auth.ticketMatchId && auth.ticketMatchId !== matchId) {
+        socket.close(4401, 'ticket scope mismatch');
+        return;
+      }
+      const user = auth.user;
       const match = loadMatch(db, user.sub, matchId);
       if (!match) {
         socket.close(4404, 'match not found');

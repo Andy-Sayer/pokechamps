@@ -245,3 +245,58 @@ describe('GET /matches/:id/live', () => {
     expect(_subscriberCount(id)).toBe(0);
   });
 });
+
+describe('GET /matches/:id/live — ticket path', () => {
+  it('connects with a single-use ticket and rejects re-use', async () => {
+    const { token } = await registerUser(app, 'alice@test.example');
+    const id = await createMatch(token);
+    await app.ready();
+
+    const t = await app.inject({
+      method: 'POST', url: `/matches/${id}/live-ticket`,
+      headers: authHeaders(token),
+    });
+    expect(t.statusCode).toBe(200);
+    const { ticket } = t.json() as { ticket: string };
+    expect(ticket).toMatch(/^[A-Za-z0-9_-]+$/);
+
+    const c = await connect(`/matches/${id}/live?ticket=${encodeURIComponent(ticket)}`);
+    const msg = await c.recv();
+    expect(msg.type).toBe('snapshot');
+    c.ws.close();
+
+    // Single-use: a second connect with the same ticket fails.
+    const c2 = await connect(`/matches/${id}/live?ticket=${encodeURIComponent(ticket)}`);
+    const { code } = await c2.closed;
+    expect(code).toBe(4401);
+  });
+
+  it('rejects a ticket reused against a different match', async () => {
+    const { token } = await registerUser(app, 'alice@test.example');
+    const idA = await createMatch(token);
+    const idB = await createMatch(token);
+    await app.ready();
+
+    const t = await app.inject({
+      method: 'POST', url: `/matches/${idA}/live-ticket`,
+      headers: authHeaders(token),
+    });
+    const { ticket } = t.json() as { ticket: string };
+
+    const c = await connect(`/matches/${idB}/live?ticket=${encodeURIComponent(ticket)}`);
+    const { code } = await c.closed;
+    expect(code).toBe(4401);
+  });
+
+  it('POST /matches/:id/live-ticket 404s for another user', async () => {
+    const alice = await registerUser(app, 'alice@test.example');
+    const bob = await registerUser(app, 'bob@test.example');
+    const id = await createMatch(alice.token);
+
+    const t = await app.inject({
+      method: 'POST', url: `/matches/${id}/live-ticket`,
+      headers: authHeaders(bob.token),
+    });
+    expect(t.statusCode).toBe(404);
+  });
+});

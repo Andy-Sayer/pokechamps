@@ -34,6 +34,7 @@ import { getDb } from '../db/connection.js';
 import type { JwtPayload } from '../auth/jwt.js';
 import { MATCH_BODY_LIMIT, loadMatch, saveMatch } from './match-storage.js';
 import { broadcastMatch } from '../ws/hub.js';
+import { issueTicket } from '../ws/tickets.js';
 
 // Loose schemas — pass-through to the engine. We only validate the top-level
 // envelope and array-ness; the engine itself enforces semantic validity.
@@ -92,6 +93,23 @@ const matchActionsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
           message: err instanceof Error ? err.message : String(err),
         });
       }
+    },
+  );
+
+  // POST /matches/:id/live-ticket — mint a single-use 30s ticket for the
+  // WebSocket /matches/:id/live upgrade. Browser clients use this so the
+  // long-lived JWT never appears in a URL (which would leak it via access
+  // logs, browser history, Referer headers, etc.).
+  app.post<{ Params: { id: string } }>(
+    '/:id/live-ticket',
+    { preHandler: app.authenticate },
+    async (request, reply) => {
+      const user = request.user as JwtPayload;
+      // Ownership check: don't issue tickets for matches the user can't see.
+      const match = loadMatch(db, user.sub, request.params.id);
+      if (!match) return reply.code(404).send({ error: 'match not found' });
+      const ticket = issueTicket(user.sub, request.params.id);
+      return reply.code(200).send({ ticket, expiresInMs: 30_000 });
     },
   );
 

@@ -4,13 +4,18 @@
 // type-only on the core import so we don't drag Node-y code into the bundle.
 // Envelope shape is the same: { type: 'snapshot' | 'update', match }.
 //
-// The browser WS handshake can't set arbitrary headers, so the JWT rides
-// the query string. Server enforces close codes:
-//   4401 = unauthorized (bad/expired token)
+// Auth: we mint a single-use ticket via POST /matches/:id/live-ticket and
+// use ?ticket=<…> on the upgrade URL. The long-lived JWT never enters a
+// URL (and so never lands in browser history / access logs / Referer).
+// Each reconnect mints a fresh ticket because tickets are single-use.
+//
+// Server close codes:
+//   4401 = unauthorized (bad ticket or expired)
 //   4404 = match not found
 //   1000 = normal closure (do not reconnect)
 //   anything else = retry with backoff.
 import type { Match } from '@pokechamps/core/domain/types.js';
+import { getLiveTicket } from './api.js';
 
 export type LiveStatus = 'connecting' | 'live' | 'reconnecting' | 'closed';
 
@@ -36,14 +41,11 @@ const BACKOFF_MS = [2_000, 5_000, 15_000];
 
 export function subscribeLiveMatch(
   baseUrl: string,
-  token: string,
   matchId: string,
   opts: SubscribeOptions,
 ): LiveSubscription {
   const Ctor = opts.WebSocketImpl ?? WebSocket;
   const wsBase = baseUrl.replace(/^http(s?):/, 'ws$1:').replace(/\/$/, '');
-  const url =
-    `${wsBase}/matches/${encodeURIComponent(matchId)}/live?token=${encodeURIComponent(token)}`;
 
   let ws: WebSocket | null = null;
   let cancelled = false;
@@ -60,9 +62,31 @@ export function subscribeLiveMatch(
     opts.onError?.(err);
   };
 
-  const connect = (): void => {
+  const connect = async (): Promise<void> => {
     if (cancelled) return;
     status(attempt === 0 ? 'connecting' : 'reconnecting');
+    let ticket: string;
+    try {
+      ticket = (await getLiveTicket(matchId)).ticket;
+    } catch (e: any) {
+      // 401 on ticket fetch → session expired; 404 → match gone.
+      if (e?.status === 401) {
+        status('closed');
+        fail({ kind: 'unauthorized', message: 'session expired — please sign in again' });
+        return;
+      }
+      if (e?.status === 404) {
+        status('closed');
+        fail({ kind: 'not-found', message: 'match not found' });
+        return;
+      }
+      scheduleRetry();
+      fail({ kind: 'network', message: e?.message ?? 'ticket fetch failed' });
+      return;
+    }
+    if (cancelled) return;
+
+    const url = `${wsBase}/matches/${encodeURIComponent(matchId)}/live?ticket=${encodeURIComponent(ticket)}`;
     let socket: WebSocket;
     try {
       socket = new Ctor(url);
@@ -131,10 +155,10 @@ export function subscribeLiveMatch(
     const delay = BACKOFF_MS[attempt] ?? 15_000;
     attempt += 1;
     status('reconnecting');
-    retryTimer = setTimeout(connect, delay);
+    retryTimer = setTimeout(() => { void connect(); }, delay);
   };
 
-  connect();
+  void connect();
 
   return {
     unsubscribe(): void {
