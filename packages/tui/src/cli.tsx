@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { render, Box, Text, useApp } from 'ink';
 import type { PokemonSet, OpponentEntry, Match } from '@pokechamps/core/domain/types.js';
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
-import { defaultStores } from '@pokechamps/core/storage/index.js';
+import { createFileStores, createHttpStores, type Stores } from '@pokechamps/core/storage/index.js';
+import { loadConfig, saveConfig, type PokechampsConfig } from './config.js';
 import { MainMenu } from './ui/MainMenu.js';
 import { TeamPaste } from './ui/TeamPaste.js';
 import { TeamPicker } from './ui/TeamPicker.js';
@@ -12,16 +13,14 @@ import { OpponentLeadPicker } from './ui/OpponentLeadPicker.js';
 import { BattleScreen } from './ui/BattleScreen.js';
 import { TeamBuilder } from './ui/TeamBuilder.js';
 import { MatchHistory } from './ui/MatchHistory.js';
-
-// Single Stores instance for the whole app. Phase 3 will swap defaultStores()
-// for a config-driven factory (file vs http) without touching screen props.
-const stores = defaultStores();
+import { ServerSettings } from './ui/ServerSettings.js';
 
 type Route =
   | { kind: 'menu' }
   | { kind: 'edit-team' }
   | { kind: 'team-builder' }
   | { kind: 'history' }
+  | { kind: 'server' }
   | { kind: 'pick-team' }
   | { kind: 'opponent'; myTeam: PokemonSet[]; teamName: string }
   | { kind: 'bring'; myTeam: PokemonSet[]; opponent: OpponentEntry[]; teamName: string }
@@ -30,16 +29,52 @@ type Route =
 
 function App() {
   const { exit } = useApp();
+  const [config, setConfig] = useState<PokechampsConfig>(() => loadConfig());
   const [route, setRoute] = useState<Route>({ kind: 'menu' });
 
+  // The token is read on every request, so we route it through a ref. Logging
+  // in mid-session updates the ref without rebuilding stores.
+  const tokenRef = useRef<string | null>(config.token ?? null);
+  tokenRef.current = config.token ?? null;
+
+  // Stores are rebuilt only when the *transport* changes (file ↔ http or
+  // serverUrl change). Token changes don't invalidate the cached instance.
+  const stores: Stores = useMemo(() => {
+    if (config.serverUrl) {
+      return createHttpStores({
+        baseUrl: config.serverUrl,
+        getToken: () => tokenRef.current,
+      });
+    }
+    return createFileStores();
+  }, [config.serverUrl]);
+
+  const onConfigChange = (next: PokechampsConfig) => {
+    saveConfig(next);
+    setConfig(next);
+  };
+
   if (route.kind === 'menu') {
-    return <MainMenu onSelect={k => {
+    const badge: { text: string; color: 'green' | 'yellow' | 'red' } | undefined = config.serverUrl
+      ? config.token
+        ? { text: `● remote: ${config.serverUrl}${config.email ? ` (${config.email})` : ''}`, color: 'green' }
+        : { text: `● remote: ${config.serverUrl} — not signed in`, color: 'red' }
+      : { text: '● local file mode', color: 'yellow' };
+    return <MainMenu connectionBadge={badge} onSelect={k => {
       if (k === 'quit') exit();
       else if (k === 'edit-team') setRoute({ kind: 'edit-team' });
       else if (k === 'team-builder') setRoute({ kind: 'team-builder' });
       else if (k === 'history') setRoute({ kind: 'history' });
+      else if (k === 'server') setRoute({ kind: 'server' });
       else if (k === 'new-match') setRoute({ kind: 'pick-team' });
     }} />;
+  }
+  if (route.kind === 'server') {
+    return <ServerSettings
+      config={config}
+      onConfigChange={onConfigChange}
+      onExit={() => setRoute({ kind: 'menu' })}
+    />;
   }
   if (route.kind === 'history') {
     return <MatchHistory stores={stores} onExit={() => setRoute({ kind: 'menu' })} />;
