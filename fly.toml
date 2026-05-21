@@ -30,6 +30,12 @@ app = "pokechamps-server"
   # rolling restarts. packages/server/src/db/connection.ts mkdir -p's the
   # parent dir on boot, so /data/pokechamps.sqlite is safe.
   DATABASE_URL = "file:/data/pokechamps.sqlite"
+  # Tell Fastify to honor X-Forwarded-For (Fly stamps it). Without this the
+  # rate-limit bucket is keyed by Fly's edge IP and every user shares it.
+  TRUST_PROXY  = "1"
+  # CORS allowlist for the web client. Comma-separated origins; set after you
+  # know the public hostname for packages/web.
+  # POKECHAMPS_WEB_ORIGIN = "https://pokechamps.example.com"
 
 # Persistent volume for sqlite. Create it once before the first deploy:
 #   flyctl volumes create pokechamps_data --size 10 --region <region>
