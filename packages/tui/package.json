@@ -10,7 +10,8 @@
   },
   "scripts": {
     "start": "tsx src/cli.tsx",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "migrate-to-server": "tsx src/scripts/migrate-to-server.ts"
   },
   "dependencies": {
     "@pokechamps/core": "*",
