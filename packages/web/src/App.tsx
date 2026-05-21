@@ -16,6 +16,7 @@ import {
   signOut,
   type AuthUser,
 } from './lib/api.js';
+import { BattleView } from './BattleView.js';
 
 type AuthMode = 'login' | 'register';
 
@@ -120,9 +121,10 @@ function AuthView({ baseUrl, onBaseUrlChange, onAuthed }: AuthViewProps) {
 interface MatchesViewProps {
   user: AuthUser;
   onSignOut: () => void;
+  onOpenMatch: (id: string) => void;
 }
 
-function MatchesView({ user, onSignOut }: MatchesViewProps) {
+function MatchesView({ user, onSignOut, onOpenMatch }: MatchesViewProps) {
   const [matches, setMatches] = useState<MatchSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -172,28 +174,31 @@ function MatchesView({ user, onSignOut }: MatchesViewProps) {
         ) : (
           <ul className="space-y-2">
             {matches.map((m) => (
-              <li
-                key={m.id}
-                className="rounded border border-slate-800 bg-slate-900 px-4 py-3 text-sm"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs text-slate-500">
-                    {new Date(m.startedAt).toLocaleString()}
-                  </span>
-                  <span className="text-xs uppercase tracking-wide text-slate-400">
-                    {m.outcome ?? 'in progress'}
-                  </span>
-                </div>
-                <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <div className="text-slate-500">Me</div>
-                    <div>{m.myTeamSpecies?.join(', ') ?? '-'}</div>
+              <li key={m.id}>
+                <button
+                  type="button"
+                  onClick={() => onOpenMatch(m.id)}
+                  className="w-full rounded border border-slate-800 bg-slate-900 px-4 py-3 text-left text-sm hover:border-emerald-700 hover:bg-slate-800/70 focus:outline-none focus:ring focus:ring-emerald-500"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-xs text-slate-500">
+                      {new Date(m.startedAt).toLocaleString()}
+                    </span>
+                    <span className="text-xs uppercase tracking-wide text-slate-400">
+                      {m.outcome ?? 'in progress'}
+                    </span>
                   </div>
-                  <div>
-                    <div className="text-slate-500">Opp</div>
-                    <div>{m.opponentTeamSpecies?.join(', ') ?? '-'}</div>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <div className="text-slate-500">Me</div>
+                      <div>{m.myTeamSpecies?.join(', ') ?? '-'}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">Opp</div>
+                      <div>{m.opponentTeamSpecies?.join(', ') ?? '-'}</div>
+                    </div>
                   </div>
-                </div>
+                </button>
               </li>
             ))}
           </ul>
@@ -208,6 +213,9 @@ export function App() {
     isAuthenticated() ? getCurrentUser() : null,
   );
   const [baseUrl, setBaseUrlState] = useState<string>(() => getBaseUrl());
+  // No router — Phase 4.2 is one screen deep. selectedMatchId === null means
+  // the list view; setting it opens BattleView.
+  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
 
   function onBaseUrlChange(next: string): void {
     setBaseUrlState(next);
@@ -223,6 +231,18 @@ export function App() {
       />
     );
   }
+  if (selectedMatchId !== null) {
+    return (
+      <BattleView
+        matchId={selectedMatchId}
+        onBack={() => setSelectedMatchId(null)}
+        onSessionExpired={() => {
+          setSelectedMatchId(null);
+          setUser(null);
+        }}
+      />
+    );
+  }
   return (
     <MatchesView
       user={user}
@@ -230,6 +250,7 @@ export function App() {
         signOut();
         setUser(null);
       }}
+      onOpenMatch={(id) => setSelectedMatchId(id)}
     />
   );
 }

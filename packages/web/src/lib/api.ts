@@ -6,6 +6,7 @@
 // Only the endpoints needed for Phase 4.1 (auth + matches list/get) are
 // wrapped. Phase 4.2 will add the WebSocket subscription for live battles.
 import type { MatchSummary } from '@pokechamps/core/storage/types.js';
+import type { Match } from '@pokechamps/core/domain/types.js';
 
 export interface AuthUser {
   id: string;
@@ -176,9 +177,6 @@ export function listMatches(): Promise<MatchSummary[]> {
   return request<MatchSummary[]>('/matches');
 }
 
-// Match shape is intentionally opaque here — Phase 4.2 will type this
-// against the live-viewer's needs. Returning unknown keeps the v1 surface
-// honest about what the scaffold actually consumes.
-export function getMatch(id: string): Promise<unknown> {
-  return request<unknown>(`/matches/${encodeURIComponent(id)}`);
+export function getMatch(id: string): Promise<Match> {
+  return request<Match>(`/matches/${encodeURIComponent(id)}`);
 }
