@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "start": "npm -w @pokechamps/tui start",
-    "typecheck": "npm -w @pokechamps/core run typecheck && npm -w @pokechamps/tui run typecheck && npm -w @pokechamps/server run typecheck",
+    "typecheck": "npm -w @pokechamps/core run typecheck && npm -w @pokechamps/tui run typecheck && npm -w @pokechamps/server run typecheck && npm -w @pokechamps/web run typecheck",
     "server": "npm -w @pokechamps/server start",
     "server:dev": "npm -w @pokechamps/server run dev",
     "server:docker": "docker compose up --build",
