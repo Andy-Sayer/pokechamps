@@ -1,46 +1,13 @@
-// PokeChamps server entry point. v1: a healthcheck endpoint so the Docker
-// dev environment has something to boot. Phase 2.1 adds sqlite + migrations;
-// 2.2 adds auth; 2.3 teams + matches routes; 2.5 WebSocket live updates.
-import Fastify from 'fastify';
-import { getDb, closeDb } from './db/connection.js';
-import { migrate } from './db/migrations.js';
+// PokeChamps server entry point. Boots the Fastify app, listens on PORT,
+// installs signal handlers for graceful shutdown. App wiring (DB, migrations,
+// plugins, routes) lives in app.ts so tests can reuse it via app.inject().
+import { buildApp } from './app.js';
+import { closeDb } from './db/connection.js';
 
-const log = (msg: string, extra?: object) => console.log(JSON.stringify({ msg, ...extra }));
+const log = (msg: string, extra?: object) =>
+  console.log(JSON.stringify({ msg, ...extra }));
 
-const app = Fastify({
-  logger: {
-    level: process.env.LOG_LEVEL ?? 'info',
-  },
-});
-
-// Open the DB + run pending migrations before we start listening. If either
-// throws the process exits — we'd rather fail fast than serve traffic against
-// a half-migrated schema.
-const db = getDb();
-const migrationResult = migrate(db);
-app.log.info(
-  { applied: migrationResult.applied, latest: migrationResult.latest },
-  migrationResult.applied.length > 0
-    ? `migrations applied: ${migrationResult.applied.join(', ')}`
-    : 'no new migrations',
-);
-
-app.get('/health', async () => {
-  let dbStatus: 'ok' | 'error' = 'ok';
-  try {
-    // Cheap liveness probe — round-trips the connection without touching data.
-    db.prepare('SELECT 1').get();
-  } catch {
-    dbStatus = 'error';
-  }
-  return {
-    status: 'ok',
-    ts: new Date().toISOString(),
-    version: process.env.npm_package_version ?? '0.1.0',
-    db: dbStatus,
-    schemaLatest: migrationResult.latest,
-  };
-});
+const { app } = await buildApp();
 
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? '0.0.0.0';

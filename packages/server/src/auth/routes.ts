@@ -1,0 +1,184 @@
+// Auth routes plugin. Mounted at /auth (see index.ts) so paths here are
+// relative: /register, /login, /me, /tokens.
+//
+// Response shapes never leak password_hash or token_hash. Inputs are
+// zod-validated; we return 400 with the zod issue list on parse failure
+// (clients want a precise field name, not just "Bad Request").
+import type { FastifyInstance, FastifyPluginAsync, FastifyReply } from 'fastify';
+import { z } from 'zod';
+import { getDb } from '../db/connection.js';
+import { hashPassword, verifyPassword } from './passwords.js';
+import { newId, newTokenSecret } from './ids.js';
+import type { JwtPayload } from './jwt.js';
+
+const credentialsSchema = z.object({
+  email: z.string().email().max(255),
+  password: z.string().min(8).max(200),
+});
+
+const createTokenSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+});
+
+interface UserRow {
+  id: string;
+  email: string;
+  password_hash: string;
+  created_at: string;
+}
+
+function publicUser(row: UserRow) {
+  return { id: row.id, email: row.email, createdAt: row.created_at };
+}
+
+function badRequest(reply: FastifyReply, err: z.ZodError) {
+  return reply.code(400).send({
+    error: 'invalid request body',
+    issues: err.issues.map(i => ({ path: i.path.join('.'), message: i.message })),
+  });
+}
+
+// Strict bucket on the credential endpoints — separate from the global limit.
+const credentialRateLimit = {
+  config: {
+    rateLimit: {
+      max: 5,
+      timeWindow: '1 minute',
+    },
+  },
+};
+
+const authRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
+  const db = getDb();
+
+  app.post('/register', credentialRateLimit, async (request, reply) => {
+    const parsed = credentialsSchema.safeParse(request.body);
+    if (!parsed.success) return badRequest(reply, parsed.error);
+    const { email, password } = parsed.data;
+
+    const existing = db
+      .prepare<[string], { id: string }>('SELECT id FROM users WHERE email = ? COLLATE NOCASE')
+      .get(email);
+    if (existing) {
+      return reply.code(409).send({ error: 'email already registered' });
+    }
+
+    const id = newId();
+    const password_hash = await hashPassword(password);
+    const created_at = new Date().toISOString();
+    db.prepare(
+      'INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)',
+    ).run(id, email, password_hash, created_at);
+
+    const token = await reply.jwtSign({ sub: id, email });
+    return reply.code(200).send({
+      token,
+      user: { id, email },
+    });
+  });
+
+  app.post('/login', credentialRateLimit, async (request, reply) => {
+    const parsed = credentialsSchema.safeParse(request.body);
+    if (!parsed.success) return badRequest(reply, parsed.error);
+    const { email, password } = parsed.data;
+
+    const row = db
+      .prepare<[string], UserRow>(
+        'SELECT id, email, password_hash, created_at FROM users WHERE email = ? COLLATE NOCASE',
+      )
+      .get(email);
+    // Always run a bcrypt compare even on missing user, to avoid leaking
+    // account existence via response timing.
+    const placeholderHash =
+      '$2b$12$abcdefghijklmnopqrstuuKZ0FtY9C6vV6c0p9Yqo4SX1XvKxqyAW';
+    const ok = await verifyPassword(password, row?.password_hash ?? placeholderHash);
+    if (!row || !ok) {
+      return reply.code(401).send({ error: 'invalid email or password' });
+    }
+
+    const token = await reply.jwtSign({ sub: row.id, email: row.email });
+    return reply.code(200).send({
+      token,
+      user: { id: row.id, email: row.email },
+    });
+  });
+
+  app.get('/me', { preHandler: app.authenticate }, async (request, reply) => {
+    const user = request.user as JwtPayload;
+    const row = db
+      .prepare<[string], UserRow>(
+        'SELECT id, email, password_hash, created_at FROM users WHERE id = ?',
+      )
+      .get(user.sub);
+    if (!row) return reply.code(404).send({ error: 'user not found' });
+    return { user: publicUser(row) };
+  });
+
+  app.post('/tokens', { preHandler: app.authenticate }, async (request, reply) => {
+    const parsed = createTokenSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return badRequest(reply, parsed.error);
+    const { name } = parsed.data;
+    const user = request.user as JwtPayload;
+
+    // PAT format: `<rowId>.<secret>`. We store only bcrypt(secret); the id
+    // is the table key so lookup is O(1).
+    const id = newId();
+    const secret = newTokenSecret();
+    const token_hash = await hashPassword(secret);
+    const created_at = new Date().toISOString();
+
+    db.prepare(
+      `INSERT INTO api_tokens (id, user_id, token_hash, name, created_at, last_used_at)
+       VALUES (?, ?, ?, ?, ?, NULL)`,
+    ).run(id, user.sub, token_hash, name ?? null, created_at);
+
+    return reply.code(200).send({
+      // Returned exactly once — the client must persist it now.
+      token: `${id}.${secret}`,
+      id,
+      name: name ?? null,
+      createdAt: created_at,
+    });
+  });
+
+  app.get('/tokens', { preHandler: app.authenticate }, async (request) => {
+    const user = request.user as JwtPayload;
+    const rows = db
+      .prepare<
+        [string],
+        { id: string; name: string | null; created_at: string; last_used_at: string | null }
+      >(
+        `SELECT id, name, created_at, last_used_at
+         FROM api_tokens
+         WHERE user_id = ?
+         ORDER BY created_at DESC`,
+      )
+      .all(user.sub);
+    return rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      createdAt: r.created_at,
+      lastUsedAt: r.last_used_at,
+    }));
+  });
+
+  app.delete<{ Params: { id: string } }>(
+    '/tokens/:id',
+    { preHandler: app.authenticate },
+    async (request, reply) => {
+      const user = request.user as JwtPayload;
+      const { id } = request.params;
+      // Scope the delete to the authed user so one user can't revoke another's
+      // tokens by guessing ids.
+      const info = db
+        .prepare('DELETE FROM api_tokens WHERE id = ? AND user_id = ?')
+        .run(id, user.sub);
+      if (info.changes === 0) {
+        return reply.code(404).send({ error: 'token not found' });
+      }
+      return reply.code(204).send();
+    },
+  );
+};
+
+export default authRoutes;

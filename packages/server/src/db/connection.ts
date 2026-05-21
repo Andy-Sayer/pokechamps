@@ -14,10 +14,17 @@ export function getDb(): Database.Database {
     throw new Error(`DATABASE_URL must be a file: URL for sqlite. Got: ${url}`);
   }
   const path = url.slice('file:'.length);
-  const dir = dirname(path);
-  if (dir && !existsSync(dir)) mkdirSync(dir, { recursive: true });
-  db = new Database(path);
-  db.pragma('journal_mode = WAL');     // better-sqlite3 default but explicit
+  // ':memory:' (or 'file::memory:') is the sqlite shared-in-memory sentinel —
+  // used by tests for isolation. Skip the mkdir step in that case.
+  const isMemory = path === ':memory:' || path === '';
+  if (!isMemory) {
+    const dir = dirname(path);
+    if (dir && !existsSync(dir)) mkdirSync(dir, { recursive: true });
+  }
+  db = new Database(isMemory ? ':memory:' : path);
+  if (!isMemory) {
+    db.pragma('journal_mode = WAL');   // WAL files only meaningful for on-disk DBs
+  }
   db.pragma('synchronous = NORMAL');   // safe with WAL; faster than FULL
   db.pragma('foreign_keys = ON');      // OFF by default in sqlite (!)
   return db;
