@@ -10,6 +10,8 @@ import { migrate } from './db/migrations.js';
 import { registerJwt } from './auth/jwt.js';
 import { authenticateFactory } from './auth/authenticate.js';
 import authRoutes from './auth/routes.js';
+import teamsRoutes from './routes/teams.js';
+import matchesRoutes from './routes/matches.js';
 
 export interface BuildAppOptions {
   /** Override the default logger (set false to silence in tests). */
@@ -76,6 +78,8 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<BuiltApp> {
   );
 
   await app.register(authRoutes, { prefix: '/auth' });
+  await app.register(teamsRoutes, { prefix: '/teams' });
+  await app.register(matchesRoutes, { prefix: '/matches' });
 
   return { app, migration };
 }

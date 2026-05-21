@@ -237,6 +237,6 @@ describe('health', () => {
     const body = r.json() as { status: string; db: string; schemaLatest: string };
     expect(body.status).toBe('ok');
     expect(body.db).toBe('ok');
-    expect(body.schemaLatest).toBe('002_users');
+    expect(body.schemaLatest).toBe('003_teams_matches');
   });
 });
