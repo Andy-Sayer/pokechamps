@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { getDb } from '../db/connection.js';
 import { hashPassword, verifyPassword } from './passwords.js';
 import { newId, newTokenSecret } from './ids.js';
-import type { JwtPayload } from './jwt.js';
+import { readTokenVersion, type JwtPayload } from './jwt.js';
 
 const credentialsSchema = z.object({
   email: z.string().email().max(255),
@@ -70,7 +70,8 @@ const authRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       'INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)',
     ).run(id, email, password_hash, created_at);
 
-    const token = await reply.jwtSign({ sub: id, email });
+    // Fresh user → token_version starts at 0 (column default).
+    const token = await reply.jwtSign({ sub: id, email, tv: 0 });
     return reply.code(200).send({
       token,
       user: { id, email },
@@ -96,11 +97,26 @@ const authRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       return reply.code(401).send({ error: 'invalid email or password' });
     }
 
-    const token = await reply.jwtSign({ sub: row.id, email: row.email });
+    const tv = readTokenVersion(db, row.id) ?? 0;
+    const token = await reply.jwtSign({ sub: row.id, email: row.email, tv });
     return reply.code(200).send({
       token,
       user: { id: row.id, email: row.email },
     });
+  });
+
+  // Bump the user's token_version so every JWT issued before this call is
+  // immediately rejected by authenticate.ts. Useful after a password reset,
+  // lost device, or compromise. PATs (api_tokens) are unaffected.
+  app.post('/logout-all', { preHandler: app.authenticate }, async (request, reply) => {
+    const user = request.user as JwtPayload;
+    const info = db
+      .prepare('UPDATE users SET token_version = token_version + 1 WHERE id = ?')
+      .run(user.sub);
+    if (info.changes === 0) {
+      return reply.code(404).send({ error: 'user not found' });
+    }
+    return reply.code(204).send();
   });
 
   app.get('/me', { preHandler: app.authenticate }, async (request, reply) => {

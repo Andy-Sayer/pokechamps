@@ -10,7 +10,7 @@
 import type { FastifyRequest, FastifyReply, FastifyInstance } from 'fastify';
 import { getDb } from '../db/connection.js';
 import { verifyPassword } from './passwords.js';
-import type { JwtPayload } from './jwt.js';
+import { readTokenVersion, type JwtPayload } from './jwt.js';
 
 const BEARER = /^Bearer\s+(.+)$/i;
 
@@ -70,7 +70,17 @@ export function authenticateFactory(app: FastifyInstance) {
     if (looksLikeJwt(token)) {
       try {
         // verify() sets request.user as a side effect (via @fastify/jwt typing).
-        await request.jwtVerify();
+        const payload = await request.jwtVerify<JwtPayload>();
+        // Token-version check: every JWT we mint carries the user's tv at
+        // sign time; a mismatch means /auth/logout-all was called (or the
+        // column was bumped out-of-band) and the JWT is revoked. Tokens
+        // minted before this feature existed have tv=undefined — reject
+        // them so a fresh login is required.
+        const currentTv = readTokenVersion(getDb(), payload.sub);
+        if (currentTv === null || payload.tv !== currentTv) {
+          await reply.code(401).send({ error: 'token revoked' });
+          return;
+        }
         return;
       } catch {
         // fall through to API-token attempt — token could still be a malformed PAT

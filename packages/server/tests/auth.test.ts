@@ -230,6 +230,78 @@ describe('auth: API tokens', () => {
   });
 });
 
+describe('JWT token_version revocation', () => {
+  it('POST /auth/logout-all invalidates every JWT in flight for that user', async () => {
+    const r1 = await app.inject({
+      method: 'POST', url: '/auth/register',
+      payload: { email: 'rev@example.com', password: 'hunter22' },
+    });
+    expect(r1.statusCode).toBe(200);
+    const { token: oldJwt } = r1.json() as { token: string };
+
+    // Sanity: the fresh token works.
+    const me1 = await app.inject({
+      method: 'GET', url: '/auth/me',
+      headers: { authorization: `Bearer ${oldJwt}` },
+    });
+    expect(me1.statusCode).toBe(200);
+
+    // Revoke.
+    const logout = await app.inject({
+      method: 'POST', url: '/auth/logout-all',
+      headers: { authorization: `Bearer ${oldJwt}` },
+    });
+    expect(logout.statusCode).toBe(204);
+
+    // Same JWT now fails with 401 'token revoked'.
+    const me2 = await app.inject({
+      method: 'GET', url: '/auth/me',
+      headers: { authorization: `Bearer ${oldJwt}` },
+    });
+    expect(me2.statusCode).toBe(401);
+    expect(me2.json()).toMatchObject({ error: 'token revoked' });
+
+    // A fresh login mints a new JWT that works.
+    const login = await app.inject({
+      method: 'POST', url: '/auth/login',
+      payload: { email: 'rev@example.com', password: 'hunter22' },
+    });
+    expect(login.statusCode).toBe(200);
+    const { token: newJwt } = login.json() as { token: string };
+    const me3 = await app.inject({
+      method: 'GET', url: '/auth/me',
+      headers: { authorization: `Bearer ${newJwt}` },
+    });
+    expect(me3.statusCode).toBe(200);
+  });
+
+  it('PATs survive a JWT revocation (different revocation path)', async () => {
+    // Register, mint a PAT, then bump token_version. The PAT should still
+    // authenticate because PATs aren't versioned — they live in api_tokens
+    // and only DELETE /tokens/:id invalidates them.
+    const reg = await app.inject({
+      method: 'POST', url: '/auth/register',
+      payload: { email: 'pat@example.com', password: 'hunter22' },
+    });
+    const { token: jwt } = reg.json() as { token: string };
+    const tok = await app.inject({
+      method: 'POST', url: '/auth/tokens',
+      headers: { authorization: `Bearer ${jwt}` },
+      payload: { name: 'cli' },
+    });
+    const { token: pat } = tok.json() as { token: string };
+    await app.inject({
+      method: 'POST', url: '/auth/logout-all',
+      headers: { authorization: `Bearer ${jwt}` },
+    });
+    const me = await app.inject({
+      method: 'GET', url: '/auth/me',
+      headers: { authorization: `Bearer ${pat}` },
+    });
+    expect(me.statusCode).toBe(200);
+  });
+});
+
 describe('health', () => {
   it('returns ok with schema version', async () => {
     const r = await app.inject({ method: 'GET', url: '/health' });
@@ -237,6 +309,6 @@ describe('health', () => {
     const body = r.json() as { status: string; db: string; schemaLatest: string };
     expect(body.status).toBe('ok');
     expect(body.db).toBe('ok');
-    expect(body.schemaLatest).toBe('004_pikalytics');
+    expect(body.schemaLatest).toBe('005_user_token_version');
   });
 });
