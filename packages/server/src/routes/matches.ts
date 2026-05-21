@@ -21,6 +21,7 @@ import type { Match, MatchSummary, PokemonSet, OpponentEntry } from '@pokechamps
 import { getDb } from '../db/connection.js';
 import type { JwtPayload } from '../auth/jwt.js';
 import { MATCH_BODY_LIMIT, denormalize, type MatchRow } from './match-storage.js';
+import { broadcastMatch } from '../ws/hub.js';
 
 // Trust the client on the Match shape (same reasoning as teams.ts — too many
 // optional fields to recapitulate). We only require that `match` is present
@@ -157,6 +158,7 @@ const matchesRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       if (info.changes === 0) {
         return reply.code(404).send({ error: 'match not found' });
       }
+      broadcastMatch(id, match, 'crud');
       return match as Match;
     },
   );

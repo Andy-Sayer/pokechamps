@@ -5,6 +5,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import fastifyCookie from '@fastify/cookie';
 import fastifyRateLimit from '@fastify/rate-limit';
+import fastifyWebsocket from '@fastify/websocket';
 import { getDb } from './db/connection.js';
 import { migrate } from './db/migrations.js';
 import { registerJwt } from './auth/jwt.js';
@@ -13,6 +14,7 @@ import authRoutes from './auth/routes.js';
 import teamsRoutes from './routes/teams.js';
 import matchesRoutes from './routes/matches.js';
 import matchActionsRoutes from './routes/match-actions.js';
+import wsMatchRoutes from './routes/ws-match.js';
 
 export interface BuildAppOptions {
   /** Override the default logger (set false to silence in tests). */
@@ -54,6 +56,10 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<BuiltApp> {
   });
   await registerJwt(app);
 
+  // WebSocket plugin must register before any route that uses { websocket: true }.
+  // The hub itself (src/ws/hub.ts) is plain-module pub/sub — no plugin needed.
+  await app.register(fastifyWebsocket);
+
   // Decorator: routes use { preHandler: app.authenticate } to require auth.
   app.decorate('authenticate', authenticateFactory(app));
 
@@ -85,6 +91,9 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<BuiltApp> {
   // POST /:id/state, both authed. Kept separate from matchesRoutes so the
   // engine-driven endpoints don't crowd the CRUD file.
   await app.register(matchActionsRoutes, { prefix: '/matches' });
+  // WebSocket live channel: GET /matches/:id/live. Sibling plugin so the
+  // upgrade handler stays out of the REST file.
+  await app.register(wsMatchRoutes, { prefix: '/matches' });
 
   return { app, migration };
 }

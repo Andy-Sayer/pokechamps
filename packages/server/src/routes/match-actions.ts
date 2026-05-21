@@ -33,6 +33,7 @@ import {
 import { getDb } from '../db/connection.js';
 import type { JwtPayload } from '../auth/jwt.js';
 import { MATCH_BODY_LIMIT, loadMatch, saveMatch } from './match-storage.js';
+import { broadcastMatch } from '../ws/hub.js';
 
 // Loose schemas — pass-through to the engine. We only validate the top-level
 // envelope and array-ness; the engine itself enforces semantic validity.
@@ -82,6 +83,7 @@ const matchActionsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
         });
         const changes = saveMatch(db, user.sub, result.match);
         if (changes === 0) return reply.code(404).send({ error: 'match not found' });
+        broadcastMatch(request.params.id, result.match, 'turn');
         return result.match as Match;
       } catch (err) {
         request.log.error({ err }, 'finalizeTurn failed');
@@ -117,6 +119,7 @@ const matchActionsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
         });
         const changes = saveMatch(db, user.sub, result.match);
         if (changes === 0) return reply.code(404).send({ error: 'match not found' });
+        broadcastMatch(request.params.id, result.match, 'state');
         return result.match as Match;
       } catch (err) {
         request.log.error({ err }, 'applyStateUpdate failed');
