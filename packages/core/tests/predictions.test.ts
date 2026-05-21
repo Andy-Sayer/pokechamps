@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { predictOffense, predictThreat, speedVerdict } from '../src/domain/predictions.js';
+import { predictOffense, predictOffenseAll, predictThreat, speedVerdict } from '../src/domain/predictions.js';
 import type { PokemonSet, OpponentEntry, FieldState } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, MAX_IVS, ZERO_EVS } from '../src/domain/types.js';
 
@@ -58,6 +58,37 @@ describe('predictOffense', () => {
     const r = predictOffense({ attacker: sneasler, opponent: opp, field: NEUTRAL_FIELD });
     expect(r).not.toBeNull();
     expect(r!.candidatesConsidered).toBe(1);
+  });
+});
+
+describe('predictOffenseAll', () => {
+  const sneasler = mon({
+    species: 'Sneasler', ability: 'Unburden', nature: 'Jolly',
+    evs: { hp: 4, atk: 252, def: 0, spa: 0, spd: 0, spe: 252 },
+    moves: ['Close Combat', 'Dire Claw', 'Fake Out', 'Protect'],
+  });
+
+  test('returns one entry per damaging move, sorted by max desc', () => {
+    const opp: OpponentEntry = { species: 'Incineroar', knownMoves: [], candidates: [incineroar] };
+    const rows = predictOffenseAll({ attacker: sneasler, opponent: opp, field: NEUTRAL_FIELD });
+    // Status-only / failing moves get skipped silently; we expect at least the
+    // damaging ones (Close Combat, Dire Claw, Fake Out) — Protect won't compute.
+    expect(rows.length).toBeGreaterThanOrEqual(3);
+    const moves = rows.map(r => r.move);
+    expect(moves).toContain('Close Combat');
+    expect(moves).toContain('Dire Claw');
+    // Sort: max descending.
+    for (let i = 1; i < rows.length; i++) {
+      expect(rows[i - 1]!.maxPercent).toBeGreaterThanOrEqual(rows[i]!.maxPercent);
+    }
+    // Close Combat is 4x effective vs Incineroar → should be the top entry.
+    expect(rows[0]!.move).toBe('Close Combat');
+  });
+
+  test('returns empty when opp species has no candidate spreads at all', () => {
+    const opp: OpponentEntry = { species: 'NotAPokemon' as string, knownMoves: [] };
+    const rows = predictOffenseAll({ attacker: sneasler, opponent: opp, field: NEUTRAL_FIELD });
+    expect(rows).toEqual([]);
   });
 });
 

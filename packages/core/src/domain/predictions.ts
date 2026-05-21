@@ -179,6 +179,71 @@ export function predictOffense(args: {
   };
 }
 
+// Like predictOffense, but reports the range for EVERY move in the attacker's
+// movepool rather than just the voted "best" one. The BattleScreen matchup
+// grid surfaces this when the user presses `a` to expand the cell. Moves that
+// can't be calculated against any candidate (e.g. status moves, or move names
+// the calc rejects) are silently omitted.
+//
+// Sort order: highest max damage first, so the user sees their strongest
+// option at the top.
+export function predictOffenseAll(args: {
+  attacker: PokemonSet;
+  opponent: OpponentEntry;
+  field: FieldState;
+  attackerGimmickActive?: boolean;
+  defenderGimmickActive?: boolean;
+  defenderCurrentHpPercent?: number;
+  attackerBoosts?: Partial<Record<string, number>>;
+  defenderBoosts?: Partial<Record<string, number>>;
+  attackerStatus?: string;
+  defenderStatus?: string;
+  critical?: boolean;
+}): MatchupCell[] {
+  const cands = defenderCandidates(args.opponent, args.attacker.level);
+  if (!cands.length) return [];
+  const out: MatchupCell[] = [];
+  for (const move of args.attacker.moves) {
+    let minPercent = Infinity;
+    let maxPercent = -Infinity;
+    let koChance = '';
+    const allRolls: number[] = [];
+    for (const c of cands) {
+      try {
+        const r = damageRange({
+          attacker: args.attacker,
+          defender: c,
+          move,
+          field: args.field,
+          attackerSide: 'mine',
+          attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+          defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
+          critical: args.critical,
+        });
+        if (r.minPercent < minPercent) minPercent = r.minPercent;
+        if (r.maxPercent > maxPercent) {
+          maxPercent = r.maxPercent;
+          koChance = r.koChance;
+        }
+        allRolls.push(...r.percentRolls);
+      } catch { /* skip — move/calc failure shouldn't drop the whole row */ }
+    }
+    if (!Number.isFinite(minPercent)) continue;
+    const finalKo = args.defenderCurrentHpPercent != null && args.defenderCurrentHpPercent < 100
+      ? koVsRemaining(allRolls, args.defenderCurrentHpPercent)
+      : koChance;
+    out.push({
+      move,
+      minPercent,
+      maxPercent,
+      koChance: finalKo,
+      candidatesConsidered: cands.length,
+    });
+  }
+  out.sort((a, b) => b.maxPercent - a.maxPercent);
+  return out;
+}
+
 // OPP damage TO me. Uses opp.knownMoves when present, else Pikalytics top
 // moves, else falls back to the species' STAB types as a last resort
 // (empty array → we'll return null which the UI shows as n/a).

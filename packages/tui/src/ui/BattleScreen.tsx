@@ -15,7 +15,7 @@ import { getSpecies } from '@pokechamps/core/domain/data.js';
 import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs } from '@pokechamps/core/domain/hazards.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
-import { predictOffense, predictThreat, speedVerdict, type SpeedVerdict } from '@pokechamps/core/domain/predictions.js';
+import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict } from '@pokechamps/core/domain/predictions.js';
 import { deriveActiveIdx } from '@pokechamps/core/match/engine.js';
 
 export interface BattleScreenProps {
@@ -211,6 +211,9 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
   const [infoOpenForOpp, setInfoOpenForOpp] = useState<number | null>(null);
   // `c` toggles a parallel offense-with-crit column on the matchup grid.
   const [showCrits, setShowCrits] = useState(false);
+  // `a` expands the matchup grid to show ALL 4 of my moves per opp instead
+  // of just the voted-best one. Off by default to keep the compact view.
+  const [showAllMoves, setShowAllMoves] = useState(false);
   // AI battle review (opt-in via `r`). Holds the rendered text and a busy flag.
   const [aiReview, setAiReview] = useState<string | null>(null);
   const [aiReviewBusy, setAiReviewBusy] = useState(false);
@@ -776,6 +779,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
     }
     if (ch === 'n') finalizeTurn();
     if (ch === 'c') setShowCrits(c => !c);
+    if (ch === 'a') setShowAllMoves(a => !a);
     if (ch === 'r' && match.turns.length > 0 && aiAvailable() && !aiReviewBusy) {
       const lastTurn = match.turns[match.turns.length - 1]!;
       const activeSummary = [
@@ -873,6 +877,25 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
           defenderStatus: opp.status,
           critical: true,
         }) : null,
+        // `a` toggle: full per-move breakdown. When combined with `c` we also
+        // compute the crit variant so each move line can show both ranges.
+        allOffense: showAllMoves ? predictOffenseAll({
+          attacker: mySet, opponent: opp, field,
+          defenderCurrentHpPercent: opp.currentHpPercent,
+          attackerBoosts: myBoosts,
+          defenderBoosts: opp.currentBoosts,
+          attackerStatus: myStatus,
+          defenderStatus: opp.status,
+        }) : null,
+        allOffenseCrit: showAllMoves && showCrits ? predictOffenseAll({
+          attacker: mySet, opponent: opp, field,
+          defenderCurrentHpPercent: opp.currentHpPercent,
+          attackerBoosts: myBoosts,
+          defenderBoosts: opp.currentBoosts,
+          attackerStatus: myStatus,
+          defenderStatus: opp.status,
+          critical: true,
+        }) : null,
         threat: predictThreat({
           opponent: opp, defender: mySet, field,
           defenderCurrentHpPercent: myHp,
@@ -917,7 +940,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
         </Box>
       )}
       <Text dimColor>
-        Type one action per line. [n] next turn · [s] snapshot · [i] opp info · [c] toggle crit prediction · [r] Claude review last turn · backspace on empty input removes last · [ESC] end match
+        Type one action per line. [n] next turn · [s] snapshot · [i] opp info · [c] toggle crit · [a] show all my moves · [r] Claude review last turn · backspace on empty input removes last · [ESC] end match
       </Text>
       <Text dimColor>
         Syntax: <Text color="white">m1 &gt; Move &gt; o2 &gt; 33</Text> (opp now at 33%) · <Text color="white">o1 &gt; Move &gt; m1 &gt; 145</Text> (you now at 145 HP) · <Text color="white">m1 &gt; switch &gt; Species</Text>
@@ -1029,6 +1052,8 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
                       opp={row.opp}
                       offense={row.offense}
                       offenseCrit={row.offenseCrit}
+                      allOffense={row.allOffense ?? null}
+                      allOffenseCrit={row.allOffenseCrit ?? null}
                       threat={row.threat}
                       verdict={row.speed}
                       dim={dim}
@@ -1283,12 +1308,17 @@ interface MatchupRowProps {
   opp: OpponentEntry;
   offense: { move: string; minPercent: number; maxPercent: number; koChance: string; candidatesConsidered: number } | null;
   offenseCrit?: { move: string; minPercent: number; maxPercent: number; koChance: string; candidatesConsidered: number } | null;
+  // When set (via the `a` toggle), render one line per move instead of a
+  // single best-move line. allOffenseCrit (when set with allOffense) carries
+  // the crit variant of each move, zipped by move name.
+  allOffense?: Array<{ move: string; minPercent: number; maxPercent: number; koChance: string; candidatesConsidered: number }> | null;
+  allOffenseCrit?: Array<{ move: string; minPercent: number; maxPercent: number; koChance: string; candidatesConsidered: number }> | null;
   threat: { move: string; minPercent: number; maxPercent: number; koChance: string; candidatesConsidered: number } | null;
   verdict: SpeedVerdict;
   dim: boolean;
   active: boolean;
 }
-function MatchupRow({ marker, opp, offense, offenseCrit, threat, verdict, dim, active }: MatchupRowProps) {
+function MatchupRow({ marker, opp, offense, offenseCrit, allOffense, allOffenseCrit, threat, verdict, dim, active }: MatchupRowProps) {
   const oppLabel = shortName(opp.species, 12).padEnd(12);
   if (opp.fainted) {
     return (
@@ -1323,6 +1353,35 @@ function MatchupRow({ marker, opp, offense, offenseCrit, threat, verdict, dim, a
     verdict === 'tie'        ? { ch: '≈', color: 'yellow' } :
     verdict === 'scarf-flag' ? { ch: '⚡', color: 'yellow' } :
                                { ch: '?', color: 'gray' };
+
+  // When `a` is on we render the opp's header line (with threat + speed)
+  // followed by one indented line per move in the attacker's pool. Each
+  // line carries its damage range + KO odds, and when `c` is also on, a
+  // ` / crit …` suffix using the per-move crit variant.
+  if (allOffense && allOffense.length > 0) {
+    const critByMove = new Map<string, { minPercent: number; maxPercent: number; koChance: string }>();
+    for (const c of allOffenseCrit ?? []) critByMove.set(c.move, c);
+    return (
+      <Box flexDirection="column">
+        <Text dimColor={dim}>
+          {'  '}{marker} {oppLabel}{hpTag}  ← {thrTxt}  {dim ? glyph.ch : <Text color={glyph.color as any}>{glyph.ch}</Text>}
+        </Text>
+        {allOffense.map(m => {
+          const crit = critByMove.get(m.move);
+          const critSfx = crit
+            ? ` / crit ${crit.minPercent.toFixed(0)}-${crit.maxPercent.toFixed(0)}%`
+            : '';
+          const line = `${m.move.padEnd(16)} ${m.minPercent.toFixed(0)}-${m.maxPercent.toFixed(0)}% (${m.koChance})${critSfx}`;
+          return (
+            <Text key={`${marker}-${m.move}`} dimColor={dim}>
+              {'        → '}{line}
+            </Text>
+          );
+        })}
+      </Box>
+    );
+  }
+
   if (dim) {
     return (
       <Text dimColor>
@@ -1332,7 +1391,7 @@ function MatchupRow({ marker, opp, offense, offenseCrit, threat, verdict, dim, a
   }
   return (
     <Text color={active ? undefined : undefined}>
-      {'  '}{marker} {oppLabel}{hpTag}  → {offTxt}  ← {thrTxt}  <Text color={glyph.color as any}>{glyph.ch}</Text>
+      {'  '}{marker} {oppLabel}{hpTag}  → {offTxt}{critTxt}  ← {thrTxt}  <Text color={glyph.color as any}>{glyph.ch}</Text>
     </Text>
   );
 }
