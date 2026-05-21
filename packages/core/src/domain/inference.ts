@@ -81,6 +81,11 @@ export interface InferenceInput {
   priorNatures?: string[];        // restrict to these
   // If already narrowed from earlier observations, start from this set.
   startingCandidates?: SpreadCandidate[];
+  // Skip the exhaustive coarse-grid fallback (~360k spreads × @smogon/calc =
+  // tens of seconds). Server-side request handlers set this to keep response
+  // latency bounded; the TUI omits it so off-meta opps still get inferred.
+  // When skipped, an inference that exhausts the priors returns [].
+  quickOnly?: boolean;
 }
 
 export function inferSpread(input: InferenceInput): SpreadCandidate[] {
@@ -141,7 +146,7 @@ export function inferSpread(input: InferenceInput): SpreadCandidate[] {
   // Priors gave nothing — fall back to the coarse grid (only if we were
   // running on priors; if we were already on the coarse grid, there's no
   // wider net to cast).
-  if (!input.startingCandidates && candidates === priorCandidates) {
+  if (!input.startingCandidates && candidates === priorCandidates && !input.quickOnly) {
     return tryList(generateCoarseCandidates({ natures, items, abilities: possibleAbilities }));
   }
   return [];

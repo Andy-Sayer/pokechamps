@@ -12,6 +12,7 @@ import { authenticateFactory } from './auth/authenticate.js';
 import authRoutes from './auth/routes.js';
 import teamsRoutes from './routes/teams.js';
 import matchesRoutes from './routes/matches.js';
+import matchActionsRoutes from './routes/match-actions.js';
 
 export interface BuildAppOptions {
   /** Override the default logger (set false to silence in tests). */
@@ -80,6 +81,10 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<BuiltApp> {
   await app.register(authRoutes, { prefix: '/auth' });
   await app.register(teamsRoutes, { prefix: '/teams' });
   await app.register(matchesRoutes, { prefix: '/matches' });
+  // Sibling plugin under the same prefix — registers POST /:id/turns and
+  // POST /:id/state, both authed. Kept separate from matchesRoutes so the
+  // engine-driven endpoints don't crowd the CRUD file.
+  await app.register(matchActionsRoutes, { prefix: '/matches' });
 
   return { app, migration };
 }

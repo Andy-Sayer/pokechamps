@@ -1,0 +1,280 @@
+// Engine-level tests for the shared finalizeTurn / applyStateUpdate pipeline.
+// Mirrors the orchestration that lives in BattleScreen, run as pure functions
+// against synthetic Match fixtures.
+import { describe, test, expect } from 'vitest';
+import {
+  finalizeTurn,
+  applyStateUpdate,
+  detectOutcome,
+  deriveActiveIdx,
+  type ActiveIdx,
+} from '../src/match/engine.js';
+import type {
+  Match,
+  PokemonSet,
+  OpponentEntry,
+  MoveAction,
+  FieldState,
+} from '../src/domain/types.js';
+import { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } from '../src/domain/types.js';
+import type { StateUpdate, HazardUpdate } from '../src/domain/turnparser.js';
+
+function mon(p: Partial<PokemonSet> & { species: string; moves: string[] }): PokemonSet {
+  return {
+    level: 50,
+    nature: 'Hardy',
+    evs: { ...ZERO_EVS },
+    ivs: MAX_IVS,
+    ...p,
+  };
+}
+
+const sneasler: PokemonSet = mon({
+  species: 'Sneasler', ability: 'Unburden', nature: 'Jolly',
+  evs: { hp: 4, atk: 252, def: 0, spa: 0, spd: 0, spe: 252 },
+  moves: ['Close Combat', 'Dire Claw', 'Fake Out', 'Protect'],
+});
+
+const rillaboom: PokemonSet = mon({
+  species: 'Rillaboom', ability: 'Grassy Surge', nature: 'Adamant',
+  evs: { hp: 252, atk: 252, def: 0, spa: 0, spd: 4, spe: 0 },
+  moves: ['Grassy Glide', 'Wood Hammer', 'U-turn', 'Fake Out'],
+});
+
+const flutterMane: PokemonSet = mon({
+  species: 'Flutter Mane', ability: 'Protosynthesis', nature: 'Timid',
+  evs: { hp: 4, atk: 0, def: 0, spa: 252, spd: 0, spe: 252 },
+  moves: ['Moonblast', 'Shadow Ball', 'Dazzling Gleam', 'Protect'],
+});
+
+const ironHands: PokemonSet = mon({
+  species: 'Iron Hands', ability: 'Quark Drive', nature: 'Adamant',
+  evs: { hp: 252, atk: 252, def: 0, spa: 0, spd: 4, spe: 0 },
+  moves: ['Drain Punch', 'Wild Charge', 'Fake Out', 'Protect'],
+});
+
+function freshMatch(opts?: {
+  myTeam?: PokemonSet[];
+  oppSpecies?: string[];
+  field?: FieldState;
+  opponentBrought?: number[];
+}): Match {
+  const myTeam = opts?.myTeam ?? [sneasler, rillaboom, ironHands, flutterMane];
+  const oppSpecies = opts?.oppSpecies ?? ['Incineroar', 'Amoonguss', 'Garchomp', 'Talonflame'];
+  const opponentTeam: OpponentEntry[] = oppSpecies.map(species => ({
+    species, knownMoves: [],
+  }));
+  return {
+    id: 'test-match',
+    startedAt: '2026-05-20T00:00:00.000Z',
+    myTeam,
+    opponentTeam,
+    bring: [0, 1, 2, 3],
+    opponentBrought: (opts?.opponentBrought ?? [0, 1]) as Match['opponentBrought'],
+    turns: [],
+    field: opts?.field ?? NEUTRAL_FIELD,
+    active: { mine: [null, null], theirs: [null, null] },
+  };
+}
+
+const startActive: ActiveIdx = { mine: [0, 1], theirs: [0, 1] };
+
+describe('match engine: finalizeTurn', () => {
+  test('opp-attacks-mine action commits my HP and grows opp knownMoves', () => {
+    // Inference only runs for mine→theirs damage; opp→mine just updates HP.
+    // This is the cheap-and-fast finalize path.
+    const match = freshMatch();
+    const action: MoveAction = {
+      side: 'theirs',
+      attackerSlot: 0,
+      attackerTeamIndex: 0,
+      kind: 'move',
+      move: 'Flare Blitz',
+      target: { side: 'mine', slot: 0 },
+      targetTeamIndex: 0,
+      targetRemainingHpPercent: 70,
+      order: 1,
+    };
+    const result = finalizeTurn({
+      match, turn: { actions: [action], field: match.field }, activeIdx: startActive,
+    });
+    expect(result.match.myCurrentHp?.[0]).toBe(70);
+    // damageHpPercent derived from prev (100) - new (70) = 30.
+    expect(result.match.turns[0]!.actions[0]!.damageHpPercent).toBe(30);
+    expect(result.inferenceNotes).toHaveLength(0);
+    // Opp knownMoves grows.
+    expect(result.match.opponentTeam[0]!.knownMoves).toEqual(['Flare Blitz']);
+    // No outcome.
+    expect(result.match.outcome).toBeUndefined();
+  });
+
+  test('opp-side switch action updates active slot + grows opponentBrought', () => {
+    const match = freshMatch();
+    const switchAction: MoveAction = {
+      side: 'theirs',
+      attackerSlot: 0,
+      kind: 'switch',
+      move: 'Garchomp',
+      target: 'self',
+      targetTeamIndex: 2,
+      order: 1,
+    };
+    const result = finalizeTurn({
+      match, turn: { actions: [switchAction], field: match.field }, activeIdx: startActive,
+    });
+    expect(result.activeIdx.theirs[0]).toBe(2);
+    expect(result.activeIdx.theirs[1]).toBe(1);
+    expect(result.match.opponentBrought).toEqual([0, 1, 2]);
+  });
+
+  test('mine-side switch onto Stealth Rock subtracts hazard damage', () => {
+    // Flutter Mane is neutral to Rock so 12.5% chip on entry.
+    const match = freshMatch({
+      field: {
+        ...NEUTRAL_FIELD,
+        myHazards: { rocks: true },
+      },
+    });
+    const switchAction: MoveAction = {
+      side: 'mine',
+      attackerSlot: 1,
+      kind: 'switch',
+      move: 'Flutter Mane',
+      target: 'self',
+      targetTeamIndex: 3,
+      order: 1,
+    };
+    const result = finalizeTurn({
+      match, turn: { actions: [switchAction], field: match.field }, activeIdx: startActive,
+    });
+    expect(result.activeIdx.mine[1]).toBe(3);
+    expect(result.match.myCurrentHp?.[3]).toBeCloseTo(87.5, 5);
+  });
+
+  test('outcome flips to victory once all brought opps fainted', () => {
+    // 4 brought opps; mark 3 fainted in advance, KO the 4th in this turn via
+    // a non-inferring action (opp self-damage substitute: use damageRaw=null
+    // and targetRemainingHpPercent=0 from "mine" side, but with the move's
+    // damage left as null so the inference loop skips it — the HP commit
+    // still runs from targetRemainingHpPercent).
+    const match = freshMatch({ opponentBrought: [0, 1, 2, 3] });
+    for (const i of [0, 1, 2]) {
+      match.opponentTeam[i] = { ...match.opponentTeam[i]!, fainted: true, currentHpPercent: 0 };
+    }
+    // Use a damageHpPercent=100 mine action against Talonflame and skip
+    // inference by leaving the attacker's set undiscoverable (the inference
+    // loop's outer try/catch handles failures and still pushes a note).
+    // Simpler: just record the faint with applyStateUpdate, then verify the
+    // outcome detector through finalizeTurn with an empty turn.
+    // ... but finalizeTurn early-returns... actually it doesn't. Use the
+    // applyStateUpdate fast path instead — it exercises detectOutcome too.
+    const result = applyStateUpdate({
+      match,
+      update: { side: 'theirs', teamIndex: 3, fainted: true },
+      activeIdx: { mine: [0, 1], theirs: [null, 3] },
+    });
+    expect(result.match.opponentTeam[3]!.fainted).toBe(true);
+    expect(result.match.outcome).toBe('victory');
+    expect(result.activeIdx.theirs[1]).toBeNull();
+  });
+});
+
+describe('match engine: applyStateUpdate', () => {
+  test('hpPercent update on opp reflects in match', () => {
+    const match = freshMatch();
+    const update: StateUpdate = { side: 'theirs', teamIndex: 0, hpPercent: 42 };
+    const result = applyStateUpdate({ match, update, activeIdx: startActive });
+    expect(result.match.opponentTeam[0]!.currentHpPercent).toBe(42);
+  });
+
+  test('fainted update on opp clears active slot and may end match', () => {
+    // Set up: 3 of 4 brought already down, faint the 4th.
+    const match = freshMatch({ opponentBrought: [0, 1, 2, 3] });
+    for (const i of [0, 1, 2]) {
+      match.opponentTeam[i] = { ...match.opponentTeam[i]!, fainted: true, currentHpPercent: 0 };
+    }
+    const update: StateUpdate = { side: 'theirs', teamIndex: 3, fainted: true };
+    const result = applyStateUpdate({
+      match, update, activeIdx: { mine: [0, 1], theirs: [null, 3] },
+    });
+    expect(result.match.opponentTeam[3]!.fainted).toBe(true);
+    expect(result.match.opponentTeam[3]!.currentHpPercent).toBe(0);
+    expect(result.activeIdx.theirs[1]).toBeNull();
+    expect(result.match.outcome).toBe('victory');
+  });
+
+  test('hazard update toggles theirHazards on the field', () => {
+    const match = freshMatch();
+    const update: HazardUpdate = { side: 'theirs', verb: 'rocks', arg: 'on' };
+    const result = applyStateUpdate({ match, update, activeIdx: startActive });
+    expect(result.match.field?.theirHazards?.rocks).toBe(true);
+    // Original match field is not mutated.
+    expect(match.field?.theirHazards).toBeUndefined();
+  });
+
+  test('boost update on mine clamps and merges per-stat', () => {
+    const match = freshMatch();
+    match.myBoosts = { 0: { atk: 5 } };
+    const update: StateUpdate = {
+      side: 'mine', teamIndex: 0, boosts: { atk: 3, def: -2 },
+    };
+    const result = applyStateUpdate({ match, update, activeIdx: startActive });
+    expect(result.match.myBoosts?.[0]?.atk).toBe(6); // clamped from 8
+    expect(result.match.myBoosts?.[0]?.def).toBe(-2);
+  });
+
+  test('bringIntoSlot triggers hazard application on incoming mon', () => {
+    const match = freshMatch({
+      field: { ...NEUTRAL_FIELD, myHazards: { rocks: true } },
+    });
+    const update: StateUpdate = {
+      side: 'mine', teamIndex: 2, bringIntoSlot: 0,
+    };
+    const result = applyStateUpdate({
+      match, update, activeIdx: { mine: [0, 1], theirs: [0, 1] },
+    });
+    expect(result.activeIdx.mine[0]).toBe(2);
+    // Iron Hands is Fighting/Electric — Rock is super-effective vs Fighting
+    // (2x), so 25% chip on entry.
+    expect(result.match.myCurrentHp?.[2]).toBeCloseTo(75, 5);
+  });
+});
+
+describe('match engine: deriveActiveIdx', () => {
+  test('initial actives derived from bring + opponentBrought leads', () => {
+    const match = freshMatch();
+    const ai = deriveActiveIdx(match);
+    expect(ai.mine).toEqual([0, 1]);
+    expect(ai.theirs).toEqual([0, 1]);
+  });
+
+  test('replays switch actions across turns', () => {
+    const match = freshMatch();
+    match.turns = [{
+      index: 1,
+      actions: [{
+        side: 'theirs', attackerSlot: 0, kind: 'switch', move: 'Garchomp',
+        target: 'self', targetTeamIndex: 2, order: 1,
+      }],
+      field: match.field,
+    }];
+    const ai = deriveActiveIdx(match);
+    expect(ai.theirs).toEqual([2, 1]);
+  });
+
+  test('clears a slot whose occupant has fainted', () => {
+    const match = freshMatch();
+    match.opponentTeam[0] = { ...match.opponentTeam[0]!, fainted: true };
+    const ai = deriveActiveIdx(match);
+    expect(ai.theirs[0]).toBeNull();
+    expect(ai.theirs[1]).toBe(1);
+  });
+});
+
+describe('match engine: detectOutcome (defeat path)', () => {
+  test('all bring fainted → defeat', () => {
+    const match = freshMatch();
+    match.myFainted = [0, 1, 2, 3];
+    expect(detectOutcome(match)).toBe('defeat');
+  });
+});

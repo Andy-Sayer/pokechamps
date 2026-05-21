@@ -20,8 +20,7 @@ import { randomUUID } from 'node:crypto';
 import type { Match, MatchSummary, PokemonSet, OpponentEntry } from '@pokechamps/core';
 import { getDb } from '../db/connection.js';
 import type { JwtPayload } from '../auth/jwt.js';
-
-const MATCH_BODY_LIMIT = 256 * 1024;
+import { MATCH_BODY_LIMIT, denormalize, type MatchRow } from './match-storage.js';
 
 // Trust the client on the Match shape (same reasoning as teams.ts — too many
 // optional fields to recapitulate). We only require that `match` is present
@@ -30,28 +29,11 @@ const matchBodySchema = z.object({
   match: z.record(z.string(), z.unknown()),
 });
 
-interface MatchRow {
-  id: string;
-  started_at: string;
-  outcome: string | null;
-  match_json: string;
-}
-
 function badRequest(reply: FastifyReply, err: z.ZodError) {
   return reply.code(400).send({
     error: 'invalid request body',
     issues: err.issues.map(i => ({ path: i.path.join('.'), message: i.message })),
   });
-}
-
-// Extract startedAt + outcome from the incoming match for the column writes.
-// Falls back to now() / null so a malformed-but-parsable match still saves.
-function denormalize(match: Record<string, unknown>): { startedAt: string; outcome: string | null } {
-  const startedAt = typeof match.startedAt === 'string' ? match.startedAt : new Date().toISOString();
-  const outcome = match.outcome === 'victory' || match.outcome === 'defeat' || match.outcome === 'tie'
-    ? match.outcome
-    : null;
-  return { startedAt, outcome };
 }
 
 // Best-effort projection for the list view. The schema doesn't constrain
