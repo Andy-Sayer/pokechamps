@@ -1,0 +1,120 @@
+# PokeChamps server production image (Phase 5 — Fly.io target).
+#
+# Two stages:
+#   1. builder  — installs ALL workspace deps (incl. devDeps), runs typecheck
+#                 against the server + its core dep so we fail the build on
+#                 type errors instead of discovering them in prod.
+#   2. runtime  — slim node:22-alpine, prod-only deps, non-root user, tsx
+#                 entrypoint. We deliberately do NOT pre-compile TS → JS;
+#                 the dev/run path uses tsx and we're keeping that here to
+#                 minimize per-phase risk. Revisit if cold-start matters.
+#
+# Image stays under ~250MB by:
+#   - omitting the tui and web workspaces from the runtime stage entirely
+#   - --omit=dev on the runtime npm install
+#   - alpine base
+#
+# The dev Dockerfile at ./Dockerfile is referenced by docker-compose.yml and
+# stays as-is for the local Compose Watch loop.
+
+# ---------------------------------------------------------------------------
+# Stage 1: builder
+# ---------------------------------------------------------------------------
+FROM node:22-alpine AS builder
+
+# python3 + build-base needed for better-sqlite3's node-gyp step on alpine.
+# These are dropped on the way to the runtime stage.
+RUN apk add --no-cache python3 make g++
+
+WORKDIR /app
+
+# Manifests first for layer-cache friendliness. We bring in ALL workspace
+# package.jsons because npm workspaces refuses to install if a referenced
+# workspace is missing — even if we only end up shipping core + server.
+COPY package.json package-lock.json ./
+COPY packages/core/package.json    ./packages/core/package.json
+COPY packages/server/package.json  ./packages/server/package.json
+COPY packages/tui/package.json     ./packages/tui/package.json
+COPY packages/web/package.json     ./packages/web/package.json
+
+# Full install (devDeps included) — needed for tsc/tsx in the typecheck step.
+RUN npm install
+
+# Source for the two workspaces we actually need to typecheck. We skip tui
+# and web to keep the builder fast; their type errors aren't blockers for
+# shipping the server.
+COPY tsconfig.base.json ./
+COPY packages/core/tsconfig.json   ./packages/core/tsconfig.json
+COPY packages/core/src             ./packages/core/src
+COPY packages/server/tsconfig.json ./packages/server/tsconfig.json
+COPY packages/server/src           ./packages/server/src
+
+# Fail fast on type errors. If this passes, the runtime stage will work.
+RUN npm -w @pokechamps/core run typecheck \
+ && npm -w @pokechamps/server run typecheck
+
+# ---------------------------------------------------------------------------
+# Stage 2: runtime
+# ---------------------------------------------------------------------------
+FROM node:22-alpine AS runtime
+
+# tini (PID 1) forwards SIGTERM to node so the graceful-shutdown handler in
+# packages/server/src/index.ts actually fires on `fly deploy` rolling
+# restarts. Without this, signals can get swallowed by node's default
+# PID 1 behavior.
+RUN apk add --no-cache tini
+
+# Non-root runtime user. node:22-alpine already ships a `node` user (uid
+# 1000) — reuse it rather than creating our own.
+ENV NODE_ENV=production
+WORKDIR /app
+
+# Production deps only. We still need every workspace's package.json on disk
+# so npm's workspace resolver is happy; the symlinks it creates in
+# node_modules/@pokechamps/* point at the workspace source we copy below.
+COPY package.json package-lock.json ./
+COPY packages/core/package.json    ./packages/core/package.json
+COPY packages/server/package.json  ./packages/server/package.json
+COPY packages/tui/package.json     ./packages/tui/package.json
+COPY packages/web/package.json     ./packages/web/package.json
+
+# better-sqlite3 needs its native binding compiled. We re-install the toolchain
+# briefly, install prod deps + a pinned tsx (which is a devDependency in the
+# server workspace but is the actual runtime — we run TS directly, no compile
+# step), then drop the toolchain in the same RUN layer so it doesn't pad the
+# final image. Keep the tsx version in sync with packages/server/package.json.
+RUN apk add --no-cache --virtual .build-deps python3 make g++ \
+ && npm install --omit=dev --workspaces --include-workspace-root \
+ && npm install --omit=dev --no-save tsx@^4.19.2 \
+ && apk del .build-deps \
+ && npm cache clean --force
+
+# Source for the two workspaces the server actually loads at runtime.
+# tsx resolves @pokechamps/core via the workspace symlink → packages/core/src.
+COPY packages/core/src             ./packages/core/src
+COPY packages/core/tsconfig.json   ./packages/core/tsconfig.json
+COPY packages/server/src           ./packages/server/src
+COPY packages/server/tsconfig.json ./packages/server/tsconfig.json
+COPY tsconfig.base.json            ./tsconfig.base.json
+
+# Editable game-data JSON. packages/core/src/domain/data.ts resolves this at
+# ../../../../data relative to its own file, i.e. /app/data here. Without
+# it every getSpecies() falls back to @pkmn/dex with no format allow-list.
+COPY data ./data
+
+# Fly mounts the persistent volume at /data (see fly.toml). The server's
+# DATABASE_URL defaults to that path — pre-create it so the first boot
+# doesn't race the volume mount.
+RUN mkdir -p /data && chown -R node:node /data /app
+
+USER node
+
+EXPOSE 3000
+
+# /health is registered in packages/server/src/app.ts and exempt from rate
+# limiting, so probes won't get 429s. wget is part of busybox in alpine.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget --quiet --tries=1 --spider http://127.0.0.1:3000/health || exit 1
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["npm", "-w", "@pokechamps/server", "start"]

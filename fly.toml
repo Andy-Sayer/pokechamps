@@ -1,0 +1,70 @@
+# Fly.io deploy config for the PokeChamps server (Phase 5, single-instance).
+#
+# This is the v1 deploy: ONE small machine, ONE sqlite file on a persistent
+# volume. Blue/green and zero-downtime cutovers are explicitly out of scope —
+# see ~/.claude/plans/blue-green-deploy.md for the long-term plan.
+#
+# Before first deploy, run `flyctl launch --no-deploy` to claim a real app
+# name (Fly will rewrite the `app` field below). The volume + secrets steps
+# are in DEPLOY.md.
+
+# NOTE: placeholder name. `flyctl launch` will overwrite this if you accept
+# a different name during interactive setup.
+app = "pokechamps-server"
+
+# Set this to the region closest to you (and your users) before first deploy.
+# Common picks: 'sea' (Seattle), 'sjc' (San Jose), 'iad' (Ashburn),
+# 'lhr' (London), 'fra' (Frankfurt). See `flyctl platform regions`.
+# primary_region = "sea"
+
+[build]
+  dockerfile = "Dockerfile.prod"
+
+[env]
+  # NODE_ENV is also set in Dockerfile.prod; duplicating here documents intent.
+  NODE_ENV     = "production"
+  HOST         = "0.0.0.0"
+  PORT         = "3000"
+  LOG_LEVEL    = "info"
+  # The sqlite file lives on the mounted volume so it survives `fly deploy`
+  # rolling restarts. packages/server/src/db/connection.ts mkdir -p's the
+  # parent dir on boot, so /data/pokechamps.sqlite is safe.
+  DATABASE_URL = "file:/data/pokechamps.sqlite"
+
+# Persistent volume for sqlite. Create it once before the first deploy:
+#   flyctl volumes create pokechamps_data --size 10 --region <region>
+# 10GB is wildly oversized for a single-user instance but Fly's smallest
+# volume is 1GB and 10GB costs ~$1.50/mo, so just take the headroom.
+[mounts]
+  source      = "pokechamps_data"
+  destination = "/data"
+
+[http_service]
+  internal_port      = 3000
+  force_https        = true
+  auto_stop_machines = "stop"   # idle → 0 machines, cold start on next request
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  # Public-facing healthcheck. Hits /health every 30s; /health is rate-limit
+  # exempt in packages/server/src/app.ts, so probes won't get 429s.
+  [[http_service.checks]]
+    interval     = "30s"
+    timeout      = "5s"
+    grace_period = "15s"
+    method       = "GET"
+    path         = "/health"
+
+[[vm]]
+  size       = "shared-cpu-1x"   # 1 shared vCPU
+  memory     = "512mb"           # sqlite + Fastify fit comfortably here
+  cpu_kind   = "shared"
+  cpus       = 1
+  processes  = ["app"]
+
+# Secrets are NOT stored here — set them with `flyctl secrets set`. See
+# DEPLOY.md for the exact commands. At minimum you need:
+#   JWT_SECRET                 (required — auth/jwt.ts refuses to boot without it in prod)
+# Optional:
+#   ANTHROPIC_API_KEY          (only if you want narration / explain-bring AI features)

@@ -1,5 +1,6 @@
 # Don't COPY these into the image — they're either machine-specific,
-# regenerable, or just bloat the build context.
+# regenerable, or just bloat the build context. Applies to BOTH the dev
+# Dockerfile and Dockerfile.prod.
 node_modules
 **/node_modules
 .git
@@ -7,11 +8,27 @@ node_modules
 matches
 dist
 **/dist
+packages/web/dist
+packages/web/node_modules
+.data
+.data-test
+**/.data
+**/.data-test
 *.log
 .env
 .env.local
+.env.*.local
 .vscode
 .idea
 .claude
 .DS_Store
 Thumbs.db
+
+# Test-only fixtures and the smoketest output dir — never needed in the image.
+**/tests
+**/*.test.ts
+**/vitest.config.ts
+
+# Docs that don't need to ship with the runtime
+DEPLOY.md
+CLAUDE.md
