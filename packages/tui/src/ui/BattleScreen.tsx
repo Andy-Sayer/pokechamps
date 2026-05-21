@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
@@ -16,6 +16,7 @@ import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate }
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs } from '@pokechamps/core/domain/hazards.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
 import { predictOffense, predictThreat, speedVerdict, type SpeedVerdict } from '@pokechamps/core/domain/predictions.js';
+import { deriveActiveIdx } from '@pokechamps/core/match/engine.js';
 
 export interface BattleScreenProps {
   stores: Stores;
@@ -226,6 +227,22 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
     return stores.pikalytics.onChange(() => setPikTick(t => t + 1));
   }, [match.opponentTeam, stores]);
   void pikTick; // exists only to trigger re-renders
+
+  // Passive WebSocket reconciliation: when the backing store streams a newer
+  // version of this match (e.g. another client wrote a turn), replace local
+  // state. The httpStore subscribe forwards both the initial snapshot and
+  // subsequent updates; fileStore.subscribe is a no-op so local mode is
+  // unaffected. JSON-key comparison short-circuits the echo of our own saves.
+  const lastAppliedKey = useRef<string>(JSON.stringify(initial));
+  useEffect(() => {
+    return stores.matches.subscribe(initial.id, incomingMatch => {
+      const incomingKey = JSON.stringify(incomingMatch);
+      if (incomingKey === lastAppliedKey.current) return;
+      lastAppliedKey.current = incomingKey;
+      setMatch(incomingMatch);
+      setActiveIdx(deriveActiveIdx(incomingMatch));
+    });
+  }, [initial.id, stores]);
 
   const field: FieldState = match.field ?? NEUTRAL_FIELD;
   const bringTeam = match.bring.map(i => match.myTeam[i]!);
