@@ -15,6 +15,7 @@ import teamsRoutes from './routes/teams.js';
 import matchesRoutes from './routes/matches.js';
 import matchActionsRoutes from './routes/match-actions.js';
 import wsMatchRoutes from './routes/ws-match.js';
+import pikalyticsRoutes from './routes/pikalytics.js';
 
 export interface BuildAppOptions {
   /** Override the default logger (set false to silence in tests). */
@@ -94,6 +95,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<BuiltApp> {
   // WebSocket live channel: GET /matches/:id/live. Sibling plugin so the
   // upgrade handler stays out of the REST file.
   await app.register(wsMatchRoutes, { prefix: '/matches' });
+  await app.register(pikalyticsRoutes, { prefix: '/pikalytics' });
 
   return { app, migration };
 }
