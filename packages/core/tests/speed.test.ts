@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'vitest';
-import { actualSpeed, inferOpponentSpeeds } from '../src/domain/speed.js';
-import type { Match, MoveAction, PokemonSet, Turn } from '../src/domain/types.js';
+import { actualSpeed, applySpeedInference, inferOpponentSpeeds } from '../src/domain/speed.js';
+import type { Match, MoveAction, OpponentEntry, PokemonSet, Turn } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, MAX_IVS } from '../src/domain/types.js';
 
 const ZERO_EVS = { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
@@ -162,5 +162,130 @@ describe('inferOpponentSpeeds', () => {
     const inf = inferOpponentSpeeds(match, match.myTeam);
     expect(inf[0]!.speedFloor).toBeUndefined();
     expect(inf[0]!.speedCeiling).toBeUndefined();
+  });
+
+  test('opp-vs-opp ordering constrains both opps from their bare envelopes', () => {
+    // User's bug repro. m2 Basculegion (fast), m1 Kingambit (slow), opps are
+    // Absol and Abomasnow. Logged order was: m2, o2 (Abomasnow), o1 (Absol),
+    // m1. So Abomasnow > Absol in actual play.
+    //
+    // Bare envelopes:
+    //   Absol     base 75 → [68, 167] roughly (no nature → -10% / no EV vs +10% / 252)
+    //   Abomasnow base 60 → [55, 145] roughly
+    //
+    // Constraint: Abomasnow.speed > Absol.speed
+    //   → Abomasnow.min ≥ Absol.min + 1
+    //   → Absol.max     ≤ Abomasnow.max - 1
+    //
+    // We don't need to assert the exact envelope numbers (those are stat
+    // arithmetic noise) — just that BOTH opps' bounds tightened from the
+    // pure-envelope state where they were undefined.
+    const myFast = mon({
+      species: 'Basculegion', nature: 'Jolly',
+      evs: { ...ZERO_EVS, atk: 252, spe: 252 },
+    });
+    const mySlow = mon({
+      species: 'Kingambit', nature: 'Adamant',
+      evs: { ...ZERO_EVS, atk: 252, hp: 252 },
+    });
+    const match = makeMatch(
+      [myFast, mySlow],
+      ['Absol', 'Abomasnow'],
+      [turn([
+        act({ side: 'mine',   attackerTeamIndex: 0, move: 'Tackle', order: 1 }),
+        act({ side: 'theirs', attackerTeamIndex: 1, move: 'Tackle', order: 2 }), // Abomasnow
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'Tackle', order: 3 }), // Absol
+        act({ side: 'mine',   attackerTeamIndex: 1, move: 'Tackle', order: 4 }),
+      ])],
+    );
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+
+    // o1 = Absol → speedCeiling must be set (because it lost to Abomasnow).
+    expect(inf[0]!.speedCeiling).toBeDefined();
+    // o2 = Abomasnow → speedFloor must be set (because it beat Absol).
+    expect(inf[1]!.speedFloor).toBeDefined();
+
+    // Sanity: Abomasnow's floor should be above the slowest Absol could be (1
+    // + Absol's bare-envelope min). We don't pin the exact number, just that
+    // it's well above 0.
+    expect(inf[1]!.speedFloor!).toBeGreaterThan(0);
+    expect(inf[0]!.speedCeiling!).toBeGreaterThan(0);
+
+    // Additionally bounded by mine-vs-opp: m2 Basculegion moved before both
+    // opps, so both must be ≤ Basculegion.speed - 1. And m1 Kingambit moved
+    // AFTER both opps, so both must be ≥ Kingambit.speed + 1.
+    expect(inf[0]!.speedFloor).toBeGreaterThan(0);
+    expect(inf[1]!.speedCeiling).toBeGreaterThan(0);
+  });
+
+  test('opp-vs-opp under trick room flips the inequality', () => {
+    // Under TR, the action that moved earlier was the SLOWER mon. So if
+    // attackerTeamIndex 1 (Abomasnow) moved before attackerTeamIndex 0
+    // (Absol), Abomasnow.speed < Absol.speed.
+    const myAny = mon({ species: 'Torkoal', nature: 'Quiet' });
+    const match = makeMatch(
+      [myAny],
+      ['Absol', 'Abomasnow'],
+      [turn([
+        act({ side: 'theirs', attackerTeamIndex: 1, move: 'Tackle', order: 1 }), // Abomasnow first under TR → slower
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'Tackle', order: 2 }), // Absol second → faster
+      ], { trickRoom: true })],
+    );
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    // Abomasnow is slower → it gets a CEILING.
+    expect(inf[1]!.speedCeiling).toBeDefined();
+    // Absol is faster → it gets a FLOOR.
+    expect(inf[0]!.speedFloor).toBeDefined();
+  });
+});
+
+describe('applySpeedInference: candidate filter', () => {
+  test('drops candidates whose actualSpeed violates the inferred floor', () => {
+    // Two candidate spreads for Garchomp: one slow (Adamant, 0 Spe EVs) and
+    // one fast (Jolly, 252 Spe EVs). If we infer speedFloor of 200, only the
+    // fast one survives.
+    const slowSet: PokemonSet = {
+      species: 'Garchomp', level: 50, nature: 'Adamant',
+      evs: { ...ZERO_EVS, atk: 252, hp: 252 }, ivs: MAX_IVS, moves: [],
+    };
+    const fastSet: PokemonSet = {
+      species: 'Garchomp', level: 50, nature: 'Jolly',
+      evs: { ...ZERO_EVS, atk: 252, spe: 252 }, ivs: MAX_IVS, moves: [],
+    };
+    // Sanity: fast > 200, slow < 200 (Garchomp base 102 Spe → Jolly 252 ≈ 191,
+    // Adamant 0 ≈ 122). Pick a floor that bisects.
+    expect(actualSpeed(fastSet)).toBeGreaterThan(150);
+    expect(actualSpeed(slowSet)).toBeLessThan(150);
+
+    const opp: OpponentEntry = {
+      species: 'Garchomp',
+      knownMoves: [],
+      candidates: [slowSet, fastSet],
+    };
+    applySpeedInference([opp], [{ speedFloor: 150 }]);
+    expect(opp.candidates).toHaveLength(1);
+    expect(opp.candidates![0]!.nature).toBe('Jolly');
+  });
+
+  test('filter does not empty candidates — keeps original if no spread survives', () => {
+    // If the inferred bound contradicts every candidate (e.g. user logged a
+    // bad turn order), we keep the wider belief rather than wipe the set.
+    const slow: PokemonSet = {
+      species: 'Garchomp', level: 50, nature: 'Adamant',
+      evs: { ...ZERO_EVS, atk: 252 }, ivs: MAX_IVS, moves: [],
+    };
+    const opp: OpponentEntry = {
+      species: 'Garchomp', knownMoves: [], candidates: [slow],
+    };
+    applySpeedInference([opp], [{ speedFloor: 999 }]);
+    expect(opp.candidates).toHaveLength(1);
+  });
+
+  test('still applies speedFloor/speedCeiling on the entry even with no candidates', () => {
+    const opp: OpponentEntry = { species: 'Garchomp', knownMoves: [] };
+    applySpeedInference([opp], [{ speedFloor: 100, speedCeiling: 200, scarfSuspected: true }]);
+    expect(opp.speedFloor).toBe(100);
+    expect(opp.speedCeiling).toBe(200);
+    expect(opp.scarfSuspected).toBe(true);
   });
 });

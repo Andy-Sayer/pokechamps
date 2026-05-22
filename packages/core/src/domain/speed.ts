@@ -40,13 +40,47 @@ function expectedSpeed(speciesName: string): number | undefined {
 }
 
 // Per-turn pairwise rules:
-//   X moved before Y, same priority, no Trick Room  =>  speed(X) >= speed(Y)
-//   With Trick Room                                  =>  speed(X) <= speed(Y)
-// Switches resolve before any move at priority +6 — treat them as priority 6
-// so they're skipped against priority-0 attacks (different bracket).
+//   X moved before Y, same priority, no Trick Room  =>  speed(X) > speed(Y)
+//   With Trick Room                                  =>  speed(X) < speed(Y)
+// Switches are skipped (they resolve before moves at priority +6).
+//
+// Three pair shapes contribute:
+//   - mine-vs-opp: my speed is known exactly, so opp gets a hard floor/ceiling.
+//   - opp-vs-opp:  neither speed is known; we constrain each opp using the
+//                  OTHER opp's current range (candidates / bare envelope plus
+//                  any constraints accumulated from earlier turns).
+//   - mine-vs-mine: both known; nothing to infer.
+//
 // Outputs one SpeedInference per opponentTeam slot.
 export function inferOpponentSpeeds(match: Match, myTeam: PokemonSet[]): SpeedInference[] {
   const out: SpeedInference[] = match.opponentTeam.map(() => ({}));
+
+  // Per-opp working range. Initialized from the candidate set (if inference
+  // has narrowed one) or the bare 0/252-EV envelope. This is what we use to
+  // bind opp-vs-opp constraints — we don't know either speed exactly, so we
+  // pull from the most-constrained range we have.
+  const workMin: (number | null)[] = match.opponentTeam.map(e => {
+    const c = candidateRange(e);
+    if (c) return c.min;
+    const env = bareEnvelope(e.species);
+    return env?.min ?? null;
+  });
+  const workMax: (number | null)[] = match.opponentTeam.map(e => {
+    const c = candidateRange(e);
+    if (c) return c.max;
+    const env = bareEnvelope(e.species);
+    return env?.max ?? null;
+  });
+  const tightenMin = (idx: number, v: number) => {
+    workMin[idx] = workMin[idx] == null ? v : Math.max(workMin[idx]!, v);
+    const slot = out[idx]!;
+    slot.speedFloor = slot.speedFloor == null ? v : Math.max(slot.speedFloor, v);
+  };
+  const tightenMax = (idx: number, v: number) => {
+    workMax[idx] = workMax[idx] == null ? v : Math.min(workMax[idx]!, v);
+    const slot = out[idx]!;
+    slot.speedCeiling = slot.speedCeiling == null ? v : Math.min(slot.speedCeiling, v);
+  };
 
   for (const turn of match.turns) {
     const trickRoom = !!turn.field?.trickRoom;
@@ -55,43 +89,52 @@ export function inferOpponentSpeeds(match: Match, myTeam: PokemonSet[]): SpeedIn
       for (let j = i + 1; j < actions.length; j++) {
         const a = actions[i]!;
         const b = actions[j]!;
-        // Skip switches — they're resolved before moves at priority +6 and
-        // don't depend on the switching mon's stat.
         if (a.kind === 'switch' || b.kind === 'switch') continue;
-        // Must be opposite sides for the constraint to bind a known stat to
-        // an unknown one.
-        if (a.side === b.side) continue;
-        // Same priority bracket only.
         if (movePriority(a.move) !== movePriority(b.move)) continue;
+        // i < j guarantees a moved before b in the turn order.
 
-        // Map each action to (set, opponentIndex|null). The opponent action
-        // contributes the unknown stat we're constraining.
-        const aMine = a.side === 'mine';
-        const myAction = aMine ? a : b;
-        const oppAction = aMine ? b : a;
-        const myFirst = aMine ? (i < j) : (j < i);
+        // ---- mine-vs-opp ---------------------------------------------------
+        if (a.side !== b.side) {
+          const aMine = a.side === 'mine';
+          const myAction = aMine ? a : b;
+          const oppAction = aMine ? b : a;
+          const myFirst = aMine ? true : false; // a is at index i, b at j>i
 
-        const mySet = myTeam[myAction.attackerTeamIndex ?? -1];
-        const oppIdx = oppAction.attackerTeamIndex;
-        if (!mySet || oppIdx == null) continue;
-        const mySpd = actualSpeed(mySet);
-        const inversion = trickRoom ? !myFirst : myFirst;
+          const mySet = myTeam[myAction.attackerTeamIndex ?? -1];
+          const oppIdx = oppAction.attackerTeamIndex;
+          if (!mySet || oppIdx == null) continue;
+          const mySpd = actualSpeed(mySet);
+          const inversion = trickRoom ? !myFirst : myFirst;
 
-        const slot = out[oppIdx]!;
-        if (inversion) {
-          // My mon was "faster in turn order" given the field — so opp speed
-          // <= my speed - 1 (strict, because ties are coin flips).
-          const ceil = mySpd - 1;
-          slot.speedCeiling = slot.speedCeiling == null
-            ? ceil
-            : Math.min(slot.speedCeiling, ceil);
-        } else {
-          // Opp moved first in their bracket: opp speed >= my speed + 1.
-          const floor = mySpd + 1;
-          slot.speedFloor = slot.speedFloor == null
-            ? floor
-            : Math.max(slot.speedFloor, floor);
+          if (inversion) {
+            // My mon was "faster in turn order" given the field, so opp must
+            // be strictly slower: opp <= my - 1.
+            tightenMax(oppIdx, mySpd - 1);
+          } else {
+            // Opp moved first in their bracket: opp >= my + 1.
+            tightenMin(oppIdx, mySpd + 1);
+          }
+          continue;
         }
+
+        // ---- opp-vs-opp ----------------------------------------------------
+        if (a.side === 'theirs') {
+          const fasterIdx = a.attackerTeamIndex;
+          const slowerIdx = b.attackerTeamIndex;
+          if (fasterIdx == null || slowerIdx == null) continue;
+          if (fasterIdx === slowerIdx) continue; // same mon, no constraint
+          // Without TR, the earlier action's mon was faster. Under TR the
+          // earlier action's mon was SLOWER, so flip the assignment.
+          const [hiIdx, loIdx] = trickRoom ? [slowerIdx, fasterIdx] : [fasterIdx, slowerIdx];
+          // hi.speed > lo.speed → constrain using each other's current range:
+          //   hi.min ≥ lo.min + 1  (since hi must beat the slowest lo could be)
+          //   lo.max ≤ hi.max - 1  (since lo must be below the fastest hi could be)
+          const loMin = workMin[loIdx];
+          const hiMax = workMax[hiIdx];
+          if (loMin != null) tightenMin(hiIdx, loMin + 1);
+          if (hiMax != null) tightenMax(loIdx, hiMax - 1);
+        }
+        // mine-vs-mine pairs tell us nothing — both speeds known.
       }
     }
   }
@@ -267,6 +310,16 @@ export function predictTurnOrder(args: {
 
 // Merge an inference result into the opponent entries (mutating). Returns
 // the same array for fluent use.
+//
+// Side effect that callers rely on: when a speed bound tightens, we also
+// prune `entry.candidates` to spreads whose actualSpeed satisfies the bound.
+// This is how speed observations propagate into damage predictions — a
+// "must have ≥ X speed" rule drops candidates whose SP went elsewhere, so
+// the surviving candidates have less budget for other stats too. (Nature is
+// honored because actualSpeed applies the multiplier.)
+//
+// Defensive: if the filter would empty the candidate list, we keep the
+// original — better a wider belief than a contradiction from a mistyped log.
 export function applySpeedInference(
   opponentTeam: OpponentEntry[],
   inferences: SpeedInference[],
@@ -277,6 +330,16 @@ export function applySpeedInference(
     e.speedFloor = s.speedFloor;
     e.speedCeiling = s.speedCeiling;
     e.scarfSuspected = s.scarfSuspected;
+
+    if (e.candidates?.length && (s.speedFloor != null || s.speedCeiling != null)) {
+      const filtered = e.candidates.filter(c => {
+        const spd = actualSpeed(c);
+        if (s.speedFloor != null && spd < s.speedFloor) return false;
+        if (s.speedCeiling != null && spd > s.speedCeiling) return false;
+        return true;
+      });
+      if (filtered.length > 0) e.candidates = filtered;
+    }
   }
   return opponentTeam;
 }
