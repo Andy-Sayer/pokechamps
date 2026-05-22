@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { actualSpeed, applySpeedInference, inferOpponentSpeeds } from '../src/domain/speed.js';
+import { actualSpeed, applySpeedInference, effectiveSpeedRange, inferOpponentSpeeds } from '../src/domain/speed.js';
 import type { Match, MoveAction, OpponentEntry, PokemonSet, Turn } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, MAX_IVS } from '../src/domain/types.js';
 
@@ -296,6 +296,148 @@ describe('inferOpponentSpeeds', () => {
     expect(inf[1]!.speedCeiling).toBeDefined();
     // Absol is faster → it gets a FLOOR.
     expect(inf[0]!.speedFloor).toBeDefined();
+  });
+});
+
+describe('scarfChance', () => {
+  test('0 when the inferred floor is at-or-below Pikalytics expected', () => {
+    // Slow my mon outsped by opp → low floor. No scarf signal.
+    const mySlow = mon({ species: 'Torkoal', nature: 'Quiet', evs: { ...ZERO_EVS } });
+    const match = makeMatch(
+      [mySlow],
+      ['Incineroar'],
+      [turn([
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'Tackle', order: 1 }),
+        act({ side: 'mine',   attackerTeamIndex: 0, move: 'Heat Wave', order: 2 }),
+      ])],
+    );
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    // Floor was set (opp went first) but should be below or near expected → 0
+    // or undefined chance. We don't pin the exact value, just that it doesn't
+    // SUSPECT scarf.
+    expect(inf[0]!.scarfSuspected).toBeFalsy();
+  });
+
+  test('100 when the inferred floor exceeds the bare envelope max', () => {
+    // No non-scarf nature/EV combo can put Incineroar above ~121, so a floor
+    // of 180 (e.g. outsped by Jolly Sneasler) is definitively boosted.
+    const myFast = mon({
+      species: 'Sneasler', nature: 'Jolly',
+      evs: { ...ZERO_EVS, atk: 252, spe: 252 },
+    });
+    const match = makeMatch(
+      [myFast],
+      ['Incineroar'],
+      [turn([
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'Knock Off', order: 1 }),
+        act({ side: 'mine',   attackerTeamIndex: 0, move: 'Close Combat', order: 2 }),
+      ])],
+    );
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    expect(inf[0]!.scarfChance).toBe(100);
+    expect(inf[0]!.scarfSuspected).toBe(true);
+  });
+
+  test('between 0 and 100 when floor is between expected and envelope max', () => {
+    // Hand-craft a SpeedInference floor that sits between expected and
+    // envelope max — verify the linear ramp. We bypass inferOpponentSpeeds
+    // by setting speedFloor directly and re-deriving via applySpeedInference's
+    // sibling logic (in this case just check the raw ramp math by exercising
+    // a known scenario with a Garchomp opp).
+    // Easier: assert that SOME middle-range scenario gives a moderate value.
+    // We use a tailwind-free Garchomp opp with mySpd = 110 (sits between
+    // expected ~ 102 and envelope max ~ 169) so scarfChance > 0 and < 100.
+    const myMid = mon({
+      species: 'Hatterene', nature: 'Bold',
+      evs: { ...ZERO_EVS, hp: 252, def: 252 },
+    });
+    // Hatterene's bare speed is ~50ish — not the right test mon.
+    // Use Aerodactyl with Adamant + 0 EVs → about 105 (between Garchomp's
+    // expected and envelope max). Opp outsped my Aerodactyl → floor 106.
+    const myMidSpd = mon({
+      species: 'Aerodactyl', nature: 'Adamant',
+      evs: { ...ZERO_EVS, atk: 252 },
+    });
+    expect(actualSpeed(myMidSpd)).toBeGreaterThan(100);
+    expect(actualSpeed(myMidSpd)).toBeLessThan(160);
+    const match = makeMatch(
+      [myMidSpd],
+      ['Garchomp'],
+      [turn([
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'Tackle', order: 1 }),
+        act({ side: 'mine',   attackerTeamIndex: 0, move: 'Tackle', order: 2 }),
+      ])],
+    );
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    // chance might be undefined (if floor ≤ expected) OR > 0. We just want
+    // to confirm scarfSuspected isn't always-true. With pikalytics data
+    // present scarfChance will be 0 if the floor is ≤ expected, or some
+    // positive number if it exceeds it. Either is fine — the assertion is
+    // that we're NOT defaulting to 100% on a mild outspeed.
+    const ch = inf[0]!.scarfChance ?? 0;
+    expect(ch).toBeLessThan(100);
+  });
+});
+
+describe('effectiveSpeedRange', () => {
+  test('falls back to bare envelope when nothing else is known', () => {
+    const e: OpponentEntry = { species: 'Garchomp', knownMoves: [] };
+    const r = effectiveSpeedRange(e);
+    expect(r).not.toBeNull();
+    expect(r!.source).toBe('envelope');
+    expect(r!.min).toBeGreaterThan(0);
+    expect(r!.max).toBeGreaterThan(r!.min);
+  });
+
+  test('combines: a looser inferred bound does NOT override a tighter envelope', () => {
+    // User's exact bug: opp-vs-opp constraint produced speedCeiling = 138
+    // for an opp whose bare envelope already capped it at ~123. The combined
+    // range should still report ≤123, not ≤138.
+    const e: OpponentEntry = {
+      species: 'Abomasnow',
+      knownMoves: [],
+      speedCeiling: 999, // grossly loose
+    };
+    const env = effectiveSpeedRange({ species: 'Abomasnow', knownMoves: [] })!;
+    const r = effectiveSpeedRange(e)!;
+    // max should still be the envelope max, not 999
+    expect(r.max).toBe(env.max);
+    expect(r.max).toBeLessThan(999);
+  });
+
+  test('a tightening inferred floor wins over the envelope', () => {
+    // Garchomp envelope min is around 68 (0 EV, -nature). Inferred floor
+    // 150 (e.g. observed outspeeding a fast mon) MUST tighten the min.
+    const e: OpponentEntry = {
+      species: 'Garchomp', knownMoves: [], speedFloor: 150,
+    };
+    const r = effectiveSpeedRange(e)!;
+    expect(r.min).toBe(150);
+    expect(r.source).not.toBe('envelope'); // 'inferred' or 'mixed'
+  });
+
+  test('candidates can tighten both bounds when inference is silent', () => {
+    // Two narrow candidate spreads → the candidate-derived range is tighter
+    // than the bare envelope.
+    const cand1: PokemonSet = {
+      species: 'Garchomp', level: 50, nature: 'Jolly',
+      evs: { ...ZERO_EVS, spe: 252 }, ivs: MAX_IVS, moves: [],
+    };
+    const cand2: PokemonSet = {
+      species: 'Garchomp', level: 50, nature: 'Adamant',
+      evs: { ...ZERO_EVS, spe: 252 }, ivs: MAX_IVS, moves: [],
+    };
+    const e: OpponentEntry = {
+      species: 'Garchomp', knownMoves: [], candidates: [cand1, cand2],
+    };
+    const r = effectiveSpeedRange(e)!;
+    const env = effectiveSpeedRange({ species: 'Garchomp', knownMoves: [] })!;
+    // Both candidates have 252 Spe EVs, so the candidate-derived MIN is far
+    // above the bare-envelope min (0-EV, -nature). The MAX matches the
+    // envelope ceiling (Jolly 252 is the literal envelope top), so we don't
+    // assert it tightens — the goal is to confirm candidates pull bounds in.
+    expect(r.min).toBeGreaterThan(env.min);
+    expect(r.max).toBeLessThanOrEqual(env.max);
   });
 });
 

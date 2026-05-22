@@ -36,6 +36,11 @@ export interface OpponentEntry {
   // True when speedFloor exceeds the speed implied by Pikalytics' top spread —
   // strong signal of Choice Scarf (or another speed-boosting item/ability).
   scarfSuspected?: boolean;
+  // 0-100: how unusual the non-scarf explanation would be for the inferred
+  // floor. 0 = consistent with the popular spread; 100 = no nature/EV combo
+  // can hit that speed without a multiplier. Soft signal — a high value
+  // could still mean "max Spe + Jolly without scarf".
+  scarfChance?: number;
   // True after we've observed this mon mega-evolve.
   megaUsed?: boolean;
   // Current HP as a percent of max (0-100). Undefined = full HP.

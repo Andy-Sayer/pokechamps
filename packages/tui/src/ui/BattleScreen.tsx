@@ -7,7 +7,7 @@ import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
 import { inferSpread, mostLikely } from '@pokechamps/core/domain/inference.js';
 import { maxHpFor } from '@pokechamps/core/domain/damage.js';
 import { endOfTurn } from '@pokechamps/core/domain/endOfTurn.js';
-import { inferOpponentSpeeds, applySpeedInference, actualSpeed, predictTurnOrder } from '@pokechamps/core/domain/speed.js';
+import { inferOpponentSpeeds, applySpeedInference, actualSpeed, predictTurnOrder, effectiveSpeedRange } from '@pokechamps/core/domain/speed.js';
 import { reviewLastTurn } from '@pokechamps/core/ai/prompts.js';
 import { isAvailable as aiAvailable } from '@pokechamps/core/ai/client.js';
 import type { Stores } from '@pokechamps/core/storage/index.js';
@@ -1283,11 +1283,15 @@ function OppRow({ stores, entry, marker, color }: OppRowProps) {
   const pik = stores.pikalytics.get(entry.species);
   const fetching = !pik && stores.pikalytics.isFetching(entry.species);
   const topItem = pik?.items.find(i => i.name.toLowerCase() !== 'other');
-  const speed =
-    entry.speedFloor != null && entry.speedCeiling != null ? `${entry.speedFloor}–${entry.speedCeiling}` :
-    entry.speedFloor != null ? `≥${entry.speedFloor}` :
-    entry.speedCeiling != null ? `≤${entry.speedCeiling}` :
-    null;
+  // Show the combined speed range (inferred → candidates → envelope) so the
+  // user always sees a number rather than 'unknown' — and can watch it
+  // tighten as turns are logged.
+  const speedRange = effectiveSpeedRange(entry);
+  const speed = speedRange
+    ? speedRange.min === speedRange.max
+      ? `${speedRange.min}`
+      : `${speedRange.min}–${speedRange.max} (${speedRange.source})`
+    : null;
   const inferred = entry.candidates?.length ? mostLikely(entry.candidates) : null;
   const effectiveColor = entry.fainted ? 'gray' : color;
   return (
@@ -1297,7 +1301,9 @@ function OppRow({ stores, entry, marker, color }: OppRowProps) {
         {entry.currentHpPercent != null && !entry.fainted ? <Text dimColor> HP {entry.currentHpPercent.toFixed(0)}%</Text> : null}
         {entry.status ? <Text color={statusColor(entry.status)}> {entry.status.toUpperCase()}</Text> : null}
         {entry.fainted ? <Text color="gray"> KO</Text> : null}
-        {entry.scarfSuspected ? <Text color="yellow"> ⚡scarf?</Text> : null}
+        {entry.scarfChance != null && entry.scarfChance > 0 ? (
+          <Text color={entry.scarfChance >= 50 ? 'yellow' : 'gray'}> ⚡scarf? {entry.scarfChance}%</Text>
+        ) : null}
         {entry.megaUsed ? <Text color="magenta"> M</Text> : null}
       </Text>
       {fetching && (
@@ -1442,11 +1448,15 @@ function OppInfoPanel({ stores, index, entry }: OppInfoPanelProps) {
   const bs = species?.baseStats;
   const types = (species?.types as string[] | undefined) ?? [];
   const top = entry.candidates?.length ? mostLikely(entry.candidates) : null;
-  const speed =
-    entry.speedFloor != null && entry.speedCeiling != null ? `${entry.speedFloor}–${entry.speedCeiling}` :
-    entry.speedFloor != null ? `≥${entry.speedFloor}` :
-    entry.speedCeiling != null ? `≤${entry.speedCeiling}` :
-    'unknown';
+  // effectiveSpeedRange walks the same priority chain as predictTurnOrder
+  // (inferred bounds → candidates → bare envelope) so the panel always
+  // surfaces a number and labels its source.
+  const speedRange = effectiveSpeedRange(entry);
+  const speed = speedRange
+    ? speedRange.min === speedRange.max
+      ? `${speedRange.min}`
+      : `${speedRange.min}–${speedRange.max} (${speedRange.source})`
+    : 'unknown';
   const fmtRow = (rows: { name: string; pct: number }[], n = 3) =>
     rows.filter(r => r.name.toLowerCase() !== 'other').slice(0, n)
       .map(r => `${r.name} ${r.pct.toFixed(0)}%`).join(' · ');
@@ -1457,7 +1467,9 @@ function OppInfoPanel({ stores, index, entry }: OppInfoPanelProps) {
         {entry.currentHpPercent != null && !entry.fainted ? <Text> HP {entry.currentHpPercent.toFixed(0)}%</Text> : null}
         {entry.fainted ? <Text color="gray"> (KO)</Text> : null}
         <Text dimColor> · spd {speed}</Text>
-        {entry.scarfSuspected ? <Text color="yellow"> ⚡scarf?</Text> : null}
+        {entry.scarfChance != null && entry.scarfChance > 0 ? (
+          <Text color={entry.scarfChance >= 50 ? 'yellow' : 'gray'}> ⚡scarf? {entry.scarfChance}%</Text>
+        ) : null}
         {entry.megaUsed ? <Text color="magenta"> mega'd</Text> : null}
       </Text>
       {bs && (

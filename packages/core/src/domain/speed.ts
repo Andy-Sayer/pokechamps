@@ -31,6 +31,17 @@ function effectivePriority(a: MoveAction): number {
 export interface SpeedInference {
   speedFloor?: number;
   speedCeiling?: number;
+  /** 0-100 chance the opp is running Choice Scarf (or another non-standard
+   *  speed booster). Derived from how far the inferred floor exceeds the
+   *  Pikalytics top spread, capped at the bare-envelope max:
+   *    floor ≤ expected           → 0   (consistent with the popular spread)
+   *    floor > envelope max       → 100 (no nature/EV combo could hit this)
+   *    else                       → linear ramp between the two
+   *  A high value isn't proof — the mon could still be running an unusual
+   *  spread with max Spe investment + Jolly nature. The user reads the
+   *  number as "how unusual would the non-scarf alternative be". */
+  scarfChance?: number;
+  /** Derived alias: scarfChance ≥ 50. Kept so older callers keep working. */
   scarfSuspected?: boolean;
 }
 
@@ -79,6 +90,13 @@ export function inferOpponentSpeeds(match: Match, myTeam: PokemonSet[]): SpeedIn
     const env = bareEnvelope(e.species);
     return env?.max ?? null;
   });
+  // Both write-throughs accumulate observation-derived bounds on `out[]` AND
+  // keep the workMin/workMax mirror current so opp-vs-opp constraints later
+  // in the same turn use the latest knowledge. The bounds we emit on `out`
+  // can be looser than the bare envelope (e.g. opp-vs-opp gives a ceiling
+  // derived from the other opp's bare max); effectiveSpeedRange downstream
+  // combines them with the envelope/candidate range and takes the tightest
+  // values, so this is fine.
   const tightenMin = (idx: number, v: number) => {
     workMin[idx] = workMin[idx] == null ? v : Math.max(workMin[idx]!, v);
     const slot = out[idx]!;
@@ -149,14 +167,24 @@ export function inferOpponentSpeeds(match: Match, myTeam: PokemonSet[]): SpeedIn
     }
   }
 
-  // Scarf-suspected flag: floor exceeds Pikalytics expected speed.
+  // Scarf chance: how unusual the non-scarf alternative would be, given the
+  // observed floor. Linear ramp from Pikalytics expected → bare envelope max.
   for (let k = 0; k < match.opponentTeam.length; k++) {
     const entry = match.opponentTeam[k]!;
     const inf = out[k]!;
     if (inf.speedFloor == null) continue;
     const expected = expectedSpeed(entry.species);
-    if (expected != null && inf.speedFloor > expected) {
-      inf.scarfSuspected = true;
+    const env = bareEnvelope(entry.species);
+    if (expected == null || env == null) continue;
+    const floor = inf.speedFloor;
+    let chance: number;
+    if (floor <= expected) chance = 0;
+    else if (floor > env.max) chance = 100;
+    else if (env.max === expected) chance = 100; // degenerate; avoid div by zero
+    else chance = Math.round(((floor - expected) / (env.max - expected)) * 100);
+    if (chance > 0) {
+      inf.scarfChance = chance;
+      inf.scarfSuspected = chance >= 50;
     }
   }
 
@@ -226,6 +254,57 @@ function candidateRange(entry: OpponentEntry): { min: number; max: number } | nu
   return Number.isFinite(min) ? { min, max } : null;
 }
 
+// Resolve the combined speed range for an opp entry by walking the same
+// priority chain predictTurnOrder uses internally:
+//   1. Explicit speedFloor / speedCeiling from observations (most precise).
+//   2. Candidate-derived range (every plausible spread we still believe).
+//   3. Bare 0/252-EV envelope from base Spe (loosest).
+// `source` reports which tier supplied each bound so the UI can tell the
+// user where the number came from. Returns null only when we have zero
+// information (species not in the dex).
+export interface EffectiveSpeed {
+  min: number;
+  max: number;
+  source: 'inferred' | 'candidates' | 'envelope' | 'mixed';
+}
+
+export function effectiveSpeedRange(entry: OpponentEntry): EffectiveSpeed | null {
+  // Combine every available source by taking the TIGHTEST bounds. Inferred
+  // bounds may be looser than the envelope (e.g. opp-vs-opp constraints
+  // derived from the other opp's bare envelope); we want the user-visible
+  // range to be at least as tight as any single source.
+  const cand = candidateRange(entry);
+  const env = bareEnvelope(entry.species);
+
+  let min: number | null = null;
+  let max: number | null = null;
+  // Track which source(s) actually pinned the bound so the UI can show
+  // 'inferred' (someone observed this), 'candidates' (we've narrowed via
+  // damage), 'envelope' (purely speculative), or 'mixed'.
+  let minSrc: EffectiveSpeed['source'] | null = null;
+  let maxSrc: EffectiveSpeed['source'] | null = null;
+  const considerMin = (v: number, s: EffectiveSpeed['source']) => {
+    if (min == null || v > min) { min = v; minSrc = s; }
+    else if (v === min && minSrc !== s) minSrc = 'mixed';
+  };
+  const considerMax = (v: number, s: EffectiveSpeed['source']) => {
+    if (max == null || v < max) { max = v; maxSrc = s; }
+    else if (v === max && maxSrc !== s) maxSrc = 'mixed';
+  };
+
+  if (env) {           considerMin(env.min,  'envelope');   considerMax(env.max,  'envelope'); }
+  if (cand) {          considerMin(cand.min, 'candidates'); considerMax(cand.max, 'candidates'); }
+  if (entry.speedFloor   != null) considerMin(entry.speedFloor,   'inferred');
+  if (entry.speedCeiling != null) considerMax(entry.speedCeiling, 'inferred');
+
+  if (min == null || max == null) return null;
+  // If the bound was both inferred AND already pinned by a tighter envelope/
+  // candidate, label it 'mixed' so the user knows multiple sources agree.
+  const source: EffectiveSpeed['source'] =
+    minSrc === maxSrc ? minSrc! : 'mixed';
+  return { min, max, source };
+}
+
 // Predict the order in which the 4 actives will move this turn assuming
 // neutral priority. Tailwind doubles the relevant side's effective speed;
 // Trick Room inverts the sort. Paralysis halves. For opp slots where the
@@ -261,41 +340,12 @@ export function predictTurnOrder(args: {
     if (!a.entry) continue;
     const tw = args.field.theirTailwind ? 2 : 1;
     const par = a.entry.status === 'par';
-    let min: number | null = null;
-    let max: number | null = null;
-    let uncertain = false;
-    // Priority 1: explicit bounds from speed inference.
-    if (a.entry.speedFloor != null || a.entry.speedCeiling != null) {
-      min = a.entry.speedFloor ?? null;
-      max = a.entry.speedCeiling ?? null;
-      uncertain = min !== max;
-    }
-    // Priority 2: candidate-derived range.
-    if (min == null || max == null) {
-      const cand = candidateRange(a.entry);
-      if (cand) {
-        min = min ?? cand.min;
-        max = max ?? cand.max;
-        uncertain = cand.min !== cand.max;
-      }
-    }
-    // Priority 3/4: Pikalytics expected speed (pin midpoint) OR bare envelope.
-    if (min == null || max == null) {
-      const env = bareEnvelope(a.entry.species);
-      const exp = expectedSpeed(a.entry.species);
-      if (env) {
-        min = min ?? env.min;
-        max = max ?? env.max;
-        if (exp != null && env.min <= exp && exp <= env.max) {
-          // Center the range on the expected speed but keep the envelope edges.
-          uncertain = true;
-        } else {
-          uncertain = env.min !== env.max;
-        }
-      } else if (exp != null) {
-        min = exp; max = exp;
-      }
-    }
+    // Use the same helper the info panel uses so the two displays never
+    // disagree. effectiveSpeedRange walks inferred → candidates → envelope.
+    const eff = effectiveSpeedRange(a.entry);
+    const min = eff?.min ?? null;
+    const max = eff?.max ?? null;
+    const uncertain = eff != null && eff.min !== eff.max;
     const finMin = min != null ? finalize(min, tw, par) : 0;
     const finMax = max != null ? finalize(max, tw, par) : 0;
     rows.push({
@@ -340,6 +390,7 @@ export function applySpeedInference(
     e.speedFloor = s.speedFloor;
     e.speedCeiling = s.speedCeiling;
     e.scarfSuspected = s.scarfSuspected;
+    e.scarfChance = s.scarfChance;
 
     if (e.candidates?.length && (s.speedFloor != null || s.speedCeiling != null)) {
       const filtered = e.candidates.filter(c => {
