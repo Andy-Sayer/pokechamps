@@ -7,6 +7,7 @@ import { pikalyticsAvailable } from '@pokechamps/core/domain/pikalytics.js';
 import { explainBring } from '@pokechamps/core/ai/prompts.js';
 import { isAvailable } from '@pokechamps/core/ai/client.js';
 import type { Stores } from '@pokechamps/core/storage/index.js';
+import { PikaSpinner } from './PikaSpinner.js';
 
 export interface BringPickerProps {
   stores: Stores;
@@ -150,7 +151,7 @@ export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: B
         </Box>
       </Box>
 
-      {explaining && <Box marginTop={1}><Text dimColor>Asking Claude…</Text></Box>}
+      {explaining && <Box marginTop={1}><PikaSpinner label="Pikachu is mulling over your team…" /></Box>}
       {explanation && (
         <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor="magenta" paddingX={1}>
           <Text bold color="magenta">Claude:</Text>

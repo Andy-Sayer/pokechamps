@@ -16,6 +16,8 @@ import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate }
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs } from '@pokechamps/core/domain/hazards.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
 import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict } from '@pokechamps/core/domain/predictions.js';
+import { PikaSpinner } from './PikaSpinner.js';
+import { BATTLE_COMMANDS, parseCommand, helpLine, type BattleCommandId } from './slashCommands.js';
 import { deriveActiveIdx } from '@pokechamps/core/match/engine.js';
 
 export interface BattleScreenProps {
@@ -748,65 +750,85 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
 
   // ---------------- global hotkeys ----------------
 
-  useInput((ch, key) => {
-    // Match over: only Esc (exit) and `s` (snapshot) remain useful.
-    if (match.outcome) {
-      if (key.escape) onEnd();
-      if (ch === 's') {
+  // Dispatch a parsed slash command. Returns true when handled (the caller
+  // should clear the input box); false when the command was unknown or its
+  // preconditions weren't met (e.g. /review with no turns yet).
+  const runBattleCommand = (id: BattleCommandId): boolean => {
+    switch (id) {
+      case 'quit': onEnd(); return true;
+      case 'save':
         saveMatchAsync(stores, match, setMessage);
         setMessage(`Snapshot saved (${match.id}).`);
+        return true;
+      case 'next': finalizeTurn(); return true;
+      case 'crit': setShowCrits(c => !c); return true;
+      case 'allmoves': setShowAllMoves(a => !a); return true;
+      case 'info': setInfoPickerOpen(true); return true;
+      case 'help':
+        setMessage(`Commands: ${helpLine(BATTLE_COMMANDS)} · type an action like "m1 > Close Combat > o1 > 67"`);
+        return true;
+      case 'review': {
+        if (match.turns.length === 0) {
+          setMessage('/review needs at least one finalized turn.');
+          return true;
+        }
+        if (!aiAvailable()) {
+          setMessage('/review needs ANTHROPIC_API_KEY set.');
+          return true;
+        }
+        if (aiReviewBusy) return true;
+        const lastTurn = match.turns[match.turns.length - 1]!;
+        const activeSummary = [
+          activeIdx.mine[0] != null ? `m1 ${match.myTeam[activeIdx.mine[0]]!.species} HP ${(match.myCurrentHp?.[activeIdx.mine[0]] ?? 100).toFixed(0)}%` : 'm1 empty',
+          activeIdx.mine[1] != null ? `m2 ${match.myTeam[activeIdx.mine[1]]!.species} HP ${(match.myCurrentHp?.[activeIdx.mine[1]] ?? 100).toFixed(0)}%` : 'm2 empty',
+          activeIdx.theirs[0] != null ? `o1 ${match.opponentTeam[activeIdx.theirs[0]]!.species} HP ${(match.opponentTeam[activeIdx.theirs[0]]!.currentHpPercent ?? 100).toFixed(0)}%` : 'o1 empty',
+          activeIdx.theirs[1] != null ? `o2 ${match.opponentTeam[activeIdx.theirs[1]]!.species} HP ${(match.opponentTeam[activeIdx.theirs[1]]!.currentHpPercent ?? 100).toFixed(0)}%` : 'o2 empty',
+        ].join(' · ');
+        const fieldSummary = [
+          field.weather ?? 'no weather',
+          field.terrain ?? 'no terrain',
+          field.trickRoom ? 'TR' : null,
+          field.myTailwind ? 'my TW' : null,
+          field.theirTailwind ? 'opp TW' : null,
+        ].filter(Boolean).join(' · ');
+        setAiReviewBusy(true);
+        reviewLastTurn({
+          myTeam: match.myTeam,
+          opponent: match.opponentTeam,
+          lastTurn,
+          activeSummary,
+          fieldSummary,
+        })
+          .then(text => setAiReview(text))
+          .catch(err => setAiReview(`Error: ${err.message}`))
+          .finally(() => setAiReviewBusy(false));
+        return true;
       }
+    }
+  };
+
+  // Only non-printable / navigation keys remain on the global key listener,
+  // since printable hotkeys collide with typing into the action input.
+  // Slash commands cover the rest — see TextInput onSubmit below.
+  useInput((_ch, key) => {
+    // Match over: Esc exits; /save still works via the input.
+    if (match.outcome) {
+      if (key.escape) onEnd();
       return;
     }
-    // Modal precedence: replacement picker > info picker > info panel > normal.
     if (pendingReplacement) {
       if (key.escape) setPendingReplacement(null);
       return;
     }
     if (infoPickerOpen) {
       if (key.escape) setInfoPickerOpen(false);
-      return; // SelectInput handles arrows/enter
-    }
-    if (infoOpenForOpp != null) {
-      if (key.escape || ch === 'i') setInfoOpenForOpp(null);
       return;
     }
-    if (ch === 'i') { setInfoPickerOpen(true); return; }
+    if (infoOpenForOpp != null) {
+      if (key.escape) setInfoOpenForOpp(null);
+      return;
+    }
     if (key.escape) onEnd();
-    if (ch === 's') {
-      saveMatchAsync(stores, match, setMessage);
-      setMessage(`Snapshot saved (${match.id}).`);
-    }
-    if (ch === 'n') finalizeTurn();
-    if (ch === 'c') setShowCrits(c => !c);
-    if (ch === 'a') setShowAllMoves(a => !a);
-    if (ch === 'r' && match.turns.length > 0 && aiAvailable() && !aiReviewBusy) {
-      const lastTurn = match.turns[match.turns.length - 1]!;
-      const activeSummary = [
-        activeIdx.mine[0] != null ? `m1 ${match.myTeam[activeIdx.mine[0]]!.species} HP ${(match.myCurrentHp?.[activeIdx.mine[0]] ?? 100).toFixed(0)}%` : 'm1 empty',
-        activeIdx.mine[1] != null ? `m2 ${match.myTeam[activeIdx.mine[1]]!.species} HP ${(match.myCurrentHp?.[activeIdx.mine[1]] ?? 100).toFixed(0)}%` : 'm2 empty',
-        activeIdx.theirs[0] != null ? `o1 ${match.opponentTeam[activeIdx.theirs[0]]!.species} HP ${(match.opponentTeam[activeIdx.theirs[0]]!.currentHpPercent ?? 100).toFixed(0)}%` : 'o1 empty',
-        activeIdx.theirs[1] != null ? `o2 ${match.opponentTeam[activeIdx.theirs[1]]!.species} HP ${(match.opponentTeam[activeIdx.theirs[1]]!.currentHpPercent ?? 100).toFixed(0)}%` : 'o2 empty',
-      ].join(' · ');
-      const fieldSummary = [
-        field.weather ?? 'no weather',
-        field.terrain ?? 'no terrain',
-        field.trickRoom ? 'TR' : null,
-        field.myTailwind ? 'my TW' : null,
-        field.theirTailwind ? 'opp TW' : null,
-      ].filter(Boolean).join(' · ');
-      setAiReviewBusy(true);
-      reviewLastTurn({
-        myTeam: match.myTeam,
-        opponent: match.opponentTeam,
-        lastTurn,
-        activeSummary,
-        fieldSummary,
-      })
-        .then(text => setAiReview(text))
-        .catch(err => setAiReview(`Error: ${err.message}`))
-        .finally(() => setAiReviewBusy(false));
-    }
     if (key.backspace && input.length === 0 && draftActions.length > 0) {
       setDraftActions(prev => prev.slice(0, -1));
       setMessage('Removed last action of in-progress turn.');
@@ -940,7 +962,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
         </Box>
       )}
       <Text dimColor>
-        Type one action per line. [n] next turn · [s] snapshot · [i] opp info · [c] toggle crit · [a] show all my moves · [r] Claude review last turn · backspace on empty input removes last · [ESC] end match
+        Type one action per line, or a slash command. Commands: /next /save /info /crit /allmoves /review /help · ESC ends match · Backspace on empty input removes last draft action
       </Text>
       <Text dimColor>
         Syntax: <Text color="white">m1 &gt; Move &gt; o2 &gt; 33</Text> (opp now at 33%) · <Text color="white">o1 &gt; Move &gt; m1 &gt; 145</Text> (you now at 145 HP) · <Text color="white">m1 &gt; switch &gt; Species</Text>
@@ -1134,6 +1156,19 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
             onSubmit={value => {
               const trimmed = value.trim();
               if (!trimmed) return;
+              // Slash commands take precedence over the action parser. They
+              // never collide because action lines don't start with '/'.
+              const cmd = parseCommand(trimmed, BATTLE_COMMANDS);
+              if (cmd) {
+                runBattleCommand(cmd.id);
+                setInput('');
+                return;
+              }
+              if (trimmed.startsWith('/')) {
+                setMessage(`Unknown command: ${trimmed}. Type /help.`);
+                setInput('');
+                return;
+              }
               const r = parseTurnLine(trimmed, ctxWithDraft, draftActions.length + 1);
               if (!r.ok) {
                 setMessage(`Couldn't parse: ${r.error}`);
@@ -1204,7 +1239,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
         </Box>
       )}
 
-      {aiReviewBusy && <Box marginTop={1}><Text dimColor>Claude reviewing…</Text></Box>}
+      {aiReviewBusy && <Box marginTop={1}><PikaSpinner label="Pikachu is reviewing the last turn…" /></Box>}
       {aiReview && !aiReviewBusy && (
         <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor="magenta" paddingX={1}>
           <Text bold color="magenta">Claude's read on turn {match.turns.length}</Text>
