@@ -1,49 +1,67 @@
-// Tiny Ink spinner used while the AI is thinking. Frames are intentionally
-// short (a couple of glyphs each) so they fit inline with a status message
-// like "Pikachu thinking… ⚡(>'-')>". The frame index advances on a 120ms
-// interval that's cleared when the component unmounts.
+// Tiny chibi-Pikachu throbber used while the AI is thinking. Three short
+// lines (ears / face / chin) so it actually reads as a creature rather than
+// just a row of glyphs. The middle row's face cycles through expressions and
+// cheek-spark states; the ears and chin stay still, keeping the silhouette
+// stable enough that the eye moves catch the user's eye.
 //
-// The exported `spinnerFrames` array is the single source of truth and is
-// used by the test to assert the cycle progresses. Keep it short and visually
-// distinct; the goal is "something is happening", not a flipbook.
+// The exported `spinnerFrames` array is the single source of truth — both
+// the React component and the test consume it. Each frame is the full 3-line
+// silhouette so tests can verify width parity without parsing the component.
 import React, { useEffect, useState } from 'react';
-import { Text } from 'ink';
+import { Box, Text } from 'ink';
 
-// Pikachu cheek-spark animation. Tail wags left/right with little lightning
-// bolts firing alongside. Reads as motion in a monospace cell.
-export const spinnerFrames: readonly string[] = [
-  "⚡(>'-')>  ",
-  "  <('-'<)⚡",
-  " ⚡^('-')^ ",
-  "  <('-'<)⚡",
+export interface PikaFrame {
+  /** Ears row — the two pointy `/\__/\` ear silhouette. */
+  top: string;
+  /** Face row — the part that animates: eyes + cheek glow + side sparks. */
+  mid: string;
+  /** Chin row — round bottom of the head. */
+  bot: string;
+}
+
+// Six frames cycle through: idle → cheek glow → spark left → cheek glow →
+// blink → spark right. All rows are padded to 11 columns so the silhouette
+// stays vertically aligned regardless of which frame is showing.
+export const spinnerFrames: readonly PikaFrame[] = [
+  { top: '   /\\__/\\  ', mid: '  ( o.o )  ', bot: '   \\____/  ' },
+  { top: '   /\\__/\\  ', mid: ' •( o.o )• ', bot: '   \\____/  ' },
+  { top: ' ⚡ /\\__/\\  ', mid: '  ( O.O )  ', bot: '   \\____/  ' },
+  { top: '   /\\__/\\  ', mid: ' •( O.O )• ', bot: '   \\____/  ' },
+  { top: '   /\\__/\\  ', mid: '  ( -.- )  ', bot: '   \\____/  ' },
+  { top: '   /\\__/\\ ⚡', mid: '  ( O.O )  ', bot: '   \\____/  ' },
 ];
 
-export const FRAME_INTERVAL_MS = 120;
+export const FRAME_INTERVAL_MS = 180;
 
 export interface PikaSpinnerProps {
-  /** Status text shown after the animated frame. Default 'Pikachu thinking…'. */
+  /** Status text shown to the right of the throbber. */
   label?: string;
-  /** Override the colour of the label (defaults to yellow — Pikachu's hue). */
+  /** Override the colour of the silhouette + label. Default 'yellow' (Pika hue). */
   color?: string;
 }
 
 export function PikaSpinner({ label = 'Pikachu thinking…', color = 'yellow' }: PikaSpinnerProps) {
-  const [frame, setFrame] = useState(0);
+  const [tick, setTick] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => {
-      setFrame(f => (f + 1) % spinnerFrames.length);
-    }, FRAME_INTERVAL_MS);
+    const t = setInterval(() => setTick(n => n + 1), FRAME_INTERVAL_MS);
     return () => clearInterval(t);
   }, []);
+  const frame = frameAt(tick);
   return (
-    <Text color={color}>
-      {spinnerFrames[frame]} {label}
-    </Text>
+    <Box flexDirection="row">
+      <Box flexDirection="column" marginRight={2}>
+        <Text color={color}>{frame.top}</Text>
+        <Text color={color} bold>{frame.mid}</Text>
+        <Text color={color}>{frame.bot}</Text>
+      </Box>
+      <Box alignItems="center">
+        <Text color={color}>{label}</Text>
+      </Box>
+    </Box>
   );
 }
 
-// Test-only: deterministic frame for a given tick count. Pure function so we
-// can unit-test the cycle without rendering.
-export function frameAt(tick: number): string {
+// Pure helper so tests can assert the cycle without mounting React.
+export function frameAt(tick: number): PikaFrame {
   return spinnerFrames[tick % spinnerFrames.length]!;
 }
