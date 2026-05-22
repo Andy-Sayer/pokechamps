@@ -20,6 +20,14 @@ function movePriority(name: string): number {
   return typeof m?.priority === 'number' ? m.priority : 0;
 }
 
+// Effective priority bracket for an action — switches resolve at +6 (above
+// every move priority bracket), so switch-vs-switch is a valid speed signal
+// even with no damage logged. switch-vs-move at priority < 6 still falls in
+// different brackets and gets skipped via the bracket check below.
+function effectivePriority(a: MoveAction): number {
+  return a.kind === 'switch' ? 6 : movePriority(a.move);
+}
+
 export interface SpeedInference {
   speedFloor?: number;
   speedCeiling?: number;
@@ -89,8 +97,10 @@ export function inferOpponentSpeeds(match: Match, myTeam: PokemonSet[]): SpeedIn
       for (let j = i + 1; j < actions.length; j++) {
         const a = actions[i]!;
         const b = actions[j]!;
-        if (a.kind === 'switch' || b.kind === 'switch') continue;
-        if (movePriority(a.move) !== movePriority(b.move)) continue;
+        // Same priority bracket only. Switches share the +6 bracket so two
+        // switches DO produce a speed signal; switch-vs-priority-0-move
+        // falls in different brackets and gets skipped here.
+        if (effectivePriority(a) !== effectivePriority(b)) continue;
         // i < j guarantees a moved before b in the turn order.
 
         // ---- mine-vs-opp ---------------------------------------------------

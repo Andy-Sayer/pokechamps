@@ -218,6 +218,66 @@ describe('inferOpponentSpeeds', () => {
     expect(inf[1]!.speedCeiling).toBeGreaterThan(0);
   });
 
+  test('mine switch + opp switch — opp gets a speed bound from my switching mon', () => {
+    // Both switches share the +6 priority bracket. My outgoing mon's
+    // ACTUAL speed bounds the opp's. Here m1 (Jolly Sneasler, very fast)
+    // switched out before o1 → opp speed ≤ mySpd - 1.
+    const myFast = mon({
+      species: 'Sneasler', nature: 'Jolly',
+      evs: { ...ZERO_EVS, atk: 252, spe: 252 },
+    });
+    const myFastSpd = actualSpeed(myFast);
+    const match = makeMatch(
+      [myFast, mon({ species: 'Garchomp' })],
+      ['Incineroar'],
+      [turn([
+        act({ side: 'mine',   attackerTeamIndex: 0, move: 'switch', order: 1, kind: 'switch' }),
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'switch', order: 2, kind: 'switch' }),
+      ])],
+    );
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    expect(inf[0]!.speedCeiling).toBe(myFastSpd - 1);
+  });
+
+  test('switch-vs-switch opp-vs-opp constrains both opps', () => {
+    // User's exact repro scenario, using ONLY switch actions so no damage
+    // logging is needed. The order says Abomasnow (o2) switched before
+    // Absol (o1), so Abomasnow.speed > Absol.speed.
+    const myAny = mon({ species: 'Pikachu' });
+    const match = makeMatch(
+      [myAny],
+      ['Absol', 'Abomasnow'],
+      [turn([
+        // Pure switch-vs-switch on opp side, no mine actions involved.
+        act({ side: 'theirs', attackerTeamIndex: 1, move: 'switch', order: 1, kind: 'switch' }),
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'switch', order: 2, kind: 'switch' }),
+      ])],
+    );
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    // Abomasnow faster than Absol → Abomasnow.speedFloor + Absol.speedCeiling.
+    expect(inf[1]!.speedFloor).toBeDefined();
+    expect(inf[0]!.speedCeiling).toBeDefined();
+  });
+
+  test('switch + priority-0 move stay in DIFFERENT brackets (no signal)', () => {
+    // Switch is +6, Close Combat is 0 — different brackets, no constraint.
+    const myFast = mon({
+      species: 'Sneasler', nature: 'Jolly',
+      evs: { ...ZERO_EVS, spe: 252 },
+    });
+    const match = makeMatch(
+      [myFast],
+      ['Incineroar'],
+      [turn([
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'switch', order: 1, kind: 'switch' }),
+        act({ side: 'mine',   attackerTeamIndex: 0, move: 'Close Combat', order: 2 }),
+      ])],
+    );
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    expect(inf[0]!.speedFloor).toBeUndefined();
+    expect(inf[0]!.speedCeiling).toBeUndefined();
+  });
+
   test('opp-vs-opp under trick room flips the inequality', () => {
     // Under TR, the action that moved earlier was the SLOWER mon. So if
     // attackerTeamIndex 1 (Abomasnow) moved before attackerTeamIndex 0
