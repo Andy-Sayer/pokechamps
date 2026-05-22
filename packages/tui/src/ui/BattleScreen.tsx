@@ -262,6 +262,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
     myActiveTeamIndex: activeIdx.mine,
     theirActiveTeamIndex: activeIdx.theirs,
     myFainted: match.myFainted,
+    myBring: match.bring,
   };
 
   // Apply the in-flight turn's switches to the active map so subsequent
@@ -733,7 +734,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
 
   const sctx = useMemo(() => deriveSuggestionContext(input, ctxWithDraft), [input, ctxWithDraft]);
   const suggestions = useMemo(
-    () => getSuggestions(sctx, { myTeam: match.myTeam, opponentTeam: match.opponentTeam, myFainted: match.myFainted }, 8),
+    () => getSuggestions(sctx, { myTeam: match.myTeam, opponentTeam: match.opponentTeam, myFainted: match.myFainted, bring: match.bring }, 8),
     [sctx, match.myTeam, match.opponentTeam, match.myFainted],
   );
   // When the user is typing in the damage slot (4th `>`-segment), surface a

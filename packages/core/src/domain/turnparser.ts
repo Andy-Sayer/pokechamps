@@ -42,6 +42,11 @@ export interface ParseContext {
   // Team indices of fainted mons on my side. (Opp fainted lives on
   // opponentTeam[i].fainted directly.)
   myFainted?: number[];
+  // The 4 team indices the user committed to at preview. Mine-side switches
+  // must resolve to one of these — you can't send in a mon you didn't bring.
+  // When undefined the parser falls back to the full 6 (preview-stage replay
+  // tests, mainly).
+  myBring?: number[];
 }
 
 // Side-scoped hazard updates emit a different StateUpdate variant — no
@@ -333,6 +338,12 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
     if (teamIndex == null) {
       return { ok: false, error: `couldn't resolve ${inMatch[1]}${inMatch[2]} as a team index` };
     }
+    // Mine side: enforce the bring restriction here too. Manual replacement
+    // ("m5 in m1" after a faint) must still pick from the 4 brought mons.
+    if (sideL === 'mine' && ctx.myBring && !ctx.myBring.includes(teamIndex)) {
+      const species = ctx.myTeam[teamIndex]?.species ?? `m${teamIndex + 1}`;
+      return { ok: false, error: `${species} wasn't brought to this battle — pick one of your 4 brought mons` };
+    }
     return { ok: true, kind: 'state', update: { side: sideL, teamIndex, bringIntoSlot: slot } };
   }
 
@@ -361,6 +372,12 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
     const idx = resolveTeamRef(target, ctx, actor.side);
     if (idx == null) {
       return { ok: false, error: `couldn't resolve switch target "${target}" on ${actor.side === 'mine' ? 'my' : 'opp'} team` };
+    }
+    // Mine side: enforce the bring restriction — you can only send in mons
+    // you committed to at preview. The brought set has 4 of 6.
+    if (actor.side === 'mine' && ctx.myBring && !ctx.myBring.includes(idx)) {
+      const species = ctx.myTeam[idx]?.species ?? `m${idx + 1}`;
+      return { ok: false, error: `${species} wasn't brought to this battle — pick one of your 4 brought mons` };
     }
     return {
       ok: true,

@@ -369,3 +369,56 @@ describe('parseTurnLine — new round (spread, boosts, damage, triggers, crit)',
     expect(b.ok && b.kind === 'state' && b.update.namedTrigger).toBe('balloon');
   });
 });
+
+describe('parseTurnLine — bring restriction on mine switches', () => {
+  // Brought 2 of 3 to this battle: Sneasler (idx 0) + Garchomp (idx 1).
+  // Kingambit (idx 2) is on the team but NOT brought.
+  const ctxBring: ParseContext = { ...ctx, myBring: [0, 1] };
+
+  test('switch by species to a brought mon succeeds', () => {
+    const r = parseTurnLine('m1 > switch > Garchomp', ctxBring, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    expect(r.actions[0]!.targetTeamIndex).toBe(1);
+  });
+
+  test('switch by species to an UNBROUGHT mon errors', () => {
+    const r = parseTurnLine('m1 > switch > Kingambit', ctxBring, 1);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error).toContain('Kingambit');
+    expect(r.error).toContain('brought');
+  });
+
+  test('switch by my-team-ref my3 to an unbrought slot errors', () => {
+    const r = parseTurnLine('m1 > switch > my3', ctxBring, 1);
+    expect(r.ok).toBe(false);
+  });
+
+  test('"m3 in m1" state update to an unbrought slot errors', () => {
+    const r = parseTurnLine('m3 in m1', ctxBring, 1);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error).toContain('brought');
+  });
+
+  test('"m2 in m1" state update to a brought slot succeeds', () => {
+    const r = parseTurnLine('m2 in m1', ctxBring, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'state') return;
+    expect(r.update.bringIntoSlot).toBe(0);
+    expect(r.update.teamIndex).toBe(1);
+  });
+
+  test('opp side is unaffected by myBring (opps switch from full team)', () => {
+    const r = parseTurnLine('o1 > switch > op3', ctxBring, 1);
+    expect(r.ok).toBe(true);
+  });
+
+  test('without myBring the parser falls back to the full team (legacy/replay)', () => {
+    const r = parseTurnLine('m1 > switch > Kingambit', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    expect(r.actions[0]!.targetTeamIndex).toBe(2);
+  });
+});

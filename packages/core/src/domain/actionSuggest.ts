@@ -105,7 +105,7 @@ function dedupe(xs: string[]): string[] {
 
 export function getSuggestions(
   sctx: SuggestionContext,
-  match: { myTeam: PokemonSet[]; opponentTeam: OpponentEntry[]; myFainted?: number[] },
+  match: { myTeam: PokemonSet[]; opponentTeam: OpponentEntry[]; myFainted?: number[]; bring?: number[] },
   limit = 8,
 ): string[] {
   if (sctx.kind === 'state-verb') {
@@ -138,11 +138,16 @@ export function getSuggestions(
   }
 
   // switch-target: team species on the actor's side, minus fainted mons.
+  // Mine: also restrict to the 4 brought to the battle (can't send in a mon
+  // you didn't bring at preview). Falls back to the full 6 when no bring is
+  // set so unit tests outside a real match still get suggestions.
   if (sctx.actorSide === 'mine') {
     const fainted = new Set(match.myFainted ?? []);
+    const bring = match.bring ? new Set(match.bring) : null;
     const pool = match.myTeam
       .map((m, i) => ({ species: m.species, idx: i }))
       .filter(x => !fainted.has(x.idx))
+      .filter(x => bring === null || bring.has(x.idx))
       .map(x => x.species);
     return filterAndRank(pool, sctx.query, limit);
   } else {

@@ -214,6 +214,18 @@ describe('getSuggestions — switch-target', () => {
     expect(s).not.toContain('Pelipper');
     expect(s).toContain('Sinistcha');
   });
+
+  test('mine switch restricts to brought mons when bring is set', () => {
+    // Brought Sneasler + Garchomp; Kingambit (idx 2) is on the team but not
+    // brought, so it should NOT appear in switch-target suggestions.
+    const sctx = deriveSuggestionContext('m1 > switch > ', ctx);
+    const s = getSuggestions(sctx, {
+      myTeam: my, opponentTeam: opp, bring: [0, 1],
+    });
+    expect(s).toContain('Sneasler');
+    expect(s).toContain('Garchomp');
+    expect(s).not.toContain('Kingambit');
+  });
 });
 
 describe('applySuggestion', () => {
