@@ -131,10 +131,21 @@ async function main(): Promise<number> {
   return teamsFail + matchesFail === 0 ? 0 : 1;
 }
 
-main().then(
-  code => process.exit(code),
-  err => {
-    console.error('Migration crashed:', err);
-    process.exit(1);
-  },
-);
+export { main, putTeam, postMatch };
+
+// Only auto-run when invoked directly as a script (via `tsx
+// migrate-to-server.ts`) — when imported by tests we want to call `main()`
+// ourselves and assert its exit code.
+import { fileURLToPath } from 'node:url';
+const isDirectInvocation =
+  process.argv[1] !== undefined &&
+  fileURLToPath(import.meta.url) === process.argv[1];
+if (isDirectInvocation) {
+  main().then(
+    code => process.exit(code),
+    err => {
+      console.error('Migration crashed:', err);
+      process.exit(1);
+    },
+  );
+}
