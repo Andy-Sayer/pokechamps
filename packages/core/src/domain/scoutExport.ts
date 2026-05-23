@@ -14,6 +14,7 @@ import type { OpponentEntry, PokemonSet, Match } from './types.js';
 import { MAX_IVS, ZERO_EVS } from './types.js';
 import { mostLikely } from './inference.js';
 import { formatShowdownTeam } from './showdown.js';
+import { effectiveSpeedRange } from './speed.js';
 
 export interface ScoutOptions {
   /** Default level for unknown opp levels. PoChamps is 50 across the board. */
@@ -30,12 +31,16 @@ export function opponentToScoutedSet(opp: OpponentEntry, opts: ScoutOptions = {}
   // off the actual cast when present.
   const top = opp.candidates?.length ? mostLikely(opp.candidates as any) : null;
   const topSet = top as PokemonSet | null;
+  // Nature: prefer the inferred candidate's nature. When we have no
+  // candidate at all, leave it as 'Hardy' (the formatter omits the line
+  // because Hardy is the no-op default — keeps the dump terse).
+  const nature = topSet?.nature ?? 'Hardy';
   return {
     species: opp.species,
     level,
     item: opp.itemConsumed ?? topSet?.item ?? opp.item ?? undefined,
     ability: topSet?.ability ?? opp.ability ?? undefined,
-    nature: topSet?.nature ?? 'Hardy',
+    nature,
     evs: topSet?.evs ?? { ...ZERO_EVS },
     ivs: topSet?.ivs ?? { ...MAX_IVS },
     moves: opp.knownMoves.length ? [...opp.knownMoves] : [],
@@ -60,8 +65,11 @@ export function exportScoutedOpponents(match: Match): string {
   for (const opp of targets) {
     const top = opp.candidates?.length ? mostLikely(opp.candidates) : null;
     const certainty = top ? `inferred from ${opp.candidates!.length} candidate spread(s)` : 'no spread inference';
-    const speed = opp.speedFloor != null || opp.speedCeiling != null
-      ? `speed ${opp.speedFloor ?? '?'}-${opp.speedCeiling ?? '?'}`
+    // Combined range (inferred ∪ candidates ∪ bare envelope) — matches the
+    // in-battle info panel so the user sees the same number in both places.
+    const eff = effectiveSpeedRange(opp);
+    const speed = eff
+      ? `speed ${eff.min}-${eff.max} (${eff.source})`
       : 'speed unknown';
     const scarf = opp.scarfChance != null && opp.scarfChance > 0 ? ` · scarf ${opp.scarfChance}%` : '';
     header.push(`// ${opp.species}: ${certainty} · ${speed}${scarf}`);

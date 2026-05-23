@@ -22,6 +22,7 @@ export type BattleCommandId =
   | 'allmoves'
   | 'review'
   | 'pika'
+  | 'export'
   | 'help'
   | 'quit';
 
@@ -39,6 +40,7 @@ export const BATTLE_COMMANDS: readonly BattleCommand[] = [
   { id: 'allmoves', aliases: ['allmoves', 'all', 'a'], description: 'Toggle all-my-moves view per opp' },
   { id: 'review',   aliases: ['review', 'r'],         description: 'Ask Pikachu (Claude) to review the last turn' },
   { id: 'pika',     aliases: ['pika', 'p'],           description: 'Toggle a Pikachu sprite (for sixel preview)' },
+  { id: 'export',   aliases: ['export', 'x'],         description: 'Show the current team as a Showdown export' },
   { id: 'help',     aliases: ['help', 'h', '?'],      description: 'Show available commands' },
   { id: 'quit',     aliases: ['quit', 'q', 'end'],    description: 'End the match and return to the menu' },
 ];

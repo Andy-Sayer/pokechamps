@@ -14,14 +14,22 @@ import { BattleScreen } from './ui/BattleScreen.js';
 import { TeamBuilder } from './ui/TeamBuilder.js';
 import { MatchHistory } from './ui/MatchHistory.js';
 import { ServerSettings } from './ui/ServerSettings.js';
+import { TeamManagement } from './ui/TeamManagement.js';
+import { AddTeamPicker } from './ui/AddTeamPicker.js';
 
 type Route =
   | { kind: 'menu' }
-  | { kind: 'edit-team'; initialTeam?: PokemonSet[]; initialName?: string }
-  | { kind: 'team-builder' }
+  | { kind: 'team-management' }
+  | { kind: 'add-team' }
+  | { kind: 'edit-team'; initialTeam?: PokemonSet[]; initialName?: string; returnTo?: 'menu' | 'team-management' | 'pick-team' }
+  | { kind: 'team-builder'; returnTo?: 'menu' | 'team-management' | 'pick-team' }
   | { kind: 'history' }
   | { kind: 'server' }
+  // pick-team is now battle-only (entry to a new match). Team browse /
+  // edit / export uses team-management → view-existing, which shows the
+  // same TeamPicker but routes Enter to edit instead of pick-for-battle.
   | { kind: 'pick-team' }
+  | { kind: 'view-teams' }
   | { kind: 'opponent'; myTeam: PokemonSet[]; teamName: string }
   | { kind: 'bring'; myTeam: PokemonSet[]; opponent: OpponentEntry[]; teamName: string }
   | { kind: 'opponent-lead'; myTeam: PokemonSet[]; opponent: OpponentEntry[]; teamName: string; bring: [number, number, number, number] }
@@ -62,12 +70,35 @@ function App() {
       : { text: '● local file mode', color: 'yellow' };
     return <MainMenu connectionBadge={badge} onSelect={k => {
       if (k === 'quit') exit();
-      else if (k === 'edit-team') setRoute({ kind: 'edit-team' });
-      else if (k === 'team-builder') setRoute({ kind: 'team-builder' });
+      else if (k === 'team-management') setRoute({ kind: 'team-management' });
       else if (k === 'history') setRoute({ kind: 'history' });
       else if (k === 'server') setRoute({ kind: 'server' });
       else if (k === 'new-match') setRoute({ kind: 'pick-team' });
     }} />;
+  }
+  if (route.kind === 'team-management') {
+    return <TeamManagement onSelect={choice => {
+      if (choice === 'view') setRoute({ kind: 'view-teams' });
+      else if (choice === 'add') setRoute({ kind: 'add-team' });
+      else setRoute({ kind: 'menu' });
+    }} />;
+  }
+  if (route.kind === 'add-team') {
+    return <AddTeamPicker onSelect={choice => {
+      if (choice === 'interactive') setRoute({ kind: 'team-builder', returnTo: 'team-management' });
+      else if (choice === 'import') setRoute({ kind: 'edit-team', returnTo: 'team-management' });
+      else setRoute({ kind: 'team-management' });
+    }} />;
+  }
+  if (route.kind === 'view-teams') {
+    // Same TeamPicker, but onPick edits instead of starting a battle.
+    return <TeamPicker
+      stores={stores}
+      onPick={(team, name) => setRoute({ kind: 'edit-team', initialTeam: team, initialName: name })}
+      onCreateNew={() => setRoute({ kind: 'add-team' })}
+      onEdit={(team, name) => setRoute({ kind: 'edit-team', initialTeam: team, initialName: name })}
+      onCancel={() => setRoute({ kind: 'team-management' })}
+    />;
   }
   if (route.kind === 'server') {
     return <ServerSettings
@@ -80,23 +111,28 @@ function App() {
     return <MatchHistory stores={stores} onExit={() => setRoute({ kind: 'menu' })} />;
   }
   if (route.kind === 'edit-team') {
+    const back = route.returnTo ?? 'team-management';
     return <TeamPaste
       stores={stores}
       initialTeam={route.initialTeam}
       initialName={route.initialName}
-      onDone={() => setRoute({ kind: 'menu' })}
-      onCancel={() => setRoute({ kind: 'menu' })}
+      onDone={() => setRoute({ kind: back })}
+      onCancel={() => setRoute({ kind: back })}
     />;
   }
   if (route.kind === 'team-builder') {
-    return <TeamBuilder stores={stores} onDone={() => setRoute({ kind: 'menu' })} onCancel={() => setRoute({ kind: 'menu' })} />;
+    const back = route.returnTo ?? 'team-management';
+    return <TeamBuilder stores={stores} onDone={() => setRoute({ kind: back })} onCancel={() => setRoute({ kind: back })} />;
   }
   if (route.kind === 'pick-team') {
     return <TeamPicker
       stores={stores}
       onPick={(team, name) => setRoute({ kind: 'opponent', myTeam: team, teamName: name })}
-      onCreateNew={() => setRoute({ kind: 'edit-team' })}
-      onEdit={(team, name) => setRoute({ kind: 'edit-team', initialTeam: team, initialName: name })}
+      // No teams yet? Route into the add-team flow but return to pick-team
+      // after so the user can immediately start the match they were trying
+      // to start.
+      onCreateNew={() => setRoute({ kind: 'edit-team', returnTo: 'pick-team' })}
+      onEdit={(team, name) => setRoute({ kind: 'edit-team', initialTeam: team, initialName: name, returnTo: 'pick-team' })}
       onCancel={() => setRoute({ kind: 'menu' })}
     />;
   }

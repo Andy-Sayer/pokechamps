@@ -172,6 +172,10 @@ export interface Match {
   myToxCounter?: Record<number, number>;
   // myTeam index → sleep counter (1-3 remaining turns).
   mySleepCounter?: Record<number, number>;
+  // myTeam indices that have mega-evolved this match. Parallel to
+  // OpponentEntry.megaUsed — mega is a once-per-battle gimmick so this
+  // is just a set of "has used it" indices.
+  myMegaUsed?: number[];
   // Set when the match ends (4 KOs on either side). Persists to snapshots.
   outcome?: 'victory' | 'defeat' | 'tie';
   turns: Turn[];

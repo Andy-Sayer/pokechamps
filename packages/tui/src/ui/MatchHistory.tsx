@@ -4,7 +4,7 @@ import SelectInput from 'ink-select-input';
 import type { Match } from '@pokechamps/core/domain/types.js';
 import type { Stores, MatchSummary } from '@pokechamps/core/storage/index.js';
 import { exportScoutedOpponents } from '@pokechamps/core/domain/scoutExport.js';
-import { writeExport } from '@pokechamps/core/domain/storage.js';
+import { ExportPanel } from './ExportPanel.js';
 
 export interface MatchHistoryProps {
   stores: Stores;
@@ -29,8 +29,9 @@ export function MatchHistory({ stores, onExit }: MatchHistoryProps) {
   const [summaries, setSummaries] = useState<MatchSummary[] | null>(null);
   const [selected, setSelected] = useState<{ id: string; match: Match } | null>(null);
   const [turnCursor, setTurnCursor] = useState(0);
-  // Transient line under the header — shows the export path after `x`.
-  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  // When set: render an ExportPanel overlay below the turn display. Esc
+  // clears.
+  const [exportText, setExportText] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,7 +43,8 @@ export function MatchHistory({ stores, onExit }: MatchHistoryProps) {
 
   useInput((input, key) => {
     if (key.escape) {
-      if (selected) { setSelected(null); setTurnCursor(0); setStatusMsg(null); }
+      if (exportText) { setExportText(null); return; }
+      if (selected) { setSelected(null); setTurnCursor(0); }
       else onExit();
     }
     if (selected && selected.match.turns.length > 0) {
@@ -50,10 +52,7 @@ export function MatchHistory({ stores, onExit }: MatchHistoryProps) {
       if (key.rightArrow) setTurnCursor(c => Math.min(selected.match.turns.length - 1, c + 1));
     }
     if (selected && input === 'x') {
-      // Dump the scouted opponent info as a Showdown export. File name uses
-      // the match id so re-exporting overwrites in place.
-      const path = writeExport(`scout-${selected.id}.txt`, exportScoutedOpponents(selected.match));
-      setStatusMsg(`Exported scouted opps to ${path}`);
+      setExportText(exportScoutedOpponents(selected.match));
     }
   });
 
@@ -91,9 +90,8 @@ export function MatchHistory({ stores, onExit }: MatchHistoryProps) {
           Opp:     {selected.match.opponentTeam.map(o => o.species).join(', ')}
         </Text>
         <Text dimColor>
-          ←/→ step turn · <Text color="white">x</Text> export scouted opps · ESC back
+          ←/→ step turn · <Text color="white">x</Text> show scouted-opp export · ESC back
         </Text>
-        {statusMsg && <Text color="green">{statusMsg}</Text>}
         <Box marginTop={1} flexDirection="column">
           {selected.match.turns.length === 0 ? (
             <Text dimColor>(no turns logged)</Text>
@@ -112,6 +110,13 @@ export function MatchHistory({ stores, onExit }: MatchHistoryProps) {
             </>
           )}
         </Box>
+        {exportText && (
+          <ExportPanel
+            title="Scouted opponents export"
+            body={exportText}
+            hint="Select with your terminal + copy · paste into play.pokemonshowdown.com → Teambuilder · Esc closes"
+          />
+        )}
       </Box>
     );
   }

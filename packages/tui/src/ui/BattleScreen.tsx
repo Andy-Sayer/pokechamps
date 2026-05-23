@@ -17,6 +17,8 @@ import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyp
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
 import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict } from '@pokechamps/core/domain/predictions.js';
 import { PikaSpinner } from './PikaSpinner.js';
+import { ExportPanel } from './ExportPanel.js';
+import { formatShowdownTeam } from '@pokechamps/core/domain/showdown.js';
 import { BATTLE_COMMANDS, parseCommand, type BattleCommandId } from './slashCommands.js';
 import { deriveActiveIdx } from '@pokechamps/core/match/engine.js';
 
@@ -222,6 +224,9 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
   // `/pika` preview — toggles a standalone Pikachu sprite so the user can
   // confirm sixel rendering without firing the AI review.
   const [pikaPreview, setPikaPreview] = useState<'run' | 'idle' | null>(null);
+  // `/export` overlay — shows the current team as a Showdown export so the
+  // user can copy it without leaving the match. Esc closes.
+  const [exportPanelText, setExportPanelText] = useState<string | null>(null);
   // AI battle review (opt-in via `r`). Holds the rendered text and a busy flag.
   const [aiReview, setAiReview] = useState<string | null>(null);
   const [aiReviewBusy, setAiReviewBusy] = useState(false);
@@ -694,6 +699,20 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
         if (nextActive.mine[1] === teamIndex) nextActive.mine[1] = null;
       }
     }
+    if (update.megaActivated) {
+      // Mega resolves above all move priorities (after switches), so the
+      // user typically logs it before the turn's attacks. We just flip the
+      // flag — the engine + matchup grid pick up the post-mega forme via
+      // the held-stone resolver in gimmicks/mega.ts.
+      if (side === 'mine') {
+        const list = next.myMegaUsed ? [...next.myMegaUsed] : [];
+        if (!list.includes(teamIndex)) list.push(teamIndex);
+        next.myMegaUsed = list;
+      } else {
+        const o = next.opponentTeam[teamIndex];
+        if (o) o.megaUsed = true;
+      }
+    }
     if (update.bringIntoSlot != null) {
       // Boosts on the OUTGOING active reset on switch-out (game mechanic). The
       // incoming mon starts with whatever boosts they already had stored —
@@ -731,6 +750,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       update.status ? `Status: ${update.status}.` :
       update.cureStatus ? `Status cured.` :
       update.fainted ? `Marked fainted.` :
+      update.megaActivated ? `Mega evolved.` :
       update.bringIntoSlot != null ? `Replacement applied.` :
       'Updated.'
     );
@@ -778,6 +798,11 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
         // Cycle through: off → run → idle → off. Lets the user compare
         // both sprites and confirm sixel works.
         setPikaPreview(p => p == null ? 'run' : p === 'run' ? 'idle' : null);
+        return true;
+      case 'export':
+        // Toggle the export overlay. Renders the current full team (not
+        // just the brought 4) — same as TeamPicker's `x` does.
+        setExportPanelText(t => t == null ? formatShowdownTeam(match.myTeam) : null);
         return true;
       case 'review': {
         if (match.turns.length === 0) {
@@ -842,6 +867,10 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
     }
     if (helpOpen) {
       if (key.escape) setHelpOpen(false);
+      return;
+    }
+    if (exportPanelText != null) {
+      if (key.escape) setExportPanelText(null);
       return;
     }
     if (key.escape) onEnd();
@@ -1127,6 +1156,16 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       {/* /help cheat-sheet — full syntax + slash command reference. Esc to close. */}
       {helpOpen && <HelpPanel />}
 
+      {/* /export overlay — current team's Showdown export, selectable via
+          the terminal's normal selection mechanism. Esc closes. */}
+      {exportPanelText != null && (
+        <ExportPanel
+          title="Showdown export — current team"
+          body={exportPanelText}
+          hint="Select with your terminal + copy · paste into play.pokemonshowdown.com → Teambuilder · Esc closes"
+        />
+      )}
+
       {/* /pika preview — forces SIXEL regardless of detection. If your
           terminal can't render sixel you'll see escape-sequence garbage
           instead of the sprite, which itself confirms the detection
@@ -1333,6 +1372,7 @@ function HelpPanel() {
       <Text>  <Text color="white">/allmoves</Text> (/a)   <Text dimColor>show all my moves per opp</Text></Text>
       <Text>  <Text color="white">/review</Text> (/r)     <Text dimColor>ask Pikachu (Claude) to review last turn</Text></Text>
       <Text>  <Text color="white">/pika</Text> (/p)       <Text dimColor>toggle Pikachu sprite (sixel preview)</Text></Text>
+      <Text>  <Text color="white">/export</Text> (/x)     <Text dimColor>show current team as Showdown export</Text></Text>
       <Text>  <Text color="white">/help</Text> (/h, /?)   <Text dimColor>this panel</Text></Text>
       <Text>  <Text color="white">/quit</Text> (/q)       <Text dimColor>end match and return to menu</Text></Text>
       <Box marginTop={1}>

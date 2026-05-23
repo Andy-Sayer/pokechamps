@@ -7,20 +7,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, '..', '..', '..', '..');
 const teamsDir = join(rootDir, 'data', 'my-teams');
 const matchesDir = join(rootDir, 'matches');
-const exportsDir = join(rootDir, 'data', 'exports');
 
 mkdirSync(teamsDir, { recursive: true });
 mkdirSync(matchesDir, { recursive: true });
-
-// Lazy mkdir for exports — created on first write so we don't litter the
-// data/ tree on a fresh checkout.
-export function writeExport(filename: string, contents: string): string {
-  if (!existsSync(exportsDir)) mkdirSync(exportsDir, { recursive: true });
-  const safe = filename.replace(/[^a-zA-Z0-9_.-]/g, '_');
-  const path = join(exportsDir, safe);
-  writeFileSync(path, contents);
-  return path;
-}
 
 export function listTeams(): { name: string; team: PokemonSet[] }[] {
   if (!existsSync(teamsDir)) return [];

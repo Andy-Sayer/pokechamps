@@ -370,6 +370,26 @@ describe('parseTurnLine — new round (spread, boosts, damage, triggers, crit)',
   });
 });
 
+describe('parseTurnLine — standalone mega declaration', () => {
+  test('"m1 mega" emits a state update with megaActivated:true on my side', () => {
+    const r = parseTurnLine('m1 mega', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'state') return;
+    expect(r.update.side).toBe('mine');
+    expect(r.update.teamIndex).toBe(0);
+    expect(r.update.megaActivated).toBe(true);
+  });
+
+  test('"o2 mega" emits a state update on opp side', () => {
+    const r = parseTurnLine('o2 mega', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'state') return;
+    expect(r.update.side).toBe('theirs');
+    expect(r.update.teamIndex).toBe(1);
+    expect(r.update.megaActivated).toBe(true);
+  });
+});
+
 describe('parseTurnLine — non-damaging moves', () => {
   test('m1 > Gravity (no target) parses as a self-targeted action', () => {
     const r = parseTurnLine('m1 > Gravity', ctx, 1);

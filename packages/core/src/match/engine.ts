@@ -613,6 +613,16 @@ function applyStateUpdateImpl(
       if (nextActive.mine[1] === teamIndex) nextActive.mine[1] = null;
     }
   }
+  if (update.megaActivated) {
+    if (side === 'mine') {
+      const list = next.myMegaUsed ? [...next.myMegaUsed] : [];
+      if (!list.includes(teamIndex)) list.push(teamIndex);
+      next.myMegaUsed = list;
+    } else {
+      const o = next.opponentTeam[teamIndex];
+      if (o) o.megaUsed = true;
+    }
+  }
   if (update.bringIntoSlot != null) {
     if (side === 'mine') {
       const outgoing = nextActive.mine[update.bringIntoSlot];

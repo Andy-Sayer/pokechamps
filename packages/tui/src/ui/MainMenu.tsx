@@ -3,7 +3,7 @@ import { Box, Text } from 'ink';
 import SelectInput from 'ink-select-input';
 
 export interface MainMenuProps {
-  onSelect: (key: 'new-match' | 'team-builder' | 'edit-team' | 'history' | 'server' | 'quit') => void;
+  onSelect: (key: 'new-match' | 'team-management' | 'history' | 'server' | 'quit') => void;
   /** Optional one-line connection badge shown above the menu. */
   connectionBadge?: { text: string; color: 'green' | 'yellow' | 'red' };
 }
@@ -11,8 +11,7 @@ export interface MainMenuProps {
 export function MainMenu({ onSelect, connectionBadge }: MainMenuProps) {
   const items = [
     { label: 'Start a new match', value: 'new-match' as const },
-    { label: 'Build a team (interactive)', value: 'team-builder' as const },
-    { label: 'Paste a Showdown export', value: 'edit-team' as const },
+    { label: 'Team management', value: 'team-management' as const },
     { label: 'Match history', value: 'history' as const },
     { label: 'Server settings', value: 'server' as const },
     { label: 'Quit', value: 'quit' as const },

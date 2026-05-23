@@ -26,6 +26,7 @@ describe('parseCommand', () => {
     expect(parseCommand('/crit', BATTLE_COMMANDS)?.id).toBe('crit');
     expect(parseCommand('/allmoves', BATTLE_COMMANDS)?.id).toBe('allmoves');
     expect(parseCommand('/review', BATTLE_COMMANDS)?.id).toBe('review');
+    expect(parseCommand('/export', BATTLE_COMMANDS)?.id).toBe('export');
     expect(parseCommand('/quit', BATTLE_COMMANDS)?.id).toBe('quit');
     expect(parseCommand('/help', BATTLE_COMMANDS)?.id).toBe('help');
   });
@@ -37,6 +38,7 @@ describe('parseCommand', () => {
     expect(parseCommand('/c', BATTLE_COMMANDS)?.id).toBe('crit');
     expect(parseCommand('/a', BATTLE_COMMANDS)?.id).toBe('allmoves');
     expect(parseCommand('/r', BATTLE_COMMANDS)?.id).toBe('review');
+    expect(parseCommand('/x', BATTLE_COMMANDS)?.id).toBe('export');
     expect(parseCommand('/q', BATTLE_COMMANDS)?.id).toBe('quit');
     expect(parseCommand('/?', BATTLE_COMMANDS)?.id).toBe('help');
   });
@@ -63,7 +65,7 @@ describe('parseCommand', () => {
     expect(dedup.size).toBe(ids.length);
     // Compile-time check: each id matches the union — TS would complain
     // if a command had an unknown id, but a runtime spot-check is cheap.
-    const expected: BattleCommandId[] = ['next', 'save', 'info', 'crit', 'allmoves', 'review', 'help', 'quit'];
+    const expected: BattleCommandId[] = ['next', 'save', 'info', 'crit', 'allmoves', 'review', 'pika', 'export', 'help', 'quit'];
     for (const id of expected) expect(ids).toContain(id);
   });
 });
