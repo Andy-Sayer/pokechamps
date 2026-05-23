@@ -108,6 +108,64 @@ describe('match engine: finalizeTurn', () => {
     expect(result.match.outcome).toBeUndefined();
   });
 
+  test('charge move with no damage sets opp.charging; next-turn damage clears it', () => {
+    const match = freshMatch();
+    // Turn 1: opp commits Solar Beam against my mon, no damage logged.
+    const charge: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0,
+      kind: 'move', move: 'Solar Beam',
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      order: 1,
+    };
+    const r1 = finalizeTurn({
+      match, turn: { actions: [charge], field: match.field }, activeIdx: startActive,
+    });
+    expect(r1.match.opponentTeam[0]!.charging?.move).toBe('Solar Beam');
+    expect(r1.match.opponentTeam[0]!.charging?.turn).toBe(1);
+
+    // Turn 2: same opp fires for damage. Charging flag clears.
+    const fire: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0,
+      kind: 'move', move: 'Solar Beam',
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 40,
+      order: 1,
+    };
+    const r2 = finalizeTurn({
+      match: r1.match, turn: { actions: [fire], field: r1.match.field }, activeIdx: r1.activeIdx,
+    });
+    expect(r2.match.opponentTeam[0]!.charging).toBeUndefined();
+  });
+
+  test('Power-Herb / sun shortcut: damage logged on charge turn never sets the flag', () => {
+    const match = freshMatch();
+    const oneshot: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0,
+      kind: 'move', move: 'Solar Beam',
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 50,  // damage IS logged → not charging
+      order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [oneshot], field: match.field }, activeIdx: startActive,
+    });
+    expect(r.match.opponentTeam[0]!.charging).toBeUndefined();
+  });
+
+  test('non-charge move with no damage (status move) does not set charging', () => {
+    const match = freshMatch();
+    const status: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0,
+      kind: 'move', move: 'Will-O-Wisp',
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [status], field: match.field }, activeIdx: startActive,
+    });
+    expect(r.match.opponentTeam[0]!.charging).toBeUndefined();
+  });
+
   test('opp-side switch action updates active slot + grows opponentBrought', () => {
     const match = freshMatch();
     const switchAction: MoveAction = {

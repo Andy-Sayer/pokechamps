@@ -11,7 +11,7 @@ import { inferOpponentSpeeds, applySpeedInference, actualSpeed, predictTurnOrder
 import { reviewLastTurn } from '@pokechamps/core/ai/prompts.js';
 import { isAvailable as aiAvailable } from '@pokechamps/core/ai/client.js';
 import type { Stores } from '@pokechamps/core/storage/index.js';
-import { getSpecies } from '@pokechamps/core/domain/data.js';
+import { getSpecies, isChargeMove } from '@pokechamps/core/domain/data.js';
 import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs } from '@pokechamps/core/domain/hazards.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
@@ -399,6 +399,35 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       if (a.kind !== 'mega') continue;
       const err = applyMegaAction(next, a);
       if (err) inferenceNotes.push(err);
+    }
+    // Two-turn charge moves (Solar Beam, Electro Shot, etc.). No-damage
+    // charge action → set charging flag; damage action by same mon →
+    // clear it. Power Herb / sun / terrain skip the charge turn entirely,
+    // in which case the user just logs damage normally and we never set
+    // the flag in the first place.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      const idx = a.attackerTeamIndex;
+      if (idx == null) continue;
+      const hasDamage = a.damageHpPercent != null || a.damageRaw != null
+        || a.targetRemainingHpPercent != null || a.targetRemainingHpRaw != null;
+      if (a.side === 'theirs') {
+        const entry = next.opponentTeam[idx];
+        if (!entry) continue;
+        if (!hasDamage && isChargeMove(a.move)) {
+          entry.charging = { move: a.move, turn: turnIndex };
+        } else if (hasDamage) {
+          entry.charging = undefined;
+        }
+      } else {
+        const cur = next.myCharging ?? {};
+        if (!hasDamage && isChargeMove(a.move)) {
+          next.myCharging = { ...cur, [idx]: { move: a.move, turn: turnIndex } };
+        } else if (hasDamage && cur[idx]) {
+          const { [idx]: _drop, ...rest } = cur;
+          next.myCharging = rest;
+        }
+      }
     }
     for (const a of draftActions) {
       if (a.kind === 'switch' || a.kind === 'mega') continue;
@@ -1118,7 +1147,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
             if (!m) return null;
             return (
               <Box key={`mu-${mi}`} flexDirection="column" marginTop={mi === 0 ? 0 : 1}>
-                <Text color="green">m{mi + 1} {match.myMegaForme?.[m.myIdx] ?? m.mySet.species} <Text dimColor>[HP {m.myHp.toFixed(0)}% · spd {m.mySpeed}]</Text></Text>
+                <Text color="green">m{mi + 1} {match.myMegaForme?.[m.myIdx] ?? m.mySet.species} <Text dimColor>[HP {m.myHp.toFixed(0)}% · spd {m.mySpeed}]</Text>{match.myCharging?.[m.myIdx] ? <Text color="cyan"> ⚡charging {match.myCharging[m.myIdx]!.move}</Text> : null}</Text>
                 {m.rows.map(row => {
                   const a0 = activeIdx.theirs[0];
                   const a1 = activeIdx.theirs[1];
@@ -1455,6 +1484,7 @@ function OppRow({ stores, entry, marker, color }: OppRowProps) {
           <Text color={entry.scarfChance >= 50 ? 'yellow' : 'gray'}> ⚡scarf? {entry.scarfChance}%</Text>
         ) : null}
         {entry.megaUsed ? <Text color="magenta"> M</Text> : null}
+        {entry.charging ? <Text color="cyan"> ⚡charging {entry.charging.move}</Text> : null}
       </Text>
       {fetching && (
         <Text dimColor>      (fetching Pikalytics…)</Text>

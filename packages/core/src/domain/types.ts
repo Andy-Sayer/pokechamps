@@ -47,6 +47,11 @@ export interface OpponentEntry {
   // base-stat lookups consult this override when present; `species`
   // remains the base forme so we can look up the mega-options list etc.
   megaForme?: string;
+  // Charge-move tracking. When the opp commits a charge move (Solar Beam,
+  // Electro Shot, Phantom Force, etc.) without dealing damage, we remember
+  // the move so the matchup grid can warn "they'll fire X next turn".
+  // Cleared automatically when this mon's next damaging action lands.
+  charging?: { move: string; turn: number };
   // Current HP as a percent of max (0-100). Undefined = full HP.
   currentHpPercent?: number;
   // True after HP hits 0 (auto on damage or manual via state update).
@@ -190,6 +195,10 @@ export interface Match {
   // Set when /mega is logged. Display + base-stat lookups consult this
   // override; the underlying PokemonSet stays unchanged.
   myMegaForme?: Record<number, string>;
+  // myTeam index → charging-move state. Parallel to OpponentEntry.charging.
+  // Set when a mine-side charge move logged with no damage; cleared when
+  // the same mon's next damaging action lands.
+  myCharging?: Record<number, { move: string; turn: number }>;
   // Set when the match ends (4 KOs on either side). Persists to snapshots.
   outcome?: 'victory' | 'defeat' | 'tie';
   turns: Turn[];

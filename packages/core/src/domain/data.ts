@@ -39,6 +39,17 @@ export function getMove(name: string) {
   const id = toId(name);
   return movesOverrides?.[id] ?? gen.moves.get(name);
 }
+
+// True for moves that charge turn 1 + fire turn 2 (Solar Beam, Electro
+// Shot, Sky Attack, Phantom Force, Fly, Dig, Bounce, Meteor Beam, etc.).
+// The dex marks these with flags.charge === 1. Power Herb / sun (Solar
+// Beam) / electric terrain (Electro Shot) can collapse it to one turn —
+// when that happens the user just logs damage normally and the charging
+// state never gets set.
+export function isChargeMove(name: string): boolean {
+  const m = getMove(name) as any;
+  return !!(m?.flags?.charge);
+}
 export function getItem(name: string) {
   const id = toId(name);
   return itemsOverrides?.[id] ?? gen.items.get(name);

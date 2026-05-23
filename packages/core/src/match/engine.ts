@@ -30,6 +30,7 @@ import {
   absorbsToxicSpikes,
 } from '../domain/hazards.js';
 import { applyMegaAction } from '../domain/megaResolve.js';
+import { isChargeMove } from '../domain/data.js';
 import type { StateUpdate, HazardUpdate } from '../domain/turnparser.js';
 
 export type ActiveIdx = {
@@ -291,6 +292,37 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     if (a.kind !== 'mega') continue;
     const err = applyMegaAction(next, a);
     if (err) inferenceNotes.push(err);
+  }
+
+  // Two-turn charge moves (Solar Beam, Electro Shot, Phantom Force, etc.).
+  // - If an action is a charge move with NO damage logged → the mon is
+  //   charging; remember which move so the matchup grid can surface it.
+  // - If an action has damage logged → clear any prior charging state
+  //   for that mon (the move resolved this turn, either via Power Herb /
+  //   sun / electric terrain, or it's just a different action entirely).
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    const idx = a.attackerTeamIndex;
+    if (idx == null) continue;
+    const hasDamage = a.damageHpPercent != null || a.damageRaw != null
+      || a.targetRemainingHpPercent != null || a.targetRemainingHpRaw != null;
+    if (a.side === 'theirs') {
+      const entry = next.opponentTeam[idx];
+      if (!entry) continue;
+      if (!hasDamage && isChargeMove(a.move)) {
+        entry.charging = { move: a.move, turn: turnIndex };
+      } else if (hasDamage) {
+        entry.charging = undefined;
+      }
+    } else {
+      const cur = next.myCharging ?? {};
+      if (!hasDamage && isChargeMove(a.move)) {
+        next.myCharging = { ...cur, [idx]: { move: a.move, turn: turnIndex } };
+      } else if (hasDamage && cur[idx]) {
+        const { [idx]: _, ...rest } = cur;
+        next.myCharging = rest;
+      }
+    }
   }
 
   // Damage inference for every mine→theirs damaging action.
