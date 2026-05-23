@@ -3,6 +3,8 @@ import { Box, Text, useInput } from 'ink';
 import SelectInput from 'ink-select-input';
 import type { Match } from '@pokechamps/core/domain/types.js';
 import type { Stores, MatchSummary } from '@pokechamps/core/storage/index.js';
+import { exportScoutedOpponents } from '@pokechamps/core/domain/scoutExport.js';
+import { writeExport } from '@pokechamps/core/domain/storage.js';
 
 export interface MatchHistoryProps {
   stores: Stores;
@@ -27,6 +29,8 @@ export function MatchHistory({ stores, onExit }: MatchHistoryProps) {
   const [summaries, setSummaries] = useState<MatchSummary[] | null>(null);
   const [selected, setSelected] = useState<{ id: string; match: Match } | null>(null);
   const [turnCursor, setTurnCursor] = useState(0);
+  // Transient line under the header — shows the export path after `x`.
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -36,14 +40,20 @@ export function MatchHistory({ stores, onExit }: MatchHistoryProps) {
     return () => { cancelled = true; };
   }, [stores]);
 
-  useInput((_input, key) => {
+  useInput((input, key) => {
     if (key.escape) {
-      if (selected) { setSelected(null); setTurnCursor(0); }
+      if (selected) { setSelected(null); setTurnCursor(0); setStatusMsg(null); }
       else onExit();
     }
     if (selected && selected.match.turns.length > 0) {
       if (key.leftArrow) setTurnCursor(c => Math.max(0, c - 1));
       if (key.rightArrow) setTurnCursor(c => Math.min(selected.match.turns.length - 1, c + 1));
+    }
+    if (selected && input === 'x') {
+      // Dump the scouted opponent info as a Showdown export. File name uses
+      // the match id so re-exporting overwrites in place.
+      const path = writeExport(`scout-${selected.id}.txt`, exportScoutedOpponents(selected.match));
+      setStatusMsg(`Exported scouted opps to ${path}`);
     }
   });
 
@@ -80,6 +90,10 @@ export function MatchHistory({ stores, onExit }: MatchHistoryProps) {
         <Text dimColor>
           Opp:     {selected.match.opponentTeam.map(o => o.species).join(', ')}
         </Text>
+        <Text dimColor>
+          ←/→ step turn · <Text color="white">x</Text> export scouted opps · ESC back
+        </Text>
+        {statusMsg && <Text color="green">{statusMsg}</Text>}
         <Box marginTop={1} flexDirection="column">
           {selected.match.turns.length === 0 ? (
             <Text dimColor>(no turns logged)</Text>

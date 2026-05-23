@@ -6,6 +6,7 @@ export * from './domain/data.js';
 export * from './domain/predictions.js';
 export * from './domain/speed.js';
 export * from './domain/inference.js';
+export * from './domain/scoutExport.js';
 export * from './domain/turnparser.js';
 export * from './domain/actionSuggest.js';
 export * from './domain/pikalytics.js';

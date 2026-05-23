@@ -1,6 +1,7 @@
 node_modules/
 dist/
 matches/
+data/exports/
 *.tsbuildinfo
 
 # Server runtime sqlite data (native dev) — Docker uses a named volume

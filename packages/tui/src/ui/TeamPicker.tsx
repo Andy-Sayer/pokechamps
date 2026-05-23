@@ -3,6 +3,8 @@ import { Box, Text, useInput } from 'ink';
 import SelectInput from 'ink-select-input';
 import type { PokemonSet } from '@pokechamps/core/domain/types.js';
 import type { Stores, SavedTeam } from '@pokechamps/core/storage/index.js';
+import { formatShowdownTeam } from '@pokechamps/core/domain/showdown.js';
+import { writeExport } from '@pokechamps/core/domain/storage.js';
 
 export interface TeamPickerProps {
   stores: Stores;
@@ -21,6 +23,8 @@ export function TeamPicker({ stores, onPick, onCreateNew, onEdit, onCancel }: Te
   // ink-select-input fires onHighlight with the focused item — we track that
   // separately to drive the right-hand preview panel.
   const [preview, setPreview] = useState<string | null>(null);
+  // Transient status line — shown after an export, cleared on next render.
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,12 +39,16 @@ export function TeamPicker({ stores, onPick, onCreateNew, onEdit, onCancel }: Te
 
   // `e` while a real team is highlighted: edit it. The previewed team is
   // resolved from the highlighted item, so the user always edits exactly
-  // what they're looking at.
+  // what they're looking at. `x` exports it to data/exports/.
   useInput((input) => {
-    if (input !== 'e') return;
     if (!preview || !teams) return;
     const t = teams.find(t => t.name === preview);
-    if (t) onEdit(t.team, t.name);
+    if (!t) return;
+    if (input === 'e') onEdit(t.team, t.name);
+    if (input === 'x') {
+      const path = writeExport(`team-${t.name}.txt`, formatShowdownTeam(t.team));
+      setStatusMsg(`Exported to ${path}`);
+    }
   });
 
   if (teams === null) {
@@ -68,7 +76,8 @@ export function TeamPicker({ stores, onPick, onCreateNew, onEdit, onCancel }: Te
   return (
     <Box flexDirection="column" padding={1}>
       <Text bold color="cyan">Pick your team</Text>
-      <Text dimColor>Enter to pick · <Text color="white">e</Text> to edit the highlighted team · ESC to cancel</Text>
+      <Text dimColor>Enter to pick · <Text color="white">e</Text> edit · <Text color="white">x</Text> export to Showdown · ESC to cancel</Text>
+      {statusMsg && <Text color="green">{statusMsg}</Text>}
       <Box marginTop={1} flexDirection="row">
         <Box width={30} marginRight={2} flexDirection="column">
           <SelectInput
