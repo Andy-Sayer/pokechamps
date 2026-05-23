@@ -27,9 +27,15 @@ export function sixelSupported(): boolean {
   if (process.env.WT_SESSION) return true;            // Windows Terminal
   if (termProgram === 'wezterm') return true;
   if (termProgram === 'iterm.app') return true;       // iTerm2 (sixel opt-in)
+  if (termProgram === 'tabby') return true;
   if (term.includes('mlterm')) return true;
   if (term.includes('foot')) return true;
   if (term.includes('kitty')) return true;            // via xterm-kitty compat
+
+  // Last-resort heuristic: Windows-side runners (git-bash, ConEmu, etc.)
+  // launched inside Windows Terminal sometimes strip WT_SESSION but leave
+  // WT_PROFILE_ID intact. Check for that as a fallback.
+  if (process.env.WT_PROFILE_ID) return true;
 
   return false;
 }

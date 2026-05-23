@@ -1127,10 +1127,23 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       {/* /help cheat-sheet — full syntax + slash command reference. Esc to close. */}
       {helpOpen && <HelpPanel />}
 
-      {/* /pika preview — sixel sprite check. Toggles through run → idle → off. */}
+      {/* /pika preview — forces SIXEL regardless of detection. If your
+          terminal can't render sixel you'll see escape-sequence garbage
+          instead of the sprite, which itself confirms the detection
+          path. Toggles through run → idle → off. */}
       {pikaPreview && (
-        <Box marginTop={1}>
-          <PikaSpinner sprite={pikaPreview} label={`(/pika preview · ${pikaPreview} · /pika again to switch)`} />
+        <Box flexDirection="column" marginTop={1}>
+          <Text dimColor>
+            /pika preview · {pikaPreview} sprite · force=sixel ·
+            {' '}TERM_PROGRAM={process.env.TERM_PROGRAM ?? '(unset)'} ·
+            {' '}WT_SESSION={process.env.WT_SESSION ? 'yes' : 'no'} ·
+            {' '}TERM={process.env.TERM ?? '(unset)'}
+          </Text>
+          <PikaSpinner
+            sprite={pikaPreview}
+            force="sixel"
+            label={`(/pika again to switch to ${pikaPreview === 'run' ? 'idle' : pikaPreview === 'idle' ? 'off' : 'run'})`}
+          />
         </Box>
       )}
 

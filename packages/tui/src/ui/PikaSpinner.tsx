@@ -114,6 +114,11 @@ export interface PikaSpinnerProps {
   /** Which sprite to show (sixel mode only). 'run' = active loading,
    *  'idle' = ambient/info. Default 'run'. */
   sprite?: 'run' | 'idle';
+  /** Bypass the runtime sixel-support probe. 'sixel' forces bitmap mode
+   *  even on terminals we couldn't auto-detect; 'halfblock' forces the
+   *  ASCII fallback. The /pika debug command uses 'sixel' so the user
+   *  can verify what their terminal actually renders. */
+  force?: 'sixel' | 'halfblock';
 }
 
 function renderRow(segs: readonly PikaSeg[], bodyColor: SegColor): React.ReactElement {
@@ -179,10 +184,13 @@ export function PikaSpinner({
   label = 'Pikachu thinking…',
   bodyColor = 'yellow',
   sprite = 'run',
+  force,
 }: PikaSpinnerProps) {
   // Cache the support check at first render — env vars don't change at
-  // runtime and re-probing on every tick is wasteful.
-  const useSixel = useMemo(() => sixelSupported(), []);
+  // runtime and re-probing on every tick is wasteful. `force` overrides.
+  const useSixel = useMemo(() => force
+    ? force === 'sixel'
+    : sixelSupported(), [force]);
   return useSixel
     ? <PikaSpinnerSixel label={label} sprite={sprite} />
     : <PikaSpinnerHalfBlock label={label} bodyColor={bodyColor} />;
