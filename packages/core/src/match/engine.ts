@@ -220,7 +220,7 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
   const myHpSoFar = new Map<number, number>();
   const sortedActions = [...draftActions].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   for (const a of sortedActions) {
-    if (a.kind === 'switch') continue;
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
     if (typeof a.target !== 'object') continue;
     const tIdx = a.targetTeamIndex;
     if (tIdx == null) continue;
@@ -267,21 +267,34 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
   // Update knownMoves + megaUsed on every opp that acted this turn.
   next.opponentTeam = next.opponentTeam.map(o => ({ ...o }));
   for (const a of draftActions) {
-    if (a.side !== 'theirs' || a.kind === 'switch') continue;
+    if (a.side !== 'theirs') continue;
+    if (a.kind === 'switch') continue;
     const idx = a.attackerTeamIndex;
     if (idx == null) continue;
     const entry = next.opponentTeam[idx];
     if (!entry) continue;
+    // Standalone mega action: just set the flag, don't pollute knownMoves
+    // with a literal "mega" string.
+    if (a.kind === 'mega') { entry.megaUsed = true; continue; }
     if (!entry.knownMoves.includes(a.move)) {
       entry.knownMoves = [...entry.knownMoves, a.move];
     }
     if (a.mega) entry.megaUsed = true;
   }
+  // Standalone mega actions on MY side flip Match.myMegaUsed[].
+  for (const a of draftActions) {
+    if (a.side !== 'mine' || a.kind !== 'mega') continue;
+    const idx = a.attackerTeamIndex;
+    if (idx == null) continue;
+    const list = next.myMegaUsed ? [...next.myMegaUsed] : [];
+    if (!list.includes(idx)) list.push(idx);
+    next.myMegaUsed = list;
+  }
 
   // Damage inference for every mine→theirs damaging action.
   const inferenceNotes: string[] = [];
   for (const a of draftActions) {
-    if (a.kind === 'switch') continue;
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
     if (a.side !== 'mine') continue;
     if (a.damageHpPercent == null && a.damageRaw == null) continue;
     if (typeof a.target !== 'object' || a.target.side !== 'theirs') continue;
@@ -611,16 +624,6 @@ function applyStateUpdateImpl(
       next.myCurrentHp![teamIndex] = 0;
       if (nextActive.mine[0] === teamIndex) nextActive.mine[0] = null;
       if (nextActive.mine[1] === teamIndex) nextActive.mine[1] = null;
-    }
-  }
-  if (update.megaActivated) {
-    if (side === 'mine') {
-      const list = next.myMegaUsed ? [...next.myMegaUsed] : [];
-      if (!list.includes(teamIndex)) list.push(teamIndex);
-      next.myMegaUsed = list;
-    } else {
-      const o = next.opponentTeam[teamIndex];
-      if (o) o.megaUsed = true;
     }
   }
   if (update.bringIntoSlot != null) {

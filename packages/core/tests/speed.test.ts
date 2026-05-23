@@ -218,6 +218,46 @@ describe('inferOpponentSpeeds', () => {
     expect(inf[1]!.speedCeiling).toBeGreaterThan(0);
   });
 
+  test('mine mega + opp mega — opp gets a speed bound (mega-vs-mega bracket)', () => {
+    // Both megas resolve in their own +5 bracket; within it they speed-tie.
+    // If opp went first → opp.speed > mySpd. If mine went first → opp.speed < mySpd.
+    const myFast = mon({
+      species: 'Sneasler', nature: 'Jolly',
+      evs: { ...ZERO_EVS, atk: 252, spe: 252 },
+    });
+    const myFastSpd = actualSpeed(myFast);
+    const match = makeMatch(
+      [myFast],
+      ['Incineroar'],
+      [turn([
+        act({ side: 'mine',   attackerTeamIndex: 0, move: 'mega',  order: 1, kind: 'mega' }),
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'mega',  order: 2, kind: 'mega' }),
+      ])],
+    );
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    // My mega went first → opp must be slower.
+    expect(inf[0]!.speedCeiling).toBe(myFastSpd - 1);
+  });
+
+  test('mega vs move — different brackets, no signal', () => {
+    // Mega is +5, move is +0 → skipped by the bracket check.
+    const myAny = mon({
+      species: 'Sneasler', nature: 'Jolly',
+      evs: { ...ZERO_EVS, spe: 252 },
+    });
+    const match = makeMatch(
+      [myAny],
+      ['Incineroar'],
+      [turn([
+        act({ side: 'mine',   attackerTeamIndex: 0, move: 'mega',         order: 1, kind: 'mega' }),
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'Knock Off',    order: 2 }),
+      ])],
+    );
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    expect(inf[0]!.speedFloor).toBeUndefined();
+    expect(inf[0]!.speedCeiling).toBeUndefined();
+  });
+
   test('mine switch + opp switch — opp gets a speed bound from my switching mon', () => {
     // Both switches share the +6 priority bracket. My outgoing mon's
     // ACTUAL speed bounds the opp's. Here m1 (Jolly Sneasler, very fast)

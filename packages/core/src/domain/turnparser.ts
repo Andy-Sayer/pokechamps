@@ -77,10 +77,6 @@ export interface StateUpdate {
   cureStatus?: boolean;
   fainted?: boolean;
   bringIntoSlot?: 0 | 1;
-  // True when the user logs a standalone mega-evolution declaration (e.g.
-  // `m1 mega`). Apply layer flips Match.myMegaUsed (mine) or
-  // OpponentEntry.megaUsed (theirs).
-  megaActivated?: boolean;
 }
 
 export type ParseResult =
@@ -278,21 +274,6 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
     return { ok: true, kind: 'state', update: { side, teamIndex, status: verb as StateUpdate['status'] } };
   }
 
-  // Standalone mega declaration: "m1 mega" / "o1 mega". Mega Evolution
-  // resolves in its own bracket before any move (after switches), so the
-  // user typically logs it before the corresponding turn's moves — but the
-  // engine doesn't care about ordering here, just the flag.
-  const megaMatch = trimmed.match(/^([mo])([1-6])\s+mega$/i);
-  if (megaMatch) {
-    const side = sideFor(megaMatch[1]!);
-    const n = parseInt(megaMatch[2]!, 10);
-    const teamIndex = resolveStateRef(side, n, ctx);
-    if (teamIndex == null) {
-      return { ok: false, error: `${megaMatch[1]}${megaMatch[2]} has no active mon to mega-evolve` };
-    }
-    return { ok: true, kind: 'state', update: { side, teamIndex, megaActivated: true } };
-  }
-
   // Named after-attack triggers: wp / sash / balloon.
   const triggerMatch = trimmed.match(/^([mo])([1-6])\s+(wp|sash|balloon)$/i);
   if (triggerMatch) {
@@ -374,6 +355,33 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
   // or `in`, none of which appear in action syntax.
   const state = tryParseState(line, ctx);
   if (state) return state;
+
+  // Standalone mega declaration: "m1 mega" / "o1 mega" — no `>` separator.
+  // Emits a kind:'mega' action so it appears in the draft tracker AND
+  // contributes to speed inference for the mega bracket (megas resolve in
+  // speed order against each other, between switches and move priority).
+  const megaMatch = line.trim().match(/^([mo])([1-6])\s+mega$/i);
+  if (megaMatch) {
+    const side: FieldSide = megaMatch[1]!.toLowerCase() === 'm' ? 'mine' : 'theirs';
+    const slot = (parseInt(megaMatch[2]!, 10) - 1) as FieldSlot;
+    const attackerTeamIndex = activeTeamIndex(ctx, side, slot);
+    if (attackerTeamIndex == null) {
+      return { ok: false, error: `${megaMatch[1]}${megaMatch[2]} has no active mon to mega-evolve` };
+    }
+    return {
+      ok: true,
+      kind: 'action',
+      actions: [{
+        side,
+        attackerSlot: slot,
+        kind: 'mega',
+        move: 'mega',
+        attackerTeamIndex,
+        target: 'self',
+        order,
+      }],
+    };
+  }
 
   const parts = line.split('>').map(s => s.trim()).filter(p => p.length > 0);
   if (parts.length < 2) return { ok: false, error: 'expected at least "<actor> > <move>"' };

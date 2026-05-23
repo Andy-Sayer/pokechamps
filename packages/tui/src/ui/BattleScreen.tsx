@@ -323,7 +323,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
     const myHpSoFar = new Map<number, number>();
     const sortedActions = [...draftActions].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     for (const a of sortedActions) {
-      if (a.kind === 'switch') continue;
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
       if (typeof a.target !== 'object') continue;
       const tIdx = a.targetTeamIndex;
       if (tIdx == null) continue;
@@ -373,21 +373,33 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
     // Update each opp's knownMoves with anything they did this turn.
     next.opponentTeam = next.opponentTeam.map(o => ({ ...o }));
     for (const a of draftActions) {
-      if (a.side !== 'theirs' || a.kind === 'switch') continue;
+      if (a.side !== 'theirs') continue;
+      if (a.kind === 'switch') continue;
       const idx = a.attackerTeamIndex;
       if (idx == null) continue;
       const entry = next.opponentTeam[idx];
       if (!entry) continue;
+      // Standalone mega action: flip flag only, skip knownMoves push.
+      if (a.kind === 'mega') { entry.megaUsed = true; continue; }
       if (!entry.knownMoves.includes(a.move)) {
         entry.knownMoves = [...entry.knownMoves, a.move];
       }
       if (a.mega) entry.megaUsed = true;
     }
+    // Standalone mega actions on MY side flip Match.myMegaUsed[].
+    for (const a of draftActions) {
+      if (a.side !== 'mine' || a.kind !== 'mega') continue;
+      const idx = a.attackerTeamIndex;
+      if (idx == null) continue;
+      const list = next.myMegaUsed ? [...next.myMegaUsed] : [];
+      if (!list.includes(idx)) list.push(idx);
+      next.myMegaUsed = list;
+    }
 
     // Run damage inference for every mine→theirs damaging action.
     const inferenceNotes: string[] = [];
     for (const a of draftActions) {
-      if (a.kind === 'switch') continue;
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
       if (a.side !== 'mine') continue;
       if (a.damageHpPercent == null && a.damageRaw == null) continue;
       if (typeof a.target !== 'object' || a.target.side !== 'theirs') continue;
@@ -699,20 +711,6 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
         if (nextActive.mine[1] === teamIndex) nextActive.mine[1] = null;
       }
     }
-    if (update.megaActivated) {
-      // Mega resolves above all move priorities (after switches), so the
-      // user typically logs it before the turn's attacks. We just flip the
-      // flag — the engine + matchup grid pick up the post-mega forme via
-      // the held-stone resolver in gimmicks/mega.ts.
-      if (side === 'mine') {
-        const list = next.myMegaUsed ? [...next.myMegaUsed] : [];
-        if (!list.includes(teamIndex)) list.push(teamIndex);
-        next.myMegaUsed = list;
-      } else {
-        const o = next.opponentTeam[teamIndex];
-        if (o) o.megaUsed = true;
-      }
-    }
     if (update.bringIntoSlot != null) {
       // Boosts on the OUTGOING active reset on switch-out (game mechanic). The
       // incoming mon starts with whatever boosts they already had stored —
@@ -750,7 +748,6 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       update.status ? `Status: ${update.status}.` :
       update.cureStatus ? `Status cured.` :
       update.fainted ? `Marked fainted.` :
-      update.megaActivated ? `Mega evolved.` :
       update.bringIntoSlot != null ? `Replacement applied.` :
       'Updated.'
     );
@@ -1333,6 +1330,12 @@ function actionToLine(a: MoveAction, match: Match): string {
       ? (team[a.targetTeamIndex] as PokemonSet | OpponentEntry | undefined)?.species ?? `?${a.targetTeamIndex}`
       : '?';
     return `${actor} > switch > ${incoming}`;
+  }
+  if (a.kind === 'mega') {
+    // Standalone mega declaration — minimal display, just the actor + verb.
+    // The move field carries variant info ('mega', 'mega-x', 'mega-y') so
+    // surfaces it as part of the verb.
+    return `${actor} ${a.move}`;
   }
   const target = typeof a.target === 'object'
     ? `${a.target.side === 'mine' ? 'm' : 'o'}${a.target.slot + 1}`

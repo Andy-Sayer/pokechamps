@@ -20,12 +20,20 @@ function movePriority(name: string): number {
   return typeof m?.priority === 'number' ? m.priority : 0;
 }
 
-// Effective priority bracket for an action — switches resolve at +6 (above
-// every move priority bracket), so switch-vs-switch is a valid speed signal
-// even with no damage logged. switch-vs-move at priority < 6 still falls in
-// different brackets and gets skipped via the bracket check below.
+// Effective priority bracket for an action. Brackets resolve top-down each
+// turn:
+//   +6 switches      — switch-vs-switch is a speed signal
+//   +5 mega          — mega-vs-mega is a speed signal (between switches
+//                       and move priorities); confirmed via Bulbapedia's
+//                       turn-order page
+//   +N moves         — move's intrinsic priority
+//
+// Cross-bracket pairs (switch-vs-move, mega-vs-move, etc.) get skipped via
+// the bracket equality check in inferOpponentSpeeds.
 function effectivePriority(a: MoveAction): number {
-  return a.kind === 'switch' ? 6 : movePriority(a.move);
+  if (a.kind === 'switch') return 6;
+  if (a.kind === 'mega')   return 5;
+  return movePriority(a.move);
 }
 
 export interface SpeedInference {

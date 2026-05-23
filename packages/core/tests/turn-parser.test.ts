@@ -371,22 +371,34 @@ describe('parseTurnLine — new round (spread, boosts, damage, triggers, crit)',
 });
 
 describe('parseTurnLine — standalone mega declaration', () => {
-  test('"m1 mega" emits a state update with megaActivated:true on my side', () => {
-    const r = parseTurnLine('m1 mega', ctx, 1);
+  test('"m1 mega" emits a kind:mega action on my side', () => {
+    const r = parseTurnLine('m1 mega', ctx, 3);
     expect(r.ok).toBe(true);
-    if (!r.ok || r.kind !== 'state') return;
-    expect(r.update.side).toBe('mine');
-    expect(r.update.teamIndex).toBe(0);
-    expect(r.update.megaActivated).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    const a = r.actions[0]!;
+    expect(a.side).toBe('mine');
+    expect(a.attackerSlot).toBe(0);
+    expect(a.kind).toBe('mega');
+    expect(a.move).toBe('mega');
+    expect(a.attackerTeamIndex).toBe(0);
+    expect(a.target).toBe('self');
+    expect(a.order).toBe(3);
   });
 
-  test('"o2 mega" emits a state update on opp side', () => {
+  test('"o2 mega" emits a kind:mega action on opp side', () => {
     const r = parseTurnLine('o2 mega', ctx, 1);
     expect(r.ok).toBe(true);
-    if (!r.ok || r.kind !== 'state') return;
-    expect(r.update.side).toBe('theirs');
-    expect(r.update.teamIndex).toBe(1);
-    expect(r.update.megaActivated).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    const a = r.actions[0]!;
+    expect(a.side).toBe('theirs');
+    expect(a.attackerSlot).toBe(1);
+    expect(a.kind).toBe('mega');
+  });
+
+  test('"m1 mega" with an empty slot errors out', () => {
+    const ctxEmpty: ParseContext = { ...ctx, myActiveTeamIndex: [null, null] };
+    const r = parseTurnLine('m1 mega', ctxEmpty, 1);
+    expect(r.ok).toBe(false);
   });
 });
 

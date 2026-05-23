@@ -97,9 +97,10 @@ export interface MoveAction {
   attackerSlot: FieldSlot;
   // 'move' for any attacking/status move; 'switch' for sending in a new mon
   // (the `move` field then holds the incoming species name and target is
-  // implicitly the slot being switched into). Defaults to 'move' when absent
-  // to keep older saved matches readable.
-  kind?: 'move' | 'switch';
+  // implicitly the slot being switched into); 'mega' for a standalone mega
+  // evolution declaration. Defaults to 'move' when absent to keep older
+  // saved matches readable.
+  kind?: 'move' | 'switch' | 'mega';
   // Index into myTeam (side === 'mine') or opponentTeam (side === 'theirs')
   // for the acting mon. Resolved at action time so history survives switches.
   attackerTeamIndex?: number;
