@@ -9,6 +9,10 @@ export interface OpponentLeadPickerProps {
   opponent: OpponentEntry[];
   onConfirm: (indices: [number, number]) => void;
   onCancel: () => void;
+  /** Step back one screen (to BringPicker) so the user can change their
+   *  bring choice. Triggered by Esc or Left-arrow. If omitted, falls
+   *  back to onCancel (which typically routes all the way to the menu). */
+  onBack?: () => void;
 }
 
 const LEAD_SIZE = 2;
@@ -17,12 +21,16 @@ const LEAD_SIZE = 2;
 // the 2 leads up front; the back two reveal themselves via switches or
 // forced send-ins after a faint. This picker captures just the leads —
 // the BattleScreen grows the "brought" set as more opp mons appear on field.
-export function OpponentLeadPicker({ stores, opponent, onConfirm, onCancel }: OpponentLeadPickerProps) {
+export function OpponentLeadPicker({ stores, opponent, onConfirm, onCancel, onBack }: OpponentLeadPickerProps) {
   const [cursor, setCursor] = useState(0);
   const [chosen, setChosen] = useState<Set<number>>(new Set());
 
   useInput((input, key) => {
-    if (key.escape) { onCancel(); return; }
+    // Esc + Left-arrow both go back one step (to BringPicker) so the user
+    // can fix the bring if they realise they messed it up. When no
+    // onBack handler is supplied we fall through to onCancel which
+    // typically routes all the way to the main menu.
+    if (key.escape || key.leftArrow) { (onBack ?? onCancel)(); return; }
     if (key.upArrow) setCursor(c => Math.max(0, c - 1));
     if (key.downArrow) setCursor(c => Math.min(opponent.length - 1, c + 1));
     if (input === ' ') {
@@ -40,7 +48,7 @@ export function OpponentLeadPicker({ stores, opponent, onConfirm, onCancel }: Op
   return (
     <Box flexDirection="column" padding={1}>
       <Text bold color="cyan">Opponent's leads — which 2 did they send out at preview?</Text>
-      <Text dimColor>↑/↓ to move · space to toggle · Enter when 2 selected · ESC to cancel</Text>
+      <Text dimColor>↑/↓ to move · space to toggle · Enter when 2 selected · ←/ESC to go back to bring</Text>
       <Text dimColor>The other 2 of their bring will reveal as they switch in or come in on a faint.</Text>
       <Box flexDirection="column" marginTop={1}>
         {opponent.map((o, i) => {

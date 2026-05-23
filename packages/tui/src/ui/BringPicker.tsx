@@ -51,8 +51,12 @@ export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: B
   // builds their own 4-of-6 by toggling team indices with number keys.
   // Esc returns to suggestion mode; the custom pick stays so they can
   // re-enter and fix mistakes.
+  //
+  // customPicks is an ORDERED array (not a Set) so the user's tap order
+  // becomes the bring order — important: the first tap is the lead, the
+  // second tap is m2, etc. Sorting would lose that intent.
   const [customMode, setCustomMode] = useState(false);
-  const [customPicks, setCustomPicks] = useState<Set<number>>(new Set());
+  const [customPicks, setCustomPicks] = useState<number[]>([]);
   const [customError, setCustomError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -63,9 +67,8 @@ export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: B
   // Effective selection: custom picks (when valid) override the suggestion
   // cursor. Used for the matchup preview and Enter-to-confirm.
   const customIndices = useMemo<[number, number, number, number] | null>(() => {
-    if (customPicks.size !== 4) return null;
-    const sorted = [...customPicks].sort((a, b) => a - b) as [number, number, number, number];
-    return sorted;
+    if (customPicks.length !== 4) return null;
+    return [...customPicks] as [number, number, number, number];
   }, [customPicks]);
 
   const selected = brings[cursor];
@@ -88,22 +91,27 @@ export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: B
     }
     if (customMode) {
       // 1-6 toggle inclusion. Enforces a max of 4 — the 5th tap is rejected.
+      // Tap order is preserved (becomes bring order).
       const n = parseInt(input, 10);
       if (!Number.isNaN(n) && n >= 1 && n <= myTeam.length) {
         const idx = n - 1;
         setCustomPicks(prev => {
-          const next = new Set(prev);
-          if (next.has(idx)) next.delete(idx);
-          else if (next.size >= 4) { setCustomError('Already 4 picked — tap one to remove it first.'); return prev; }
-          else next.add(idx);
+          if (prev.includes(idx)) {
+            setCustomError(null);
+            return prev.filter(i => i !== idx);
+          }
+          if (prev.length >= 4) {
+            setCustomError('Already 4 picked — tap one to remove it first.');
+            return prev;
+          }
           setCustomError(null);
-          return next;
+          return [...prev, idx];
         });
         return;
       }
       if (key.return) {
         if (customIndices) onConfirm(customIndices);
-        else setCustomError(`Pick exactly 4 mons (currently ${customPicks.size}).`);
+        else setCustomError(`Pick exactly 4 mons (currently ${customPicks.length}).`);
         return;
       }
       return;
@@ -134,12 +142,15 @@ export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: B
         <Box flexDirection="column" width={36} marginRight={2}>
           <Text bold>My Team</Text>
           {myTeam.map((m, i) => {
-            const picked = customMode && customPicks.has(i);
+            const pickPos = customMode ? customPicks.indexOf(i) : -1;
+            const picked = pickPos >= 0;
             // Highlight picks in green when in custom mode. The number prefix
-            // (1-6) doubles as the toggle key.
+            // shown next to each mon (1-6) doubles as the toggle key. The
+            // pick-order number (#1/#2/#3/#4) shows which bring slot it'll
+            // become — first tap is the lead.
             return (
               <Text key={`mt-${i}`} color={picked ? 'green' : undefined}>
-                {customMode ? (picked ? '✓' : ' ') : ' '}{i + 1}. {shortName(m.species, 14)} <Text dimColor>[{fmtTypes(speciesTypes(m.species))}]</Text>{m.item ? <Text dimColor> {m.item}</Text> : null}
+                {customMode ? (picked ? `#${pickPos + 1}` : '  ') : ' '} {i + 1}. {shortName(m.species, 14)} <Text dimColor>[{fmtTypes(speciesTypes(m.species))}]</Text>{m.item ? <Text dimColor> {m.item}</Text> : null}
               </Text>
             );
           })}
@@ -175,13 +186,13 @@ export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: B
             <Box flexDirection="column">
               <Text bold color="yellow">Custom bring</Text>
               <Text>
-                Picked {customPicks.size}/4:{' '}
-                {customPicks.size === 0
+                Picked {customPicks.length}/4 <Text dimColor>(in bring order — first tap is lead):</Text>{' '}
+                {customPicks.length === 0
                   ? <Text dimColor>(none yet — tap 1-6 to add)</Text>
-                  : [...customPicks].sort((a, b) => a - b).map(i => myTeam[i]!.species).join(' + ')}
+                  : customPicks.map(i => myTeam[i]!.species).join(' → ')}
               </Text>
               {customError && <Text color="red">{customError}</Text>}
-              {customPicks.size === 4 && !customError && (
+              {customPicks.length === 4 && !customError && (
                 <Text color="green">Press Enter to confirm.</Text>
               )}
             </Box>

@@ -13,10 +13,26 @@ export interface TeamPickerProps {
   /** Edit an existing team — opens TeamPaste pre-loaded with the team's
    *  Showdown export. Saving with the same name overwrites silently. */
   onEdit: (team: PokemonSet[], name: string) => void;
+  /** Clone an existing team — opens TeamPaste pre-loaded with the team's
+   *  Showdown export but with a fresh suggested name, so saving creates
+   *  a new variant instead of overwriting. Lets the user tweak one small
+   *  detail without rebuilding from scratch. */
+  onClone: (team: PokemonSet[], suggestedName: string) => void;
   onCancel: () => void;
 }
 
-export function TeamPicker({ stores, onPick, onCreateNew, onEdit, onCancel }: TeamPickerProps) {
+// Picks the smallest "<base>-copy", "<base>-copy2", … that doesn't already
+// exist. Keeps clone-of-clone names reasonable.
+function suggestCopyName(base: string, existing: string[]): string {
+  const taken = new Set(existing);
+  const root = base.replace(/-copy\d*$/i, '');
+  let candidate = `${root}-copy`;
+  let n = 2;
+  while (taken.has(candidate)) candidate = `${root}-copy${n++}`;
+  return candidate;
+}
+
+export function TeamPicker({ stores, onPick, onCreateNew, onEdit, onClone, onCancel }: TeamPickerProps) {
   // null = still loading. Once loaded, an empty list short-circuits to the
   // create-new flow (preserves the prior synchronous behaviour).
   const [teams, setTeams] = useState<SavedTeam[] | null>(null);
@@ -38,14 +54,15 @@ export function TeamPicker({ stores, onPick, onCreateNew, onEdit, onCancel }: Te
     return () => { cancelled = true; };
   }, [stores]);
 
-  // `e` while a real team is highlighted: edit it. `x` opens the export
-  // overlay so the user can select + copy with the terminal directly.
+  // `e` edit, `k` clone (k for kopy — c is taken by /custom-bring style
+  // commands), `x` show Showdown export.
   useInput((input, key) => {
     if (key.escape && exportFor) { setExportFor(null); return; }
     if (!preview || !teams) return;
     const t = teams.find(t => t.name === preview);
     if (!t) return;
     if (input === 'e') onEdit(t.team, t.name);
+    if (input === 'k') onClone(t.team, suggestCopyName(t.name, teams.map(x => x.name)));
     if (input === 'x') {
       setExportFor({ name: t.name, text: formatShowdownTeamSP(t.team) });
     }
@@ -75,7 +92,7 @@ export function TeamPicker({ stores, onPick, onCreateNew, onEdit, onCancel }: Te
   return (
     <Box flexDirection="column" padding={1}>
       <Text bold color="cyan">Pick your team</Text>
-      <Text dimColor>Enter to pick · <Text color="white">e</Text> edit · <Text color="white">x</Text> show Showdown export · ESC to cancel</Text>
+      <Text dimColor>Enter to pick · <Text color="white">e</Text> edit · <Text color="white">k</Text> clone · <Text color="white">x</Text> show Showdown export · ESC to cancel</Text>
       <Box marginTop={1} flexDirection="row">
         <Box width={30} marginRight={2} flexDirection="column">
           <SelectInput

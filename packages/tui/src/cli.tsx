@@ -97,6 +97,10 @@ function App() {
       onPick={(team, name) => setRoute({ kind: 'edit-team', initialTeam: team, initialName: name })}
       onCreateNew={() => setRoute({ kind: 'add-team' })}
       onEdit={(team, name) => setRoute({ kind: 'edit-team', initialTeam: team, initialName: name })}
+      // Clone routes to the same edit screen but with a fresh
+      // suggested name so saving creates a sibling team rather than
+      // overwriting.
+      onClone={(team, name) => setRoute({ kind: 'edit-team', initialTeam: team, initialName: name })}
       onCancel={() => setRoute({ kind: 'team-management' })}
     />;
   }
@@ -133,6 +137,7 @@ function App() {
       // to start.
       onCreateNew={() => setRoute({ kind: 'edit-team', returnTo: 'pick-team' })}
       onEdit={(team, name) => setRoute({ kind: 'edit-team', initialTeam: team, initialName: name, returnTo: 'pick-team' })}
+      onClone={(team, name) => setRoute({ kind: 'edit-team', initialTeam: team, initialName: name, returnTo: 'pick-team' })}
       onCancel={() => setRoute({ kind: 'menu' })}
     />;
   }
@@ -179,6 +184,15 @@ function App() {
         setRoute({ kind: 'battle', match });
       }}
       onCancel={() => setRoute({ kind: 'menu' })}
+      onBack={() => setRoute({
+        // Returning to the bring picker preserves the team + opp so the
+        // user only re-picks their 4. The picker re-scores brings off
+        // the existing inputs.
+        kind: 'bring',
+        myTeam: route.myTeam,
+        opponent: route.opponent,
+        teamName: route.teamName,
+      })}
     />;
   }
   if (route.kind === 'battle') {
