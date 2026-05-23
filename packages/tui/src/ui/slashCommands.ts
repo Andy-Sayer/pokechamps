@@ -16,6 +16,7 @@
 
 export type BattleCommandId =
   | 'next'
+  | 'undo'
   | 'save'
   | 'info'
   | 'crit'
@@ -34,6 +35,7 @@ export interface BattleCommand {
 
 export const BATTLE_COMMANDS: readonly BattleCommand[] = [
   { id: 'next',     aliases: ['next', 'n'],           description: 'Finalize the in-progress turn' },
+  { id: 'undo',     aliases: ['undo', 'u'],           description: 'Remove the last drafted action from this turn' },
   { id: 'save',     aliases: ['save', 's', 'snap'],   description: 'Snapshot the match to disk / server' },
   { id: 'info',     aliases: ['info', 'i'],           description: 'Open the opponent info picker' },
   { id: 'crit',     aliases: ['crit', 'c'],           description: 'Toggle crit damage column in matchup grid' },

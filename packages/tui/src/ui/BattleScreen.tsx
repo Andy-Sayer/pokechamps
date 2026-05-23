@@ -782,6 +782,15 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
         setMessage(`Snapshot saved (${match.id}).`);
         return true;
       case 'next': finalizeTurn(); return true;
+      case 'undo':
+        if (draftActions.length === 0) {
+          setMessage('Nothing to undo — no drafted actions this turn.');
+        } else {
+          const last = draftActions[draftActions.length - 1]!;
+          setDraftActions(prev => prev.slice(0, -1));
+          setMessage(`Removed: ${actionToLine(last, match)}`);
+        }
+        return true;
       case 'crit': setShowCrits(c => !c); return true;
       case 'allmoves': setShowAllMoves(a => !a); return true;
       case 'info': setInfoPickerOpen(true); return true;
@@ -868,10 +877,6 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       return;
     }
     if (key.escape) onEnd();
-    if (key.backspace && input.length === 0 && draftActions.length > 0) {
-      setDraftActions(prev => prev.slice(0, -1));
-      setMessage('Removed last action of in-progress turn.');
-    }
     if (suggestions.length > 0) {
       if (key.upArrow) setHighlight(h => Math.max(0, h - 1));
       else if (key.downArrow) setHighlight(h => Math.min(suggestions.length - 1, h + 1));
@@ -1367,6 +1372,7 @@ function HelpPanel() {
       <Text>  <Text color="white">m rocks on</Text> · <Text color="white">o spikes 2</Text> · <Text color="white">o tspikes 1</Text> · <Text color="white">o web on</Text></Text>
       <Box marginTop={1}><Text bold>Slash commands</Text></Box>
       <Text>  <Text color="white">/next</Text> (/n)       <Text dimColor>finalize the turn</Text></Text>
+      <Text>  <Text color="white">/undo</Text> (/u)       <Text dimColor>remove the last drafted action</Text></Text>
       <Text>  <Text color="white">/save</Text> (/s)       <Text dimColor>snapshot match to disk</Text></Text>
       <Text>  <Text color="white">/info</Text> (/i)       <Text dimColor>open opponent info picker</Text></Text>
       <Text>  <Text color="white">/crit</Text> (/c)       <Text dimColor>toggle crit damage column</Text></Text>
@@ -1377,7 +1383,7 @@ function HelpPanel() {
       <Text>  <Text color="white">/help</Text> (/h, /?)   <Text dimColor>this panel</Text></Text>
       <Text>  <Text color="white">/quit</Text> (/q)       <Text dimColor>end match and return to menu</Text></Text>
       <Box marginTop={1}>
-        <Text dimColor>Esc to close · Backspace on empty input removes last drafted action · Tab accepts the highlighted suggestion</Text>
+        <Text dimColor>Esc to close · Tab accepts the highlighted suggestion</Text>
       </Box>
     </Box>
   );

@@ -21,6 +21,7 @@ describe('parseCommand', () => {
 
   it('resolves canonical verbs', () => {
     expect(parseCommand('/next', BATTLE_COMMANDS)?.id).toBe('next');
+    expect(parseCommand('/undo', BATTLE_COMMANDS)?.id).toBe('undo');
     expect(parseCommand('/save', BATTLE_COMMANDS)?.id).toBe('save');
     expect(parseCommand('/info', BATTLE_COMMANDS)?.id).toBe('info');
     expect(parseCommand('/crit', BATTLE_COMMANDS)?.id).toBe('crit');
@@ -33,6 +34,7 @@ describe('parseCommand', () => {
 
   it('resolves short aliases', () => {
     expect(parseCommand('/n', BATTLE_COMMANDS)?.id).toBe('next');
+    expect(parseCommand('/u', BATTLE_COMMANDS)?.id).toBe('undo');
     expect(parseCommand('/s', BATTLE_COMMANDS)?.id).toBe('save');
     expect(parseCommand('/i', BATTLE_COMMANDS)?.id).toBe('info');
     expect(parseCommand('/c', BATTLE_COMMANDS)?.id).toBe('crit');
@@ -65,7 +67,7 @@ describe('parseCommand', () => {
     expect(dedup.size).toBe(ids.length);
     // Compile-time check: each id matches the union — TS would complain
     // if a command had an unknown id, but a runtime spot-check is cheap.
-    const expected: BattleCommandId[] = ['next', 'save', 'info', 'crit', 'allmoves', 'review', 'pika', 'export', 'help', 'quit'];
+    const expected: BattleCommandId[] = ['next', 'undo', 'save', 'info', 'crit', 'allmoves', 'review', 'pika', 'export', 'help', 'quit'];
     for (const id of expected) expect(ids).toContain(id);
   });
 });
