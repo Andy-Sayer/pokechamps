@@ -13,9 +13,9 @@
 //     item is already known from the team data)
 //
 // Returns an error string when ambiguous; nothing is mutated.
-import type { Match, MoveAction } from './types.js';
+import type { Match, MoveAction, PokemonSet } from './types.js';
 import { getMegaOptions, resolveMegaForme, type MegaOption } from './gimmicks/mega.js';
-import { isLegalItem, toId } from './data.js';
+import { isLegalItem, toId, getSpecies } from './data.js';
 
 function pickOption(
   speciesName: string,
@@ -88,5 +88,29 @@ export function applyMegaAction(match: Match, a: MoveAction): string | null {
   // that matches this forme. Set the item field (mega stones aren't
   // consumed; they stay equipped, so no itemConsumed update).
   opp.item = option.stone;
+  // Retain the candidate stat-point spreads we've inferred so far, but
+  // remap each candidate's species/item/ability to the mega forme so
+  // downstream calcs use the right base stats + ability. EVs / nature /
+  // IVs / moves are preserved unchanged — those are the SP allocations
+  // the user has narrowed via observation and they stay valid across
+  // the mega transformation.
+  if (opp.candidates && opp.candidates.length > 0) {
+    const megaAbility = megaFormeAbility(option.forme);
+    opp.candidates = opp.candidates.map<PokemonSet>(c => ({
+      ...c,
+      species: option.forme,
+      item: option.stone,
+      ability: megaAbility ?? c.ability,
+    }));
+  }
   return null;
+}
+
+// Mega formes have a single ability slot in the dex (`abilities['0']`).
+// Returns undefined if the dex lookup fails — caller falls back to the
+// candidate's existing ability so we don't accidentally wipe it.
+function megaFormeAbility(formeName: string): string | undefined {
+  const sp = getSpecies(formeName) as any;
+  const abilities = sp?.abilities as Record<string, string> | undefined;
+  return abilities?.['0'];
 }

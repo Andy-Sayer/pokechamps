@@ -101,6 +101,46 @@ describe('applyMegaAction — opp side', () => {
   });
 });
 
+describe('applyMegaAction — candidate retention', () => {
+  test('opp candidates keep their EVs / nature but switch species + ability + item to mega forme', () => {
+    const m = makeMatch([mon({ species: 'Sneasler' })], ['Charizard']);
+    // Pre-existing inference: two candidate spreads with different EVs and
+    // a non-mega item the user previously guessed. Both should survive
+    // mega activation but have their species/item/ability rewritten.
+    m.opponentTeam[0]!.candidates = [
+      { species: 'Charizard', level: 50, nature: 'Timid',
+        evs: { hp: 4, atk: 0, def: 0, spa: 252, spd: 0, spe: 252 },
+        ivs: { ...MAX_IVS }, item: 'Heavy-Duty Boots', ability: 'Blaze', moves: [] },
+      { species: 'Charizard', level: 50, nature: 'Modest',
+        evs: { hp: 252, atk: 0, def: 0, spa: 252, spd: 4, spe: 0 },
+        ivs: { ...MAX_IVS }, item: 'Choice Specs', ability: 'Solar Power', moves: [] },
+    ];
+    expect(applyMegaAction(m, megaAction('theirs', 0, 'y'))).toBeNull();
+    const cands = m.opponentTeam[0]!.candidates!;
+    expect(cands).toHaveLength(2);
+    // Species, item, ability remap to mega values.
+    expect(cands[0]!.species).toBe('Charizard-Mega-Y');
+    expect(cands[1]!.species).toBe('Charizard-Mega-Y');
+    expect(cands[0]!.item).toBe('Charizardite Y');
+    expect(cands[1]!.item).toBe('Charizardite Y');
+    expect(cands[0]!.ability).toBe('Drought');
+    expect(cands[1]!.ability).toBe('Drought');
+    // EVs / nature / IVs untouched — the SP allocations carry through.
+    expect(cands[0]!.nature).toBe('Timid');
+    expect(cands[0]!.evs.spa).toBe(252);
+    expect(cands[0]!.evs.spe).toBe(252);
+    expect(cands[1]!.nature).toBe('Modest');
+    expect(cands[1]!.evs.hp).toBe(252);
+  });
+
+  test('opp with no candidates yet just sets the forme + item without erroring', () => {
+    const m = makeMatch([mon({ species: 'Sneasler' })], ['Charizard']);
+    expect(applyMegaAction(m, megaAction('theirs', 0, 'x'))).toBeNull();
+    expect(m.opponentTeam[0]!.candidates).toBeUndefined();
+    expect(m.opponentTeam[0]!.megaForme).toBe('Charizard-Mega-X');
+  });
+});
+
 describe('applyMegaAction — mine side', () => {
   test('Charizard mine + "m1 mega x" records forme on myMegaForme', () => {
     const m = makeMatch([mon({ species: 'Charizard', item: 'Charizardite X' })], ['Pikachu']);
