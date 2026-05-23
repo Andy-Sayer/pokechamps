@@ -39,6 +39,23 @@ describe('parseTurnLine', () => {
     expect(r.actions[0]!.mega).toBeUndefined();
   });
 
+  test('+quick modifier sets quickClaw=true', () => {
+    const r = parseTurnLine('m1+quick > Knock Off > o1 > 67', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    expect(r.actions[0]!.quickClaw).toBe(true);
+    // Mega + crit not set when only +quick was used.
+    expect(r.actions[0]!.mega).toBeUndefined();
+    expect(r.actions[0]!.critical).toBeUndefined();
+  });
+
+  test('+qc alias also sets quickClaw=true', () => {
+    const r = parseTurnLine('o2+qc > Sucker Punch > m1 > 41%', ctx, 2);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    expect(r.actions[0]!.quickClaw).toBe(true);
+  });
+
   test('mega modifier sets mega=true', () => {
     const r = parseTurnLine('m1+mega > Flamethrower > o2 > 45', ctx, 3);
     expect(r.ok).toBe(true);

@@ -1325,7 +1325,12 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
 // Pretty-print a MoveAction back to roughly the syntax that produced it,
 // for display in the in-progress turn list and the history panel.
 function actionToLine(a: MoveAction, match: Match): string {
-  const actor = `${a.side === 'mine' ? 'm' : 'o'}${a.attackerSlot + 1}${a.mega ? '+mega' : ''}`;
+  const mods = [
+    a.mega ? '+mega' : '',
+    a.critical ? '+crit' : '',
+    a.quickClaw ? '+quick' : '',
+  ].join('');
+  const actor = `${a.side === 'mine' ? 'm' : 'o'}${a.attackerSlot + 1}${mods}`;
   if (a.kind === 'switch') {
     const team = a.side === 'mine' ? match.myTeam : match.opponentTeam;
     const incoming = a.targetTeamIndex != null
@@ -1358,7 +1363,7 @@ function HelpPanel() {
       <Text>  <Text color="white">o1 &gt; Sucker Punch &gt; m1 &gt; 145</Text>     <Text dimColor>— opp attack; you now at 145 raw HP</Text></Text>
       <Text>  <Text color="white">m1 &gt; Sucker Punch &gt; o1 &gt; 41%</Text>     <Text dimColor>— explicit % override</Text></Text>
       <Text>  <Text color="white">m1 &gt; Close Combat &gt; o1 &gt; 80 raw</Text>  <Text dimColor>— damage-DEALT in raw HP</Text></Text>
-      <Text>  <Text color="white">m1+mega &gt; Flamethrower &gt; o2 &gt; 45</Text> <Text dimColor>— +mega / +crit / +tera&lt;type&gt; modifiers</Text></Text>
+      <Text>  <Text color="white">m1+mega &gt; Flamethrower &gt; o2 &gt; 45</Text> <Text dimColor>— +mega / +crit / +tera&lt;type&gt; / +quick (Quick Claw)</Text></Text>
       <Text>  <Text color="white">m1 &gt; switch &gt; Kingambit</Text>           <Text dimColor>— switch by species (must be in brought 4)</Text></Text>
       <Box marginTop={1}><Text bold>State updates</Text></Box>
       <Text>  <Text color="white">o3 = 45</Text>          <Text dimColor>— opp HP set to 45%</Text></Text>

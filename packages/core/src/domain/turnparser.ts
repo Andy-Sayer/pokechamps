@@ -90,7 +90,17 @@ export type ParseResult =
 // (the move was a critical hit).
 const ACTOR_RE = /^(m|o)([12])((?:\+[a-z]+)*)$/i;
 
-export interface ActorRef { side: FieldSide; slot: FieldSlot; mega: boolean; crit: boolean }
+export interface ActorRef {
+  side: FieldSide;
+  slot: FieldSlot;
+  mega: boolean;
+  crit: boolean;
+  /** True when the Quick Claw proc'd this turn (or any other +1-priority
+   *  trigger the user logged via +quick/+qc). Bumps effectivePriority in
+   *  speed inference so we don't conclude the mon naturally outsped its
+   *  bracket. */
+  quickClaw: boolean;
+}
 
 export function parseActor(raw: string): ActorRef | null {
   const m = raw.trim().toLowerCase().match(ACTOR_RE);
@@ -101,6 +111,7 @@ export function parseActor(raw: string): ActorRef | null {
     slot: (parseInt(m[2]!, 10) - 1) as FieldSlot,
     mega: mods.includes('mega'),
     crit: mods.includes('crit'),
+    quickClaw: mods.includes('quick') || mods.includes('qc'),
   };
 }
 
@@ -422,6 +433,7 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
         target: { side: actor.side, slot: actor.slot },
         order,
         mega: actor.mega || undefined,
+        quickClaw: actor.quickClaw || undefined,
       }],
     };
   }
@@ -464,6 +476,7 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
         target: 'self',
         order,
         mega: actor.mega || undefined,
+        quickClaw: actor.quickClaw || undefined,
         critical: actor.crit || undefined,
       }],
     };
@@ -491,6 +504,7 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
       order,
       mega: actor.mega || undefined,
       critical: actor.crit || undefined,
+      quickClaw: actor.quickClaw || undefined,
       ...e.dmg,
     }));
     return { ok: true, kind: 'action', actions };
@@ -524,6 +538,7 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
       order,
       mega: actor.mega || undefined,
       critical: actor.crit || undefined,
+      quickClaw: actor.quickClaw || undefined,
       ...dmg,
     }],
   };

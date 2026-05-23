@@ -33,7 +33,12 @@ function movePriority(name: string): number {
 function effectivePriority(a: MoveAction): number {
   if (a.kind === 'switch') return 6;
   if (a.kind === 'mega')   return 5;
-  return movePriority(a.move);
+  // Quick Claw (+1 to whatever priority bracket the move is in) lifts the
+  // action out of its natural bracket. Pairing against same-natural-
+  // bracket actions then fails the bracket-equality check and produces
+  // no speed signal — which is correct, since the claw was the reason
+  // the mon went first, not its speed stat.
+  return movePriority(a.move) + (a.quickClaw ? 1 : 0);
 }
 
 export interface SpeedInference {

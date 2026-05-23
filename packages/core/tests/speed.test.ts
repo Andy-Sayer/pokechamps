@@ -239,6 +239,49 @@ describe('inferOpponentSpeeds', () => {
     expect(inf[0]!.speedCeiling).toBe(myFastSpd - 1);
   });
 
+  test('Quick Claw proc shifts an action into a higher bracket — no speed signal vs same-natural-bracket', () => {
+    // Without +quick, opp going first would imply opp.speed > mySpd. With
+    // +quick, opp is effectively +1 priority — different bracket from mine
+    // at +0 — so no signal is derived.
+    const myFast = mon({
+      species: 'Sneasler', nature: 'Jolly',
+      evs: { ...ZERO_EVS, atk: 252, spe: 252 },
+    });
+    const match = makeMatch(
+      [myFast],
+      ['Incineroar'],
+      [turn([
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'Knock Off', order: 1, quickClaw: true }),
+        act({ side: 'mine',   attackerTeamIndex: 0, move: 'Close Combat', order: 2 }),
+      ])],
+    );
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    expect(inf[0]!.speedFloor).toBeUndefined();
+    expect(inf[0]!.speedCeiling).toBeUndefined();
+  });
+
+  test('Quick Claw vs natural-priority move at same effective +1 — pair contributes signal', () => {
+    // Quick Claw move at priority 0 lifts to +1; opp uses Sucker Punch
+    // (natural +1). Same bracket → speed pair fires.
+    const myFast = mon({
+      species: 'Sneasler', nature: 'Jolly',
+      evs: { ...ZERO_EVS, atk: 252, spe: 252 },
+    });
+    const mySpd = actualSpeed(myFast);
+    const match = makeMatch(
+      [myFast],
+      ['Bisharp'],
+      [turn([
+        act({ side: 'mine',   attackerTeamIndex: 0, move: 'Knock Off', order: 1, quickClaw: true }),
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'Sucker Punch', order: 2 }),
+      ])],
+    );
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    // Opp Sucker Punch (natural +1) lost to my Knock Off+quick (also +1)
+    // → opp.speed <= mySpd - 1.
+    expect(inf[0]!.speedCeiling).toBe(mySpd - 1);
+  });
+
   test('mega vs move — different brackets, no signal', () => {
     // Mega is +5, move is +0 → skipped by the bracket check.
     const myAny = mon({

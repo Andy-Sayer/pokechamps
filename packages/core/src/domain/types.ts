@@ -123,6 +123,11 @@ export interface MoveAction {
   order?: number;
   // True when the attacker mega-evolved this turn (before executing the move).
   mega?: boolean;
+  // True when the action used Quick Claw (or another +1-priority proc).
+  // Bumps effectivePriority by 1 in speed inference so the action ends
+  // up in a higher bracket and doesn't generate a misleading speed
+  // signal against natural-priority same-bracket actions.
+  quickClaw?: boolean;
   helpingHand?: boolean;
   critical?: boolean;
   notes?: string;
