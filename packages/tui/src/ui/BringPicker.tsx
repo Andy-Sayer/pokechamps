@@ -47,20 +47,67 @@ export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: B
   const [cursor, setCursor] = useState(0);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [explaining, setExplaining] = useState(false);
+  // Custom mode: when on, the suggestion list is ignored and the user
+  // builds their own 4-of-6 by toggling team indices with number keys.
+  // Esc returns to suggestion mode; the custom pick stays so they can
+  // re-enter and fix mistakes.
+  const [customMode, setCustomMode] = useState(false);
+  const [customPicks, setCustomPicks] = useState<Set<number>>(new Set());
+  const [customError, setCustomError] = useState<string | null>(null);
 
   useEffect(() => {
     setBrings(scoreBrings(myTeam, opponent).slice(0, 5));
     setCursor(0);
   }, [myTeam, opponent]);
 
+  // Effective selection: custom picks (when valid) override the suggestion
+  // cursor. Used for the matchup preview and Enter-to-confirm.
+  const customIndices = useMemo<[number, number, number, number] | null>(() => {
+    if (customPicks.size !== 4) return null;
+    const sorted = [...customPicks].sort((a, b) => a - b) as [number, number, number, number];
+    return sorted;
+  }, [customPicks]);
+
   const selected = brings[cursor];
+  const effectiveIndices = customMode && customIndices ? customIndices : selected?.myIndices;
   const grid = useMemo(
-    () => selected ? matchupGrid(myTeam, opponent, selected.myIndices) : [],
-    [selected, myTeam, opponent],
+    () => effectiveIndices ? matchupGrid(myTeam, opponent, effectiveIndices) : [],
+    [effectiveIndices, myTeam, opponent],
   );
 
   useInput((input, key) => {
-    if (key.escape) onCancel();
+    if (key.escape) {
+      if (customMode) { setCustomMode(false); setCustomError(null); return; }
+      onCancel();
+      return;
+    }
+    if (input === 'c') {
+      setCustomMode(m => !m);
+      setCustomError(null);
+      return;
+    }
+    if (customMode) {
+      // 1-6 toggle inclusion. Enforces a max of 4 — the 5th tap is rejected.
+      const n = parseInt(input, 10);
+      if (!Number.isNaN(n) && n >= 1 && n <= myTeam.length) {
+        const idx = n - 1;
+        setCustomPicks(prev => {
+          const next = new Set(prev);
+          if (next.has(idx)) next.delete(idx);
+          else if (next.size >= 4) { setCustomError('Already 4 picked — tap one to remove it first.'); return prev; }
+          else next.add(idx);
+          setCustomError(null);
+          return next;
+        });
+        return;
+      }
+      if (key.return) {
+        if (customIndices) onConfirm(customIndices);
+        else setCustomError(`Pick exactly 4 mons (currently ${customPicks.size}).`);
+        return;
+      }
+      return;
+    }
     if (key.upArrow) setCursor(c => Math.max(0, c - 1));
     if (key.downArrow) setCursor(c => Math.min(brings.length - 1, c + 1));
     if (key.return && selected) onConfirm(selected.myIndices);
@@ -76,17 +123,26 @@ export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: B
   return (
     <Box flexDirection="column" padding={1}>
       <Text bold color="cyan">Bring 4 of 6</Text>
-      <Text dimColor>↑/↓ to pick · Enter to confirm · e for Claude review · ESC to cancel</Text>
+      <Text dimColor>
+        {customMode
+          ? <>Custom mode · 1-6 toggle · Enter confirms · ESC back to suggestions</>
+          : <>↑/↓ pick suggestion · Enter confirm · <Text color="white">c</Text> custom · e Claude review · ESC cancel</>}
+      </Text>
 
       <Box flexDirection="row" marginTop={1}>
         {/* Left column: teams */}
         <Box flexDirection="column" width={36} marginRight={2}>
           <Text bold>My Team</Text>
-          {myTeam.map((m, i) => (
-            <Text key={`mt-${i}`}>
-              {' '}{i + 1}. {shortName(m.species, 14)} <Text dimColor>[{fmtTypes(speciesTypes(m.species))}]</Text>{m.item ? <Text dimColor> {m.item}</Text> : null}
-            </Text>
-          ))}
+          {myTeam.map((m, i) => {
+            const picked = customMode && customPicks.has(i);
+            // Highlight picks in green when in custom mode. The number prefix
+            // (1-6) doubles as the toggle key.
+            return (
+              <Text key={`mt-${i}`} color={picked ? 'green' : undefined}>
+                {customMode ? (picked ? '✓' : ' ') : ' '}{i + 1}. {shortName(m.species, 14)} <Text dimColor>[{fmtTypes(speciesTypes(m.species))}]</Text>{m.item ? <Text dimColor> {m.item}</Text> : null}
+              </Text>
+            );
+          })}
           <Box marginTop={1}><Text bold>Opponent</Text></Box>
           {opponent.map((o, i) => {
             const pik = stores.pikalytics.get(o.species);
@@ -115,21 +171,39 @@ export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: B
 
         {/* Right column: brings + matchup */}
         <Box flexDirection="column" flexGrow={1}>
-          <Text bold>Suggested brings (type-matchup weighted)</Text>
-          {brings.length === 0 && <Text dimColor>Scoring brings…</Text>}
-          {brings.map((b, i) => {
-            const mons = b.myIndices.map(idx => myTeam[idx]!.species).join(' + ');
-            return (
-              <Box key={i} flexDirection="column">
-                <Text color={i === cursor ? 'yellow' : undefined}>
-                  {i === cursor ? '>' : ' '} {i + 1}. {mons}  <Text dimColor>[total {b.total}]</Text>
-                </Text>
-                <Text dimColor>     match {b.matchup} · off {b.offense} · def {b.defense} · spd {b.speed} · roles {b.roles}{b.rationale.length ? ` · ${b.rationale.join('; ')}` : ''}</Text>
-              </Box>
-            );
-          })}
+          {customMode ? (
+            <Box flexDirection="column">
+              <Text bold color="yellow">Custom bring</Text>
+              <Text>
+                Picked {customPicks.size}/4:{' '}
+                {customPicks.size === 0
+                  ? <Text dimColor>(none yet — tap 1-6 to add)</Text>
+                  : [...customPicks].sort((a, b) => a - b).map(i => myTeam[i]!.species).join(' + ')}
+              </Text>
+              {customError && <Text color="red">{customError}</Text>}
+              {customPicks.size === 4 && !customError && (
+                <Text color="green">Press Enter to confirm.</Text>
+              )}
+            </Box>
+          ) : (
+            <>
+              <Text bold>Suggested brings (type-matchup weighted)</Text>
+              {brings.length === 0 && <Text dimColor>Scoring brings…</Text>}
+              {brings.map((b, i) => {
+                const mons = b.myIndices.map(idx => myTeam[idx]!.species).join(' + ');
+                return (
+                  <Box key={i} flexDirection="column">
+                    <Text color={i === cursor ? 'yellow' : undefined}>
+                      {i === cursor ? '>' : ' '} {i + 1}. {mons}  <Text dimColor>[total {b.total}]</Text>
+                    </Text>
+                    <Text dimColor>     match {b.matchup} · off {b.offense} · def {b.defense} · spd {b.speed} · roles {b.roles}{b.rationale.length ? ` · ${b.rationale.join('; ')}` : ''}</Text>
+                  </Box>
+                );
+              })}
+            </>
+          )}
 
-          {selected && grid.length > 0 && (
+          {effectiveIndices && grid.length > 0 && (
             <Box flexDirection="column" marginTop={1}>
               <Text bold>Matchup (my STAB+coverage → opp)</Text>
               <Text>
@@ -138,7 +212,7 @@ export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: B
                   <Text key={`hdr-${j}`} dimColor>{shortName(o.species, 5)} </Text>
                 ))}
               </Text>
-              {selected.myIndices.map((idx, row) => (
+              {effectiveIndices.map((idx, row) => (
                 <Text key={`row-${row}`}>
                   {shortName(myTeam[idx]!.species, 8)} {' '}
                   {grid[row]!.map((m, col) => (
