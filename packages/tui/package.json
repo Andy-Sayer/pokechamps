@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "migrate-to-server": "tsx src/scripts/migrate-to-server.ts"
+    "migrate-to-server": "tsx src/scripts/migrate-to-server.ts",
+    "preview-pika": "tsx src/scripts/preview-pika.ts"
   },
   "dependencies": {
     "@pokechamps/core": "*",

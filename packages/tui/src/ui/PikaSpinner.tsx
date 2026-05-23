@@ -1,15 +1,22 @@
-// Chibi-Pikachu throbber. Three short lines (ears / face / chin) so it reads
-// as a creature, plus per-segment colour so the three iconic Pikachu cues
-// land at a glance: YELLOW body, RED cheek dots, WHITE/yellow lightning
-// sparks. The label sits to the right in a row layout.
+// PikaSpinner — dispatches to a sixel-bitmap renderer in terminals that
+// support it (Windows Terminal Preview ≥1.22, WezTerm, iTerm2, etc.) and
+// falls back to a chibi half-block ASCII Pikachu elsewhere.
 //
-// Frames are typed as Segment[] per row instead of plain strings so we can
-// colour the cheeks + sparks independently of the body. The test asserts
-// width parity (sum of segment widths) across rows within each frame, so
-// the silhouette stays vertically aligned regardless of which expression is
-// showing.
-import React, { useEffect, useState } from 'react';
+// Two sprite sets are available via the `sprite` prop:
+//   - 'run'  (default for active thinking): the Lord Libidan running-Pikachu
+//   - 'idle' (for ambient / info displays): the BW idle stand
+//
+// The half-block fallback ignores `sprite` — it just runs the same chibi
+// silhouette cycle. The animation cadence (~150-180ms) matches between the
+// two so neither feels jarring relative to the other.
+import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Text } from 'ink';
+import { SixelImage } from './SixelImage.js';
+import { sixelSupported } from './sixelSupport.js';
+import {
+  IDLE_FRAMES, IDLE_PALETTE,
+  RUN_FRAMES, RUN_PALETTE,
+} from './pikaSprite.js';
 
 // Named colour helpers — keep the palette tight so the throbber reads as
 // Pikachu and not a Christmas tree.
@@ -101,8 +108,12 @@ export function segWidth(segs: readonly PikaSeg[]): number {
 export interface PikaSpinnerProps {
   /** Status text shown to the right of the throbber. */
   label?: string;
-  /** Override the colour of unmarked body segments + label. Default 'yellow'. */
+  /** Override the colour of unmarked body segments + label (half-block only).
+   *  Sixel rendering uses the sprite's baked palette. Default 'yellow'. */
   bodyColor?: SegColor;
+  /** Which sprite to show (sixel mode only). 'run' = active loading,
+   *  'idle' = ambient/info. Default 'run'. */
+  sprite?: 'run' | 'idle';
 }
 
 function renderRow(segs: readonly PikaSeg[], bodyColor: SegColor): React.ReactElement {
@@ -117,7 +128,33 @@ function renderRow(segs: readonly PikaSeg[], bodyColor: SegColor): React.ReactEl
   );
 }
 
-export function PikaSpinner({ label = 'Pikachu thinking…', bodyColor = 'yellow' }: PikaSpinnerProps) {
+// Sixel-bitmap renderer. Cycles through the chosen sprite's frames at the
+// shared FRAME_INTERVAL_MS cadence.
+function PikaSpinnerSixel({ label, sprite }: { label: string; sprite: 'run' | 'idle' }) {
+  const frames = sprite === 'idle' ? IDLE_FRAMES : RUN_FRAMES;
+  const palette = sprite === 'idle' ? IDLE_PALETTE : RUN_PALETTE;
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick(n => n + 1), FRAME_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, []);
+  const frame = frames[tick % frames.length]!;
+  return (
+    <Box flexDirection="row">
+      <Box flexDirection="column" marginRight={2}>
+        <SixelImage bitmap={frame} palette={palette} />
+      </Box>
+      <Box alignItems="center">
+        <Text color="yellow" bold>{label}</Text>
+      </Box>
+    </Box>
+  );
+}
+
+// Half-block ASCII fallback. Used when sixel isn't supported (or
+// POKECHAMPS_SIXEL=0 is set). Ignores `sprite` — same chibi silhouette
+// either way.
+function PikaSpinnerHalfBlock({ label, bodyColor }: { label: string; bodyColor: SegColor }) {
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setTick(n => n + 1), FRAME_INTERVAL_MS);
@@ -136,6 +173,19 @@ export function PikaSpinner({ label = 'Pikachu thinking…', bodyColor = 'yellow
       </Box>
     </Box>
   );
+}
+
+export function PikaSpinner({
+  label = 'Pikachu thinking…',
+  bodyColor = 'yellow',
+  sprite = 'run',
+}: PikaSpinnerProps) {
+  // Cache the support check at first render — env vars don't change at
+  // runtime and re-probing on every tick is wasteful.
+  const useSixel = useMemo(() => sixelSupported(), []);
+  return useSixel
+    ? <PikaSpinnerSixel label={label} sprite={sprite} />
+    : <PikaSpinnerHalfBlock label={label} bodyColor={bodyColor} />;
 }
 
 // Pure helper so tests can assert the cycle without mounting React.
