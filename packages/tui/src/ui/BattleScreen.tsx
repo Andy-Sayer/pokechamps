@@ -1360,6 +1360,7 @@ function HelpPanel() {
       <Text>  <Text color="white">m2 = 145</Text>         <Text dimColor>— my mon HP set to 145 raw</Text></Text>
       <Text>  <Text color="white">o2 ko</Text>            <Text dimColor>— mark fainted</Text></Text>
       <Text>  <Text color="white">o3 in o1</Text>         <Text dimColor>— bring teamIndex into active slot</Text></Text>
+      <Text>  <Text color="white">m1 mega</Text>          <Text dimColor>— flag a mega evolution (log BEFORE the turn's moves)</Text></Text>
       <Text>  <Text color="white">o1 brn</Text> / <Text color="white">par</Text> / <Text color="white">psn</Text> / <Text color="white">tox</Text> / <Text color="white">slp</Text> / <Text color="white">frz</Text> / <Text color="white">cure</Text></Text>
       <Text>  <Text color="white">o1 +2 atk</Text>        <Text dimColor>— stat boost (or -1, multiple stats OK)</Text></Text>
       <Text>  <Text color="white">o1 wp</Text> / <Text color="white">sash</Text> / <Text color="white">balloon</Text>  <Text dimColor>— named item triggers</Text></Text>
