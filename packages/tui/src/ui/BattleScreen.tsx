@@ -219,6 +219,9 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
   // `/help` overlay — full syntax cheat-sheet. Closes on Esc or the next
   // /help invocation.
   const [helpOpen, setHelpOpen] = useState(false);
+  // `/pika` preview — toggles a standalone Pikachu sprite so the user can
+  // confirm sixel rendering without firing the AI review.
+  const [pikaPreview, setPikaPreview] = useState<'run' | 'idle' | null>(null);
   // AI battle review (opt-in via `r`). Holds the rendered text and a busy flag.
   const [aiReview, setAiReview] = useState<string | null>(null);
   const [aiReviewBusy, setAiReviewBusy] = useState(false);
@@ -771,6 +774,11 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       case 'help':
         setHelpOpen(h => !h);
         return true;
+      case 'pika':
+        // Cycle through: off → run → idle → off. Lets the user compare
+        // both sprites and confirm sixel works.
+        setPikaPreview(p => p == null ? 'run' : p === 'run' ? 'idle' : null);
+        return true;
       case 'review': {
         if (match.turns.length === 0) {
           setMessage('/review needs at least one finalized turn.');
@@ -1119,6 +1127,13 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       {/* /help cheat-sheet — full syntax + slash command reference. Esc to close. */}
       {helpOpen && <HelpPanel />}
 
+      {/* /pika preview — sixel sprite check. Toggles through run → idle → off. */}
+      {pikaPreview && (
+        <Box marginTop={1}>
+          <PikaSpinner sprite={pikaPreview} label={`(/pika preview · ${pikaPreview} · /pika again to switch)`} />
+        </Box>
+      )}
+
       {/* Replacement picker — takes focus when an active slot is empty
           after a faint. Other input is paused until the user picks (or Esc). */}
       {pendingReplacement && (() => {
@@ -1304,6 +1319,7 @@ function HelpPanel() {
       <Text>  <Text color="white">/crit</Text> (/c)       <Text dimColor>toggle crit damage column</Text></Text>
       <Text>  <Text color="white">/allmoves</Text> (/a)   <Text dimColor>show all my moves per opp</Text></Text>
       <Text>  <Text color="white">/review</Text> (/r)     <Text dimColor>ask Pikachu (Claude) to review last turn</Text></Text>
+      <Text>  <Text color="white">/pika</Text> (/p)       <Text dimColor>toggle Pikachu sprite (sixel preview)</Text></Text>
       <Text>  <Text color="white">/help</Text> (/h, /?)   <Text dimColor>this panel</Text></Text>
       <Text>  <Text color="white">/quit</Text> (/q)       <Text dimColor>end match and return to menu</Text></Text>
       <Box marginTop={1}>

@@ -21,6 +21,7 @@ export type BattleCommandId =
   | 'crit'
   | 'allmoves'
   | 'review'
+  | 'pika'
   | 'help'
   | 'quit';
 
@@ -37,6 +38,7 @@ export const BATTLE_COMMANDS: readonly BattleCommand[] = [
   { id: 'crit',     aliases: ['crit', 'c'],           description: 'Toggle crit damage column in matchup grid' },
   { id: 'allmoves', aliases: ['allmoves', 'all', 'a'], description: 'Toggle all-my-moves view per opp' },
   { id: 'review',   aliases: ['review', 'r'],         description: 'Ask Pikachu (Claude) to review the last turn' },
+  { id: 'pika',     aliases: ['pika', 'p'],           description: 'Toggle a Pikachu sprite (for sixel preview)' },
   { id: 'help',     aliases: ['help', 'h', '?'],      description: 'Show available commands' },
   { id: 'quit',     aliases: ['quit', 'q', 'end'],    description: 'End the match and return to the menu' },
 ];
