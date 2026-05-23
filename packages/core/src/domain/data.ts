@@ -105,7 +105,9 @@ function expandedLegalIds(allow: string[]): Set<string> {
     out.add(baseId);
     const sp = getSpecies(baseId) as any;
     const formes: string[] | undefined = sp?.otherFormes;
-    if (formes) for (const f of formes) out.add(toId(f));
+    // Exclude gimmick formes (Mega-X, Mega-Y, Primal, Gmax, Tera, etc.)
+    // from autocomplete — those are battle transformations, not pickable.
+    if (formes) for (const f of formes) if (!isGimmickForme(f)) out.add(toId(f));
   }
   _expandedCache = { srcLen: allow.length, set: out };
   return out;
@@ -150,12 +152,29 @@ export function loadFormat(): ChampionsFormat {
 // the configured gimmick without circular imports.
 _setFormatLoader(() => loadFormat());
 
+// Returns true for formes that ONLY exist as in-battle transformations —
+// Mega Evolution, Primal Reversion, Gigantamax, Tera, etc. These should
+// never appear in a team or autocomplete: the user picks the base species,
+// equips the appropriate stone/item, and the engine swaps the forme at
+// runtime (see gimmicks/mega.ts resolveSpecies).
+export function isGimmickForme(speciesIdOrName: string): boolean {
+  const sp = getSpecies(speciesIdOrName) as any;
+  if (!sp || !sp.exists) return false;
+  const forme: string | undefined = sp.forme;
+  if (!forme) return false;
+  // Match-prefix list so 'Mega', 'Mega-X', 'Mega-Y' all hit.
+  return /^(Mega|Primal|Gmax|Tera|Eternamax|Origin|Ultra|Ash)\b/i.test(forme);
+}
+
 export function isLegalSpecies(speciesId: string, format = loadFormat()): boolean {
   const id = toId(speciesId);
   if (format.legality.ban.map(toId).includes(id)) return false;
   if (format.legality.allow.length === 0) return true;
   const allow = format.legality.allow.map(toId);
   if (allow.includes(id)) return true;
+  // Reject gimmick formes (Mega/Primal/Gmax/Tera/etc.) outright — they're
+  // not pickable team members; they're battle transformations.
+  if (isGimmickForme(speciesId)) return false;
   // Forme fallback: Rotom-Wash, Lycanroc-Midnight, etc. aren't enumerated
   // in the format file — we resolve them to their base species in the dex
   // and allow if the base is allowed. This covers every Gen 1-9 forme

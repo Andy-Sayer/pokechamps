@@ -78,6 +78,19 @@ describe('isLegalSpecies', () => {
     expect(isLegalSpecies('landorus')).toBe(false);
     expect(isLegalSpecies('Landorus-Therian')).toBe(false);
   });
+
+  test('mega formes are NOT pickable — they only exist as in-battle transformations', () => {
+    // Charizard + Lucario are both in M-A; their mega formes must still
+    // be rejected as pickable species.
+    expect(isLegalSpecies('Charizard')).toBe(true);
+    expect(isLegalSpecies('Charizard-Mega-X')).toBe(false);
+    expect(isLegalSpecies('Charizard-Mega-Y')).toBe(false);
+    expect(isLegalSpecies('Lucario')).toBe(true);
+    expect(isLegalSpecies('Lucario-Mega')).toBe(false);
+    // Primal Reversion + Gigantamax + Ash-Greninja are battle-only too.
+    expect(isLegalSpecies('Kyogre-Primal')).toBe(false);
+    expect(isLegalSpecies('Greninja-Ash')).toBe(false);
+  });
 });
 
 describe('isLegalItem', () => {
@@ -132,5 +145,16 @@ describe('searchLegalSpecies', () => {
     expect(lycan).toContain('Lycanroc');
     expect(lycan).toContain('Lycanroc-Midnight');
     expect(lycan).toContain('Lycanroc-Dusk');
+  });
+
+  test('autocomplete does NOT surface mega/primal/gigantamax formes', () => {
+    // Charizard appears, but its Mega-X / Mega-Y do not.
+    const char = searchLegalSpecies('charizard');
+    expect(char).toContain('Charizard');
+    expect(char).not.toContain('Charizard-Mega-X');
+    expect(char).not.toContain('Charizard-Mega-Y');
+    const luc = searchLegalSpecies('lucario');
+    expect(luc).toContain('Lucario');
+    expect(luc).not.toContain('Lucario-Mega');
   });
 });
