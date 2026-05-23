@@ -42,6 +42,60 @@ const megaFormeByItem = (() => {
   return out;
 })();
 
+// Map: speciesId -> Array of { forme, stone, variant } for every mega forme
+// the species has. variant is the trailing 'X' / 'Y' / '' (Charizard-Mega-Y
+// → 'Y'; Lucario-Mega → ''). Used by the parser to disambiguate
+// "m1 mega y" vs "m1 mega x" and to power the standalone mega action.
+export interface MegaOption {
+  /** Full mega forme species name, e.g. "Charizard-Mega-Y". */
+  forme: string;
+  /** Item name that triggers this forme, e.g. "Charizardite Y". */
+  stone: string;
+  /** Variant tag if any, lowercased: 'x' / 'y' / '' (no variant). */
+  variant: string;
+}
+const megaOptionsBySpecies = (() => {
+  const out = new Map<string, MegaOption[]>();
+  for (const item of dex.items.all()) {
+    const stone = (item as any).megaStone as Record<string, string> | undefined;
+    if (!stone) continue;
+    for (const [baseSpecies, megaForme] of Object.entries(stone)) {
+      const sid = toId(baseSpecies);
+      const list = out.get(sid) ?? [];
+      // Variant: trailing suffix after the last hyphen if it's a single
+      // letter (X/Y), else empty. Charizard-Mega-Y → 'y'; Lucario-Mega → ''.
+      const match = megaForme.match(/-(?:Mega|Primal)-([A-Z])$/i);
+      const variant = match ? match[1]!.toLowerCase() : '';
+      list.push({ forme: megaForme, stone: item.name, variant });
+      out.set(sid, list);
+    }
+  }
+  return out;
+})();
+
+// Public: list mega formes available for a species. Empty if none.
+export function getMegaOptions(speciesName: string): readonly MegaOption[] {
+  return megaOptionsBySpecies.get(toId(speciesName)) ?? [];
+}
+
+// Public: pick the right mega forme given a variant hint. variant === ''
+// means "auto" — if only one option exists return it, else null (caller
+// must surface a disambiguation error). If variant is 'x' / 'y' / etc.
+// match the option whose variant tag agrees.
+export function resolveMegaForme(
+  speciesName: string,
+  variant: string,
+): MegaOption | null {
+  const opts = getMegaOptions(speciesName);
+  if (opts.length === 0) return null;
+  const v = variant.toLowerCase();
+  if (v === '') {
+    if (opts.length === 1) return opts[0]!;
+    return null;
+  }
+  return opts.find(o => o.variant === v) ?? null;
+}
+
 function holdingMegaStone(itemName: string | undefined): boolean {
   if (!itemName) return false;
   const item = getItem(itemName);

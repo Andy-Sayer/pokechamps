@@ -356,14 +356,17 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
   const state = tryParseState(line, ctx);
   if (state) return state;
 
-  // Standalone mega declaration: "m1 mega" / "o1 mega" — no `>` separator.
-  // Emits a kind:'mega' action so it appears in the draft tracker AND
-  // contributes to speed inference for the mega bracket (megas resolve in
-  // speed order against each other, between switches and move priority).
-  const megaMatch = line.trim().match(/^([mo])([1-6])\s+mega$/i);
+  // Standalone mega declaration: "m1 mega" / "o1 mega" / "m1 mega y" /
+  // "o2 mega x" — no `>` separator. The trailing letter (when present)
+  // disambiguates Charizard / Mewtwo X-vs-Y formes. The move field carries
+  // the variant ('mega', 'mega-x', 'mega-y') so finalizeTurn can resolve
+  // the actual forme name + mega-stone item via @pokechamps/core/domain/
+  // gimmicks/mega's resolveMegaForme().
+  const megaMatch = line.trim().match(/^([mo])([1-6])\s+mega(?:[-\s]+([a-z]))?$/i);
   if (megaMatch) {
     const side: FieldSide = megaMatch[1]!.toLowerCase() === 'm' ? 'mine' : 'theirs';
     const slot = (parseInt(megaMatch[2]!, 10) - 1) as FieldSlot;
+    const variant = (megaMatch[3] ?? '').toLowerCase();
     const attackerTeamIndex = activeTeamIndex(ctx, side, slot);
     if (attackerTeamIndex == null) {
       return { ok: false, error: `${megaMatch[1]}${megaMatch[2]} has no active mon to mega-evolve` };
@@ -375,7 +378,7 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
         side,
         attackerSlot: slot,
         kind: 'mega',
-        move: 'mega',
+        move: variant ? `mega-${variant}` : 'mega',
         attackerTeamIndex,
         target: 'self',
         order,

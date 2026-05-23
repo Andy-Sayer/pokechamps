@@ -29,6 +29,7 @@ import {
   applyHazardsToSwitchIn,
   absorbsToxicSpikes,
 } from '../domain/hazards.js';
+import { applyMegaAction } from '../domain/megaResolve.js';
 import type { StateUpdate, HazardUpdate } from '../domain/turnparser.js';
 
 export type ActiveIdx = {
@@ -264,35 +265,35 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     if (hp === 0 && !next.myFainted!.includes(idx)) next.myFainted!.push(idx);
   }
 
-  // Update knownMoves + megaUsed on every opp that acted this turn.
+  // Collected throughout the rest of finalize — mega resolution errors,
+  // damage-inference candidates produced, etc.
+  const inferenceNotes: string[] = [];
+
+  // Update knownMoves on every opp that acted this turn (skipping mega and
+  // switch actions which don't have a real move name).
   next.opponentTeam = next.opponentTeam.map(o => ({ ...o }));
   for (const a of draftActions) {
     if (a.side !== 'theirs') continue;
-    if (a.kind === 'switch') continue;
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
     const idx = a.attackerTeamIndex;
     if (idx == null) continue;
     const entry = next.opponentTeam[idx];
     if (!entry) continue;
-    // Standalone mega action: just set the flag, don't pollute knownMoves
-    // with a literal "mega" string.
-    if (a.kind === 'mega') { entry.megaUsed = true; continue; }
     if (!entry.knownMoves.includes(a.move)) {
       entry.knownMoves = [...entry.knownMoves, a.move];
     }
     if (a.mega) entry.megaUsed = true;
   }
-  // Standalone mega actions on MY side flip Match.myMegaUsed[].
+  // Standalone mega actions: resolve the forme (X/Y when ambiguous), flip
+  // megaUsed + megaForme + (opp side) confirm the held mega stone. Errors
+  // come back as inference notes so the user sees them next turn.
   for (const a of draftActions) {
-    if (a.side !== 'mine' || a.kind !== 'mega') continue;
-    const idx = a.attackerTeamIndex;
-    if (idx == null) continue;
-    const list = next.myMegaUsed ? [...next.myMegaUsed] : [];
-    if (!list.includes(idx)) list.push(idx);
-    next.myMegaUsed = list;
+    if (a.kind !== 'mega') continue;
+    const err = applyMegaAction(next, a);
+    if (err) inferenceNotes.push(err);
   }
 
   // Damage inference for every mine→theirs damaging action.
-  const inferenceNotes: string[] = [];
   for (const a of draftActions) {
     if (a.kind === 'switch' || a.kind === 'mega') continue;
     if (a.side !== 'mine') continue;

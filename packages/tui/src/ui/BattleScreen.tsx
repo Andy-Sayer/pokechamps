@@ -21,6 +21,7 @@ import { ExportPanel } from './ExportPanel.js';
 import { formatShowdownTeamSP } from '@pokechamps/core/domain/showdown.js';
 import { BATTLE_COMMANDS, parseCommand, type BattleCommandId } from './slashCommands.js';
 import { deriveActiveIdx } from '@pokechamps/core/match/engine.js';
+import { applyMegaAction } from '@pokechamps/core/domain/megaResolve.js';
 
 export interface BattleScreenProps {
   stores: Stores;
@@ -374,30 +375,26 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
     next.opponentTeam = next.opponentTeam.map(o => ({ ...o }));
     for (const a of draftActions) {
       if (a.side !== 'theirs') continue;
-      if (a.kind === 'switch') continue;
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
       const idx = a.attackerTeamIndex;
       if (idx == null) continue;
       const entry = next.opponentTeam[idx];
       if (!entry) continue;
-      // Standalone mega action: flip flag only, skip knownMoves push.
-      if (a.kind === 'mega') { entry.megaUsed = true; continue; }
       if (!entry.knownMoves.includes(a.move)) {
         entry.knownMoves = [...entry.knownMoves, a.move];
       }
       if (a.mega) entry.megaUsed = true;
     }
-    // Standalone mega actions on MY side flip Match.myMegaUsed[].
-    for (const a of draftActions) {
-      if (a.side !== 'mine' || a.kind !== 'mega') continue;
-      const idx = a.attackerTeamIndex;
-      if (idx == null) continue;
-      const list = next.myMegaUsed ? [...next.myMegaUsed] : [];
-      if (!list.includes(idx)) list.push(idx);
-      next.myMegaUsed = list;
-    }
 
-    // Run damage inference for every mine→theirs damaging action.
+    // Run damage inference + mega resolution. Mega actions resolve here so
+    // species / ability / item swap from the base forme to the mega
+    // forme; errors (ambiguous X/Y, no mega available) surface as notes.
     const inferenceNotes: string[] = [];
+    for (const a of draftActions) {
+      if (a.kind !== 'mega') continue;
+      const err = applyMegaAction(next, a);
+      if (err) inferenceNotes.push(err);
+    }
     for (const a of draftActions) {
       if (a.kind === 'switch' || a.kind === 'mega') continue;
       if (a.side !== 'mine') continue;
@@ -1095,7 +1092,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
             if (!m) return null;
             return (
               <Box key={`mu-${mi}`} flexDirection="column" marginTop={mi === 0 ? 0 : 1}>
-                <Text color="green">m{mi + 1} {m.mySet.species} <Text dimColor>[HP {m.myHp.toFixed(0)}% · spd {m.mySpeed}]</Text></Text>
+                <Text color="green">m{mi + 1} {match.myMegaForme?.[m.myIdx] ?? m.mySet.species} <Text dimColor>[HP {m.myHp.toFixed(0)}% · spd {m.mySpeed}]</Text></Text>
                 {m.rows.map(row => {
                   const a0 = activeIdx.theirs[0];
                   const a1 = activeIdx.theirs[1];
@@ -1413,7 +1410,7 @@ function OppRow({ stores, entry, marker, color }: OppRowProps) {
   return (
     <Box flexDirection="column">
       <Text color={effectiveColor as any}>
-        {' '}{marker} {shortName(entry.species, 14)}
+        {' '}{marker} {shortName(entry.megaForme ?? entry.species, 14)}
         {entry.currentHpPercent != null && !entry.fainted ? <Text dimColor> HP {entry.currentHpPercent.toFixed(0)}%</Text> : null}
         {entry.status ? <Text color={statusColor(entry.status)}> {entry.status.toUpperCase()}</Text> : null}
         {entry.fainted ? <Text color="gray"> KO</Text> : null}
@@ -1560,7 +1557,11 @@ function MatchupRow({ marker, opp, offense, offenseCrit, allOffense, allOffenseC
 interface OppInfoPanelProps { stores: Stores; index: number; entry: OpponentEntry }
 function OppInfoPanel({ stores, index, entry }: OppInfoPanelProps) {
   const pik = stores.pikalytics.get(entry.species);
-  const species = getSpecies(entry.species) as any;
+  // Active species name = mega forme if megaed, otherwise the base.
+  // Pikalytics data is keyed by base (mega formes aren't in the cache),
+  // but base stats + types switch to the mega forme post-evolution.
+  const activeSpecies = entry.megaForme ?? entry.species;
+  const species = getSpecies(activeSpecies) as any;
   const bs = species?.baseStats;
   const types = (species?.types as string[] | undefined) ?? [];
   const top = entry.candidates?.length ? mostLikely(entry.candidates) : null;
@@ -1579,7 +1580,7 @@ function OppInfoPanel({ stores, index, entry }: OppInfoPanelProps) {
   return (
     <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor="cyan" paddingX={1}>
       <Text bold color="cyan">
-        o{index + 1} {entry.species} <Text dimColor>[{types.join('/') || '?'}]</Text>
+        o{index + 1} {activeSpecies} <Text dimColor>[{types.join('/') || '?'}]</Text>
         {entry.currentHpPercent != null && !entry.fainted ? <Text> HP {entry.currentHpPercent.toFixed(0)}%</Text> : null}
         {entry.fainted ? <Text color="gray"> (KO)</Text> : null}
         <Text dimColor> · spd {speed}</Text>

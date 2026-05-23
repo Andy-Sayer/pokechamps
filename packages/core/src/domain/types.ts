@@ -43,6 +43,10 @@ export interface OpponentEntry {
   scarfChance?: number;
   // True after we've observed this mon mega-evolve.
   megaUsed?: boolean;
+  // Mega forme name once activated (e.g. "Charizard-Mega-Y"). Display +
+  // base-stat lookups consult this override when present; `species`
+  // remains the base forme so we can look up the mega-options list etc.
+  megaForme?: string;
   // Current HP as a percent of max (0-100). Undefined = full HP.
   currentHpPercent?: number;
   // True after HP hits 0 (auto on damage or manual via state update).
@@ -177,6 +181,10 @@ export interface Match {
   // OpponentEntry.megaUsed — mega is a once-per-battle gimmick so this
   // is just a set of "has used it" indices.
   myMegaUsed?: number[];
+  // myTeam index → resolved mega forme name (e.g. "Charizard-Mega-Y").
+  // Set when /mega is logged. Display + base-stat lookups consult this
+  // override; the underlying PokemonSet stays unchanged.
+  myMegaForme?: Record<number, string>;
   // Set when the match ends (4 KOs on either side). Persists to snapshots.
   outcome?: 'victory' | 'defeat' | 'tie';
   turns: Turn[];
