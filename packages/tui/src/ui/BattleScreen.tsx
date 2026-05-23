@@ -1306,6 +1306,15 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
                 setInput('');
                 return;
               }
+              if (r.kind === 'states') {
+                // Bulk HP update — apply each in turn. applyStateUpdate is
+                // pure-ish (uses React's batched setState), so the final
+                // render reflects the cumulative result.
+                for (const u of r.updates) applyStateUpdate(u);
+                setInput('');
+                setMessage(`Applied ${r.updates.length} HP updates.`);
+                return;
+              }
               // r.kind === 'state' — mutate immediately, no turn entry.
               applyStateUpdate(r.update);
               setInput('');
@@ -1423,6 +1432,7 @@ function HelpPanel() {
       <Box marginTop={1}><Text bold>State updates</Text></Box>
       <Text>  <Text color="white">o3 = 45</Text>          <Text dimColor>— opp HP set to 45%</Text></Text>
       <Text>  <Text color="white">m2 = 145</Text>         <Text dimColor>— my mon HP set to 145 raw</Text></Text>
+      <Text>  <Text color="white">hp m1=45 o1=30%</Text>  <Text dimColor>— bulk HP update at end of turn</Text></Text>
       <Text>  <Text color="white">o2 ko</Text>            <Text dimColor>— mark fainted</Text></Text>
       <Text>  <Text color="white">o3 in o1</Text>         <Text dimColor>— bring teamIndex into active slot</Text></Text>
       <Text>  <Text color="white">m1 mega</Text>          <Text dimColor>— flag a mega evolution (log BEFORE the turn's moves)</Text></Text>

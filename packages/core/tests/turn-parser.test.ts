@@ -387,6 +387,33 @@ describe('parseTurnLine — new round (spread, boosts, damage, triggers, crit)',
   });
 });
 
+describe('parseTurnLine — bulk hp update', () => {
+  test('hp m1=145 o1=30 o2=60% emits one state update per pair', () => {
+    const r = parseTurnLine('hp m1=145 o1=30 o2=60%', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'states') return;
+    expect(r.updates).toHaveLength(3);
+    // Mine bare = raw HP
+    expect(r.updates[0]).toMatchObject({ side: 'mine', teamIndex: 0, hpRaw: 145 });
+    // Opp bare = percent
+    expect(r.updates[1]).toMatchObject({ side: 'theirs', teamIndex: 0, hpPercent: 30 });
+    // Explicit % suffix
+    expect(r.updates[2]).toMatchObject({ side: 'theirs', teamIndex: 1, hpPercent: 60 });
+  });
+
+  test('hp accepts comma separators', () => {
+    const r = parseTurnLine('hp m1=145, o1=30%, m2=80', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'states') return;
+    expect(r.updates).toHaveLength(3);
+  });
+
+  test('hp with a bad pair errors out cleanly', () => {
+    const r = parseTurnLine('hp m1=145 bogus o1=30', ctx, 1);
+    expect(r.ok).toBe(false);
+  });
+});
+
 describe('parseTurnLine — standalone mega declaration', () => {
   test('"m1 mega" emits a kind:mega action on my side', () => {
     const r = parseTurnLine('m1 mega', ctx, 3);

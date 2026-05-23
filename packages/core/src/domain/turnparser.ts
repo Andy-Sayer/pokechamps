@@ -82,6 +82,7 @@ export interface StateUpdate {
 export type ParseResult =
   | { ok: true; kind: 'action'; actions: MoveAction[] }
   | { ok: true; kind: 'state'; update: StateUpdate }
+  | { ok: true; kind: 'states'; updates: StateUpdate[] }
   | { ok: true; kind: 'hazard'; update: HazardUpdate }
   | { ok: false; error: string };
 
@@ -194,6 +195,37 @@ function parseDamage(
 function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
   const trimmed = line.trim();
   const sideFor = (ch: string): FieldSide => (ch.toLowerCase() === 'm' ? 'mine' : 'theirs');
+
+  // Bulk HP update — `hp m1=45 m2=80 o1=30% o2=60`. Lets the user skip
+  // damage entry on individual actions when the game's moving fast and
+  // recover HPs at end of turn in one line. Each pair has the same
+  // interpretation as the single "<ref> = <val>" form: opp bare = %,
+  // mine bare = raw HP, explicit % suffix forces percent.
+  const hpBulk = trimmed.match(/^hp\s+(.+)$/i);
+  if (hpBulk) {
+    const body = hpBulk[1]!;
+    const pairs = body.split(/[\s,]+/).filter(Boolean);
+    if (pairs.length === 0) return { ok: false, error: 'hp line needs at least one <ref>=<val> pair' };
+    const updates: StateUpdate[] = [];
+    for (const pair of pairs) {
+      const m = pair.match(/^([mo])([1-6])=(\d+(?:\.\d+)?)(%?)$/i);
+      if (!m) return { ok: false, error: `bad hp pair "${pair}" — expected m1=45 / o1=30% / m2=145` };
+      const side = sideFor(m[1]!);
+      const n = parseInt(m[2]!, 10);
+      const teamIndex = resolveStateRef(side, n, ctx);
+      if (teamIndex == null) {
+        return { ok: false, error: `${m[1]}${m[2]} has no active mon to update` };
+      }
+      const value = parseFloat(m[3]!);
+      const explicitPct = m[4] === '%';
+      if (side === 'mine' && !explicitPct) {
+        updates.push({ side, teamIndex, hpRaw: Math.max(0, value) });
+      } else {
+        updates.push({ side, teamIndex, hpPercent: Math.max(0, Math.min(100, value)) });
+      }
+    }
+    return { ok: true, kind: 'states', updates };
+  }
 
   // Hazards — side-scoped, no slot ref.
   //   "m rocks on" / "m rocks off"
