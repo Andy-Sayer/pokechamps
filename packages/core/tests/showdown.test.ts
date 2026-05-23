@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { parseShowdownTeam, formatShowdownTeam } from '../src/domain/showdown.js';
+import { parseShowdownTeam, formatShowdownTeam, formatShowdownTeamSP } from '../src/domain/showdown.js';
 
 const CHARIZARD_Y = `Charizard @ Charizardite Y
 Ability: Blaze
@@ -129,6 +129,31 @@ Adamant Nature
     expect(set!.species).toBe('Charizard');
     expect(set!.ability).toBe('Blaze');
     expect(set!.moves).toEqual(['Heat Wave', 'Protect']);
+  });
+
+  test('formatShowdownTeamSP converts standard EVs to PoChamps stat-points (0-32)', () => {
+    // Charizard with standard EVs 4 HP / 252 SpA / 252 Spe. spFromEv(4)=1,
+    // spFromEv(252)=32. Output should keep the "EVs:" field label (the
+    // Champions Showdown client expects that name) but values switch to
+    // the SP scale.
+    const team = parseShowdownTeam(CHARIZARD_Y);
+    const text = formatShowdownTeamSP(team);
+    expect(text).toContain('EVs: 1 HP / 32 SpA / 32 Spe');
+    // Field label stays the same — only the values change.
+    expect(text).not.toContain('252');
+  });
+
+  test('formatShowdownTeamSP zeros out stats that map to SP 0', () => {
+    // EVs 0-3 all map to SP 0 → the formatter omits them since SP 0 is
+    // the no-investment default.
+    const team = parseShowdownTeam(CHARIZARD_Y);
+    const text = formatShowdownTeamSP(team);
+    // Charizard set has 4 HP / 252 SpA / 252 Spe — atk/def/spd are 0.
+    // None of atk/def/spd should appear in the EVs line.
+    const evLine = text.split('\n').find(l => l.startsWith('EVs:'))!;
+    expect(evLine).not.toMatch(/\bAtk\b/);
+    expect(evLine).not.toMatch(/\bDef\b/);
+    expect(evLine).not.toMatch(/\bSpD\b/);
   });
 
   test('defaults: missing nature -> Hardy, missing level -> 50, missing EVs all 0, missing IVs all 31', () => {

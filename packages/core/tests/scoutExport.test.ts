@@ -100,7 +100,10 @@ describe('exportScoutedOpponents', () => {
     // Standard Showdown block:
     expect(txt).toContain('Incineroar @ Safety Goggles');
     expect(txt).toContain('Ability: Intimidate');
-    expect(txt).toContain('252 HP / 252 SpD / 4 Spe');
+    // EVs are emitted in PoChamps stat-point units (0–32), not standard
+    // EVs (0–252) — Champions Showdown expects the SP scale.
+    // spFromEv(252) = 32, spFromEv(4) = 1.
+    expect(txt).toContain('32 HP / 32 SpD / 1 Spe');
     expect(txt).toContain('Careful Nature');
     expect(txt).toContain('- Knock Off');
   });

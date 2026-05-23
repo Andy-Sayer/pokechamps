@@ -13,7 +13,7 @@
 import type { OpponentEntry, PokemonSet, Match } from './types.js';
 import { MAX_IVS, ZERO_EVS } from './types.js';
 import { mostLikely } from './inference.js';
-import { formatShowdownTeam } from './showdown.js';
+import { formatShowdownTeamSP } from './showdown.js';
 import { effectiveSpeedRange } from './speed.js';
 
 export interface ScoutOptions {
@@ -77,5 +77,5 @@ export function exportScoutedOpponents(match: Match): string {
   header.push('');
 
   const sets = targets.map(o => opponentToScoutedSet(o));
-  return header.join('\n') + formatShowdownTeam(sets);
+  return header.join('\n') + formatShowdownTeamSP(sets);
 }

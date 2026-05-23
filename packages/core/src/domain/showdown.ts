@@ -1,6 +1,7 @@
 import type { PokemonSet, Stats } from './types.js';
 import { ZERO_EVS, MAX_IVS } from './types.js';
 import { activeGimmick } from './gimmicks/index.js';
+import { spFromEv } from './pikalytics.js';
 
 // Minimal Pokemon Showdown team-export parser. Handles the common subset:
 //
@@ -101,6 +102,27 @@ function parseStatLine(rest: string, base: number): Stats {
 
 export function formatShowdownTeam(team: PokemonSet[]): string {
   return team.map(formatShowdownSet).join('\n\n');
+}
+
+// Same as formatShowdownTeam but converts each EV value to its PoChamps
+// stat-point (0–32) equivalent. The Pokemon Champions client uses the
+// `EVs:` field label but expects SP values, not the standard 0–252 EV
+// scale that @smogon/calc / Pokemon Showdown use internally. Round-trip
+// (paste back into TeamPaste) is NOT round-tripable since the parser
+// reads the field as standard EVs — this is export-only.
+export function formatShowdownTeamSP(team: PokemonSet[]): string {
+  return team.map(set => formatShowdownSet({ ...set, evs: evsToSp(set.evs) })).join('\n\n');
+}
+
+function evsToSp(evs: Stats): Stats {
+  return {
+    hp:  spFromEv(evs.hp),
+    atk: spFromEv(evs.atk),
+    def: spFromEv(evs.def),
+    spa: spFromEv(evs.spa),
+    spd: spFromEv(evs.spd),
+    spe: spFromEv(evs.spe),
+  };
 }
 
 function formatShowdownSet(s: PokemonSet): string {

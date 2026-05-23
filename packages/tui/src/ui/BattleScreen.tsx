@@ -18,7 +18,7 @@ import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokec
 import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict } from '@pokechamps/core/domain/predictions.js';
 import { PikaSpinner } from './PikaSpinner.js';
 import { ExportPanel } from './ExportPanel.js';
-import { formatShowdownTeam } from '@pokechamps/core/domain/showdown.js';
+import { formatShowdownTeamSP } from '@pokechamps/core/domain/showdown.js';
 import { BATTLE_COMMANDS, parseCommand, type BattleCommandId } from './slashCommands.js';
 import { deriveActiveIdx } from '@pokechamps/core/match/engine.js';
 
@@ -802,7 +802,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       case 'export':
         // Toggle the export overlay. Renders the current full team (not
         // just the brought 4) — same as TeamPicker's `x` does.
-        setExportPanelText(t => t == null ? formatShowdownTeam(match.myTeam) : null);
+        setExportPanelText(t => t == null ? formatShowdownTeamSP(match.myTeam) : null);
         return true;
       case 'review': {
         if (match.turns.length === 0) {

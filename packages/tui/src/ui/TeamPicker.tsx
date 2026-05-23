@@ -3,7 +3,7 @@ import { Box, Text, useInput } from 'ink';
 import SelectInput from 'ink-select-input';
 import type { PokemonSet } from '@pokechamps/core/domain/types.js';
 import type { Stores, SavedTeam } from '@pokechamps/core/storage/index.js';
-import { formatShowdownTeam } from '@pokechamps/core/domain/showdown.js';
+import { formatShowdownTeamSP } from '@pokechamps/core/domain/showdown.js';
 import { ExportPanel } from './ExportPanel.js';
 
 export interface TeamPickerProps {
@@ -47,7 +47,7 @@ export function TeamPicker({ stores, onPick, onCreateNew, onEdit, onCancel }: Te
     if (!t) return;
     if (input === 'e') onEdit(t.team, t.name);
     if (input === 'x') {
-      setExportFor({ name: t.name, text: formatShowdownTeam(t.team) });
+      setExportFor({ name: t.name, text: formatShowdownTeamSP(t.team) });
     }
   });
 
