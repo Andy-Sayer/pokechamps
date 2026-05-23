@@ -22,6 +22,7 @@ import { formatShowdownTeamSP } from '@pokechamps/core/domain/showdown.js';
 import { BATTLE_COMMANDS, parseCommand, type BattleCommandId } from './slashCommands.js';
 import { deriveActiveIdx } from '@pokechamps/core/match/engine.js';
 import { applyMegaAction } from '@pokechamps/core/domain/megaResolve.js';
+import { getMegaOptions } from '@pokechamps/core/domain/gimmicks/mega.js';
 
 export interface BattleScreenProps {
   stores: Stores;
@@ -966,62 +967,117 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
     const myHp = match.myCurrentHp?.[myIdx] ?? 100;
     const myBoosts = match.myBoosts?.[myIdx];
     const myStatus = match.myStatus?.[myIdx];
+    // Mega state: has this mon already mega-evolved? If not, do they hold a
+    // legal mega stone — i.e. could they mega NEXT? Pre-mega + stone-held
+    // means we render predictions BOTH ways: current base-forme stats AND
+    // the post-mega forme stats so the user can see whether mega is worth
+    // popping this turn.
+    const myMegaActive = match.myMegaUsed?.includes(myIdx) ?? false;
+    const myMegaOption = !myMegaActive
+      ? getMegaOptions(mySet.species).find(o => o.stone === mySet.item) ?? null
+      : null;
+    const mySpeedBase = actualSpeed(mySet);
+    const mySpeedMega = myMegaOption ? actualSpeed(mySet, myMegaOption.forme) : null;
+    // Common args for prediction calls — only the active flag flips when we
+    // compute the "what if I mega'd" variant.
+    const baseOpts = {
+      attackerBoosts: myBoosts,
+      defenderBoosts: undefined as Partial<Record<string, number>> | undefined,
+      attackerStatus: myStatus,
+      defenderStatus: undefined as string | undefined,
+    };
     return {
       mySet,
       myIdx,
       myHp,
       myBoosts,
       myStatus,
-      mySpeed: actualSpeed(mySet),
-      rows: match.opponentTeam.map((opp, oi) => ({
-        opp,
-        oppIdx: oi,
-        offense: predictOffense({
-          attacker: mySet, opponent: opp, field,
-          defenderCurrentHpPercent: opp.currentHpPercent,
-          attackerBoosts: myBoosts,
-          defenderBoosts: opp.currentBoosts,
-          attackerStatus: myStatus,
-          defenderStatus: opp.status,
-        }),
-        offenseCrit: showCrits ? predictOffense({
-          attacker: mySet, opponent: opp, field,
-          defenderCurrentHpPercent: opp.currentHpPercent,
-          attackerBoosts: myBoosts,
-          defenderBoosts: opp.currentBoosts,
-          attackerStatus: myStatus,
-          defenderStatus: opp.status,
-          critical: true,
-        }) : null,
-        // `a` toggle: full per-move breakdown. When combined with `c` we also
-        // compute the crit variant so each move line can show both ranges.
-        allOffense: showAllMoves ? predictOffenseAll({
-          attacker: mySet, opponent: opp, field,
-          defenderCurrentHpPercent: opp.currentHpPercent,
-          attackerBoosts: myBoosts,
-          defenderBoosts: opp.currentBoosts,
-          attackerStatus: myStatus,
-          defenderStatus: opp.status,
-        }) : null,
-        allOffenseCrit: showAllMoves && showCrits ? predictOffenseAll({
-          attacker: mySet, opponent: opp, field,
-          defenderCurrentHpPercent: opp.currentHpPercent,
-          attackerBoosts: myBoosts,
-          defenderBoosts: opp.currentBoosts,
-          attackerStatus: myStatus,
-          defenderStatus: opp.status,
-          critical: true,
-        }) : null,
-        threat: predictThreat({
-          opponent: opp, defender: mySet, field,
-          defenderCurrentHpPercent: myHp,
-          attackerBoosts: opp.currentBoosts,
-          defenderBoosts: myBoosts,
-          attackerStatus: opp.status,
-          defenderStatus: myStatus,
-        }),
-        speed: speedVerdict({ mySet, opp, field }),
-      })),
+      mySpeed: myMegaActive && match.myMegaForme?.[myIdx]
+        ? actualSpeed(mySet, match.myMegaForme[myIdx])
+        : mySpeedBase,
+      mySpeedMega,
+      myMegaForme: myMegaOption?.forme ?? null,
+      rows: match.opponentTeam.map((opp, oi) => {
+        const oppActive = opp.megaUsed ?? false;
+        return {
+          opp,
+          oppIdx: oi,
+          offense: predictOffense({
+            attacker: mySet, opponent: opp, field,
+            attackerGimmickActive: myMegaActive,
+            defenderGimmickActive: oppActive,
+            defenderCurrentHpPercent: opp.currentHpPercent,
+            ...baseOpts,
+            defenderBoosts: opp.currentBoosts,
+            defenderStatus: opp.status,
+          }),
+          offenseCrit: showCrits ? predictOffense({
+            attacker: mySet, opponent: opp, field,
+            attackerGimmickActive: myMegaActive,
+            defenderGimmickActive: oppActive,
+            defenderCurrentHpPercent: opp.currentHpPercent,
+            ...baseOpts,
+            defenderBoosts: opp.currentBoosts,
+            defenderStatus: opp.status,
+            critical: true,
+          }) : null,
+          // `a` toggle: full per-move breakdown. When combined with `c` we also
+          // compute the crit variant so each move line can show both ranges.
+          allOffense: showAllMoves ? predictOffenseAll({
+            attacker: mySet, opponent: opp, field,
+            attackerGimmickActive: myMegaActive,
+            defenderGimmickActive: oppActive,
+            defenderCurrentHpPercent: opp.currentHpPercent,
+            ...baseOpts,
+            defenderBoosts: opp.currentBoosts,
+            defenderStatus: opp.status,
+          }) : null,
+          allOffenseCrit: showAllMoves && showCrits ? predictOffenseAll({
+            attacker: mySet, opponent: opp, field,
+            attackerGimmickActive: myMegaActive,
+            defenderGimmickActive: oppActive,
+            defenderCurrentHpPercent: opp.currentHpPercent,
+            ...baseOpts,
+            defenderBoosts: opp.currentBoosts,
+            defenderStatus: opp.status,
+            critical: true,
+          }) : null,
+          threat: predictThreat({
+            opponent: opp, defender: mySet, field,
+            attackerGimmickActive: oppActive,
+            defenderGimmickActive: myMegaActive,
+            defenderCurrentHpPercent: myHp,
+            attackerBoosts: opp.currentBoosts,
+            defenderBoosts: myBoosts,
+            attackerStatus: opp.status,
+            defenderStatus: myStatus,
+          }),
+          // Dual-forme: compute the same offense + threat using post-mega
+          // stats, so the row can surface "(mega: X-Y%)" alongside the base
+          // numbers. Only built when the mon could still mega.
+          offenseMega: myMegaOption ? predictOffense({
+            attacker: mySet, opponent: opp, field,
+            attackerGimmickActive: true,
+            defenderGimmickActive: oppActive,
+            defenderCurrentHpPercent: opp.currentHpPercent,
+            ...baseOpts,
+            defenderBoosts: opp.currentBoosts,
+            defenderStatus: opp.status,
+          }) : null,
+          threatMega: myMegaOption ? predictThreat({
+            opponent: opp, defender: mySet, field,
+            attackerGimmickActive: oppActive,
+            defenderGimmickActive: true,
+            defenderCurrentHpPercent: myHp,
+            attackerBoosts: opp.currentBoosts,
+            defenderBoosts: myBoosts,
+            attackerStatus: opp.status,
+            defenderStatus: myStatus,
+          }) : null,
+          speed: speedVerdict({ mySet, opp, field, myFormeOverride: myMegaActive ? match.myMegaForme?.[myIdx] : undefined }),
+          speedMega: myMegaOption ? speedVerdict({ mySet, opp, field, myFormeOverride: myMegaOption.forme }) : null,
+        };
+      }),
     };
   });
 
@@ -1147,7 +1203,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
             if (!m) return null;
             return (
               <Box key={`mu-${mi}`} flexDirection="column" marginTop={mi === 0 ? 0 : 1}>
-                <Text color="green">m{mi + 1} {match.myMegaForme?.[m.myIdx] ?? m.mySet.species} <Text dimColor>[HP {m.myHp.toFixed(0)}% · spd {m.mySpeed}]</Text>{match.myCharging?.[m.myIdx] ? <Text color="cyan"> ⚡charging {match.myCharging[m.myIdx]!.move}</Text> : null}</Text>
+                <Text color="green">m{mi + 1} {match.myMegaForme?.[m.myIdx] ?? m.mySet.species} <Text dimColor>[HP {m.myHp.toFixed(0)}% · spd {m.mySpeed}{m.mySpeedMega != null ? ` (mega ${m.myMegaForme}: ${m.mySpeedMega})` : ''}]</Text>{match.myCharging?.[m.myIdx] ? <Text color="cyan"> ⚡charging {match.myCharging[m.myIdx]!.move}</Text> : null}</Text>
                 {m.rows.map(row => {
                   const a0 = activeIdx.theirs[0];
                   const a1 = activeIdx.theirs[1];
@@ -1166,6 +1222,9 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
                       allOffenseCrit={row.allOffenseCrit ?? null}
                       threat={row.threat}
                       verdict={row.speed}
+                      offenseMega={row.offenseMega ?? null}
+                      threatMega={row.threatMega ?? null}
+                      verdictMega={row.speedMega ?? null}
                       dim={dim}
                       active={isActive}
                     />
@@ -1547,10 +1606,16 @@ interface MatchupRowProps {
   allOffenseCrit?: Array<{ move: string; minPercent: number; maxPercent: number; koChance: string; candidatesConsidered: number }> | null;
   threat: { move: string; minPercent: number; maxPercent: number; koChance: string; candidatesConsidered: number } | null;
   verdict: SpeedVerdict;
+  // Post-mega variants — set only when the my-side mon holds an unused mega
+  // stone. Surfaced inline as "(mega: X-Y%)" / "(mega ✓)" so the user can
+  // compare both formes at a glance before deciding to pop mega.
+  offenseMega?: { move: string; minPercent: number; maxPercent: number; koChance: string; candidatesConsidered: number } | null;
+  threatMega?: { move: string; minPercent: number; maxPercent: number; koChance: string; candidatesConsidered: number } | null;
+  verdictMega?: SpeedVerdict | null;
   dim: boolean;
   active: boolean;
 }
-function MatchupRow({ marker, opp, offense, offenseCrit, allOffense, allOffenseCrit, threat, verdict, dim, active }: MatchupRowProps) {
+function MatchupRow({ marker, opp, offense, offenseCrit, allOffense, allOffenseCrit, threat, verdict, offenseMega, threatMega, verdictMega, dim, active }: MatchupRowProps) {
   const oppLabel = shortName(opp.species, 12).padEnd(12);
   if (opp.fainted) {
     return (
@@ -1576,15 +1641,30 @@ function MatchupRow({ marker, opp, offense, offenseCrit, allOffense, allOffenseC
   const critTxt = offenseCrit
     ? ` / crit ${offenseCrit.minPercent.toFixed(0)}-${offenseCrit.maxPercent.toFixed(0)}%`
     : '';
+  // Append "(mega: X-Y%)" when the post-mega prediction exists and differs
+  // meaningfully from the base. If the move flips too (e.g. base coverage vs
+  // mega STAB), include the move name; otherwise just the range.
+  const offMegaTxt = offenseMega
+    ? offenseMega.move === offense?.move
+      ? ` ⭢mega ${offenseMega.minPercent.toFixed(0)}-${offenseMega.maxPercent.toFixed(0)}%`
+      : ` ⭢mega ${offenseMega.move} ${offenseMega.minPercent.toFixed(0)}-${offenseMega.maxPercent.toFixed(0)}%`
+    : '';
   const thrTxt = threat
     ? `${threat.move} ${threat.minPercent.toFixed(0)}-${threat.maxPercent.toFixed(0)}%`
     : 'n/a';
-  const glyph: { ch: string; color?: string } =
-    verdict === 'faster'     ? { ch: '✓', color: 'green' } :
-    verdict === 'slower'     ? { ch: '✗', color: 'red' } :
-    verdict === 'tie'        ? { ch: '≈', color: 'yellow' } :
-    verdict === 'scarf-flag' ? { ch: '⚡', color: 'yellow' } :
-                               { ch: '?', color: 'gray' };
+  const thrMegaTxt = threatMega
+    ? threatMega.move === threat?.move
+      ? ` ⭢mega ${threatMega.minPercent.toFixed(0)}-${threatMega.maxPercent.toFixed(0)}%`
+      : ` ⭢mega ${threatMega.move} ${threatMega.minPercent.toFixed(0)}-${threatMega.maxPercent.toFixed(0)}%`
+    : '';
+  const glyphFor = (v: SpeedVerdict): { ch: string; color?: string } =>
+    v === 'faster'     ? { ch: '✓', color: 'green' } :
+    v === 'slower'     ? { ch: '✗', color: 'red' } :
+    v === 'tie'        ? { ch: '≈', color: 'yellow' } :
+    v === 'scarf-flag' ? { ch: '⚡', color: 'yellow' } :
+                         { ch: '?', color: 'gray' };
+  const glyph = glyphFor(verdict);
+  const glyphMega = verdictMega ? glyphFor(verdictMega) : null;
 
   // When `a` is on we render the opp's header line (with threat + speed)
   // followed by one indented line per move in the attacker's pool. Each
@@ -1596,7 +1676,7 @@ function MatchupRow({ marker, opp, offense, offenseCrit, allOffense, allOffenseC
     return (
       <Box flexDirection="column">
         <Text dimColor={dim}>
-          {'  '}{marker} {oppLabel}{hpTag}  ← {thrTxt}  {dim ? glyph.ch : <Text color={glyph.color as any}>{glyph.ch}</Text>}
+          {'  '}{marker} {oppLabel}{hpTag}  ← {thrTxt}{thrMegaTxt}  {dim ? glyph.ch : <Text color={glyph.color as any}>{glyph.ch}</Text>}{glyphMega ? (dim ? `/${glyphMega.ch}` : <>/<Text color={glyphMega.color as any}>{glyphMega.ch}</Text></>) : null}
         </Text>
         {allOffense.map(m => {
           const crit = critByMove.get(m.move);
@@ -1617,13 +1697,13 @@ function MatchupRow({ marker, opp, offense, offenseCrit, allOffense, allOffenseC
   if (dim) {
     return (
       <Text dimColor>
-        {'  '}{marker} {oppLabel}{hpTag}  → {offTxt}{critTxt}  ← {thrTxt}  {glyph.ch}
+        {'  '}{marker} {oppLabel}{hpTag}  → {offTxt}{critTxt}{offMegaTxt}  ← {thrTxt}{thrMegaTxt}  {glyph.ch}{glyphMega ? `/${glyphMega.ch}` : ''}
       </Text>
     );
   }
   return (
     <Text color={active ? undefined : undefined}>
-      {'  '}{marker} {oppLabel}{hpTag}  → {offTxt}{critTxt}  ← {thrTxt}  <Text color={glyph.color as any}>{glyph.ch}</Text>
+      {'  '}{marker} {oppLabel}{hpTag}  → {offTxt}{critTxt}{offMegaTxt}  ← {thrTxt}{thrMegaTxt}  <Text color={glyph.color as any}>{glyph.ch}</Text>{glyphMega ? <><Text>/</Text><Text color={glyphMega.color as any}>{glyphMega.ch}</Text></> : null}
     </Text>
   );
 }

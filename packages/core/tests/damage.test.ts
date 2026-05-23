@@ -362,8 +362,26 @@ describe('Mega evolution behavior', () => {
       move: 'Flamethrower',
       field: NEUTRAL_FIELD,
       attackerSide: 'mine',
+      attackerOpts: { gimmickActive: true },
     });
     expect(mega.min).toBeGreaterThan(base.min);
     expect(mega.max).toBeGreaterThan(base.max);
+  });
+
+  test('Pre-mega Charizard holding Charizardite Y still calcs as base Charizard', () => {
+    // Held stone alone does NOT auto-megify — the mon has to have actually
+    // mega-evolved (active=true) for the calc to use the mega forme stats.
+    const heldStone = damageRange({
+      attacker: megaY, defender: target, move: 'Flamethrower',
+      field: NEUTRAL_FIELD, attackerSide: 'mine',
+      // No gimmickActive — stone held but mon hasn't mega'd yet.
+    });
+    const activated = damageRange({
+      attacker: megaY, defender: target, move: 'Flamethrower',
+      field: NEUTRAL_FIELD, attackerSide: 'mine',
+      attackerOpts: { gimmickActive: true },
+    });
+    // Pre-mega < post-mega: held stone alone doesn't get the mega SpA bump.
+    expect(heldStone.max).toBeLessThan(activated.max);
   });
 });

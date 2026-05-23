@@ -5,8 +5,13 @@ import { getPikalytics, evFromSp } from './pikalytics.js';
 // Speed stat at L50, 31 IVs — matches PoChamps' fixed-level/IV model and the
 // numerical equivalence with @smogon/calc (see project-pochamps-ev-scale).
 //   floor((2*base + 31 + ev/4) * 50 / 100) + 5, then * nature multiplier.
-export function actualSpeed(set: PokemonSet): number {
-  const sp = (getSpecies(set.species) as any)?.baseStats?.spe ?? 0;
+//
+// Optional formeOverride lets callers look up the speed of a different forme
+// of the same set (e.g. the post-mega forme). EVs/nature stay; only the base
+// species changes — which is exactly what mega evolution does to stats.
+export function actualSpeed(set: PokemonSet, formeOverride?: string): number {
+  const speciesName = formeOverride ?? set.species;
+  const sp = (getSpecies(speciesName) as any)?.baseStats?.spe ?? 0;
   const ev = set.evs.spe;
   const raw = Math.floor(((2 * sp + 31 + Math.floor(ev / 4)) * 50) / 100) + 5;
   const nat = (getNature(set.nature) as any) ?? null;

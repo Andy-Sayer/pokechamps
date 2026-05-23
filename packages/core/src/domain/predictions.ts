@@ -337,8 +337,12 @@ export function speedVerdict(args: {
   mySet: PokemonSet;
   opp: OpponentEntry;
   field: FieldState;
+  /** Forme override for mySet — e.g. the post-mega forme name. Lets the
+   *  matchup grid render a "what if I mega'd" verdict without rebuilding
+   *  the whole set. */
+  myFormeOverride?: string;
 }): SpeedVerdict {
-  let mySpd = actualSpeed(args.mySet);
+  let mySpd = actualSpeed(args.mySet, args.myFormeOverride);
   if (args.field.myTailwind) mySpd *= 2;
 
   let oppLow = args.opp.speedFloor;

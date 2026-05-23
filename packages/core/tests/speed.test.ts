@@ -63,6 +63,18 @@ describe('actualSpeed', () => {
     const slow = mon({ species: 'Garchomp', nature: 'Brave', evs: { ...ZERO_EVS } });
     expect(actualSpeed(fast)).toBeGreaterThan(actualSpeed(slow) + 30);
   });
+
+  test('formeOverride uses the override species base speed (mega bump)', () => {
+    // Base Charizard 100 Spe → Mega Y still 100 (same), but Mega X is 100.
+    // Use Pinsir → Pinsir-Mega (85 → 105) for a clear bump.
+    const s = mon({
+      species: 'Pinsir', nature: 'Jolly',
+      evs: { ...ZERO_EVS, spe: 252 },
+    });
+    const baseSpd = actualSpeed(s);
+    const megaSpd = actualSpeed(s, 'Pinsir-Mega');
+    expect(megaSpd).toBeGreaterThan(baseSpd);
+  });
 });
 
 describe('inferOpponentSpeeds', () => {

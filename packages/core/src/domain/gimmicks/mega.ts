@@ -115,12 +115,16 @@ export const megaGimmick: Gimmick = {
   label: 'Mega Evolution',
 
   // @smogon/calc does NOT auto-resolve the mega forme from the held stone — it
-  // keys purely on the species name passed to `new Pokemon(...)`. So when a set
-  // holds a legal mega stone we swap in the mega forme name (e.g. Charizard +
-  // Charizardite Y -> "Charizard-Mega-Y") so damage/stat calcs reflect mega.
-  // If a future ruleset requires opt-in mega (held stone but not activated
-  // this turn), gate this on `active`.
-  resolveSpecies({ set }) {
+  // keys purely on the species name passed to `new Pokemon(...)`. So when the
+  // mon has actually mega-evolved this battle (`active: true`) we swap in the
+  // mega forme name (e.g. Charizard + Charizardite Y -> "Charizard-Mega-Y").
+  // Before activation the mon is still in its base forme — base-stats, base-
+  // ability — even though the stone is held; in that case we leave the
+  // species alone so damage/speed reflect the pre-mega reality. The matchup
+  // grid surfaces the post-mega numbers separately as a "potential mega"
+  // alternative.
+  resolveSpecies({ set, active }) {
+    if (!active) return null;
     if (!set.item) return null;
     const inner = megaFormeByItem.get(toId(set.item));
     if (!inner) return null;
