@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import SelectInput from 'ink-select-input';
 import type { PokemonSet } from '@pokechamps/core/domain/types.js';
 import type { Stores, SavedTeam } from '@pokechamps/core/storage/index.js';
@@ -8,10 +8,13 @@ export interface TeamPickerProps {
   stores: Stores;
   onPick: (team: PokemonSet[], name: string) => void;
   onCreateNew: () => void;
+  /** Edit an existing team — opens TeamPaste pre-loaded with the team's
+   *  Showdown export. Saving with the same name overwrites silently. */
+  onEdit: (team: PokemonSet[], name: string) => void;
   onCancel: () => void;
 }
 
-export function TeamPicker({ stores, onPick, onCreateNew, onCancel }: TeamPickerProps) {
+export function TeamPicker({ stores, onPick, onCreateNew, onEdit, onCancel }: TeamPickerProps) {
   // null = still loading. Once loaded, an empty list short-circuits to the
   // create-new flow (preserves the prior synchronous behaviour).
   const [teams, setTeams] = useState<SavedTeam[] | null>(null);
@@ -29,6 +32,16 @@ export function TeamPicker({ stores, onPick, onCreateNew, onCancel }: TeamPicker
     });
     return () => { cancelled = true; };
   }, [stores]);
+
+  // `e` while a real team is highlighted: edit it. The previewed team is
+  // resolved from the highlighted item, so the user always edits exactly
+  // what they're looking at.
+  useInput((input) => {
+    if (input !== 'e') return;
+    if (!preview || !teams) return;
+    const t = teams.find(t => t.name === preview);
+    if (t) onEdit(t.team, t.name);
+  });
 
   if (teams === null) {
     return (
@@ -55,6 +68,7 @@ export function TeamPicker({ stores, onPick, onCreateNew, onCancel }: TeamPicker
   return (
     <Box flexDirection="column" padding={1}>
       <Text bold color="cyan">Pick your team</Text>
+      <Text dimColor>Enter to pick · <Text color="white">e</Text> to edit the highlighted team · ESC to cancel</Text>
       <Box marginTop={1} flexDirection="row">
         <Box width={30} marginRight={2} flexDirection="column">
           <SelectInput

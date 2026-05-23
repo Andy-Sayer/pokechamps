@@ -60,6 +60,24 @@ describe('isLegalSpecies', () => {
   test('respects display-form input with the toId normalizer', () => {
     expect(isLegalSpecies('Incineroar')).toBe(true);
   });
+
+  test('formes inherit legality from their base species', () => {
+    // Rotom is in the allow list — every Rotom forme should pass too.
+    expect(isLegalSpecies('rotomwash')).toBe(true);
+    expect(isLegalSpecies('Rotom-Heat')).toBe(true);
+    expect(isLegalSpecies('rotomfrost')).toBe(true);
+    expect(isLegalSpecies('Rotom-Fan')).toBe(true);
+    expect(isLegalSpecies('rotommow')).toBe(true);
+    // Lycanroc → Midnight + Dusk also legal.
+    expect(isLegalSpecies('Lycanroc-Midnight')).toBe(true);
+    expect(isLegalSpecies('lycanrocdusk')).toBe(true);
+  });
+
+  test('formes of a NON-allowed base species are still illegal', () => {
+    // Landorus isn't in M-A — so neither is Landorus-Therian.
+    expect(isLegalSpecies('landorus')).toBe(false);
+    expect(isLegalSpecies('Landorus-Therian')).toBe(false);
+  });
 });
 
 describe('isLegalItem', () => {
@@ -101,5 +119,18 @@ describe('searchLegalSpecies', () => {
   test('respects an explicit limit', () => {
     const results = searchLegalSpecies('', 3);
     expect(results.length).toBeLessThanOrEqual(3);
+  });
+
+  test('autocomplete surfaces formes whose base species is allowed', () => {
+    // Query "rotom" should surface every Rotom forme, not just the base.
+    const results = searchLegalSpecies('rotom');
+    expect(results).toContain('Rotom');
+    expect(results).toContain('Rotom-Wash');
+    expect(results).toContain('Rotom-Heat');
+    // Lycanroc: query "lycan" should pull Midnight + Dusk too.
+    const lycan = searchLegalSpecies('lycan');
+    expect(lycan).toContain('Lycanroc');
+    expect(lycan).toContain('Lycanroc-Midnight');
+    expect(lycan).toContain('Lycanroc-Dusk');
   });
 });

@@ -17,7 +17,7 @@ import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyp
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
 import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict } from '@pokechamps/core/domain/predictions.js';
 import { PikaSpinner } from './PikaSpinner.js';
-import { BATTLE_COMMANDS, parseCommand, helpLine, type BattleCommandId } from './slashCommands.js';
+import { BATTLE_COMMANDS, parseCommand, type BattleCommandId } from './slashCommands.js';
 import { deriveActiveIdx } from '@pokechamps/core/match/engine.js';
 
 export interface BattleScreenProps {
@@ -216,6 +216,9 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
   // `a` expands the matchup grid to show ALL 4 of my moves per opp instead
   // of just the voted-best one. Off by default to keep the compact view.
   const [showAllMoves, setShowAllMoves] = useState(false);
+  // `/help` overlay — full syntax cheat-sheet. Closes on Esc or the next
+  // /help invocation.
+  const [helpOpen, setHelpOpen] = useState(false);
   // AI battle review (opt-in via `r`). Holds the rendered text and a busy flag.
   const [aiReview, setAiReview] = useState<string | null>(null);
   const [aiReviewBusy, setAiReviewBusy] = useState(false);
@@ -766,7 +769,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       case 'allmoves': setShowAllMoves(a => !a); return true;
       case 'info': setInfoPickerOpen(true); return true;
       case 'help':
-        setMessage(`Commands: ${helpLine(BATTLE_COMMANDS)} · type an action like "m1 > Close Combat > o1 > 67"`);
+        setHelpOpen(h => !h);
         return true;
       case 'review': {
         if (match.turns.length === 0) {
@@ -827,6 +830,10 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
     }
     if (infoOpenForOpp != null) {
       if (key.escape) setInfoOpenForOpp(null);
+      return;
+    }
+    if (helpOpen) {
+      if (key.escape) setHelpOpen(false);
       return;
     }
     if (key.escape) onEnd();
@@ -963,13 +970,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
         </Box>
       )}
       <Text dimColor>
-        Type one action per line, or a slash command. Commands: /next /save /info /crit /allmoves /review /help · ESC ends match · Backspace on empty input removes last draft action
-      </Text>
-      <Text dimColor>
-        Syntax: <Text color="white">m1 &gt; Move &gt; o2 &gt; 33</Text> (opp now at 33%) · <Text color="white">o1 &gt; Move &gt; m1 &gt; 145</Text> (you now at 145 HP) · <Text color="white">m1 &gt; switch &gt; Species</Text>
-      </Text>
-      <Text dimColor>
-        State: <Text color="white">o3 = 45</Text> (% remain) · <Text color="white">m2 = 145</Text> (raw remain) · <Text color="white">o2 ko</Text> · <Text color="white">o3 in o1</Text>
+        Type an action, or <Text color="white">/help</Text> for syntax + commands · ESC ends match
       </Text>
 
       <Box marginTop={1} flexDirection="row">
@@ -1114,6 +1115,9 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       {infoOpenForOpp != null && (
         <OppInfoPanel stores={stores} index={infoOpenForOpp} entry={match.opponentTeam[infoOpenForOpp]!} />
       )}
+
+      {/* /help cheat-sheet — full syntax + slash command reference. Esc to close. */}
+      {helpOpen && <HelpPanel />}
 
       {/* Replacement picker — takes focus when an active slot is empty
           after a faint. Other input is paused until the user picks (or Esc). */}
@@ -1268,6 +1272,45 @@ function actionToLine(a: MoveAction, match: Match): string {
     : a.target;
   const dmg = a.damageHpPercent != null ? ` > ${a.damageHpPercent}%` : a.damageRaw != null ? ` > ${a.damageRaw} raw` : '';
   return `${actor} > ${a.move} > ${target}${dmg}`;
+}
+
+// Full syntax + commands cheat-sheet shown by /help. Lives in a bordered
+// panel near the bottom of the screen. Esc closes it (see the keyboard
+// handler higher up — helpOpen takes modal precedence over normal input).
+function HelpPanel() {
+  return (
+    <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor="magenta" paddingX={1}>
+      <Text bold color="magenta">/help — battle syntax + commands</Text>
+      <Box marginTop={1}><Text bold>Actions</Text></Box>
+      <Text>  <Text color="white">m1 &gt; Close Combat &gt; o1 &gt; 67</Text>      <Text dimColor>— attack; opp now at 67%</Text></Text>
+      <Text>  <Text color="white">o1 &gt; Sucker Punch &gt; m1 &gt; 145</Text>     <Text dimColor>— opp attack; you now at 145 raw HP</Text></Text>
+      <Text>  <Text color="white">m1 &gt; Sucker Punch &gt; o1 &gt; 41%</Text>     <Text dimColor>— explicit % override</Text></Text>
+      <Text>  <Text color="white">m1 &gt; Close Combat &gt; o1 &gt; 80 raw</Text>  <Text dimColor>— damage-DEALT in raw HP</Text></Text>
+      <Text>  <Text color="white">m1+mega &gt; Flamethrower &gt; o2 &gt; 45</Text> <Text dimColor>— +mega / +crit / +tera&lt;type&gt; modifiers</Text></Text>
+      <Text>  <Text color="white">m1 &gt; switch &gt; Kingambit</Text>           <Text dimColor>— switch by species (must be in brought 4)</Text></Text>
+      <Box marginTop={1}><Text bold>State updates</Text></Box>
+      <Text>  <Text color="white">o3 = 45</Text>          <Text dimColor>— opp HP set to 45%</Text></Text>
+      <Text>  <Text color="white">m2 = 145</Text>         <Text dimColor>— my mon HP set to 145 raw</Text></Text>
+      <Text>  <Text color="white">o2 ko</Text>            <Text dimColor>— mark fainted</Text></Text>
+      <Text>  <Text color="white">o3 in o1</Text>         <Text dimColor>— bring teamIndex into active slot</Text></Text>
+      <Text>  <Text color="white">o1 brn</Text> / <Text color="white">par</Text> / <Text color="white">psn</Text> / <Text color="white">tox</Text> / <Text color="white">slp</Text> / <Text color="white">frz</Text> / <Text color="white">cure</Text></Text>
+      <Text>  <Text color="white">o1 +2 atk</Text>        <Text dimColor>— stat boost (or -1, multiple stats OK)</Text></Text>
+      <Text>  <Text color="white">o1 wp</Text> / <Text color="white">sash</Text> / <Text color="white">balloon</Text>  <Text dimColor>— named item triggers</Text></Text>
+      <Text>  <Text color="white">m rocks on</Text> · <Text color="white">o spikes 2</Text> · <Text color="white">o tspikes 1</Text> · <Text color="white">o web on</Text></Text>
+      <Box marginTop={1}><Text bold>Slash commands</Text></Box>
+      <Text>  <Text color="white">/next</Text> (/n)       <Text dimColor>finalize the turn</Text></Text>
+      <Text>  <Text color="white">/save</Text> (/s)       <Text dimColor>snapshot match to disk</Text></Text>
+      <Text>  <Text color="white">/info</Text> (/i)       <Text dimColor>open opponent info picker</Text></Text>
+      <Text>  <Text color="white">/crit</Text> (/c)       <Text dimColor>toggle crit damage column</Text></Text>
+      <Text>  <Text color="white">/allmoves</Text> (/a)   <Text dimColor>show all my moves per opp</Text></Text>
+      <Text>  <Text color="white">/review</Text> (/r)     <Text dimColor>ask Pikachu (Claude) to review last turn</Text></Text>
+      <Text>  <Text color="white">/help</Text> (/h, /?)   <Text dimColor>this panel</Text></Text>
+      <Text>  <Text color="white">/quit</Text> (/q)       <Text dimColor>end match and return to menu</Text></Text>
+      <Box marginTop={1}>
+        <Text dimColor>Esc to close · Backspace on empty input removes last drafted action · Tab accepts the highlighted suggestion</Text>
+      </Box>
+    </Box>
+  );
 }
 
 // One row of the opp roster: name, brought marker, types from Pikalytics

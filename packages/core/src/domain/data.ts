@@ -62,8 +62,12 @@ export function listSpecies(): string[] {
 // matches; ties are alphabetical. Used by the opponent-input autocomplete.
 export function searchLegalSpecies(query: string, limit = 8): string[] {
   const format = loadFormat();
+  // Expand the allow list with each species's otherFormes so the
+  // autocomplete surfaces forme names too (Rotom-Wash, Lycanroc-Midnight,
+  // Urshifu-Rapid-Strike, etc.) even though the format file only lists
+  // the base species id.
   const legalIds = format.legality.allow.length
-    ? new Set(format.legality.allow.map(toId))
+    ? expandedLegalIds(format.legality.allow)
     : null;
   const q = toId(query);
   if (!q) {
@@ -86,6 +90,25 @@ export function searchLegalSpecies(query: string, limit = 8): string[] {
   }
   matches.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name));
   return matches.slice(0, limit).map(m => m.name);
+}
+
+// Cache the expansion since the format file rarely changes and listing
+// otherFormes is a per-species dex hit.
+let _expandedCache: { srcLen: number; set: Set<string> } | null = null;
+function expandedLegalIds(allow: string[]): Set<string> {
+  if (_expandedCache && _expandedCache.srcLen === allow.length) {
+    return _expandedCache.set;
+  }
+  const out = new Set<string>();
+  for (const raw of allow) {
+    const baseId = toId(raw);
+    out.add(baseId);
+    const sp = getSpecies(baseId) as any;
+    const formes: string[] | undefined = sp?.otherFormes;
+    if (formes) for (const f of formes) out.add(toId(f));
+  }
+  _expandedCache = { srcLen: allow.length, set: out };
+  return out;
 }
 export function listMoves(): string[] {
   if (movesOverrides) return Object.keys(movesOverrides);
@@ -131,7 +154,19 @@ export function isLegalSpecies(speciesId: string, format = loadFormat()): boolea
   const id = toId(speciesId);
   if (format.legality.ban.map(toId).includes(id)) return false;
   if (format.legality.allow.length === 0) return true;
-  return format.legality.allow.map(toId).includes(id);
+  const allow = format.legality.allow.map(toId);
+  if (allow.includes(id)) return true;
+  // Forme fallback: Rotom-Wash, Lycanroc-Midnight, etc. aren't enumerated
+  // in the format file — we resolve them to their base species in the dex
+  // and allow if the base is allowed. This covers every Gen 1-9 forme
+  // automatically (Rotom-*, Lycanroc-*, Urshifu-*, Landorus-T, etc.).
+  const sp = getSpecies(speciesId) as any;
+  if (!sp || !sp.exists) return false;
+  const base = sp.baseSpecies as string | undefined;
+  if (!base) return false;
+  const baseId = toId(base);
+  if (baseId === id) return false; // already checked above
+  return allow.includes(baseId);
 }
 
 export function isLegalItem(itemId: string, format = loadFormat()): boolean {

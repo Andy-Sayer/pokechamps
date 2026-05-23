@@ -370,6 +370,37 @@ describe('parseTurnLine — new round (spread, boosts, damage, triggers, crit)',
   });
 });
 
+describe('parseTurnLine — non-damaging moves', () => {
+  test('m1 > Gravity (no target) parses as a self-targeted action', () => {
+    const r = parseTurnLine('m1 > Gravity', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    expect(r.actions[0]!.kind).toBe('move');
+    expect(r.actions[0]!.move).toBe('Gravity');
+    expect(r.actions[0]!.target).toBe('self');
+    expect(r.actions[0]!.damageHpPercent).toBeUndefined();
+    expect(r.actions[0]!.damageRaw).toBeUndefined();
+  });
+
+  test('o2 > Trick Room (no target) parses on opp side', () => {
+    const r = parseTurnLine('o2 > Trick Room', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    expect(r.actions[0]!.side).toBe('theirs');
+    expect(r.actions[0]!.move).toBe('Trick Room');
+  });
+
+  test('m1 > Will-O-Wisp > o1 (status move with target, no damage) parses', () => {
+    const r = parseTurnLine('m1 > Will-O-Wisp > o1', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    expect(r.actions[0]!.move).toBe('Will-O-Wisp');
+    expect(r.actions[0]!.targetTeamIndex).toBe(0);
+    expect(r.actions[0]!.damageHpPercent).toBeUndefined();
+    expect(r.actions[0]!.targetRemainingHpPercent).toBeUndefined();
+  });
+});
+
 describe('parseTurnLine — bring restriction on mine switches', () => {
   // Brought 2 of 3 to this battle: Sneasler (idx 0) + Garchomp (idx 1).
   // Kingambit (idx 2) is on the team but NOT brought.

@@ -17,7 +17,7 @@ import { ServerSettings } from './ui/ServerSettings.js';
 
 type Route =
   | { kind: 'menu' }
-  | { kind: 'edit-team' }
+  | { kind: 'edit-team'; initialTeam?: PokemonSet[]; initialName?: string }
   | { kind: 'team-builder' }
   | { kind: 'history' }
   | { kind: 'server' }
@@ -80,7 +80,13 @@ function App() {
     return <MatchHistory stores={stores} onExit={() => setRoute({ kind: 'menu' })} />;
   }
   if (route.kind === 'edit-team') {
-    return <TeamPaste stores={stores} onDone={() => setRoute({ kind: 'menu' })} onCancel={() => setRoute({ kind: 'menu' })} />;
+    return <TeamPaste
+      stores={stores}
+      initialTeam={route.initialTeam}
+      initialName={route.initialName}
+      onDone={() => setRoute({ kind: 'menu' })}
+      onCancel={() => setRoute({ kind: 'menu' })}
+    />;
   }
   if (route.kind === 'team-builder') {
     return <TeamBuilder stores={stores} onDone={() => setRoute({ kind: 'menu' })} onCancel={() => setRoute({ kind: 'menu' })} />;
@@ -90,6 +96,7 @@ function App() {
       stores={stores}
       onPick={(team, name) => setRoute({ kind: 'opponent', myTeam: team, teamName: name })}
       onCreateNew={() => setRoute({ kind: 'edit-team' })}
+      onEdit={(team, name) => setRoute({ kind: 'edit-team', initialTeam: team, initialName: name })}
       onCancel={() => setRoute({ kind: 'menu' })}
     />;
   }

@@ -1,24 +1,56 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Box, Text, useInput, usePaste } from 'ink';
 import TextInput from 'ink-text-input';
 import type { PokemonSet } from '@pokechamps/core/domain/types.js';
-import { parseShowdownTeam } from '@pokechamps/core/domain/showdown.js';
+import { parseShowdownTeam, formatShowdownTeam } from '@pokechamps/core/domain/showdown.js';
 import type { Stores } from '@pokechamps/core/storage/index.js';
 
 export interface TeamPasteProps {
   stores: Stores;
   onDone: (team: PokemonSet[], name: string) => void;
   onCancel: () => void;
+  /** Optional: pre-populate buffer + name with an existing team so the user
+   *  can fix a typo and overwrite. Saving with the same name silently
+   *  replaces the JSON file on disk. */
+  initialTeam?: PokemonSet[];
+  initialName?: string;
 }
 
 type Phase = 'paste' | 'name' | 'saved';
 
-export function TeamPaste({ stores, onDone, onCancel }: TeamPasteProps) {
+export function TeamPaste({ stores, onDone, onCancel, initialTeam, initialName }: TeamPasteProps) {
   const [buffer, setBuffer] = useState('');
   const [team, setTeam] = useState<PokemonSet[]>([]);
   const [phase, setPhase] = useState<Phase>('paste');
-  const [name, setName] = useState('my-team');
+  const [name, setName] = useState(initialName ?? 'my-team');
   const [error, setError] = useState<string | null>(null);
+  // Names already saved on disk — used to flag "(will overwrite)" hints in
+  // the name prompt. Loaded once on mount.
+  const [existingNames, setExistingNames] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    let cancelled = false;
+    stores.teams.list().then(rows => {
+      if (cancelled) return;
+      setExistingNames(new Set(rows.map(r => r.name)));
+    });
+    return () => { cancelled = true; };
+  }, [stores]);
+
+  // Pre-populate the buffer + parsed team when editing an existing team.
+  // Round-trip through formatShowdownTeam so the buffer reflects the canonical
+  // Showdown form even if the original was hand-typed.
+  useEffect(() => {
+    if (initialTeam && initialTeam.length) {
+      const exported = formatShowdownTeam(initialTeam);
+      setBuffer(exported);
+      try {
+        setTeam(parseShowdownTeam(exported));
+      } catch {
+        setTeam(initialTeam);
+      }
+    }
+  }, [initialTeam]);
 
   // Re-parse the team whenever the buffer changes.
   const updateBuffer = (next: string) => {
@@ -86,6 +118,7 @@ export function TeamPaste({ stores, onDone, onCancel }: TeamPasteProps) {
   }
 
   if (phase === 'name') {
+    const willOverwrite = existingNames.has(name.trim());
     return (
       <Box flexDirection="column" padding={1}>
         <Text>Team name:</Text>
@@ -105,6 +138,9 @@ export function TeamPaste({ stores, onDone, onCancel }: TeamPasteProps) {
             onDone(team, safe);
           }}
         />
+        {willOverwrite && (
+          <Text color="yellow">↻ "{name.trim()}" already exists — saving will overwrite it.</Text>
+        )}
       </Box>
     );
   }

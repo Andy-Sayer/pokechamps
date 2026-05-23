@@ -396,8 +396,12 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
     };
   }
 
-  // Move form: <actor> > <move> > <target>[ > <dmg>]
-  if (parts.length < 3) return { ok: false, error: 'move line needs a target: "<actor> > <move> > <target> [> dmg]"' };
+  // Move form: <actor> > <move> [> <target>[ > <dmg>]]
+  // Two-part shape is allowed for moves with no target — Gravity, Trick Room,
+  // Tailwind, Reflect, Recover (self-heal), and any other field/self move.
+  // We don't check the dex's `target` field; the user knows what they're
+  // logging and the parser shouldn't second-guess. Inference + turn order
+  // still process these actions normally (priority + speed signal).
 
   // Refuse if the actor slot is empty (no one there) or the mon in it is
   // fainted. A fainted mon can't act; an empty slot needs a "X in Y"
@@ -412,6 +416,27 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
       : !!ctx.opponentTeam[attackerTeamIndex]?.fainted;
   if (attackerIsFainted) {
     return { ok: false, error: `${parts[0]} is fainted and can't act` };
+  }
+
+  // Two-part: <actor> > <move> — field/self-only move with no target.
+  // Synthesize target='self' so the action has a meaningful shape; the
+  // finalize loop skips it because there's no damage to commit.
+  if (parts.length === 2) {
+    return {
+      ok: true,
+      kind: 'action',
+      actions: [{
+        side: actor.side,
+        attackerSlot: actor.slot,
+        kind: 'move',
+        move: verb,
+        attackerTeamIndex,
+        target: 'self',
+        order,
+        mega: actor.mega || undefined,
+        critical: actor.crit || undefined,
+      }],
+    };
   }
 
   const targetTok = parts[2]!;
