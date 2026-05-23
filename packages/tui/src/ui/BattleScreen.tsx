@@ -231,6 +231,11 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
   // AI battle review (opt-in via `r`). Holds the rendered text and a busy flag.
   const [aiReview, setAiReview] = useState<string | null>(null);
   const [aiReviewBusy, setAiReviewBusy] = useState(false);
+  // True while finalizeTurn is running — inference for off-meta opps can
+  // take several seconds. We render a running-Pikachu spinner so the
+  // user knows the app isn't stuck. Set via /next dispatch which schedules
+  // the heavy work on the next tick so the spinner has a chance to paint.
+  const [finalizing, setFinalizing] = useState(false);
   // Bump on each Pikalytics cache change so the UI re-derives suggestions /
   // OppRow content when a background fetch lands.
   const [pikTick, setPikTick] = useState(0);
@@ -427,6 +432,12 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
           startingCandidates: opp.candidates?.length
             ? opp.candidates.map(c => ({ evs: c.evs, nature: c.nature, item: c.item, ability: c.ability }))
             : undefined,
+          // Skip the ~360k-candidate coarse-grid fallback when priors fail.
+          // It blocks the UI for 10+ seconds and is rarely useful — usually
+          // the observation was mis-logged (e.g. wrong damage % or move).
+          // We accept an empty candidate list and let the next observation
+          // re-narrow from priors instead.
+          quickOnly: true,
         });
         const candidateSets = candidates.map(c => ({
           species: opp.species,
@@ -781,7 +792,17 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
         saveMatchAsync(stores, match, setMessage);
         setMessage(`Snapshot saved (${match.id}).`);
         return true;
-      case 'next': finalizeTurn(); return true;
+      case 'next':
+        // Schedule finalize on the next tick so React can paint the
+        // 'finalizing' spinner BEFORE the heavy inference work blocks
+        // the main thread. setTimeout(0) is enough — Ink picks up the
+        // state change and renders before the timer fires.
+        if (finalizing) return true;
+        setFinalizing(true);
+        setTimeout(() => {
+          try { finalizeTurn(); } finally { setFinalizing(false); }
+        }, 0);
+        return true;
       case 'undo':
         if (draftActions.length === 0) {
           setMessage('Nothing to undo — no drafted actions this turn.');
@@ -1310,6 +1331,11 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
         </Box>
       )}
 
+      {finalizing && (
+        <Box marginTop={1}>
+          <PikaSpinner sprite="run" label="Crunching the turn — narrowing opp spreads…" />
+        </Box>
+      )}
       {aiReviewBusy && <Box marginTop={1}><PikaSpinner label="Pikachu is reviewing the last turn…" /></Box>}
       {aiReview && !aiReviewBusy && (
         <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor="magenta" paddingX={1}>

@@ -201,4 +201,9 @@ function App() {
   return <Text>Unknown route</Text>;
 }
 
+// Clear the screen + park the cursor at the top before Ink takes over,
+// so the wrapping `npm run` script banners ("> pokechamps@0.1.0 start"
+// etc.) don't linger above the UI on startup. ESC[2J = clear screen,
+// ESC[H = cursor home. Cheap, no extra dependencies.
+process.stdout.write('\x1b[2J\x1b[H');
 render(<App />);
