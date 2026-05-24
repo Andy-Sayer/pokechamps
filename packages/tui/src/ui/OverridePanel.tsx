@@ -141,13 +141,13 @@ export function buildDraft(match: Match, activeIdx: ActiveIdxLite): Draft {
   };
 }
 
-// One navigable line. `change(dir)` mutates the draft; `display` renders the
-// current value. HP rows additionally accept typed digits via `setHp`.
-interface Row {
+// One navigable property line inside a target's editor.
+interface PropRow {
   label: string;
   display: string;
   change: (dir: 1 | -1) => void;
-  hpRow?: { side: 'mine' | 'theirs'; slotIndex: number };
+  isHp?: boolean;
+  hpMax?: number;
 }
 
 function cycle<T>(arr: T[], cur: T, dir: 1 | -1): T {
@@ -156,6 +156,13 @@ function cycle<T>(arr: T[], cur: T, dir: 1 | -1): T {
   return arr[n]!;
 }
 
+const slotTag = (s: SlotDraft) => `${s.side === 'mine' ? 'm' : 'o'}${s.slot + 1}`;
+const boostSummary = (b: Record<BoostStat, number>) =>
+  BOOST_STATS.filter(s => b[s] !== 0).map(s => `${b[s] > 0 ? '+' : ''}${b[s]} ${s}`).join(' ');
+
+// Two-step editor: a target list (Field / m1 / m2 / o1 / o2) → drill into one
+// target's short property list. Far less scrolling than a flat 33-row list,
+// and HP entry replaces (first digit clears) instead of appending.
 export function OverridePanel(props: {
   match: Match;
   activeIdx: ActiveIdxLite;
@@ -164,64 +171,80 @@ export function OverridePanel(props: {
 }): React.ReactElement {
   const { match, activeIdx } = props;
   const [draft, setDraft] = useState<Draft>(() => buildDraft(match, activeIdx));
-  const [sel, setSel] = useState(0);
+  const [mode, setMode] = useState<'list' | 'edit'>('list');
+  const [listSel, setListSel] = useState(0);
+  const [editTarget, setEditTarget] = useState<'field' | number>('field');
+  const [editSel, setEditSel] = useState(0);
+  // Active HP typing buffer for the focused HP row. null = not typing; the
+  // first digit starts a fresh value (replace), further digits append.
+  const [hpInput, setHpInput] = useState<string | null>(null);
 
   const set = (patch: Partial<Draft>) => setDraft(d => ({ ...d, ...patch }));
   const setSlot = (i: number, patch: Partial<SlotDraft>) =>
     setDraft(d => ({ ...d, slots: d.slots.map((s, j) => (j === i ? { ...s, ...patch } : s)) }));
 
-  // Team-member cycle options for a side (null = leave empty).
   const occupantsFor = (side: 'mine' | 'theirs'): Array<number | null> => {
     const team = side === 'mine' ? match.myTeam : match.opponentTeam;
     return [null, ...team.map((_, i) => i)];
   };
 
-  // Build the flat row list from the current draft each render.
-  const rows: Row[] = [];
-  rows.push({
-    label: 'Weather', display: draft.weather ?? 'none',
-    change: dir => set({ weather: cycle(WEATHERS, draft.weather, dir) }),
-  });
-  rows.push({
-    label: 'Terrain', display: draft.terrain ?? 'none',
-    change: dir => set({ terrain: cycle(TERRAINS, draft.terrain, dir) }),
-  });
-  rows.push({ label: 'Trick Room', display: draft.trickRoom ? 'on' : 'off', change: () => set({ trickRoom: !draft.trickRoom }) });
-  rows.push({ label: 'Tailwind (mine)', display: draft.twMine ? 'on' : 'off', change: () => set({ twMine: !draft.twMine }) });
-  rows.push({ label: 'Tailwind (opp)', display: draft.twTheirs ? 'on' : 'off', change: () => set({ twTheirs: !draft.twTheirs }) });
+  // ---- target list summaries ----
+  const fieldSummary =
+    `${draft.weather ?? 'none'} · ${draft.terrain ?? 'none'} · TR ${draft.trickRoom ? 'on' : 'off'} · TW ${draft.twMine ? 'my' : '–'}/${draft.twTheirs ? 'opp' : '–'}`;
+  const slotSummary = (s: SlotDraft): string => {
+    if (s.teamIndex == null) return 'empty';
+    const sp = speciesFor(match, s.side, s.teamIndex);
+    const hp = s.side === 'mine' ? `${s.hp}/${maxHpForSlot(match, 'mine', s.teamIndex)}` : `${s.hp}%`;
+    const bits = [sp, hp, s.status ?? '', boostSummary(s.boosts)].filter(Boolean);
+    return bits.join('  ');
+  };
+  const targets = [
+    { id: 'field' as const, label: 'Field', summary: fieldSummary },
+    ...draft.slots.map((s, i) => ({ id: i, label: slotTag(s), summary: slotSummary(s) })),
+  ];
+  const APPLY = targets.length;
+  const CANCEL = targets.length + 1;
+  const listLen = targets.length + 2;
 
-  draft.slots.forEach((s, i) => {
-    const tag = `${s.side === 'mine' ? 'm' : 'o'}${s.slot + 1}`;
+  // ---- property rows for the current edit target ----
+  const fieldProps = (): PropRow[] => [
+    { label: 'Weather', display: draft.weather ?? 'none', change: d => set({ weather: cycle(WEATHERS, draft.weather, d) }) },
+    { label: 'Terrain', display: draft.terrain ?? 'none', change: d => set({ terrain: cycle(TERRAINS, draft.terrain, d) }) },
+    { label: 'Trick Room', display: draft.trickRoom ? 'on' : 'off', change: () => set({ trickRoom: !draft.trickRoom }) },
+    { label: 'Tailwind (mine)', display: draft.twMine ? 'on' : 'off', change: () => set({ twMine: !draft.twMine }) },
+    { label: 'Tailwind (opp)', display: draft.twTheirs ? 'on' : 'off', change: () => set({ twTheirs: !draft.twTheirs }) },
+  ];
+  const slotProps = (i: number): PropRow[] => {
+    const s = draft.slots[i]!;
     const opts = occupantsFor(s.side);
-    rows.push({
-      label: `${tag} occupant`,
+    const rows: PropRow[] = [{
+      label: 'Occupant',
       display: speciesFor(match, s.side, s.teamIndex),
-      change: dir => setSlot(i, { teamIndex: cycle(opts, s.teamIndex, dir) }),
-    });
-    if (s.teamIndex == null) return; // empty slot — nothing else to edit
-    const unit = s.side === 'mine' ? '' : '%';
-    const mx = s.side === 'mine' ? maxHpForSlot(match, s.side, s.teamIndex) : 100;
+      change: d => setSlot(i, { teamIndex: cycle(opts, s.teamIndex, d) }),
+    }];
+    if (s.teamIndex == null) return rows;
+    const mx = s.side === 'mine' ? maxHpForSlot(match, 'mine', s.teamIndex) : 100;
     rows.push({
-      label: `${tag} HP`,
-      display: `${s.hp}${unit}${s.side === 'mine' ? `/${mx}` : ''}`,
-      change: dir => setSlot(i, { hp: Math.max(0, Math.min(mx, s.hp + dir)) }),
-      hpRow: { side: s.side, slotIndex: i },
+      label: 'HP',
+      display: s.side === 'mine' ? `${s.hp}/${mx}` : `${s.hp}%`,
+      change: d => { setHpInput(null); setSlot(i, { hp: Math.max(0, Math.min(mx, s.hp + d)) }); },
+      isHp: true,
+      hpMax: mx,
     });
-    rows.push({
-      label: `${tag} status`,
-      display: s.status ?? 'none',
-      change: dir => setSlot(i, { status: cycle(STATUSES, s.status, dir) }),
-    });
+    rows.push({ label: 'Status', display: s.status ?? 'none', change: d => setSlot(i, { status: cycle(STATUSES, s.status, d) }) });
     for (const stat of BOOST_STATS) {
       rows.push({
-        label: `${tag} ${stat}`,
-        display: (s.boosts[stat] > 0 ? `+${s.boosts[stat]}` : `${s.boosts[stat]}`),
-        change: dir => setSlot(i, { boosts: { ...s.boosts, [stat]: Math.max(-6, Math.min(6, s.boosts[stat] + dir)) } }),
+        label: stat,
+        display: s.boosts[stat] > 0 ? `+${s.boosts[stat]}` : `${s.boosts[stat]}`,
+        change: d => setSlot(i, { boosts: { ...s.boosts, [stat]: Math.max(-6, Math.min(6, s.boosts[stat] + d)) } }),
       });
     }
-  });
-
-  const selClamped = Math.min(sel, rows.length - 1);
+    return rows;
+  };
+  const editRows: PropRow[] = mode === 'edit'
+    ? (editTarget === 'field' ? fieldProps() : slotProps(editTarget))
+    : [];
+  const editSelClamped = Math.min(editSel, Math.max(0, editRows.length - 1));
 
   const apply = () => {
     const { match: nextMatch, activeIdx: nextActive } = applyOverride(match, activeIdx, draft);
@@ -229,33 +252,75 @@ export function OverridePanel(props: {
   };
 
   useInput((ch, key) => {
-    if (key.escape) { props.onClose(); return; }
-    if (key.return) { apply(); return; }
-    if (key.upArrow) { setSel(s => Math.max(0, s - 1)); return; }
-    if (key.downArrow) { setSel(s => Math.min(rows.length - 1, s + 1)); return; }
-    if (key.leftArrow) { rows[selClamped]?.change(-1); return; }
-    if (key.rightArrow) { rows[selClamped]?.change(1); return; }
-    // Typed digits set an HP row directly (e.g. type "1","4","5" → 145).
-    const hp = rows[selClamped]?.hpRow;
-    if (hp && /[0-9]/.test(ch)) {
-      const s = draft.slots[hp.slotIndex]!;
-      const mx = hp.side === 'mine' ? maxHpForSlot(match, 'mine', s.teamIndex) : 100;
-      const grown = Number(`${s.hp}${ch}`);
-      setSlot(hp.slotIndex, { hp: Math.max(0, Math.min(mx, grown)) });
-    } else if (hp && (key.backspace || key.delete)) {
-      const s = draft.slots[hp.slotIndex]!;
-      setSlot(hp.slotIndex, { hp: Math.floor(s.hp / 10) });
+    if (mode === 'list') {
+      if (key.escape) { props.onClose(); return; }
+      if (key.upArrow) { setListSel(s => Math.max(0, s - 1)); return; }
+      if (key.downArrow) { setListSel(s => Math.min(listLen - 1, s + 1)); return; }
+      if (key.return) {
+        if (listSel === CANCEL) { props.onClose(); return; }
+        if (listSel === APPLY) { apply(); return; }
+        setEditTarget(targets[listSel]!.id);
+        setEditSel(0);
+        setHpInput(null);
+        setMode('edit');
+      }
+      return;
+    }
+    // edit mode
+    if (key.escape || key.return) { setMode('list'); setHpInput(null); return; }
+    if (key.upArrow) { setEditSel(s => Math.max(0, s - 1)); setHpInput(null); return; }
+    if (key.downArrow) { setEditSel(s => Math.min(editRows.length - 1, s + 1)); setHpInput(null); return; }
+    const row = editRows[editSelClamped];
+    if (key.leftArrow) { setHpInput(null); row?.change(-1); return; }
+    if (key.rightArrow) { setHpInput(null); row?.change(1); return; }
+    if (row?.isHp && typeof editTarget === 'number') {
+      const mx = row.hpMax ?? 100;
+      if (/[0-9]/.test(ch)) {
+        const buf = (hpInput ?? '') + ch;
+        setHpInput(buf);
+        setSlot(editTarget, { hp: Math.max(0, Math.min(mx, Number(buf))) });
+      } else if (key.backspace || key.delete) {
+        const buf = (hpInput ?? '').slice(0, -1);
+        setHpInput(buf);
+        setSlot(editTarget, { hp: buf ? Math.max(0, Math.min(mx, Number(buf))) : 0 });
+      }
     }
   });
 
+  if (mode === 'list') {
+    return (
+      <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor="magenta" paddingX={1}>
+        <Text bold color="magenta">/override — pick a target</Text>
+        <Text dimColor>↑/↓ pick · Enter to edit · Esc cancels</Text>
+        <Box flexDirection="column" marginTop={1}>
+          {targets.map((t, i) => (
+            <Text key={t.label} color={i === listSel ? 'cyan' : undefined} inverse={i === listSel}>
+              {i === listSel ? '› ' : '  '}{t.label.padEnd(7)} <Text dimColor>{t.summary}</Text>
+            </Text>
+          ))}
+          <Text> </Text>
+          <Text color={listSel === APPLY ? 'green' : undefined} inverse={listSel === APPLY}>
+            {listSel === APPLY ? '› ' : '  '}✓ Apply changes
+          </Text>
+          <Text color={listSel === CANCEL ? 'red' : undefined} inverse={listSel === CANCEL}>
+            {listSel === CANCEL ? '› ' : '  '}✗ Cancel
+          </Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  const targetLabel = editTarget === 'field'
+    ? 'Field'
+    : `${slotTag(draft.slots[editTarget]!)} ${speciesFor(match, draft.slots[editTarget]!.side, draft.slots[editTarget]!.teamIndex)}`;
   return (
     <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor="magenta" paddingX={1}>
-      <Text bold color="magenta">/override — manual state editor</Text>
-      <Text dimColor>↑/↓ pick · ←/→ change · type digits to set HP · Enter applies · Esc cancels</Text>
+      <Text bold color="magenta">/override — {targetLabel}</Text>
+      <Text dimColor>↑/↓ pick · ←/→ change{editRows[editSelClamped]?.isHp ? ' · type digits to set HP' : ''} · Enter/Esc back to list</Text>
       <Box flexDirection="column" marginTop={1}>
-        {rows.map((r, i) => (
-          <Text key={r.label} color={i === selClamped ? 'cyan' : undefined} inverse={i === selClamped}>
-            {i === selClamped ? '› ' : '  '}{r.label.padEnd(18)} {r.display}
+        {editRows.map((r, i) => (
+          <Text key={r.label} color={i === editSelClamped ? 'cyan' : undefined} inverse={i === editSelClamped}>
+            {i === editSelClamped ? '› ' : '  '}{r.label.padEnd(12)} {r.display}
           </Text>
         ))}
       </Box>
