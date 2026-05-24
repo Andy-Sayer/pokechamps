@@ -30,6 +30,12 @@ import {
   absorbsToxicSpikes,
 } from '../domain/hazards.js';
 import { applyMegaAction } from '../domain/megaResolve.js';
+import {
+  switchInAbilityEffect,
+  intimidateReaction,
+  certainAbility,
+  type BoostMap,
+} from '../domain/abilities.js';
 import { isChargeMove, isPivotMove } from '../domain/data.js';
 import type { StateUpdate, HazardUpdate } from '../domain/turnparser.js';
 
@@ -118,6 +124,93 @@ function applyHazardOnSwitchInto(
       match.field = { ...match.field, theirHazards: { ...match.field.theirHazards, toxicSpikes: 0 } };
     }
   }
+}
+
+// Merge a boost map into a side's active-slot boosts, clamped to [-6, +6].
+// Mirrors the inline boost logic in applyHazardOnSwitchInto / applyStateUpdate.
+function applyBoostsTo(
+  match: Match,
+  side: 'mine' | 'theirs',
+  teamIndex: number,
+  boosts: BoostMap,
+): void {
+  const clamp = (n: number) => Math.max(-6, Math.min(6, n));
+  if (side === 'mine') {
+    const cur = { ...(match.myBoosts?.[teamIndex] ?? {}) };
+    for (const [stat, delta] of Object.entries(boosts)) {
+      (cur as any)[stat] = clamp(((cur as any)[stat] ?? 0) + (delta ?? 0));
+    }
+    match.myBoosts = { ...(match.myBoosts ?? {}), [teamIndex]: cur };
+  } else {
+    const o = match.opponentTeam[teamIndex];
+    if (!o) return;
+    const cur = { ...(o.currentBoosts ?? {}) };
+    for (const [stat, delta] of Object.entries(boosts)) {
+      (cur as any)[stat] = clamp(((cur as any)[stat] ?? 0) + (delta ?? 0));
+    }
+    o.currentBoosts = cur;
+  }
+}
+
+// Switch-in ability triggers (A.2). Called right after a mon enters a slot,
+// alongside hazard application. Applies Intimidate (-1 Atk to each opposing
+// active, honouring immunity / Defiant-style reactions), weather/terrain
+// setters, and self-boost abilities. `active` must already reflect this
+// switch (the engine updates the slot before calling). Opponent abilities only
+// trigger when certain (observed, or the species has a single ability) so we
+// never apply an effect the opp might not have.
+function applySwitchInAbility(
+  match: Match,
+  side: 'mine' | 'theirs',
+  teamIndex: number,
+  active: ActiveIdx,
+): string[] {
+  const notes: string[] = [];
+  const incoming = side === 'mine' ? match.myTeam[teamIndex] : match.opponentTeam[teamIndex];
+  if (!incoming) return notes;
+  const knownAbility = side === 'mine'
+    ? (incoming as PokemonSet).ability
+    : (incoming as OpponentEntry).ability;
+  const ability = certainAbility({ knownAbility, species: incoming.species });
+  const effect = switchInAbilityEffect(ability);
+  if (!effect) return notes;
+
+  // Weather / terrain: set on the shared field. Last setter wins, matching
+  // normal weather override (we don't model primordial-weather locks).
+  if (effect.weather || effect.terrain) {
+    const f: FieldState = { ...(match.field ?? NEUTRAL_FIELD) };
+    if (effect.weather) { f.weather = effect.weather; notes.push(`${incoming.species}'s ${ability} set ${effect.weather}`); }
+    if (effect.terrain) { f.terrain = effect.terrain; notes.push(`${incoming.species}'s ${ability} set ${effect.terrain} Terrain`); }
+    match.field = f;
+  }
+
+  // Self-boosts (Intrepid Sword / Dauntless Shield).
+  if (effect.selfBoosts) {
+    applyBoostsTo(match, side, teamIndex, effect.selfBoosts);
+    notes.push(`${incoming.species}'s ${ability} boosted itself`);
+  }
+
+  // Intimidate: -1 Atk to each opposing active.
+  if (effect.intimidate) {
+    const foeSide: 'mine' | 'theirs' = side === 'mine' ? 'theirs' : 'mine';
+    const foeSlots = foeSide === 'mine' ? active.mine : active.theirs;
+    for (const foeIdx of foeSlots) {
+      if (foeIdx == null) continue;
+      // My own foes' abilities are always known; opp foes only when certain.
+      const foeAbility = foeSide === 'mine'
+        ? match.myTeam[foeIdx]?.ability
+        : certainAbility({
+            knownAbility: match.opponentTeam[foeIdx]?.ability,
+            species: match.opponentTeam[foeIdx]?.species ?? '',
+          });
+      const reaction = intimidateReaction(foeAbility);
+      if (!reaction.blocked) applyBoostsTo(match, foeSide, foeIdx, { atk: -1 });
+      if (reaction.reaction) applyBoostsTo(match, foeSide, foeIdx, reaction.reaction);
+    }
+    notes.push(`${incoming.species}'s Intimidate lowered foe Attack`);
+  }
+
+  return notes;
 }
 
 // Faint-counting outcome detection (mirror of BattleScreen.detectOutcome).
@@ -422,6 +515,7 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
       nextActive.theirs[a.attackerSlot] = a.targetTeamIndex;
     }
     applyHazardOnSwitchInto(next, a.side, a.targetTeamIndex);
+    inferenceNotes.push(...applySwitchInAbility(next, a.side, a.targetTeamIndex, nextActive));
   }
 
   // End-of-turn effects.
@@ -694,6 +788,7 @@ function applyStateUpdateImpl(
       next.opponentBrought = [...brought].sort((a, b) => a - b) as Match['opponentBrought'];
     }
     applyHazardOnSwitchInto(next, side, teamIndex);
+    applySwitchInAbility(next, side, teamIndex, nextActive);
   }
 
   next.outcome = detectOutcome(next);

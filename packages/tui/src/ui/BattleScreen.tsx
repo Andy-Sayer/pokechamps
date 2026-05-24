@@ -15,6 +15,7 @@ import { getSpecies, isChargeMove, isPivotMove } from '@pokechamps/core/domain/d
 import { defaultOpponentSet } from '@pokechamps/core/domain/bring.js';
 import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs } from '@pokechamps/core/domain/hazards.js';
+import { switchInAbilityEffect, intimidateReaction, certainAbility, type BoostMap } from '@pokechamps/core/domain/abilities.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
 import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict } from '@pokechamps/core/domain/predictions.js';
 import { PikaSpinner } from './PikaSpinner.js';
@@ -140,6 +141,66 @@ function applyHazardOnSwitchInto(match: Match, side: 'mine' | 'theirs', teamInde
       match.field = { ...match.field, theirHazards: { ...match.field.theirHazards, toxicSpikes: 0 } };
     }
   }
+}
+
+// Merge a boost map into a side's active boosts, clamped to [-6, +6].
+function applyBoostsInto(match: Match, side: 'mine' | 'theirs', teamIndex: number, boosts: BoostMap) {
+  const clamp = (n: number) => Math.max(-6, Math.min(6, n));
+  if (side === 'mine') {
+    const cur = { ...(match.myBoosts?.[teamIndex] ?? {}) };
+    for (const [stat, delta] of Object.entries(boosts)) (cur as any)[stat] = clamp(((cur as any)[stat] ?? 0) + (delta ?? 0));
+    match.myBoosts = { ...(match.myBoosts ?? {}), [teamIndex]: cur };
+  } else {
+    const o = match.opponentTeam[teamIndex];
+    if (!o) return;
+    const cur = { ...(o.currentBoosts ?? {}) };
+    for (const [stat, delta] of Object.entries(boosts)) (cur as any)[stat] = clamp(((cur as any)[stat] ?? 0) + (delta ?? 0));
+    o.currentBoosts = cur;
+  }
+}
+
+// Switch-in ability triggers (A.2). Mirror of engine.applySwitchInAbility —
+// applies Intimidate / weather / terrain / self-boosts when a mon enters a
+// slot. `active` must already reflect this switch. Returns user-facing notes.
+function applySwitchInAbilityInto(
+  match: Match,
+  side: 'mine' | 'theirs',
+  teamIndex: number,
+  active: { mine: [number | null, number | null]; theirs: [number | null, number | null] },
+): string[] {
+  const notes: string[] = [];
+  const incoming = side === 'mine' ? match.myTeam[teamIndex] : match.opponentTeam[teamIndex];
+  if (!incoming) return notes;
+  const knownAbility = side === 'mine' ? (incoming as PokemonSet).ability : (incoming as OpponentEntry).ability;
+  const ability = certainAbility({ knownAbility, species: incoming.species });
+  const effect = switchInAbilityEffect(ability);
+  if (!effect) return notes;
+
+  if (effect.weather || effect.terrain) {
+    const f: FieldState = { ...(match.field ?? NEUTRAL_FIELD) };
+    if (effect.weather) { f.weather = effect.weather; notes.push(`${incoming.species}'s ${ability} set ${effect.weather}`); }
+    if (effect.terrain) { f.terrain = effect.terrain; notes.push(`${incoming.species}'s ${ability} set ${effect.terrain} Terrain`); }
+    match.field = f;
+  }
+  if (effect.selfBoosts) {
+    applyBoostsInto(match, side, teamIndex, effect.selfBoosts);
+    notes.push(`${incoming.species}'s ${ability} boosted itself`);
+  }
+  if (effect.intimidate) {
+    const foeSide: 'mine' | 'theirs' = side === 'mine' ? 'theirs' : 'mine';
+    const foeSlots = foeSide === 'mine' ? active.mine : active.theirs;
+    for (const foeIdx of foeSlots) {
+      if (foeIdx == null) continue;
+      const foeAbility = foeSide === 'mine'
+        ? match.myTeam[foeIdx]?.ability
+        : certainAbility({ knownAbility: match.opponentTeam[foeIdx]?.ability, species: match.opponentTeam[foeIdx]?.species ?? '' });
+      const reaction = intimidateReaction(foeAbility);
+      if (!reaction.blocked) applyBoostsInto(match, foeSide, foeIdx, { atk: -1 });
+      if (reaction.reaction) applyBoostsInto(match, foeSide, foeIdx, reaction.reaction);
+    }
+    notes.push(`${incoming.species}'s Intimidate lowered foe Attack`);
+  }
+  return notes;
 }
 
 // Detect match outcome from faint counts. Mine ends when all brought mons
@@ -643,6 +704,8 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       }
       // Switch-in hazards hit the new mon.
       applyHazardOnSwitchInto(next, a.side, a.targetTeamIndex);
+      // Switch-in ability triggers (Intimidate / weather / terrain).
+      inferenceNotes.push(...applySwitchInAbilityInto(next, a.side, a.targetTeamIndex, nextActive));
     }
 
     // Generalised end-of-turn: weather chip + status ticks (both sides) +
@@ -916,6 +979,8 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       }
       // Hazards on the incoming side's hazard pile hit them now.
       applyHazardOnSwitchInto(next, side, teamIndex);
+      // Switch-in ability triggers (Intimidate / weather / terrain).
+      applySwitchInAbilityInto(next, side, teamIndex, nextActive);
     }
 
     next.outcome = detectOutcome(next);
