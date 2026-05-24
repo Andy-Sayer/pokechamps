@@ -19,7 +19,7 @@ import { fieldMoveEffect, applyFieldMove } from '@pokechamps/core/domain/fieldMo
 import { detectChoiceLock, sashProcced, type ChoiceLock } from '@pokechamps/core/domain/itemSignals.js';
 import { switchInAbilityEffect, intimidateReaction, certainAbility, type BoostMap } from '@pokechamps/core/domain/abilities.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
-import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict } from '@pokechamps/core/domain/predictions.js';
+import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict, type MatchupCell, type Confidence } from '@pokechamps/core/domain/predictions.js';
 import { PikaSpinner } from './PikaSpinner.js';
 import { ExportPanel } from './ExportPanel.js';
 import { OverridePanel } from './OverridePanel.js';
@@ -1908,20 +1908,20 @@ function statusColor(s: 'brn' | 'par' | 'psn' | 'tox' | 'slp' | 'frz'): string {
 interface MatchupRowProps {
   marker: string;
   opp: OpponentEntry;
-  offense: { move: string; minPercent: number; maxPercent: number; koChance: string; candidatesConsidered: number } | null;
-  offenseCrit?: { move: string; minPercent: number; maxPercent: number; koChance: string; candidatesConsidered: number } | null;
+  offense: MatchupCell | null;
+  offenseCrit?: MatchupCell | null;
   // When set (via the `a` toggle), render one line per move instead of a
   // single best-move line. allOffenseCrit (when set with allOffense) carries
   // the crit variant of each move, zipped by move name.
-  allOffense?: Array<{ move: string; minPercent: number; maxPercent: number; koChance: string; candidatesConsidered: number }> | null;
-  allOffenseCrit?: Array<{ move: string; minPercent: number; maxPercent: number; koChance: string; candidatesConsidered: number }> | null;
-  threat: { move: string; minPercent: number; maxPercent: number; koChance: string; candidatesConsidered: number } | null;
+  allOffense?: MatchupCell[] | null;
+  allOffenseCrit?: MatchupCell[] | null;
+  threat: MatchupCell | null;
   verdict: SpeedVerdict;
   // Post-mega variants — set only when the my-side mon holds an unused mega
   // stone. Surfaced inline as "(mega: X-Y%)" / "(mega ✓)" so the user can
   // compare both formes at a glance before deciding to pop mega.
-  offenseMega?: { move: string; minPercent: number; maxPercent: number; koChance: string; candidatesConsidered: number } | null;
-  threatMega?: { move: string; minPercent: number; maxPercent: number; koChance: string; candidatesConsidered: number } | null;
+  offenseMega?: MatchupCell | null;
+  threatMega?: MatchupCell | null;
   verdictMega?: SpeedVerdict | null;
   dim: boolean;
   active: boolean;
@@ -1946,8 +1946,18 @@ function MatchupRow({ marker, opp, offense, offenseCrit, allOffense, allOffenseC
     );
   }
   const hpTag = opp.currentHpPercent != null ? ` [HP ${opp.currentHpPercent.toFixed(0)}%]` : '';
+  // Honest envelope is the min-max range; the likely sub-range (most-likely /
+  // least-invested spread) is appended with a confidence tag when inference has
+  // pinned it AND it's tighter than the envelope.
+  const confTag = (c?: Confidence) => (c === 'high' ? 'hi' : c === 'med' ? 'med' : 'lo');
+  const likelyTxt = (cell?: MatchupCell | null) => {
+    if (!cell || cell.likelyMinPercent == null || cell.likelyMaxPercent == null || !cell.confidence) return '';
+    const tighter = cell.likelyMinPercent > cell.minPercent + 0.5 || cell.likelyMaxPercent < cell.maxPercent - 0.5;
+    if (!tighter) return ` (${confTag(cell.confidence)})`;
+    return ` · likely ${cell.likelyMinPercent.toFixed(0)}-${cell.likelyMaxPercent.toFixed(0)}% (${confTag(cell.confidence)})`;
+  };
   const offTxt = offense
-    ? `${offense.move} ${offense.minPercent.toFixed(0)}-${offense.maxPercent.toFixed(0)}% (${offense.koChance})`
+    ? `${offense.move} ${offense.minPercent.toFixed(0)}-${offense.maxPercent.toFixed(0)}% (${offense.koChance})${likelyTxt(offense)}`
     : 'n/a';
   const critTxt = offenseCrit
     ? ` / crit ${offenseCrit.minPercent.toFixed(0)}-${offenseCrit.maxPercent.toFixed(0)}%`
@@ -1961,7 +1971,7 @@ function MatchupRow({ marker, opp, offense, offenseCrit, allOffense, allOffenseC
       : ` ⭢mega ${offenseMega.move} ${offenseMega.minPercent.toFixed(0)}-${offenseMega.maxPercent.toFixed(0)}%`
     : '';
   const thrTxt = threat
-    ? `${threat.move} ${threat.minPercent.toFixed(0)}-${threat.maxPercent.toFixed(0)}%`
+    ? `${threat.move} ${threat.minPercent.toFixed(0)}-${threat.maxPercent.toFixed(0)}%${likelyTxt(threat)}`
     : 'n/a';
   const thrMegaTxt = threatMega
     ? threatMega.move === threat?.move

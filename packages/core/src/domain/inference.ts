@@ -261,26 +261,26 @@ function generateCoarseCandidates(opts: {
   return out;
 }
 
-// Pick a "most likely" representative from a candidate set. When per-candidate
-// likelihoods are supplied (from scoreSpread / OpponentEntry.candidateLikelihoods)
-// the highest-likelihood spread wins — the actual best fit to observed damage.
-// Ties (and the no-likelihood case) fall back to the cheap prior: prefer
-// minimal EV investment + common items/natures.
-export function mostLikely(
-  candidates: SpreadCandidate[],
-  likelihoods?: number[],
-): SpreadCandidate | null {
-  if (!candidates.length) return null;
-  const prior = (c: SpreadCandidate) =>
+// Index of the "most likely" spread in a candidate set. Per the minimum-stat-
+// points principle, the headline estimate is the LEAST-invested spread still
+// consistent with observations (people run the minimum that hits benchmarks),
+// so we rank by total defensive investment ascending (+ small item/nature
+// priors). Per-candidate likelihoods, when present, only break investment ties
+// — the better roll-fit among equally-invested spreads. Returns -1 if empty.
+export function mostLikelyIndex(candidates: SpreadCandidate[], likelihoods?: number[]): number {
+  if (!candidates.length) return -1;
+  const invest = (c: SpreadCandidate) =>
     (c.evs.hp + c.evs.def + c.evs.spd) + (c.item ? 0 : 5) + (c.nature === 'Hardy' ? 10 : 0);
-  if (likelihoods && likelihoods.length === candidates.length) {
-    let best = 0;
-    for (let i = 1; i < candidates.length; i++) {
-      const dl = likelihoods[i]! - likelihoods[best]!;
-      // Higher likelihood wins; tie → lower prior score (less investment).
-      if (dl > 1e-9 || (Math.abs(dl) <= 1e-9 && prior(candidates[i]!) < prior(candidates[best]!))) best = i;
-    }
-    return candidates[best] ?? null;
+  let best = 0;
+  for (let i = 1; i < candidates.length; i++) {
+    const di = invest(candidates[i]!) - invest(candidates[best]!);
+    if (di < -1e-9) { best = i; continue; }
+    if (Math.abs(di) <= 1e-9 && likelihoods && (likelihoods[i] ?? 0) > (likelihoods[best] ?? 0)) best = i;
   }
-  return [...candidates].sort((a, b) => prior(a) - prior(b))[0] ?? null;
+  return best;
+}
+
+export function mostLikely(candidates: SpreadCandidate[], likelihoods?: number[]): SpreadCandidate | null {
+  const i = mostLikelyIndex(candidates, likelihoods);
+  return i < 0 ? null : candidates[i]!;
 }

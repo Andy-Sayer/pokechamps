@@ -3,16 +3,35 @@ import { damageRange } from './damage.js';
 import { defaultOpponentSet } from './bring.js';
 import { actualSpeed } from './speed.js';
 import { getPikalytics } from './pikalytics.js';
+import { mostLikelyIndex } from './inference.js';
+
+export type Confidence = 'high' | 'med' | 'low';
 
 // One matchup row's worth of data. `move` is the attacker's best option
-// against this defender; min/max are the honest range across the candidate
+// against this defender; min/max are the HONEST envelope across the candidate
 // uncertainty (every plausible defender spread × the calc's roll spread).
+// `likely*` is the single most-likely (least-invested consistent) spread's
+// range, with a `confidence` rating reflecting how tightly observations pin it.
 export interface MatchupCell {
   move: string;
   minPercent: number;
   maxPercent: number;
   koChance: string;
   candidatesConsidered: number;
+  likelyMinPercent?: number;
+  likelyMaxPercent?: number;
+  confidence?: Confidence;
+}
+
+// Confidence in the prediction: no inference yet → low (it's a Pikalytics /
+// default prior); otherwise driven by how wide the honest envelope is (tight
+// agreement across surviving spreads = high).
+function confidenceFor(hasInference: boolean, minPercent: number, maxPercent: number): Confidence {
+  if (!hasInference) return 'low';
+  const width = maxPercent - minPercent;
+  if (width <= 12) return 'high';
+  if (width <= 28) return 'med';
+  return 'low';
 }
 
 export type SpeedVerdict = 'faster' | 'slower' | 'tie' | 'unknown' | 'scarf-flag';
@@ -173,13 +192,39 @@ export function predictOffense(args: {
   const finalKo = args.defenderCurrentHpPercent != null && args.defenderCurrentHpPercent < 100
     ? koVsRemaining(allRolls, args.defenderCurrentHpPercent)
     : koChance;
+  const likely = likelyRange(args.opponent, cands, chosenMove, c => damageRange({
+    attacker: args.attacker, defender: c, move: chosenMove, field: args.field, attackerSide: 'mine',
+    attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+    defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
+  }));
   return {
     move: chosenMove,
     minPercent,
     maxPercent,
     koChance: finalKo,
     candidatesConsidered: cands.length,
+    likelyMinPercent: likely?.min,
+    likelyMaxPercent: likely?.max,
+    confidence: confidenceFor(!!args.opponent.candidates?.length, minPercent, maxPercent),
   };
+}
+
+// Compute the most-likely (least-invested consistent) defender candidate's
+// damage range for `move`. `cands` is in OpponentEntry.candidates order, so the
+// mostLikely index maps straight across; falls back to the first candidate.
+function likelyRange(
+  opp: OpponentEntry,
+  cands: PokemonSet[],
+  _move: string,
+  calc: (defender: PokemonSet) => { minPercent: number; maxPercent: number },
+): { min: number; max: number } | null {
+  if (!cands.length) return null;
+  const li = mostLikelyIndex((opp.candidates ?? []) as any, opp.candidateLikelihoods);
+  const set = cands[li >= 0 && li < cands.length ? li : 0]!;
+  try {
+    const r = calc(set);
+    return { min: r.minPercent, max: r.maxPercent };
+  } catch { return null; }
 }
 
 // Like predictOffense, but reports the range for EVERY move in the attacker's
@@ -235,12 +280,21 @@ export function predictOffenseAll(args: {
     const finalKo = args.defenderCurrentHpPercent != null && args.defenderCurrentHpPercent < 100
       ? koVsRemaining(allRolls, args.defenderCurrentHpPercent)
       : koChance;
+    const likely = likelyRange(args.opponent, cands, move, c => damageRange({
+      attacker: args.attacker, defender: c, move, field: args.field, attackerSide: 'mine',
+      attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+      defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
+      critical: args.critical,
+    }));
     out.push({
       move,
       minPercent,
       maxPercent,
       koChance: finalKo,
       candidatesConsidered: cands.length,
+      likelyMinPercent: likely?.min,
+      likelyMaxPercent: likely?.max,
+      confidence: confidenceFor(!!args.opponent.candidates?.length, minPercent, maxPercent),
     });
   }
   out.sort((a, b) => b.maxPercent - a.maxPercent);
@@ -315,12 +369,21 @@ export function predictThreat(args: {
   const finalKo = args.defenderCurrentHpPercent != null && args.defenderCurrentHpPercent < 100
     ? koVsRemaining(allRolls, args.defenderCurrentHpPercent)
     : koChance;
+  // Likely range here = the opp's most-likely (least-invested) ATTACKING spread.
+  const likely = likelyRange(args.opponent, cands, chosenMove, c => damageRange({
+    attacker: c, defender: args.defender, move: chosenMove, field: args.field, attackerSide: 'theirs',
+    attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+    defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
+  }));
   return {
     move: chosenMove,
     minPercent,
     maxPercent,
     koChance: finalKo,
     candidatesConsidered: cands.length,
+    likelyMinPercent: likely?.min,
+    likelyMaxPercent: likely?.max,
+    confidence: confidenceFor(!!args.opponent.candidates?.length, minPercent, maxPercent),
   };
 }
 

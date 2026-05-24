@@ -55,22 +55,24 @@ describe('inferSpread Hybrid weighting', () => {
   });
 });
 
-describe('mostLikely', () => {
+describe('mostLikely (minimum-stat-points principle)', () => {
   const minimal: SpreadCandidate = { evs: { ...ZERO_EVS }, nature: 'Hardy' };
   const invested: SpreadCandidate = { evs: { ...ZERO_EVS, hp: 252, spd: 252 }, nature: 'Careful', item: 'Assault Vest' };
+  const investedB: SpreadCandidate = { evs: { ...ZERO_EVS, hp: 252, spd: 252 }, nature: 'Careful', item: 'Leftovers' };
 
-  test('with likelihoods, the highest-scoring candidate wins (even if heavily invested)', () => {
+  test('the least-invested consistent spread wins, even with a lower likelihood', () => {
+    // Minimal has the WORSE fit (0.1) but is the honest floor — it still wins.
     const pick = mostLikely([minimal, invested], [0.1, 0.9]);
-    expect(pick).toBe(invested);
-  });
-
-  test('without likelihoods, falls back to the minimal-EV prior', () => {
-    const pick = mostLikely([invested, minimal]);
     expect(pick).toBe(minimal);
   });
 
-  test('likelihood ties break toward the lower-investment prior', () => {
-    const pick = mostLikely([invested, minimal], [0.5, 0.5]);
-    expect(pick).toBe(minimal);
+  test('without likelihoods, picks the minimal-investment spread', () => {
+    expect(mostLikely([invested, minimal])).toBe(minimal);
+  });
+
+  test('likelihood only breaks a tie between equally-invested spreads', () => {
+    // Same investment → the better roll-fit (higher likelihood) wins.
+    const pick = mostLikely([invested, investedB], [0.2, 0.8]);
+    expect(pick).toBe(investedB);
   });
 });

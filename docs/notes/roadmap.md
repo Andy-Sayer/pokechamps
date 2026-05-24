@@ -418,17 +418,17 @@ plays matches live + finds bugs by doing so:
    Focus Sash + still infers off the full damage (`sashProcced` gates
    both). Still open: Sand-chip → no-Safety-Goggles; auto-detecting
    Sash without the explicit tag (deferred — misfire-prone).
-4. **B.1 — Bayesian candidate weighting.** *(mostly done.)* ✅
-   `candidateLikelihood` scores each spread (rolls-in-observed-bucket /
-   total); survivors ordered best-first; **Hybrid never-empty** fallback
-   (kills the "0 candidates / inference failed" dead-end + recovers from
-   contradictory observations). ✅ `scoreSpread` persists per-candidate
-   likelihoods on `OpponentEntry.candidateLikelihoods`; `mostLikely(c,
-   likelihoods)` now picks the **best-fit** spread (EV-min prior only as
-   tiebreak), wired through the roster / scout export. Still open:
-   probability-**weighted damage ranges** in `predictions.ts` (a UX
-   shift from the current honest min/max envelope — wants a call on
-   whether to change it). Task #142.
+4. ~~**B.1 — Bayesian candidate weighting.**~~ ✅ **Done.**
+   `candidateLikelihood` + Hybrid never-empty solver (no more "0
+   candidates" dead-ends; recovers from contradictions). `scoreSpread`
+   persists `OpponentEntry.candidateLikelihoods`. Per the minimum-stat-
+   points principle, `mostLikely` reports the **least-invested**
+   consistent spread (likelihood only breaks investment ties). Matchup
+   cells keep the **honest min/max envelope** AND add the most-likely
+   spread's range + a **confidence** rating (`high`/`med`/`low` from
+   envelope width; `low` when it's still a prior). Display shows
+   `move X-Y% (ko) · likely L-H% (hi)`. *(Probability-weighted ranges
+   deliberately NOT adopted — the honest envelope stays.)*
 5. **Audit completion (task #156).** Remaining gaps: Trick/Switcheroo
    item swap, Encore/Taunt/Disable surfacing, Fake Out turn-1 gating,
    Sucker Punch fail conditions. *(Knock Off item removal, EOT
