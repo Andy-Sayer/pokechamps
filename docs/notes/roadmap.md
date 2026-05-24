@@ -2,8 +2,8 @@
 
 ## Context
 
-**Last updated 2026-05-24.** 393 tests across 4 workspaces (core 286 /
-server 59 / tui 32 / web 16), all green. A root `vitest.config.ts`
+**Last updated 2026-05-24.** 416 tests across 4 workspaces, all green.
+A root `vitest.config.ts`
 (`test.projects`) now aggregates every workspace's own config, so both
 `npm test` and a bare `npx vitest run` from the repo root pass —
 including the web package's `environment: 'jsdom'`.
