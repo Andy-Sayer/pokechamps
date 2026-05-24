@@ -21,26 +21,28 @@ Node TUI assistant for Pokémon Champions doubles:
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run refresh-data` — dump `@pkmn/dex` into `data/*.json`. Preserves `format.champions.json`.
 - `npm run validate-format` — confirm every id in the format allow-lists resolves in `@pkmn/dex`. Run after hand-editing the format file.
-- `npx tsx src/scripts/smoketest.ts` — forward damage + inverse inference sanity check.
+- `npx tsx packages/core/src/scripts/smoketest.ts` — forward damage + inverse inference sanity check.
 - `npm test` — vitest suite. Also verify against Pikalytics calc and the smoketest for damage changes.
 
 ## Architecture
 
-**Data (`src/domain/data.ts`, `src/scripts/refresh-data.ts`).** Game data is dumped from `@pkmn/dex` into editable JSON under `data/`. Always read via `getSpecies/getMove/getItem/getAbility/getNature` — never import from `@pkmn/dex` elsewhere, or you bypass the editable layer. `loadFormat()` / `isLegalSpecies()` / `isLegalItem()` / `searchLegalSpecies()` consume `format.champions.json`.
+**Monorepo layout.** npm workspaces under `packages/`: `core` (domain logic, inference, damage, match engine, data scripts, AI wrapper), `tui` (Ink CLI — the primary surface), `server` (optional remote mode), `web` (read-only viewer). Paths below are relative to those packages; core lives at `packages/core/src/`, the TUI at `packages/tui/src/`.
 
-**Damage (`src/domain/damage.ts`).** Thin wrapper around `@smogon/calc`'s `calculate()`. Do not reimplement the formula. `damageRange()` is the public entry.
+**Data (`packages/core/src/domain/data.ts`, `packages/core/src/scripts/refresh-data.ts`).** Game data is dumped from `@pkmn/dex` into editable JSON under `data/`. Always read via `getSpecies/getMove/getItem/getAbility/getNature` — never import from `@pkmn/dex` elsewhere, or you bypass the editable layer. `loadFormat()` / `isLegalSpecies()` / `isLegalItem()` / `searchLegalSpecies()` consume `format.champions.json`.
 
-**Inference (`src/domain/inference.ts`).** Inverse solver. Enumerates a coarse EV grid (`[0,4,84,124,156,196,252]` on HP/Def/SpD) × common defensive natures × common items; keeps combos whose forward damage range contains the observed value. Each new `DamageObservation` narrows the candidate set. Coarse on purpose — exhaustive search is too slow for live use.
+**Damage (`packages/core/src/domain/damage.ts`).** Thin wrapper around `@smogon/calc`'s `calculate()`. Do not reimplement the formula. `damageRange()` is the public entry.
 
-**Bring (`src/domain/bring.ts`).** Scores all 15 brings on offense / defense / speed / roles. Unknown opponent spreads fall back to `defaultOpponentSet()`; once inference populates `OpponentEntry.candidates`, `resolvedOpponentSet()` uses the top one.
+**Inference (`packages/core/src/domain/inference.ts`).** Inverse solver. Enumerates a coarse EV grid (`[0,4,84,124,156,196,252]` on HP/Def/SpD) × common defensive natures × common items; keeps combos whose forward damage range contains the observed value. Each new `DamageObservation` narrows the candidate set. Coarse on purpose — exhaustive search is too slow for live use.
 
-**AI (`src/ai/`).** Anthropic SDK wrapper using `claude-opus-4-7`, with `cache_control: ephemeral` on the static team/opponent context. `explainBring()` and `narrateInference()` are called on demand from the TUI and no-op gracefully without `ANTHROPIC_API_KEY`.
+**Bring (`packages/core/src/domain/bring.ts`).** Scores all 15 brings on offense / defense / speed / roles. Unknown opponent spreads fall back to `defaultOpponentSet()`; once inference populates `OpponentEntry.candidates`, `resolvedOpponentSet()` uses the top one.
 
-**TUI (`src/cli.tsx`, `src/ui/`).** Ink 7 + React 19. Route reducer: `menu → pick-team → opponent → bring → battle`. Team input is paste-based via `TeamPaste.tsx` (`parseShowdownTeam()`); a per-field form was rejected as a UX regression. `OpponentInput.tsx` is species-only at preview, with autocomplete filtered to the Champions legal list; items/abilities/moves are learned later from battle observations. `BattleScreen.tsx` runs forward damage for every (my mon, opp mon, move) triple and accepts a single-line turn log `m1 > Astral Barrage > o2 > 67`; on submit it updates `OpponentEntry.candidates` via the inference solver.
+**AI (`packages/core/src/ai/`).** Anthropic SDK wrapper using `claude-opus-4-7`, with `cache_control: ephemeral` on the static team/opponent context. `explainBring()` and `narrateInference()` are called on demand from the TUI and no-op gracefully without `ANTHROPIC_API_KEY`.
 
-**Gimmicks (`src/domain/gimmicks/`).** Mega / Tera / Z-Move / Dynamax sit behind a pluggable `Gimmick` interface so each regulation set can swap one in. The registry in `index.ts` is keyed by `format.champions.json`'s `gimmick` field; `activeGimmick()` resolves it lazily and the rest of the engine (Showdown parse/format, `@smogon/calc` enrichment, inference variants, battle UI, validation, AI prompt summaries) dispatches through optional hooks. Today only `mega` is implemented; the other ids fall back to `noneGimmick`. See `src/domain/gimmicks/README.md` for the add-a-gimmick recipe.
+**TUI (`packages/tui/src/cli.tsx`, `packages/tui/src/ui/`).** Ink 7 + React 19. Route reducer: `menu → pick-team → opponent → bring → battle`. Team input is paste-based via `TeamPaste.tsx` (`parseShowdownTeam()`); a per-field form was rejected as a UX regression. `OpponentInput.tsx` is species-only at preview, with autocomplete filtered to the Champions legal list; items/abilities/moves are learned later from battle observations. `BattleScreen.tsx` runs forward damage for every (my mon, opp mon, move) triple and accepts a single-line turn log `m1 > Astral Barrage > o2 > 67`; on submit it updates `OpponentEntry.candidates` via the inference solver.
 
-**Storage (`src/domain/storage.ts`).** Teams in `data/my-teams/<name>.json` as `PokemonSet[]`. Match snapshots in `matches/<id>.json` (gitignored); press `s` in BattleScreen to snapshot.
+**Gimmicks (`packages/core/src/domain/gimmicks/`).** Mega / Tera / Z-Move / Dynamax sit behind a pluggable `Gimmick` interface so each regulation set can swap one in. The registry in `index.ts` is keyed by `format.champions.json`'s `gimmick` field; `activeGimmick()` resolves it lazily and the rest of the engine (Showdown parse/format, `@smogon/calc` enrichment, inference variants, battle UI, validation, AI prompt summaries) dispatches through optional hooks. Today only `mega` is implemented; the other ids fall back to `noneGimmick`. See `packages/core/src/domain/gimmicks/README.md` for the add-a-gimmick recipe.
+
+**Storage (`packages/core/src/domain/storage.ts`).** Teams in `data/my-teams/<name>.json` as `PokemonSet[]`. Match snapshots in `matches/<id>.json` (gitignored); press `s` in BattleScreen to snapshot.
 
 ## Conventions
 

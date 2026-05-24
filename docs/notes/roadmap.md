@@ -2,7 +2,7 @@
 
 ## Context
 
-**Last updated 2026-05-23.** 376 tests across 4 workspaces, all green.
+**Last updated 2026-05-24.** 381 tests across 4 workspaces, all green.
 Backend split complete (Phase 1–5), TUI is the primary surface, web
 client is read-only viewer, server backs optional remote mode. Recent
 session work has been correctness + UX gaps the user hits while
@@ -52,32 +52,138 @@ The original "Now" tier is mostly done. What's been merged on `main`:
   EVs exported as PoChamps SP (0-32).
 - **Inference speed** — `quickOnly: true` on BattleScreen inference
   to skip the 360k-spread coarse fallback that was blocking UI.
+- **End-of-turn weather + status** — `endOfTurn.ts` (wired at
+  `engine.ts`) applies weather chip with type immunities, brn/psn/tox
+  damage + tox-counter ramp, and Leftovers / Black Sludge healing on
+  MINE side only (opp items too uncertain to surface). (slice of A)
+- **Switch-in hazards** — `hazards.ts` applies Stealth Rock (×Rock
+  effectiveness), Spikes layers, Toxic Spikes (poison absorb), and
+  Sticky Web (-1 Spe) on switch-in / replacement, honouring Magic
+  Guard / Heavy-Duty Boots / type immunities. Wired via
+  `applyHazardOnSwitchInto`. (slice of A — application only; clearing
+  still open)
+- **On-the-fly Pikalytics fetch** — `pikalyticsFetch.ts` hits the
+  `/ai/pokedex` markdown endpoint fire-and-forget, dedups concurrent +
+  failed fetches, merges into the in-memory cache and on-disk
+  `data/pikalytics.<format>.json`, and is wired into the TUI. (F.2)
+- **Autocomplete / suggester** — `actionSuggest.ts` derives the
+  suggestion pool from which `>`-separated slot you're typing: move
+  names, switch targets (restricted to the brought 4), and state-verbs
+  (`heal`/`sitrus`/`brn`/...). (slice of D)
 
 Pillar status after the above:
 
 - **A — Battle model completeness** — mega done, charge done, pivots
-  done, spread fixed, ability-priority for speed done. Still open:
-  switch-in ability triggers (Intimidate / weather setters), item
-  triggers beyond Sash/Balloon/WP (Choice locks, Life Orb, berries),
-  EOT weather/status interactions, move side effects (Encore / Taunt
-  / Disable / Magic Coat), field clearing (Defog / Court Change /
-  Rapid Spin), Tera / Z / Dynamax gimmicks (Champions hasn't rotated
-  to them yet).
+  done, spread fixed, ability-priority for speed done, EOT
+  weather/status done, switch-in hazard *application* done. Still
+  open: switch-in **ability** triggers (Intimidate / weather setters /
+  Download / Trace — only comments in `engine.ts` today, no logic),
+  item triggers beyond Sash/Balloon/WP (Choice locks, Life Orb,
+  berries), move side effects (Encore / Taunt / Disable / Magic Coat),
+  hazard **clearing** (Defog / Court Change / Rapid Spin — none
+  present), Tera / Z / Dynamax gimmicks (Champions hasn't rotated to
+  them yet).
 - **B — Inference quality** — Bayesian weighting still untouched
   (#142). Item inference still binary (#7 in old order). Speed
   inference is now reasonable for Prankster-style mons.
 - **C — Decision support** — multi-turn lookahead, endgame solver
   still untouched.
-- **D — TUI polish** — /undo done; others (inline edit, Tab cycling,
-  resize-aware wrap, match-end summary, replay) still open.
+- **D — TUI polish** — /undo + autocomplete suggester done; others
+  (inline edit, Tab cycling, resize-aware wrap, match-end summary,
+  replay) still open.
 - **E — Performance** — quickOnly helps; coarse-grid cache + inference
   delta still open.
-- **F — Data** — multi-spread Pikalytics still single-spread; direct
-  fetch path planned but not wired.
+- **F — Data** — on-the-fly Pikalytics fetch shipped + wired.
+  Multi-spread deliberately de-prioritised (top-1 stands unless a
+  clear ~50/50 split appears).
 - **G — Server / web** — still low priority.
 - **H — AI** — /review (last turn), /explain (bring) opt-in. No
   expansion this round.
 - **I — Testing + ops** — no CI workflow yet.
+
+## North-star goal — end-to-end battle validation
+
+**The long-term aim:** drive *complete* battles through the same
+pipeline the TUI uses and assert two invariants at every step —
+(1) **every action was possible** (legal move / switch / target /
+gimmick), and (2) **every damage event is consistent** with what we
+compute. This converts the damage formula and the inverse solver from
+"self-consistent" into "validated against ground truth."
+
+**Primary ground-truth source: real Pokémon Showdown replays**
+(standard gen9 VGC). Chosen for external validity — the observed
+numbers come from Showdown's own engine, not ours.
+
+Two consequences shape the design:
+
+- **Replays usually hide EV/IV spreads.** Only species / revealed
+  items / abilities / moves and observed HP deltas are exposed. So
+  most damage events can't use strict range containment. Instead they
+  become a **consistency** check: the observed damage must be
+  *reachable by some spread our engine considers* — equivalently,
+  feeding the observation to `inference.ts` must not empty the
+  candidate set. That makes the harness a real-world test of the
+  **inverse solver**, not just the forward formula. **Open-team-sheet**
+  replays, where spreads are known, get the strict `observed ∈
+  [min,max]` check.
+- **Champions fidelity gap.** Real replays are gen9 VGC, so Mega and
+  the 0–32 SP EV scale aren't exercised. J.0–J.5 validate the shared
+  core (damage / legality / inference). Champions-specific mechanics
+  (Mega `resolveSpecies`, SP-scale boundaries) need the
+  *authored-Champions-transcript* corpus — folded in as **J.6** once
+  the gen9 harness is proven.
+
+### Phases
+
+- **J.0 — Replay ingest.** Fetch a replay
+  (`https://replay.pokemonshowdown.com/<id>.json` / `.log`) and parse
+  the `|`-protocol into an internal `BattleTranscript`: ordered turns,
+  each a list of events (`|switch|`, `|move|`, `|-damage|`, `|-heal|`,
+  `|-status|`, `|faint|`, `|-boost|`, `|-weather|`, `|-sidestart|`
+  hazards, `|detailschange|` / mega). Capture revealed sets + any
+  open-team-sheet data. New `replay.ts` parser + `fetch-replay.ts`.
+- **J.1 — Transcript → engine driver.** Walk the transcript turn by
+  turn through `match/engine.ts` — the *same* `applyAction` /
+  `endOfTurn` / `applyHazardOnSwitchInto` the TUI calls (largely the
+  inverse of `turnparser.ts`). Reusing production code paths is the
+  point: bugs surface where they live, not in a parallel stub.
+- **J.2 — Move-possibility assertions.** Per action: move ∈ species
+  learnset (`getLearnset`), switch target valid + alive, target-slot
+  adjacency valid, gimmick legal (≤1 mega/battle), and turn order
+  consistent with `effectivePriority` brackets (flag, don't hard-fail
+  — items/abilities are hidden). Failures = parser or legality-model
+  gaps.
+- **J.3 — Damage consistency.** Per `|-damage|` with known
+  attacker/defender/move: **(a) known spread (open sheet)** → strict
+  containment, any miss is a calc bug or unmodelled modifier;
+  **(b) hidden spread** → reachability, observed must be satisfiable
+  by some grid spread (inference filter stays non-empty).
+- **J.4 — Inference round-trip property test.** Where the true spread
+  is known, assert it *survives every observation's filter across the
+  whole match* — the "true spread always satisfies the filter"
+  invariant. Catches over-aggressive narrowing.
+- **J.5 — Corpus + CI + triage.** Checked-in replay fixtures (cached
+  JSON — tests run offline/deterministic, never hit the network in
+  CI). Out-of-range damage events get categorised (crit / spread /
+  item / ability / field / weather / our-bug) as regression fixtures.
+  Run under `npm test`; gate in GitHub Actions (ties into I.1). Track a
+  pass-rate metric.
+- **J.6 — Authored Champions transcripts.** Once J.0–J.5 hold,
+  hand/script-author full-fidelity Champions battles (known sets, Mega,
+  SP scale) to cover the mechanics real gen9 replays can't reach.
+
+**Sequencing.** J leans on **A.2** (ability triggers) and **A.3** (item
+inference) to cut false out-of-range flags, and naturally forces
+**I.1** (CI). Build J.0–J.2 first — ingest + legality is independently
+useful and low-risk — then layer J.3+ as the damage/inference engine
+matures. Treat J as the overarching arc the other pillars feed, not a
+single sprint.
+
+**Critical files:** `packages/core/src/domain/replay.ts` **new**,
+`packages/core/src/scripts/fetch-replay.ts` **new**, reuse
+`match/engine.ts` / `turnparser.ts` / `damage.ts` / `inference.ts`,
+fixtures under `packages/core/tests/replays/` **new**,
+`.github/workflows/test.yml` **new**.
 
 ## Pillars
 
@@ -97,14 +203,17 @@ pipeline gets a lot right but several whole mechanics aren't modelled.
 - **Item triggers beyond Sash/Balloon/WP.** Berry types (Chople, etc.),
   Choice locks (Scarf/Band/Specs), Life Orb chip, Black Sludge on
   Poison-types, Eject Pack, Booster Energy.
-- **End-of-turn weather + status interactions.** Sand chip on non-
-  Steel/Rock/Ground, Hail/Snow defensive boost, Toxic ramp, Leftovers
-  on switch.
+- **End-of-turn weather + status interactions.** ✅ Shipped
+  (`endOfTurn.ts`): weather chip with type immunities, brn/psn/tox +
+  tox-counter ramp, Leftovers / Black Sludge mine-side. Hail/Snow
+  *defensive* boost (Ice +Def) not yet applied in calc.
 - **Move side effects.** Sky Drop locks both mons, Fake Out only turn 1,
   Encore, Taunt, Disable, Magic Coat, Snatch, Sucker Punch fail
   conditions.
 - **Field clearing.** Defog removes screens + hazards, Court Change
   swaps them, Rapid Spin removes only own-side hazards + boosts speed.
+  *(Hazard application on switch-in is done — `hazards.ts`. This is the
+  removal half, still open.)*
 
 ### B. Inference quality  *(high value, harder)*
 
@@ -181,16 +290,22 @@ Beyond that:
 
 ### F. Data + integrations
 
-- **Multi-spread Pikalytics scrape.** Top-K spreads, not just top-1.
-  Currently only the most-common spread is in the cache; the second-
-  most-common is often very different and worth surfacing as an alt
-  candidate.
-- **On-the-fly Pikalytics fetch for off-meta opps.** Already in
-  scoutExport flow but server-side only — the TUI's direct fetch path
-  was planned but never wired (memory file mentions it).
+- **Multi-spread Pikalytics scrape.** *(De-prioritised — user is not
+  fussed about top-K spreads yet.)* Only revisit if a species shows a
+  clear ~50/50 split between two materially different spreads, where
+  the single top-1 cache entry is actively misleading first-turn
+  predictions. Until then, top-1 stands.
+- **On-the-fly Pikalytics fetch for off-meta opps.** ✅ Shipped —
+  `pikalyticsFetch.ts` hits the `/ai/pokedex` markdown endpoint
+  fire-and-forget, merges into the in-memory cache + on-disk
+  `data/pikalytics.<format>.json`, and is wired into the TUI
+  (`BattleScreen.tsx`). The earlier "planned but never wired" note is
+  stale.
 - **Champions client integration.** If/when the Champions client
   exposes a battle log API, parse it directly instead of typing.
-- **Showdown replay parser.** Paste a replay URL → load as a saved match.
+- **Showdown replay parser.** Paste a replay URL → load as a saved
+  match. Shares the `replay.ts` ingest built for the J north-star goal
+  (end-to-end battle validation) — build once, use for both.
 
 ### G. Server / web *(low priority — TUI is primary)*
 
@@ -225,6 +340,11 @@ auto-trigger. Keep that posture.
 - **Smoke test for the TUI** — spawn the binary, send keystrokes,
   assert rendered output. Hard to do well but catches regressions
   that unit tests miss.
+- **End-to-end replay validation** — the J north-star goal (see its
+  own section above). The biggest single regression-safety win: real
+  battles drive the production pipeline and assert move-legality +
+  damage consistency. CI (I.1) is a prerequisite for running the
+  corpus on push.
 
 ## Recommended priority order
 
@@ -245,23 +365,24 @@ plays matches live + finds bugs by doing so:
    guaranteed KO with 1 HP → Sash. Sand-immune mon took Sand chip →
    no Safety Goggles. Move locked to one option for N turns → Choice
    item. Largest single inference-quality win after Bayesian.
-4. **Audit completion (task #156).** Several gaps noted but not
-   tackled: Knock Off item removal, Trick/Switcheroo item swap,
-   Encore/Taunt/Disable surfacing, Fake Out turn-1 gating,
-   Sucker Punch fail conditions, end-of-turn weather/status ticks.
+4. **Audit completion (task #156).** Remaining gaps: Knock Off item
+   removal, Trick/Switcheroo item swap, Encore/Taunt/Disable
+   surfacing, Fake Out turn-1 gating, Sucker Punch fail conditions,
+   hazard clearing (Defog/Court Change/Rapid Spin). *(EOT
+   weather/status ticks now done — `endOfTurn.ts`.)*
 
 **Soon (4–8 sessions):**
 
-5. **F.1 — Multi-spread Pikalytics scrape.** Top-K spreads, not just
-   top-1. Tighter first-turn predictions. Was planned + dropped
-   earlier.
-6. **C.1 — Endgame solver.** Down-to-2-vs-2 enumerable; surface the
+5. **C.1 — Endgame solver.** Down-to-2-vs-2 enumerable; surface the
    optimal line. Stakes are highest, computation is bounded.
-7. **I.1 — GitHub Actions CI.** Run `npm test` on push. Cheap insurance
+6. **I.1 — GitHub Actions CI.** Run `npm test` on push. Cheap insurance
    against regressions.
-8. **D — More TUI polish.** Inline edit of draft actions; Tab cycling
+7. **D — More TUI polish.** Inline edit of draft actions; Tab cycling
    through autocomplete; resize-aware layouts; match-end summary
    screen; quick-replay through saved snapshots.
+
+   *(F.1 multi-spread Pikalytics deliberately dropped from this tier —
+   see pillar F. Only revisit on a clear ~50/50 two-spread split.)*
 
 **Later (no fixed timeline):**
 
@@ -282,10 +403,11 @@ plays matches live + finds bugs by doing so:
 | Area | Files |
 |---|---|
 | Gimmicks (still to scaffold) | `packages/core/src/domain/gimmicks/{tera,zmove,dynamax}.ts` |
-| Ability triggers (switch-in) | `packages/core/src/domain/{abilities.ts}` **new**, `packages/core/src/match/engine.ts` (insertion point near `inferOpponentSpeeds` call) |
+| Ability triggers (switch-in) | `packages/core/src/domain/{abilities.ts}` **new**, `packages/core/src/match/engine.ts` (insertion point at the `applyHazardOnSwitchInto` calls, ~`:424` / `:696` — the existing switch-in seam) |
+| Hazard clearing (removal) | `packages/core/src/domain/hazards.ts` (extend; application already there), `match/engine.ts` |
 | Bayesian inference | `packages/core/src/domain/inference.ts`, `predictions.ts` |
 | Item inference | `packages/core/src/domain/inference.ts` |
-| Multi-spread Pikalytics | `packages/core/src/scripts/refresh-pikalytics.ts`, `pikalytics.ts` |
+| Multi-spread Pikalytics *(de-prioritised)* | `packages/core/src/scripts/refresh-pikalytics.ts`, `pikalytics.ts` |
 | Endgame solver | `packages/core/src/domain/{endgame.ts}` **new** |
 | CI | `.github/workflows/test.yml` **new** |
 
@@ -301,6 +423,10 @@ plays matches live + finds bugs by doing so:
 | /ask | `packages/tui/src/ui/BattleScreen.tsx` (`runAskCommand`, `resolveAskSide`), `slashCommands.ts` |
 | /undo + slash dispatcher | `packages/tui/src/ui/slashCommands.ts`, `BattleScreen.tsx` |
 | Bulk HP / HP=0 KO | `packages/core/src/domain/turnparser.ts`, `packages/tui/src/ui/BattleScreen.tsx` (`applyStateUpdate`) |
+| End-of-turn weather + status | `packages/core/src/domain/endOfTurn.ts`, wired in `match/engine.ts` (~`:428`) |
+| Switch-in hazard application | `packages/core/src/domain/hazards.ts` (`applyHazardsToSwitchIn`), `match/engine.ts` (`applyHazardOnSwitchInto`) |
+| On-the-fly Pikalytics fetch | `packages/core/src/domain/pikalyticsFetch.ts`, consumed by `packages/tui/src/ui/BattleScreen.tsx` |
+| Autocomplete suggester | `packages/core/src/domain/actionSuggest.ts` (`deriveSuggestionContext`) |
 
 ## Verification mindset
 
@@ -310,7 +436,7 @@ Each item should ship with:
 - A short commit message naming what real-world scenario the change
   unblocks
 
-Keep the suite green at every commit. Current baseline: **376 tests** (was 359 when this doc was first written).
+Keep the suite green at every commit. Current baseline: **381 tests** (was 359 when this doc was first written).
 
 ## Out of scope (deliberately)
 
