@@ -16,6 +16,7 @@ import { defaultOpponentSet } from '@pokechamps/core/domain/bring.js';
 import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs, hazardClearEffect, applyHazardClear } from '@pokechamps/core/domain/hazards.js';
 import { fieldMoveEffect, applyFieldMove } from '@pokechamps/core/domain/fieldMoves.js';
+import { detectChoiceLock, type ChoiceLock } from '@pokechamps/core/domain/itemSignals.js';
 import { switchInAbilityEffect, intimidateReaction, certainAbility, type BoostMap } from '@pokechamps/core/domain/abilities.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
 import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict } from '@pokechamps/core/domain/predictions.js';
@@ -1427,6 +1428,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
                 entry={o}
                 marker={slotMarker}
                 color={color}
+                choiceLock={detectChoiceLock(match, i)}
               />
             );
           })}
@@ -1815,8 +1817,9 @@ interface OppRowProps {
   entry: OpponentEntry;
   marker: string;
   color?: string;
+  choiceLock?: ChoiceLock | null;
 }
-function OppRow({ stores, entry, marker, color }: OppRowProps) {
+function OppRow({ stores, entry, marker, color, choiceLock }: OppRowProps) {
   const pik = stores.pikalytics.get(entry.species);
   const fetching = !pik && stores.pikalytics.isFetching(entry.species);
   const topItem = pik?.items.find(i => i.name.toLowerCase() !== 'other');
@@ -1843,6 +1846,7 @@ function OppRow({ stores, entry, marker, color }: OppRowProps) {
         ) : null}
         {entry.megaUsed ? <Text color="magenta"> M</Text> : null}
         {entry.charging ? <Text color="cyan"> ⚡charging {entry.charging.move}</Text> : null}
+        {choiceLock && !entry.fainted && !entry.itemConsumed ? <Text color="yellow"> 🔒Choice? {choiceLock.move} ×{choiceLock.turns}</Text> : null}
       </Text>
       {fetching && (
         <Text dimColor>      (fetching Pikalytics…)</Text>
