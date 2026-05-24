@@ -2,7 +2,11 @@
 
 ## Context
 
-**Last updated 2026-05-24.** 381 tests across 4 workspaces, all green.
+**Last updated 2026-05-24.** 377 tests green across core / tui / server.
+⚠️ The web package has **16 failing tests** (`api.test.ts`,
+`liveMatch.test.ts`) — all `localStorage is not defined`, a jsdom-env
+misconfig in the web vitest setup. Pre-existing, unrelated to battle
+logic; tracked under pillar I.
 Backend split complete (Phase 1–5), TUI is the primary surface, web
 client is read-only viewer, server backs optional remote mode. Recent
 session work has been correctness + UX gaps the user hits while
@@ -70,14 +74,23 @@ The original "Now" tier is mostly done. What's been merged on `main`:
   suggestion pool from which `>`-separated slot you're typing: move
   names, switch targets (restricted to the brought 4), and state-verbs
   (`heal`/`sitrus`/`brn`/...). (slice of D)
+- **Switch-in ability triggers** — `abilities.ts` applies Intimidate
+  (-1 Atk to foes, with immunity / Guard Dog / Defiant / Competitive /
+  Rattled reactions), weather setters (Drought/Drizzle/Sand Stream/Snow
+  Warning + signature weathers), terrain setters (the four Surges +
+  Hadron Engine), and self-boosts (Intrepid Sword / Dauntless Shield)
+  on switch-in. Opp abilities trigger only when certain (observed, or
+  single-ability species). Wired into both the shared engine and the
+  TUI's parallel `finalizeTurn`. (A.2)
 
 Pillar status after the above:
 
 - **A — Battle model completeness** — mega done, charge done, pivots
   done, spread fixed, ability-priority for speed done, EOT
-  weather/status done, switch-in hazard *application* done. Still
-  open: switch-in **ability** triggers (Intimidate / weather setters /
-  Download / Trace — only comments in `engine.ts` today, no logic),
+  weather/status done, switch-in hazard *application* done, switch-in
+  **ability** triggers done (Intimidate / weather / terrain / self-
+  boosts — `abilities.ts`). Still open: Download / Trace switch-in
+  abilities (need foe-stat / ability-copy logic — deferred),
   item triggers beyond Sash/Balloon/WP (Choice locks, Life Orb,
   berries), move side effects (Encore / Taunt / Disable / Magic Coat),
   hazard **clearing** (Defog / Court Change / Rapid Spin — none
@@ -332,8 +345,13 @@ auto-trigger. Keep that posture.
 
 ### I. Testing + ops
 
+- **Fix web-package test env (broken now).** `api.test.ts` +
+  `liveMatch.test.ts` fail with `localStorage is not defined` — the web
+  vitest config needs `environment: 'jsdom'` (or a localStorage stub in
+  setup). 16 reds today. Cheap, and a blocker for honest CI gating.
 - **GitHub Actions CI.** Run `npm test` on push. (We commit + verify
-  manually right now.)
+  manually right now.) Needs the web env fix first or it goes red on
+  arrival.
 - **Coverage reporting.** No baseline metric yet.
 - **Property-based tests** for inference invariants ("any spread that
   satisfies observation X survives the filter").
@@ -353,10 +371,10 @@ plays matches live + finds bugs by doing so:
 
 **Now (next 1–3 sessions):**
 
-1. **A.2 — Switch-in ability triggers.** Intimidate (-1 Atk on
-   incoming opps), Drought/Drizzle/Sand Stream/Snow Warning, Surges,
-   Download, Trace. None applied in the engine today. Visible in the
-   matchup grid because damage calcs differ. Task #141.
+1. ~~**A.2 — Switch-in ability triggers.**~~ ✅ **Shipped** — Intimidate
+   (+immunity / Defiant-style reactions), weather setters, terrain
+   setters, self-boosts. `abilities.ts`, wired into engine + TUI.
+   Download / Trace deferred (need foe-stat / ability-copy logic).
 2. **B.1 — Bayesian candidate weighting.** Replace binary in/out
    filtering with probability scores. Each candidate gets a likelihood
    given ALL observations; "most likely" picks the highest score;
