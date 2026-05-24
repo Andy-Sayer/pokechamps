@@ -1385,9 +1385,9 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
             const a1 = activeIdx.mine[1];
             const teamIdx = match.bring[i]!;
             const isActive = teamIdx === a0 || teamIdx === a1;
-            // Active mons → slot ref (★m1/★m2). Benched → team-index ref so the
-            // user knows what to type for "m4 in m1", "m4 = 120", etc.
-            const slotMarker = teamIdx === a0 ? '★m1' : teamIdx === a1 ? '★m2' : `m${teamIdx + 1}`.padEnd(3);
+            // Active mons → slot ref (★m1/★m2). Benched → unambiguous team ref
+            // (my1..my6) so the user can type "my4 in m1", "my4 = 120", etc.
+            const slotMarker = teamIdx === a0 ? '★m1' : teamIdx === a1 ? '★m2' : `my${teamIdx + 1}`.padEnd(3);
             const fainted = match.myFainted?.includes(teamIdx) ?? false;
             const hp = match.myCurrentHp?.[teamIdx];
             const color = fainted ? 'gray' : isActive ? 'green' : undefined;
@@ -1415,9 +1415,9 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
             const brought = oppBroughtIndices.includes(i as any);
             const a0 = activeIdx.theirs[0];
             const a1 = activeIdx.theirs[1];
-            // Active → slot ref (★o1/★o2). Benched → team-index ref (o3..o6)
-            // so the user can target it: "o4 = 30%", "o4 in o1", etc.
-            const slotMarker = i === a0 ? '★o1' : i === a1 ? '★o2' : `o${i + 1}`.padEnd(3);
+            // Active → slot ref (★o1/★o2). Benched → unambiguous team ref
+            // (op1..op6) so the user can target it: "op4 = 30%", "op4 in o1".
+            const slotMarker = i === a0 ? '★o1' : i === a1 ? '★o2' : `op${i + 1}`.padEnd(3);
             const color = i === a0 || i === a1 ? 'red' : brought ? undefined : 'gray';
             return (
               <OppRow
@@ -1431,7 +1431,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
             );
           })}
           <Box marginTop={1}>
-            <Text dimColor>★ = active slot (m1/m2 · o1/o2) · plain mN/oN = that mon's ref for switches + edits · gray = not yet brought</Text>
+            <Text dimColor>★ = active slot (m1/m2 · o1/o2) · myN/opN = team ref, usable in any line (switch + edits) · gray = not yet brought</Text>
           </Box>
         </Box>
 

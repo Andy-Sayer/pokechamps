@@ -21,6 +21,71 @@ const ctx: ParseContext = {
   theirActiveTeamIndex: [0, 1],
 };
 
+describe('parseTurnLine: my/op team-index state refs', () => {
+  // Leads are active in slots 0/1. A benched mon sitting at team index 0/1
+  // can't be reached by m1/o1 (those are the active slots) — that's the whole
+  // reason my/op refs exist for state lines.
+  const benchedCtx: ParseContext = {
+    myTeam: my,
+    opponentTeam: opp,
+    // Slot 0 = team index 2; slot 1 empty. So team indices 0 and 1 are benched.
+    myActiveTeamIndex: [2, null],
+    theirActiveTeamIndex: [2, null],
+  };
+
+  test('op1 targets opp team index 0 even when it is benched', () => {
+    const r = parseTurnLine('op1 = 30%', benchedCtx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'state') return;
+    expect(r.update.side).toBe('theirs');
+    expect(r.update.teamIndex).toBe(0);
+    expect(r.update.hpPercent).toBe(30);
+  });
+
+  test('my2 targets my team index 1 (benched), raw HP on my side', () => {
+    const r = parseTurnLine('my2 = 120', benchedCtx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'state') return;
+    expect(r.update.side).toBe('mine');
+    expect(r.update.teamIndex).toBe(1);
+    expect(r.update.hpRaw).toBe(120);
+  });
+
+  test('op3 and my/op refs agree for indices ≥ 2', () => {
+    const a = parseTurnLine('o3 brn', ctx, 1);
+    const b = parseTurnLine('op3 brn', ctx, 1);
+    if (a.ok && a.kind === 'state' && b.ok && b.kind === 'state') {
+      expect(a.update.teamIndex).toBe(2);
+      expect(b.update.teamIndex).toBe(2);
+      expect(a.update.status).toBe('brn');
+      expect(b.update.status).toBe('brn');
+    } else { throw new Error('both should parse as state'); }
+  });
+
+  test('op4 in o1 brings a benched opp into the active slot', () => {
+    const r = parseTurnLine('op4 in o1', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'state') return;
+    expect(r.update.side).toBe('theirs');
+    expect(r.update.teamIndex).toBe(3);
+    expect(r.update.bringIntoSlot).toBe(0);
+  });
+
+  test('my1 +2 atk boosts a benched mon', () => {
+    const r = parseTurnLine('my1 +2 atk', benchedCtx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'state') return;
+    expect(r.update.side).toBe('mine');
+    expect(r.update.teamIndex).toBe(0);
+    expect(r.update.boosts?.atk).toBe(2);
+  });
+
+  test('cross-side "X in Y" is rejected (op in m)', () => {
+    const r = parseTurnLine('op3 in m1', ctx, 1);
+    expect(r.ok).toBe(false);
+  });
+});
+
 describe('parseTurnLine', () => {
   test('basic move with damage (target=theirs → remaining %)', () => {
     const r = parseTurnLine('m1 > Close Combat > o1 > 67', ctx, 1);

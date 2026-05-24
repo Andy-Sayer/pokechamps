@@ -16,6 +16,7 @@ import { toId } from './data.js';
 // <target>     m1 | m2 | o1 | o2 | spread | self
 // <slot>       m1 | m2 | o1 | o2   (active slot only)
 // <ref>        m1..m6 | o1..o6    (1/2 = active slot ref via activeIdx; 3-6 = direct team index)
+//              my1..my6 | op1..op6  (unambiguous team index 1..6 — reaches benched mons at index 0/1)
 // <species>    a species name; resolves to a team index for the actor's side
 // <teamRef>    my1..my6 / op1..op6 (1-based index into the side's team)
 // <dmg>        integer percent, optional trailing %, or "X raw" for raw damage
@@ -146,6 +147,22 @@ function resolveStateRef(side: FieldSide, n: number, ctx: ParseContext): number 
   return n - 1;
 }
 
+// Resolve a state-line ref token to { side, teamIndex }, accepting both forms:
+//   m1/m2/o1/o2          — ACTIVE SLOTS (resolve through activeIdx; null if empty)
+//   m3..m6 / o3..o6      — team index 3..6 (1-based; legacy short form)
+//   my1..my6 / op1..op6  — UNAMBIGUOUS team index 1..6 (always resolvable,
+//                          incl. benched mons sitting at team index 0/1 that
+//                          the slot-overloaded m1/o1 can't reach)
+// Matchers below use the leading token `(my|op|m|o)([1-6])`.
+function resolveRef(prefix: string, n: number, ctx: ParseContext): { side: FieldSide; teamIndex: number } | null {
+  const p = prefix.toLowerCase();
+  if (p === 'my') return { side: 'mine', teamIndex: n - 1 };
+  if (p === 'op') return { side: 'theirs', teamIndex: n - 1 };
+  const side: FieldSide = p === 'm' ? 'mine' : 'theirs';
+  const ti = resolveStateRef(side, n, ctx);
+  return ti == null ? null : { side, teamIndex: ti };
+}
+
 function resolveTeamRef(token: string, ctx: ParseContext, side: FieldSide): number | null {
   const m = token.trim().toLowerCase().match(/^(my|op)([1-6])$/);
   if (m) {
@@ -208,14 +225,13 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
     if (pairs.length === 0) return { ok: false, error: 'hp line needs at least one <ref>=<val> pair' };
     const updates: StateUpdate[] = [];
     for (const pair of pairs) {
-      const m = pair.match(/^([mo])([1-6])=(\d+(?:\.\d+)?)(%?)$/i);
-      if (!m) return { ok: false, error: `bad hp pair "${pair}" — expected m1=45 / o1=30% / m2=145` };
-      const side = sideFor(m[1]!);
-      const n = parseInt(m[2]!, 10);
-      const teamIndex = resolveStateRef(side, n, ctx);
-      if (teamIndex == null) {
+      const m = pair.match(/^(my|op|m|o)([1-6])=(\d+(?:\.\d+)?)(%?)$/i);
+      if (!m) return { ok: false, error: `bad hp pair "${pair}" — expected m1=45 / o1=30% / my3=145` };
+      const ref = resolveRef(m[1]!, parseInt(m[2]!, 10), ctx);
+      if (!ref) {
         return { ok: false, error: `${m[1]}${m[2]} has no active mon to update` };
       }
+      const { side, teamIndex } = ref;
       const value = parseFloat(m[3]!);
       const explicitPct = m[4] === '%';
       if (side === 'mine' && !explicitPct) {
@@ -244,14 +260,13 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
   // "o3 = 45" / "o3 = 45%" / "m1 = 145" / "m1 = 50%"
   // For opp: bare number = % remaining; explicit `%` also means %.
   // For mine: bare number = raw HP; explicit `%` means percent.
-  const hpMatch = trimmed.match(/^([mo])([1-6])\s*=\s*(\d+(?:\.\d+)?)(%?)$/i);
+  const hpMatch = trimmed.match(/^(my|op|m|o)([1-6])\s*=\s*(\d+(?:\.\d+)?)(%?)$/i);
   if (hpMatch) {
-    const side = sideFor(hpMatch[1]!);
-    const n = parseInt(hpMatch[2]!, 10);
-    const teamIndex = resolveStateRef(side, n, ctx);
-    if (teamIndex == null) {
+    const ref = resolveRef(hpMatch[1]!, parseInt(hpMatch[2]!, 10), ctx);
+    if (!ref) {
       return { ok: false, error: `${hpMatch[1]}${hpMatch[2]} has no active mon to update` };
     }
+    const { side, teamIndex } = ref;
     const value = parseFloat(hpMatch[3]!);
     const explicitPct = hpMatch[4] === '%';
     if (side === 'mine' && !explicitPct) {
@@ -263,14 +278,13 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
 
   // "o1 +2 atk" / "m1 -1 def" / multi-stat "o1 +2 atk +2 spa".
   // Any number of (+|-)<digits> <stat> repetitions after the ref token.
-  const boostHeader = trimmed.match(/^([mo])([1-6])\s+([+-].*)$/i);
+  const boostHeader = trimmed.match(/^(my|op|m|o)([1-6])\s+([+-].*)$/i);
   if (boostHeader && /[+-]\s*\d+\s+(atk|def|spa|spd|spe|acc|eva)\b/i.test(boostHeader[3]!)) {
-    const side = sideFor(boostHeader[1]!);
-    const n = parseInt(boostHeader[2]!, 10);
-    const teamIndex = resolveStateRef(side, n, ctx);
-    if (teamIndex == null) {
+    const ref = resolveRef(boostHeader[1]!, parseInt(boostHeader[2]!, 10), ctx);
+    if (!ref) {
       return { ok: false, error: `${boostHeader[1]}${boostHeader[2]} has no active mon to boost` };
     }
+    const { side, teamIndex } = ref;
     const boosts: NonNullable<StateUpdate['boosts']> = {};
     const rest = boostHeader[3]!;
     const re = /([+-])\s*(\d+)\s+(atk|def|spa|spd|spe|acc|eva)/gi;
@@ -288,28 +302,26 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
   }
 
   // "o1 damage 25" / "m1 damage 30" — counterpart to heal.
-  const dmgMatch = trimmed.match(/^([mo])([1-6])\s+damage\s+(\d+(?:\.\d+)?)$/i);
+  const dmgMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+damage\s+(\d+(?:\.\d+)?)$/i);
   if (dmgMatch) {
-    const side = sideFor(dmgMatch[1]!);
-    const n = parseInt(dmgMatch[2]!, 10);
-    const teamIndex = resolveStateRef(side, n, ctx);
-    if (teamIndex == null) {
+    const ref = resolveRef(dmgMatch[1]!, parseInt(dmgMatch[2]!, 10), ctx);
+    if (!ref) {
       return { ok: false, error: `${dmgMatch[1]}${dmgMatch[2]} has no active mon to damage` };
     }
+    const { side, teamIndex } = ref;
     const v = parseFloat(dmgMatch[3]!);
     if (side === 'mine') return { ok: true, kind: 'state', update: { side, teamIndex, damageRaw: Math.max(0, v) } };
     return { ok: true, kind: 'state', update: { side, teamIndex, damagePercent: Math.max(0, v) } };
   }
 
   // Status set / cure: "o1 brn" / "m1 par" / "o1 cure".
-  const statusMatch = trimmed.match(/^([mo])([1-6])\s+(brn|par|psn|tox|slp|frz|cure)$/i);
+  const statusMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+(brn|par|psn|tox|slp|frz|cure)$/i);
   if (statusMatch) {
-    const side = sideFor(statusMatch[1]!);
-    const n = parseInt(statusMatch[2]!, 10);
-    const teamIndex = resolveStateRef(side, n, ctx);
-    if (teamIndex == null) {
+    const ref = resolveRef(statusMatch[1]!, parseInt(statusMatch[2]!, 10), ctx);
+    if (!ref) {
       return { ok: false, error: `${statusMatch[1]}${statusMatch[2]} has no active mon` };
     }
+    const { side, teamIndex } = ref;
     const verb = statusMatch[3]!.toLowerCase();
     if (verb === 'cure') {
       return { ok: true, kind: 'state', update: { side, teamIndex, cureStatus: true } };
@@ -318,27 +330,25 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
   }
 
   // Named after-attack triggers: wp / sash / balloon.
-  const triggerMatch = trimmed.match(/^([mo])([1-6])\s+(wp|sash|balloon)$/i);
+  const triggerMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+(wp|sash|balloon)$/i);
   if (triggerMatch) {
-    const side = sideFor(triggerMatch[1]!);
-    const n = parseInt(triggerMatch[2]!, 10);
-    const teamIndex = resolveStateRef(side, n, ctx);
-    if (teamIndex == null) {
+    const ref = resolveRef(triggerMatch[1]!, parseInt(triggerMatch[2]!, 10), ctx);
+    if (!ref) {
       return { ok: false, error: `${triggerMatch[1]}${triggerMatch[2]} has no active mon` };
     }
+    const { side, teamIndex } = ref;
     const t = triggerMatch[3]!.toLowerCase() as 'wp' | 'sash' | 'balloon';
     return { ok: true, kind: 'state', update: { side, teamIndex, namedTrigger: t } };
   }
 
   // "o1 heal 25" / "m1 heal 30" — units side-aware (% for opp, raw for mine).
-  const healMatch = trimmed.match(/^([mo])([1-6])\s+heal\s+(\d+(?:\.\d+)?)$/i);
+  const healMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+heal\s+(\d+(?:\.\d+)?)$/i);
   if (healMatch) {
-    const side = sideFor(healMatch[1]!);
-    const n = parseInt(healMatch[2]!, 10);
-    const teamIndex = resolveStateRef(side, n, ctx);
-    if (teamIndex == null) {
+    const ref = resolveRef(healMatch[1]!, parseInt(healMatch[2]!, 10), ctx);
+    if (!ref) {
       return { ok: false, error: `${healMatch[1]}${healMatch[2]} has no active mon to heal` };
     }
+    const { side, teamIndex } = ref;
     const v = parseFloat(healMatch[3]!);
     if (side === 'mine') return { ok: true, kind: 'state', update: { side, teamIndex, healRaw: Math.max(0, v) } };
     return { ok: true, kind: 'state', update: { side, teamIndex, healPercent: Math.max(0, v) } };
@@ -346,41 +356,38 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
 
   // "o1 sitrus" — named berry shortcut; apply layer resolves to a real number
   // using the species' maxHp because parser doesn't know base stats.
-  const namedHealMatch = trimmed.match(/^([mo])([1-6])\s+(sitrus)$/i);
+  const namedHealMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+(sitrus)$/i);
   if (namedHealMatch) {
-    const side = sideFor(namedHealMatch[1]!);
-    const n = parseInt(namedHealMatch[2]!, 10);
-    const teamIndex = resolveStateRef(side, n, ctx);
-    if (teamIndex == null) {
+    const ref = resolveRef(namedHealMatch[1]!, parseInt(namedHealMatch[2]!, 10), ctx);
+    if (!ref) {
       return { ok: false, error: `${namedHealMatch[1]}${namedHealMatch[2]} has no active mon to heal` };
     }
+    const { side, teamIndex } = ref;
     return { ok: true, kind: 'state', update: { side, teamIndex, namedHeal: 'sitrus' } };
   }
 
   // "o2 fainted" / "o2 ko"
-  const koMatch = trimmed.match(/^([mo])([1-6])\s+(?:ko|fainted)$/i);
+  const koMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+(?:ko|fainted)$/i);
   if (koMatch) {
-    const side = sideFor(koMatch[1]!);
-    const n = parseInt(koMatch[2]!, 10);
-    const teamIndex = resolveStateRef(side, n, ctx);
-    if (teamIndex == null) {
+    const ref = resolveRef(koMatch[1]!, parseInt(koMatch[2]!, 10), ctx);
+    if (!ref) {
       return { ok: false, error: `${koMatch[1]}${koMatch[2]} has no active mon to mark fainted` };
     }
+    const { side, teamIndex } = ref;
     return { ok: true, kind: 'state', update: { side, teamIndex, fainted: true, hpPercent: 0 } };
   }
 
   // "o3 in o1" — bring teamIndex on left into the active slot on right.
-  const inMatch = trimmed.match(/^([mo])([1-6])\s+in\s+([mo])([12])$/i);
+  const inMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+in\s+([mo])([12])$/i);
   if (inMatch) {
-    const sideL = sideFor(inMatch[1]!);
+    const ref = resolveRef(inMatch[1]!, parseInt(inMatch[2]!, 10), ctx);
     const sideR = sideFor(inMatch[3]!);
-    if (sideL !== sideR) return { ok: false, error: '"X in Y" must be the same side (e.g. o3 in o1)' };
-    const n = parseInt(inMatch[2]!, 10);
-    const slot = (parseInt(inMatch[4]!, 10) - 1) as 0 | 1;
-    const teamIndex = resolveStateRef(sideL, n, ctx);
-    if (teamIndex == null) {
+    if (!ref) {
       return { ok: false, error: `couldn't resolve ${inMatch[1]}${inMatch[2]} as a team index` };
     }
+    if (ref.side !== sideR) return { ok: false, error: '"X in Y" must be the same side (e.g. o3 in o1)' };
+    const slot = (parseInt(inMatch[4]!, 10) - 1) as 0 | 1;
+    const { side: sideL, teamIndex } = ref;
     // Mine side: enforce the bring restriction here too. Manual replacement
     // ("m5 in m1" after a faint) must still pick from the 4 brought mons.
     if (sideL === 'mine' && ctx.myBring && !ctx.myBring.includes(teamIndex)) {

@@ -80,7 +80,7 @@ o1 balloon              ← Air Balloon: itemConsumed (no HP change)
 
 - `o1` / `o2` / `m1` / `m2` are **active-slot refs** (look up via `activeIdx`).
 - `o3`..`o6` / `m3`..`m6` are **team-index refs** (direct, 1-based).
-- `my1`..`my6` / `op1`..`op6` are also team-index refs (used in switch targets).
+- `my1`..`my6` / `op1`..`op6` are **unambiguous team-index refs** — valid in switch targets **and** in every state line (`op1 = 30%`, `my2 brn`, `op4 in o1`, `my1 +2 atk`). Use these to reach a **benched** mon sitting at team index 0/1, which `o1`/`m1` can't address (those always mean the active slots). For team indices ≥ 2, `o3` and `op3` resolve identically.
 - Bare species names in `switch > X` resolve to team index by species id.
 - For action damage: bare number's unit depends on target side (`%` for opp, `raw` for mine). For state `=` lines: same dispatch (bare on mine = raw, bare on opp = %).
 
