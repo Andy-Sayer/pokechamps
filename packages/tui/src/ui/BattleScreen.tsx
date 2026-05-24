@@ -4,7 +4,7 @@ import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
 import type { Match, FieldState, DamageObservation, MoveAction, OpponentEntry, PokemonSet } from '@pokechamps/core/domain/types.js';
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
-import { inferSpread, mostLikely } from '@pokechamps/core/domain/inference.js';
+import { scoreSpread, mostLikely } from '@pokechamps/core/domain/inference.js';
 import { maxHpFor } from '@pokechamps/core/domain/damage.js';
 import { endOfTurn } from '@pokechamps/core/domain/endOfTurn.js';
 import { inferOpponentSpeeds, applySpeedInference, actualSpeed, predictTurnOrder, effectiveSpeedRange } from '@pokechamps/core/domain/speed.js';
@@ -706,7 +706,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
         critical: a.critical,
       };
       try {
-        const candidates = inferSpread({
+        const scored = scoreSpread({
           defenderSpecies: opp.species,
           defenderLevel: attackerSet.level,
           knownDefenderMoves: opp.knownMoves,
@@ -715,24 +715,22 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
           startingCandidates: opp.candidates?.length
             ? opp.candidates.map(c => ({ evs: c.evs, nature: c.nature, item: c.item, ability: c.ability }))
             : undefined,
-          // Skip the ~360k-candidate coarse-grid fallback when priors fail.
-          // It blocks the UI for 10+ seconds and is rarely useful — usually
-          // the observation was mis-logged (e.g. wrong damage % or move).
-          // We accept an empty candidate list and let the next observation
-          // re-narrow from priors instead.
+          // Skip the ~360k-candidate coarse-grid fallback when priors fail (it
+          // blocks the UI for 10+ seconds). The Hybrid solver still returns a
+          // best-effort, likelihood-ranked set (never empty).
           quickOnly: true,
         });
-        const candidateSets = candidates.map(c => ({
+        const candidateSets = scored.map(s => ({
           species: opp.species,
           level: attackerSet.level,
-          item: c.item,
-          ability: c.ability,
-          nature: c.nature,
-          evs: c.evs,
+          item: s.candidate.item,
+          ability: s.candidate.ability,
+          nature: s.candidate.nature,
+          evs: s.candidate.evs,
           ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
           moves: opp.knownMoves,
         }));
-        next.opponentTeam[oppIdx] = { ...opp, candidates: candidateSets };
+        next.opponentTeam[oppIdx] = { ...opp, candidates: candidateSets, candidateLikelihoods: scored.map(s => s.likelihood) };
         inferenceNotes.push(`${opp.species}: ${candidateSets.length} spread(s)`);
       } catch (e) {
         inferenceNotes.push(`${opp.species}: inference failed`);
@@ -1852,7 +1850,7 @@ function OppRow({ stores, entry, marker, color, choiceLock }: OppRowProps) {
       ? `${speedRange.min}`
       : `${speedRange.min}–${speedRange.max} (${speedRange.source})`
     : null;
-  const inferred = entry.candidates?.length ? mostLikely(entry.candidates) : null;
+  const inferred = entry.candidates?.length ? mostLikely(entry.candidates, entry.candidateLikelihoods) : null;
   const effectiveColor = entry.fainted ? 'gray' : color;
   return (
     <Box flexDirection="column">
@@ -2034,7 +2032,7 @@ function OppInfoPanel({ stores, index, entry }: OppInfoPanelProps) {
   const species = getSpecies(activeSpecies) as any;
   const bs = species?.baseStats;
   const types = (species?.types as string[] | undefined) ?? [];
-  const top = entry.candidates?.length ? mostLikely(entry.candidates) : null;
+  const top = entry.candidates?.length ? mostLikely(entry.candidates, entry.candidateLikelihoods) : null;
   // effectiveSpeedRange walks the same priority chain as predictTurnOrder
   // (inferred bounds → candidates → bare envelope) so the panel always
   // surfaces a number and labels its source.

@@ -2,7 +2,7 @@
 // — crucially — never returns an empty set, recovering from a contradictory
 // observation instead of dead-ending.
 import { describe, test, expect } from 'vitest';
-import { inferSpread } from '../src/domain/inference.js';
+import { inferSpread, mostLikely, type SpreadCandidate } from '../src/domain/inference.js';
 import type { PokemonSet, DamageObservation } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } from '../src/domain/types.js';
 
@@ -52,5 +52,25 @@ describe('inferSpread Hybrid weighting', () => {
     expect(second.length).toBeGreaterThan(0);
     // All returned candidates came from the prior set (no silent re-expansion).
     for (const c of second) expect(first).toContain(c);
+  });
+});
+
+describe('mostLikely', () => {
+  const minimal: SpreadCandidate = { evs: { ...ZERO_EVS }, nature: 'Hardy' };
+  const invested: SpreadCandidate = { evs: { ...ZERO_EVS, hp: 252, spd: 252 }, nature: 'Careful', item: 'Assault Vest' };
+
+  test('with likelihoods, the highest-scoring candidate wins (even if heavily invested)', () => {
+    const pick = mostLikely([minimal, invested], [0.1, 0.9]);
+    expect(pick).toBe(invested);
+  });
+
+  test('without likelihoods, falls back to the minimal-EV prior', () => {
+    const pick = mostLikely([invested, minimal]);
+    expect(pick).toBe(minimal);
+  });
+
+  test('likelihood ties break toward the lower-investment prior', () => {
+    const pick = mostLikely([invested, minimal], [0.5, 0.5]);
+    expect(pick).toBe(minimal);
   });
 });

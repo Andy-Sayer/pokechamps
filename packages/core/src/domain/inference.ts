@@ -115,7 +115,15 @@ export interface InferenceInput {
   quickOnly?: boolean;
 }
 
+// Plain candidate list (likelihood order preserved). Most callers want this.
 export function inferSpread(input: InferenceInput): SpreadCandidate[] {
+  return scoreSpread(input).map(s => s.candidate);
+}
+
+// Scored variant — returns each surviving candidate with its likelihood,
+// ordered best-first. finalizeTurn persists these so "most likely" can pick by
+// score (vs the minimal-EV heuristic).
+export function scoreSpread(input: InferenceInput): ScoredCandidate[] {
   const species = getSpecies(input.defenderSpecies);
   const speciesName: string = species?.name ?? input.defenderSpecies;
   const possibleAbilities: string[] = input.priorAbilities ??
@@ -171,11 +179,11 @@ export function inferSpread(input: InferenceInput): SpreadCandidate[] {
     return out;
   };
 
-  const survivors = (scored: ScoredCandidate[]): SpreadCandidate[] =>
-    scored.filter(s => s.within).sort((a, b) => b.likelihood - a.likelihood).map(s => s.candidate);
+  const withinSorted = (scored: ScoredCandidate[]): ScoredCandidate[] =>
+    scored.filter(s => s.within).sort((a, b) => b.likelihood - a.likelihood);
 
   const scoredPriors = evaluate(candidates);
-  const keptPriors = survivors(scoredPriors);
+  const keptPriors = withinSorted(scoredPriors);
   if (keptPriors.length) return keptPriors;
 
   // Hard filter on the chosen set emptied. If we were on Pikalytics priors (not
@@ -183,7 +191,7 @@ export function inferSpread(input: InferenceInput): SpreadCandidate[] {
   let scoredFallback = scoredPriors;
   if (!input.startingCandidates && candidates === priorCandidates && !input.quickOnly) {
     const scoredCoarse = evaluate(generateCoarseCandidates({ natures, items, abilities: possibleAbilities }));
-    const keptCoarse = survivors(scoredCoarse);
+    const keptCoarse = withinSorted(scoredCoarse);
     if (keptCoarse.length) return keptCoarse;
     scoredFallback = scoredCoarse;
   }
@@ -193,8 +201,7 @@ export function inferSpread(input: InferenceInput): SpreadCandidate[] {
   // instead of leaving an empty candidate set.
   return scoredFallback
     .sort((a, b) => b.likelihood - a.likelihood)
-    .slice(0, HYBRID_FALLBACK_K)
-    .map(s => s.candidate);
+    .slice(0, HYBRID_FALLBACK_K);
 }
 
 // Build candidates from Pikalytics' top items × top abilities × the single top
@@ -254,16 +261,26 @@ function generateCoarseCandidates(opts: {
   return out;
 }
 
-// Pick a "most likely" representative from a candidate set: prefer minimal EV
-// investment and most common items/natures. Cheap heuristic — refine later.
-export function mostLikely(candidates: SpreadCandidate[]): SpreadCandidate | null {
+// Pick a "most likely" representative from a candidate set. When per-candidate
+// likelihoods are supplied (from scoreSpread / OpponentEntry.candidateLikelihoods)
+// the highest-likelihood spread wins — the actual best fit to observed damage.
+// Ties (and the no-likelihood case) fall back to the cheap prior: prefer
+// minimal EV investment + common items/natures.
+export function mostLikely(
+  candidates: SpreadCandidate[],
+  likelihoods?: number[],
+): SpreadCandidate | null {
   if (!candidates.length) return null;
-  const scored = candidates.map(c => {
-    const totalEvs = c.evs.hp + c.evs.def + c.evs.spd;
-    const itemPenalty = c.item ? 0 : 5;
-    const naturePenalty = c.nature === 'Hardy' ? 10 : 0;
-    return { c, score: totalEvs + itemPenalty + naturePenalty };
-  });
-  scored.sort((a, b) => a.score - b.score);
-  return scored[0]?.c ?? null;
+  const prior = (c: SpreadCandidate) =>
+    (c.evs.hp + c.evs.def + c.evs.spd) + (c.item ? 0 : 5) + (c.nature === 'Hardy' ? 10 : 0);
+  if (likelihoods && likelihoods.length === candidates.length) {
+    let best = 0;
+    for (let i = 1; i < candidates.length; i++) {
+      const dl = likelihoods[i]! - likelihoods[best]!;
+      // Higher likelihood wins; tie → lower prior score (less investment).
+      if (dl > 1e-9 || (Math.abs(dl) <= 1e-9 && prior(candidates[i]!) < prior(candidates[best]!))) best = i;
+    }
+    return candidates[best] ?? null;
+  }
+  return [...candidates].sort((a, b) => prior(a) - prior(b))[0] ?? null;
 }

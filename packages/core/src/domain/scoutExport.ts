@@ -29,7 +29,7 @@ export function opponentToScoutedSet(opp: OpponentEntry, opts: ScoutOptions = {}
   // Candidates are duck-typed as SpreadCandidate by the inference solver
   // (no ivs field), but stored on OpponentEntry as PokemonSet[]. Pull ivs
   // off the actual cast when present.
-  const top = opp.candidates?.length ? mostLikely(opp.candidates as any) : null;
+  const top = opp.candidates?.length ? mostLikely(opp.candidates as any, opp.candidateLikelihoods) : null;
   const topSet = top as PokemonSet | null;
   // Nature: prefer the inferred candidate's nature. When we have no
   // candidate at all, leave it as 'Hardy' (the formatter omits the line
@@ -63,7 +63,7 @@ export function exportScoutedOpponents(match: Match): string {
   header.push(`// Outcome: ${match.outcome ?? 'in-progress'}`);
   header.push(`//`);
   for (const opp of targets) {
-    const top = opp.candidates?.length ? mostLikely(opp.candidates) : null;
+    const top = opp.candidates?.length ? mostLikely(opp.candidates, opp.candidateLikelihoods) : null;
     const certainty = top ? `inferred from ${opp.candidates!.length} candidate spread(s)` : 'no spread inference';
     // Combined range (inferred ∪ candidates ∪ bare envelope) — matches the
     // in-battle info panel so the user sees the same number in both places.

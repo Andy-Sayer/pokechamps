@@ -20,7 +20,7 @@ import type {
   Turn,
 } from '../domain/types.js';
 import { NEUTRAL_FIELD } from '../domain/types.js';
-import { inferSpread } from '../domain/inference.js';
+import { scoreSpread } from '../domain/inference.js';
 import { maxHpFor } from '../domain/damage.js';
 import { endOfTurn } from '../domain/endOfTurn.js';
 import { inferOpponentSpeeds, applySpeedInference } from '../domain/speed.js';
@@ -514,7 +514,7 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
       critical: a.critical,
     };
     try {
-      const candidates = inferSpread({
+      const scored = scoreSpread({
         defenderSpecies: opp.species,
         defenderLevel: attackerSet.level,
         knownDefenderMoves: opp.knownMoves,
@@ -524,21 +524,21 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
           ? opp.candidates.map(c => ({ evs: c.evs, nature: c.nature, item: c.item, ability: c.ability }))
           : undefined,
         // Server keeps response latency bounded by skipping the ~360k-spread
-        // coarse fallback. If priors don't match, we accept an empty candidate
-        // list — the client can re-run with quickOnly off later if needed.
+        // coarse fallback. The Hybrid solver still returns a best-effort set
+        // (never empty) so the client always has candidates to show.
         quickOnly: true,
       });
-      const candidateSets: PokemonSet[] = candidates.map(c => ({
+      const candidateSets: PokemonSet[] = scored.map(s => ({
         species: opp.species,
         level: attackerSet.level,
-        item: c.item,
-        ability: c.ability,
-        nature: c.nature,
-        evs: c.evs,
+        item: s.candidate.item,
+        ability: s.candidate.ability,
+        nature: s.candidate.nature,
+        evs: s.candidate.evs,
         ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
         moves: opp.knownMoves,
       }));
-      next.opponentTeam[oppIdx] = { ...opp, candidates: candidateSets };
+      next.opponentTeam[oppIdx] = { ...opp, candidates: candidateSets, candidateLikelihoods: scored.map(s => s.likelihood) };
       inferenceNotes.push(`${opp.species}: ${candidateSets.length} spread(s)`);
     } catch {
       inferenceNotes.push(`${opp.species}: inference failed`);

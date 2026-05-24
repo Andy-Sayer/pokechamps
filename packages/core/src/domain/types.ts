@@ -28,8 +28,12 @@ export interface OpponentEntry {
   item?: string | null; // null = unknown, undefined = no item known
   ability?: string | null;
   knownMoves: string[];
-  // Posterior set of plausible full sets after inference. Empty until first observation.
+  // Posterior set of plausible full sets after inference. Empty until first
+  // observation. Ordered best-first by likelihood.
   candidates?: PokemonSet[];
+  // Per-candidate likelihood (parallel to `candidates`), from the Hybrid
+  // weighting solver. Lets `mostLikely` pick by score instead of the EV prior.
+  candidateLikelihoods?: number[];
   // Speed bounds inferred from turn ordering. Undefined = no constraint yet.
   speedFloor?: number;
   speedCeiling?: number;
