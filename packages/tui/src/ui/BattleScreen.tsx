@@ -1846,7 +1846,7 @@ function OppRow({ stores, entry, marker, color, choiceLock }: OppRowProps) {
         ) : null}
         {entry.megaUsed ? <Text color="magenta"> M</Text> : null}
         {entry.charging ? <Text color="cyan"> ⚡charging {entry.charging.move}</Text> : null}
-        {choiceLock && !entry.fainted && !entry.itemConsumed ? <Text color="yellow"> 🔒Choice? {choiceLock.move} ×{choiceLock.turns}</Text> : null}
+        {choiceLock && !entry.fainted && !entry.itemConsumed ? <Text color="yellow"> 🔒{entry.scarfSuspected ? 'Choice Scarf?' : 'Choice?'} {choiceLock.move} ×{choiceLock.turns}</Text> : null}
       </Text>
       {fetching && (
         <Text dimColor>      (fetching Pikalytics…)</Text>

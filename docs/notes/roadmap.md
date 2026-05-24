@@ -410,11 +410,14 @@ plays matches live + finds bugs by doing so:
    self-boosts. `abilities.ts`. Download / Trace deferred.
 2. ~~**A.3 part 1 — item removal in the calc.**~~ ✅ **Shipped** —
    Knock Off / consumed items dropped from damage predictions.
-3. **A.3 part 2 — infer the item FROM outcomes.** ← **next.** Garchomp
-   survives a guaranteed KO at 1 HP → Focus Sash. A mon repeats one
-   move while locked N turns → Choice item (complements `scarfSuspected`).
-   Sand-immune mon takes Sand chip → no Safety Goggles. Surfaces the
-   inferred item on the opp entry + into candidate filtering.
+3. **A.3 part 2 — infer the item FROM outcomes.** *(partly done.)*
+   ✅ Choice-lock: `detectChoiceLock` flags a mon repeating one move ≥2
+   turns while staying in; roster shows `🔒Choice?`/`🔒Choice Scarf?`
+   (combined with `scarfSuspected`). Still open: **Focus Sash** auto-
+   detect (needs a calc check that the survived hit was a guaranteed
+   KO — misfire-prone, wants a conservative soft-hint design) and
+   Sand-chip → no-Safety-Goggles. Feeding signals into candidate
+   filtering (vs display-only) also TBD.
 4. **B.1 — Bayesian candidate weighting.** Hybrid filter (hard cut with
    soft-likelihood fallback so the set never empties); "most likely" =
    highest score; ranges weight by candidate probability. Task #142.
