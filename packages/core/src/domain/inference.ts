@@ -56,6 +56,33 @@ export interface SpreadCandidate {
   ability?: string;
 }
 
+export interface ScoredCandidate {
+  candidate: SpreadCandidate;
+  // P(observation | candidate): the fraction of the candidate's damage rolls
+  // that land in the observed bucket. >0 means the hard filter keeps it.
+  likelihood: number;
+  within: boolean;
+}
+
+// How well does a candidate's predicted roll distribution explain the observed
+// damage? In-range candidates get a real probability (rolls-in-bucket / total);
+// out-of-range candidates get a tiny negative score scaled by distance, so the
+// Hybrid fallback can still rank "least wrong" first without ever beating a
+// genuine in-range fit.
+function candidateLikelihood(rolls: number[], lo: number, hi: number): number {
+  if (!rolls.length) return 0;
+  const within = rolls.filter(r => r >= lo && r <= hi).length;
+  if (within > 0) return within / rolls.length;
+  const mid = (lo + hi) / 2;
+  let nearest = Infinity;
+  for (const r of rolls) nearest = Math.min(nearest, Math.abs(r - mid));
+  return -nearest / 1e6; // always below any positive (in-range) score
+}
+
+// Hybrid fallback width: when the hard filter empties, keep this many of the
+// closest-fitting candidates rather than returning nothing.
+const HYBRID_FALLBACK_K = 8;
+
 function fullSet(species: string, c: SpreadCandidate, level: number, moves: string[]): PokemonSet {
   return {
     species,
@@ -117,8 +144,10 @@ export function inferSpread(input: InferenceInput): SpreadCandidate[] {
     candidates = generateCoarseCandidates({ natures, items, abilities: possibleAbilities });
   }
 
-  const tryList = (list: SpreadCandidate[]) => {
-    const kept: SpreadCandidate[] = [];
+  // Score every candidate: predicted damage vs observed, keeping both the
+  // hard in/out verdict and a likelihood for ranking + Hybrid fallback.
+  const evaluate = (list: SpreadCandidate[]): ScoredCandidate[] => {
+    const out: ScoredCandidate[] = [];
     for (const c of list) {
       const defenderSet = fullSet(speciesName, c, input.defenderLevel, input.knownDefenderMoves);
       let predicted;
@@ -136,20 +165,36 @@ export function inferSpread(input: InferenceInput): SpreadCandidate[] {
         });
       } catch { continue; }
       const obs = observationToAbsoluteDamage(input.observation, defenderSet);
-      if (predicted.max >= obs.lo && predicted.min <= obs.hi) kept.push(c);
+      const within = predicted.max >= obs.lo && predicted.min <= obs.hi;
+      out.push({ candidate: c, within, likelihood: candidateLikelihood(predicted.rolls, obs.lo, obs.hi) });
     }
-    return kept;
+    return out;
   };
 
-  const fromPriors = tryList(candidates);
-  if (fromPriors.length) return fromPriors;
-  // Priors gave nothing — fall back to the coarse grid (only if we were
-  // running on priors; if we were already on the coarse grid, there's no
-  // wider net to cast).
+  const survivors = (scored: ScoredCandidate[]): SpreadCandidate[] =>
+    scored.filter(s => s.within).sort((a, b) => b.likelihood - a.likelihood).map(s => s.candidate);
+
+  const scoredPriors = evaluate(candidates);
+  const keptPriors = survivors(scoredPriors);
+  if (keptPriors.length) return keptPriors;
+
+  // Hard filter on the chosen set emptied. If we were on Pikalytics priors (not
+  // a chained/started set) and allowed, cast the wider coarse-grid net first.
+  let scoredFallback = scoredPriors;
   if (!input.startingCandidates && candidates === priorCandidates && !input.quickOnly) {
-    return tryList(generateCoarseCandidates({ natures, items, abilities: possibleAbilities }));
+    const scoredCoarse = evaluate(generateCoarseCandidates({ natures, items, abilities: possibleAbilities }));
+    const keptCoarse = survivors(scoredCoarse);
+    if (keptCoarse.length) return keptCoarse;
+    scoredFallback = scoredCoarse;
   }
-  return [];
+
+  // Hybrid: never return nothing. Keep the closest-fitting candidates so the UI
+  // shows a (best-effort) spread and a contradictory observation recovers
+  // instead of leaving an empty candidate set.
+  return scoredFallback
+    .sort((a, b) => b.likelihood - a.likelihood)
+    .slice(0, HYBRID_FALLBACK_K)
+    .map(s => s.candidate);
 }
 
 // Build candidates from Pikalytics' top items × top abilities × the single top

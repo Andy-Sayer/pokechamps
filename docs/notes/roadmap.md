@@ -418,9 +418,15 @@ plays matches live + finds bugs by doing so:
    Focus Sash + still infers off the full damage (`sashProcced` gates
    both). Still open: Sand-chip → no-Safety-Goggles; auto-detecting
    Sash without the explicit tag (deferred — misfire-prone).
-4. **B.1 — Bayesian candidate weighting.** Hybrid filter (hard cut with
-   soft-likelihood fallback so the set never empties); "most likely" =
-   highest score; ranges weight by candidate probability. Task #142.
+4. **B.1 — Bayesian candidate weighting.** *(first slice done.)* ✅
+   `candidateLikelihood` scores each spread (rolls-in-observed-bucket /
+   total); survivors returned **ordered best-first**; **Hybrid never-
+   empty** fallback keeps the top-K closest when the hard filter empties
+   (kills the "0 candidates / inference failed" dead-end + recovers from
+   a contradictory observation mid-chain). Still open: persist scores on
+   the stored candidates so `mostLikely` picks by score and damage
+   ranges weight by candidate probability (needs a small data-model
+   add). Task #142.
 5. **Audit completion (task #156).** Remaining gaps: Trick/Switcheroo
    item swap, Encore/Taunt/Disable surfacing, Fake Out turn-1 gating,
    Sucker Punch fail conditions. *(Knock Off item removal, EOT
