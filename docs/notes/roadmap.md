@@ -3,12 +3,10 @@
 ## Context
 
 **Last updated 2026-05-24.** 393 tests across 4 workspaces (core 286 /
-server 59 / tui 32 / web 16), all green via `npm test`. Note: `npm
-test` runs each workspace separately so per-package vitest configs
-apply; running bare `npx vitest run` from the repo root ignores them
-and falsely fails the web tests (`localStorage is not defined`, because
-the root run skips the web package's `environment: 'jsdom'`). Always
-verify with `npm test` or `npm -w @pokechamps/<pkg> test`.
+server 59 / tui 32 / web 16), all green. A root `vitest.config.ts`
+(`test.projects`) now aggregates every workspace's own config, so both
+`npm test` and a bare `npx vitest run` from the repo root pass —
+including the web package's `environment: 'jsdom'`.
 Backend split complete (Phase 1–5), TUI is the primary surface, web
 client is read-only viewer, server backs optional remote mode. Recent
 session work has been correctness + UX gaps the user hits while
@@ -347,16 +345,11 @@ auto-trigger. Keep that posture.
 
 ### I. Testing + ops
 
-- **Root vitest workspace config (dev ergonomics).** Each package's
-  vitest config (e.g. web's `environment: 'jsdom'`) only applies via
-  the per-workspace `npm test`. A root `vitest.workspace.ts` would let
-  `npx vitest` from the repo root aggregate all suites with the right
-  env, so a single watch/run covers everything. Minor, but avoids the
-  "web fails from root" foot-gun.
-- **GitHub Actions CI.** Run `npm test` on push. (We commit + verify
-  manually right now.) Use `npm test` (per-workspace) — a bare root
-  `vitest` invocation would false-fail web until the workspace config
-  above lands.
+- ~~**Root vitest workspace config.**~~ ✅ Done — root
+  `vitest.config.ts` with `test.projects` aggregates all four packages
+  with their own env; `npx vitest` from root now passes.
+- **GitHub Actions CI.** Run `npm test` (or `npx vitest run`) on push.
+  We commit + verify manually right now.
 - **Coverage reporting.** No baseline metric yet.
 - **Property-based tests** for inference invariants ("any spread that
   satisfies observation X survives the filter").
