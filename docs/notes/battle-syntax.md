@@ -29,6 +29,11 @@ Field-clearing moves are auto-detected by name (`packages/core/src/domain/hazard
 - **Court Change** — swap all side conditions (hazards / screens / Tailwind) between sides.
 - **Tidy Up** — clear hazards on both sides (+1 user Atk & Speed).
 
+Field-**setting** moves are likewise auto-detected (`packages/core/src/domain/fieldMoves.ts` → `fieldMoveEffect`). Log the move normally (usually `m1 > Trick Room > self`) and `finalizeTurn` mutates the field:
+- Weather: **Sunny Day** / **Rain Dance** / **Sandstorm** / **Snowscape** / **Chilly Reception** (also pivots).
+- Terrain: **Electric / Grassy / Misty / Psychic Terrain**.
+- **Trick Room** toggles on/off; **Tailwind** sets the acting side's tailwind; **Reflect** / **Light Screen** / **Aurora Veil** (both screens) set the acting side's screens.
+
 ## State lines (mutate state immediately, no turn entry, no `/next` needed)
 
 ```

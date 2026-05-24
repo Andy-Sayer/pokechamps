@@ -31,6 +31,7 @@ import {
   hazardClearEffect,
   applyHazardClear,
 } from '../domain/hazards.js';
+import { fieldMoveEffect, applyFieldMove } from '../domain/fieldMoves.js';
 import { applyMegaAction } from '../domain/megaResolve.js';
 import {
   switchInAbilityEffect,
@@ -433,6 +434,15 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
       if (clear.userAtkBoost) applyBoostsTo(next, a.side, a.attackerTeamIndex, { atk: clear.userAtkBoost });
     }
     inferenceNotes.push(`${a.move} cleared hazards`);
+  }
+
+  // Field-setting moves (weather / terrain / Trick Room / Tailwind / screens).
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    const fm = fieldMoveEffect(a.move);
+    if (!fm) continue;
+    next.field = applyFieldMove(next.field ?? NEUTRAL_FIELD, a.side, fm);
+    inferenceNotes.push(`${a.move} set field state`);
   }
 
   // Damage inference for every mine→theirs damaging action.

@@ -15,6 +15,7 @@ import { getSpecies, isChargeMove, isPivotMove } from '@pokechamps/core/domain/d
 import { defaultOpponentSet } from '@pokechamps/core/domain/bring.js';
 import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs, hazardClearEffect, applyHazardClear } from '@pokechamps/core/domain/hazards.js';
+import { fieldMoveEffect, applyFieldMove } from '@pokechamps/core/domain/fieldMoves.js';
 import { switchInAbilityEffect, intimidateReaction, certainAbility, type BoostMap } from '@pokechamps/core/domain/abilities.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
 import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict } from '@pokechamps/core/domain/predictions.js';
@@ -632,6 +633,14 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
         if (clear.userAtkBoost) applyBoostsInto(next, a.side, a.attackerTeamIndex, { atk: clear.userAtkBoost });
       }
       inferenceNotes.push(`${a.move} cleared hazards`);
+    }
+    // Field-setting moves (weather / terrain / Trick Room / Tailwind / screens).
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      const fm = fieldMoveEffect(a.move);
+      if (!fm) continue;
+      next.field = applyFieldMove(next.field ?? NEUTRAL_FIELD, a.side, fm);
+      inferenceNotes.push(`${a.move} set field state`);
     }
     for (const a of draftActions) {
       if (a.kind === 'switch' || a.kind === 'mega') continue;

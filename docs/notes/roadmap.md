@@ -87,6 +87,12 @@ The original "Now" tier is mostly done. What's been merged on `main`:
   (both sides + screens), Court Change (swap all side conditions), Tidy
   Up (both sides). Auto-detected by move name in `finalizeTurn` (engine
   + TUI). Completes the hazard story alongside switch-in application.
+- **Field-setting moves** — `fieldMoves.ts` `fieldMoveEffect` /
+  `applyFieldMove`: weather (Sunny Day / Rain Dance / Sandstorm /
+  Snowscape / Chilly Reception), terrain (the four Terrain moves),
+  Trick Room (toggle), Tailwind + Reflect / Light Screen / Aurora Veil
+  (acting side). Fills a real gap — the field had a display but nothing
+  set weather/TR/tailwind/screens from moves.
 
 - **A — Battle model completeness** — mega done, charge done, pivots
   done, spread fixed, ability-priority for speed done, EOT
@@ -445,6 +451,7 @@ plays matches live + finds bugs by doing so:
 | Switch-in hazard application | `packages/core/src/domain/hazards.ts` (`applyHazardsToSwitchIn`), `match/engine.ts` (`applyHazardOnSwitchInto`) |
 | Switch-in ability triggers | `packages/core/src/domain/abilities.ts`, `match/engine.ts` (`applySwitchInAbility`), TUI `BattleScreen.tsx` (`applySwitchInAbilityInto`) |
 | Hazard clearing | `packages/core/src/domain/hazards.ts` (`hazardClearEffect` / `applyHazardClear`), `match/engine.ts` + TUI `finalizeTurn` |
+| Field-setting moves | `packages/core/src/domain/fieldMoves.ts` (`fieldMoveEffect` / `applyFieldMove`), `match/engine.ts` + TUI `finalizeTurn` |
 | On-the-fly Pikalytics fetch | `packages/core/src/domain/pikalyticsFetch.ts`, consumed by `packages/tui/src/ui/BattleScreen.tsx` |
 | Autocomplete suggester | `packages/core/src/domain/actionSuggest.ts` (`deriveSuggestionContext`) |
 
@@ -456,7 +463,7 @@ Each item should ship with:
 - A short commit message naming what real-world scenario the change
   unblocks
 
-Keep the suite green at every commit. Current baseline: **402 tests** (was 359 when this doc was first written).
+Keep the suite green at every commit. Current baseline: **412 tests** (was 359 when this doc was first written).
 
 ## Out of scope (deliberately)
 
