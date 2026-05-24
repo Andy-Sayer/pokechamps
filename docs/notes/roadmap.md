@@ -2,11 +2,13 @@
 
 ## Context
 
-**Last updated 2026-05-24.** 377 tests green across core / tui / server.
-⚠️ The web package has **16 failing tests** (`api.test.ts`,
-`liveMatch.test.ts`) — all `localStorage is not defined`, a jsdom-env
-misconfig in the web vitest setup. Pre-existing, unrelated to battle
-logic; tracked under pillar I.
+**Last updated 2026-05-24.** 393 tests across 4 workspaces (core 286 /
+server 59 / tui 32 / web 16), all green via `npm test`. Note: `npm
+test` runs each workspace separately so per-package vitest configs
+apply; running bare `npx vitest run` from the repo root ignores them
+and falsely fails the web tests (`localStorage is not defined`, because
+the root run skips the web package's `environment: 'jsdom'`). Always
+verify with `npm test` or `npm -w @pokechamps/<pkg> test`.
 Backend split complete (Phase 1–5), TUI is the primary surface, web
 client is read-only viewer, server backs optional remote mode. Recent
 session work has been correctness + UX gaps the user hits while
@@ -345,13 +347,16 @@ auto-trigger. Keep that posture.
 
 ### I. Testing + ops
 
-- **Fix web-package test env (broken now).** `api.test.ts` +
-  `liveMatch.test.ts` fail with `localStorage is not defined` — the web
-  vitest config needs `environment: 'jsdom'` (or a localStorage stub in
-  setup). 16 reds today. Cheap, and a blocker for honest CI gating.
+- **Root vitest workspace config (dev ergonomics).** Each package's
+  vitest config (e.g. web's `environment: 'jsdom'`) only applies via
+  the per-workspace `npm test`. A root `vitest.workspace.ts` would let
+  `npx vitest` from the repo root aggregate all suites with the right
+  env, so a single watch/run covers everything. Minor, but avoids the
+  "web fails from root" foot-gun.
 - **GitHub Actions CI.** Run `npm test` on push. (We commit + verify
-  manually right now.) Needs the web env fix first or it goes red on
-  arrival.
+  manually right now.) Use `npm test` (per-workspace) — a bare root
+  `vitest` invocation would false-fail web until the workspace config
+  above lands.
 - **Coverage reporting.** No baseline metric yet.
 - **Property-based tests** for inference invariants ("any spread that
   satisfies observation X survives the filter").
