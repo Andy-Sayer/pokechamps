@@ -71,6 +71,7 @@ o1 balloon              ← Air Balloon: itemConsumed (no HP change)
 /pika  /p        toggle Pikachu sprite (sixel preview)
 /export /x       show current team as Showdown export
 /ask <m vs o>    hypothetical matchup; both sides accept ref or species + optional +mega
+/override /ov    manual state editor: field (weather/terrain/TR/tailwind), per-active occupant/HP/status/boosts. ↑↓ pick · ←→ change · digits set HP · Enter applies · Esc cancels
 /help  /h /?     command + syntax cheat-sheet
 /quit  /q        end match
 ```

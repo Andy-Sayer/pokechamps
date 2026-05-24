@@ -2,7 +2,7 @@
 
 ## Context
 
-**Last updated 2026-05-24.** 416 tests across 4 workspaces, all green.
+**Last updated 2026-05-24.** 427 tests across 4 workspaces, all green.
 A root `vitest.config.ts`
 (`test.projects`) now aggregates every workspace's own config, so both
 `npm test` and a bare `npx vitest run` from the repo root pass —
@@ -100,6 +100,16 @@ The original "Now" tier is mostly done. What's been merged on `main`:
   `opp.itemConsumed` in `predictions.defenderCandidates`, mine via a
   `myCalcSet` in the matchup grid). Still open (A.3 part 2): inferring
   the item FROM outcomes (Sash survival, Choice-lock).
+- **Multi-hit damage input** — `m1 > Beat Up > o1 > 99,98,97,96,90(crit)`:
+  comma values = successive remaining HP per hit (side-aware), optional
+  per-hit `(crit)`. Parser emits one action per hit; finalize derives
+  each delta. Also wired the action `critical` flag into the inference
+  observation (engine + TUI) — previously crits never reached the calc.
+- **/override panel** — interactive manual state editor
+  (`OverridePanel.tsx`): field (weather / terrain / Trick Room /
+  Tailwind), per-active occupant / HP (raw mine, % opp) / status /
+  stat boosts. ↑↓ pick · ←→ change · digits set HP · Enter applies.
+  `applyOverride` extracted + unit-tested. (D polish + user request)
 
 - **A — Battle model completeness** — mega done, charge done, pivots
   done, spread fixed, ability-priority for speed done, EOT
@@ -470,7 +480,7 @@ Each item should ship with:
 - A short commit message naming what real-world scenario the change
   unblocks
 
-Keep the suite green at every commit. Current baseline: **416 tests** (was 359 when this doc was first written).
+Keep the suite green at every commit. Current baseline: **427 tests** (was 359 when this doc was first written).
 
 ## Out of scope (deliberately)
 

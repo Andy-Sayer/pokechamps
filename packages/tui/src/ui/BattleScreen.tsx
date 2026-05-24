@@ -21,6 +21,7 @@ import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokec
 import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict } from '@pokechamps/core/domain/predictions.js';
 import { PikaSpinner } from './PikaSpinner.js';
 import { ExportPanel } from './ExportPanel.js';
+import { OverridePanel } from './OverridePanel.js';
 import { formatShowdownTeamSP } from '@pokechamps/core/domain/showdown.js';
 import { BATTLE_COMMANDS, parseCommand, type BattleCommandId } from './slashCommands.js';
 import { deriveActiveIdx } from '@pokechamps/core/match/engine.js';
@@ -421,6 +422,9 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
   // `/export` overlay — shows the current team as a Showdown export so the
   // user can copy it without leaving the match. Esc closes.
   const [exportPanelText, setExportPanelText] = useState<string | null>(null);
+
+  // /override — manual god-mode state editor overlay.
+  const [overrideOpen, setOverrideOpen] = useState(false);
   // AI battle review (opt-in via `r`). Holds the rendered text and a busy flag.
   const [aiReview, setAiReview] = useState<string | null>(null);
   const [aiReviewBusy, setAiReviewBusy] = useState(false);
@@ -1095,6 +1099,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
           setMessage(`Removed: ${actionToLine(last, match)}`);
         }
         return true;
+      case 'override': setOverrideOpen(true); return true;
       case 'crit': setShowCrits(c => !c); return true;
       case 'allmoves': setShowAllMoves(a => !a); return true;
       case 'info': setInfoPickerOpen(true); return true;
@@ -1193,7 +1198,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
         setInputKey(k => k + 1);
       }
     }
-  });
+  }, { isActive: !overrideOpen });
 
   // ---------------- per-active matchup grid ----------------
   // For each of my 2 active slots, compute matchup rows against ALL 6 opps
@@ -1517,6 +1522,23 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
         <OppInfoPanel stores={stores} index={infoOpenForOpp} entry={match.opponentTeam[infoOpenForOpp]!} />
       )}
 
+      {/* /override — manual state editor. Owns its own input while open;
+          the main useInput + TextInput are gated off via overrideOpen. */}
+      {overrideOpen && (
+        <OverridePanel
+          match={match}
+          activeIdx={activeIdx}
+          onClose={() => setOverrideOpen(false)}
+          onApply={(nextMatch, nextActive) => {
+            setMatch(nextMatch);
+            setActiveIdx(nextActive);
+            saveMatchAsync(stores, nextMatch, setMessage);
+            setOverrideOpen(false);
+            setMessage('Override applied.');
+          }}
+        />
+      )}
+
       {/* /help cheat-sheet — full syntax + slash command reference. Esc to close. */}
       {helpOpen && <HelpPanel />}
 
@@ -1591,7 +1613,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
             key={inputKey}
             value={input}
             onChange={setInput}
-            focus={!pendingReplacement && !match.outcome}
+            focus={!pendingReplacement && !match.outcome && !overrideOpen}
             onSubmit={value => {
               const trimmed = value.trim();
               if (!trimmed) return;
