@@ -11,7 +11,8 @@ import { inferOpponentSpeeds, applySpeedInference, actualSpeed, predictTurnOrder
 import { reviewLastTurn } from '@pokechamps/core/ai/prompts.js';
 import { isAvailable as aiAvailable } from '@pokechamps/core/ai/client.js';
 import type { Stores } from '@pokechamps/core/storage/index.js';
-import { getSpecies, isChargeMove } from '@pokechamps/core/domain/data.js';
+import { getSpecies, isChargeMove, isPivotMove } from '@pokechamps/core/domain/data.js';
+import { defaultOpponentSet } from '@pokechamps/core/domain/bring.js';
 import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs } from '@pokechamps/core/domain/hazards.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
@@ -194,6 +195,135 @@ function initialActiveIndices(match: Match): {
 
 function shortName(name: string, width = 12): string {
   return name.length <= width ? name : name.slice(0, width);
+}
+
+// /ask <lhs> vs <rhs>. Each side can be a slot ref (m1/m2 for my actives or
+// any m1..m6 for team members, o1..o6 for opp slots) or a raw species name
+// (autocompletes via dex). Optional `+mega` / `+megax` / `+megay` suffix
+// forces the post-mega forme. Returns either an error string or a multi-line
+// prediction summary — both go straight into setMessage.
+//
+// This is read-only — no match state changes. Intentional: the user wants to
+// scout a hypothetical without rewinding or "what-iffing" the current turn.
+function runAskCommand(
+  args: string,
+  match: Match,
+  activeIdx: { mine: [number | null, number | null]; theirs: [number | null, number | null] },
+  field: FieldState,
+): string {
+  if (!args) {
+    return '/ask <mine> vs <opp>  e.g. /ask m1+mega vs o3  or  /ask Delphox-Mega vs Sneasler';
+  }
+  const parts = args.split(/\s+vs\s+|\s+v\s+/i);
+  if (parts.length !== 2) {
+    return 'Expected "<mine> vs <opp>" — separator must be "vs".';
+  }
+  const mine = resolveAskSide(parts[0]!.trim(), 'mine', match, activeIdx);
+  if (typeof mine === 'string') return `LHS: ${mine}`;
+  const opp = resolveAskSide(parts[1]!.trim(), 'theirs', match, activeIdx);
+  if (typeof opp === 'string') return `RHS: ${opp}`;
+
+  const off = predictOffense({
+    attacker: mine.set, opponent: opp.entry, field,
+    attackerGimmickActive: mine.megaActive,
+    defenderGimmickActive: opp.megaActive,
+  });
+  const thr = predictThreat({
+    opponent: opp.entry, defender: mine.set, field,
+    attackerGimmickActive: opp.megaActive,
+    defenderGimmickActive: mine.megaActive,
+  });
+  const sp = speedVerdict({
+    mySet: mine.set, opp: opp.entry, field,
+    myFormeOverride: mine.megaActive ? mine.megaForme ?? undefined : undefined,
+  });
+  const verdict = sp === 'faster' ? '✓ outspeed' : sp === 'slower' ? '✗ outsped' :
+                  sp === 'tie' ? '≈ tie' : sp === 'scarf-flag' ? '⚡ scarf risk' :
+                  '? unknown';
+  const offTxt = off
+    ? `${off.move} ${off.minPercent.toFixed(0)}-${off.maxPercent.toFixed(0)}% (${off.koChance})`
+    : 'n/a';
+  const thrTxt = thr
+    ? `${thr.move} ${thr.minPercent.toFixed(0)}-${thr.maxPercent.toFixed(0)}% (${thr.koChance})`
+    : 'n/a';
+  return `${mine.label} vs ${opp.label}\n  → ${offTxt}\n  ← ${thrTxt}\n  speed: ${verdict}`;
+}
+
+interface AskSide {
+  set: PokemonSet;
+  entry: OpponentEntry;
+  megaActive: boolean;
+  megaForme?: string;
+  label: string;
+}
+function resolveAskSide(
+  raw: string,
+  side: 'mine' | 'theirs',
+  match: Match,
+  activeIdx: { mine: [number | null, number | null]; theirs: [number | null, number | null] },
+): AskSide | string {
+  if (!raw) return 'missing token';
+  const megaMatch = raw.match(/\+mega(?:[xy])?$/i);
+  const megaActive = !!megaMatch;
+  const token = megaActive ? raw.slice(0, megaMatch!.index).trim() : raw;
+
+  // Slot ref: m1..m6 or o1..o6.
+  const refMatch = token.match(/^([mo])([1-6])$/i);
+  if (refMatch) {
+    const refSide = refMatch[1]!.toLowerCase() === 'm' ? 'mine' : 'theirs';
+    if (refSide !== side) return `${token} is on the ${refSide} side, not ${side}`;
+    const n = parseInt(refMatch[2]!, 10) - 1;
+    if (refSide === 'mine') {
+      const set = match.myTeam[n];
+      if (!set) return `m${n + 1} not in your team`;
+      const stone = getMegaOptions(set.species).find(o => o.stone === set.item);
+      return { set, entry: synthOppEntry(set), megaActive, megaForme: stone?.forme, label: `m${n + 1} ${stone && megaActive ? stone.forme : set.species}` };
+    }
+    const opp = match.opponentTeam[n];
+    if (!opp) return `o${n + 1} not on opponent team`;
+    const oppSet = opp.candidates?.[0] ?? defaultOpponentSet(opp, 50);
+    return { set: oppSet, entry: opp, megaActive, label: `o${n + 1} ${opp.megaForme ?? opp.species}` };
+  }
+
+  // Species name. Strip any "-Mega"/"-Mega-X" suffix; the gimmick layer
+  // re-resolves the forme via the held stone + megaActive flag.
+  const speciesName = token.replace(/-Mega(?:-[XY])?$/i, '');
+  const sp: any = getSpecies(speciesName);
+  if (!sp?.exists) return `unknown species: ${token}`;
+  // For mine-side raw species: synthesize a strong default set (max offence).
+  // For opp-side: build a synthetic OpponentEntry.
+  const stone = getMegaOptions(sp.name).find(o => o.variant === '' || token.toLowerCase().includes('-mega-' + o.variant));
+  // Pick a reasonable item: if the user named a -Mega species, attach the
+  // matching stone so resolveSpecies + megaActive resolves correctly.
+  const item = megaActive && stone ? stone.stone : undefined;
+  const synth: PokemonSet = {
+    species: sp.name,
+    level: 50,
+    item,
+    ability: sp.abilities ? Object.values(sp.abilities)[0] as string : undefined,
+    nature: 'Hardy',
+    evs: { hp: 0, atk: 252, def: 0, spa: 252, spd: 4, spe: 0 },
+    ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
+    moves: [],
+  };
+  if (side === 'mine') {
+    return { set: synth, entry: synthOppEntry(synth), megaActive, megaForme: stone?.forme, label: `${megaActive && stone ? stone.forme : sp.name}` };
+  }
+  const entry: OpponentEntry = { species: sp.name, knownMoves: [] };
+  return { set: synth, entry, megaActive, megaForme: stone?.forme, label: `${megaActive && stone ? stone.forme : sp.name}` };
+}
+
+// predictThreat needs an OpponentEntry shape even for mine-side scouting.
+// Synthesize from a PokemonSet by treating the set itself as the only
+// candidate and copying the basic fields.
+function synthOppEntry(set: PokemonSet): OpponentEntry {
+  return {
+    species: set.species,
+    item: set.item ?? null,
+    ability: set.ability ?? null,
+    knownMoves: set.moves,
+    candidates: [set],
+  };
 }
 
 export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProps) {
@@ -572,19 +702,35 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
     };
 
     const { side, teamIndex } = update;
-    if (update.hpPercent != null) {
+    // Absolute HP set (m1 = 145 / o2 = 30). Auto-faints at 0 + clears the
+    // active slot so the user gets prompted to switch in a replacement —
+    // matches the damage-delta path's behaviour.
+    const setAbsoluteHp = (pct: number) => {
+      const clamped = Math.max(0, Math.min(100, pct));
       if (side === 'theirs') {
         const o = next.opponentTeam[teamIndex];
-        if (o) o.currentHpPercent = update.hpPercent;
+        if (!o) return;
+        o.currentHpPercent = clamped;
+        if (clamped === 0) {
+          o.fainted = true;
+          if (nextActive.theirs[0] === teamIndex) nextActive.theirs[0] = null;
+          if (nextActive.theirs[1] === teamIndex) nextActive.theirs[1] = null;
+        }
       } else {
-        next.myCurrentHp![teamIndex] = update.hpPercent;
+        next.myCurrentHp![teamIndex] = clamped;
+        if (clamped === 0) {
+          if (!next.myFainted!.includes(teamIndex)) next.myFainted!.push(teamIndex);
+          if (nextActive.mine[0] === teamIndex) nextActive.mine[0] = null;
+          if (nextActive.mine[1] === teamIndex) nextActive.mine[1] = null;
+        }
       }
-    }
+    };
+    if (update.hpPercent != null) setAbsoluteHp(update.hpPercent);
     if (update.hpRaw != null && side === 'mine') {
       const mySet = next.myTeam[teamIndex];
       const max = mySet ? maxHpFor(mySet) : 0;
-      const pct = max > 0 ? Math.max(0, Math.min(100, (update.hpRaw / max) * 100)) : 0;
-      next.myCurrentHp![teamIndex] = pct;
+      const pct = max > 0 ? (update.hpRaw / max) * 100 : 0;
+      setAbsoluteHp(pct);
     }
     // Heals — additive, capped at 100% remaining. Don't un-faint a dead mon.
     const applyHealPct = (pct: number) => {
@@ -815,8 +961,13 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
   // Dispatch a parsed slash command. Returns true when handled (the caller
   // should clear the input box); false when the command was unknown or its
   // preconditions weren't met (e.g. /review with no turns yet).
-  const runBattleCommand = (id: BattleCommandId): boolean => {
+  const runBattleCommand = (id: BattleCommandId, args = ''): boolean => {
     switch (id) {
+      case 'ask': {
+        const r = runAskCommand(args, match, activeIdx, field);
+        setMessage(r);
+        return true;
+      }
       case 'quit': onEnd(); return true;
       case 'save':
         saveMatchAsync(stores, match, setMessage);
@@ -1323,9 +1474,12 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       {/* Turn composer */}
       <Box flexDirection="column" marginTop={1} borderStyle="round" paddingX={1}>
         <Text bold>Turn {match.turns.length + 1} in progress ({draftActions.length} action{draftActions.length === 1 ? '' : 's'})</Text>
-        {draftActions.map((a, i) => (
-          <Text key={i} dimColor>  {i + 1}. {actionToLine(a, match)}</Text>
-        ))}
+        {draftActions.map((a, i) => {
+          const pivot = a.kind !== 'switch' && a.kind !== 'mega' && isPivotMove(a.move);
+          return (
+            <Text key={i} dimColor>  {i + 1}. {actionToLine(a, match)}{pivot ? <Text color="cyan"> ⟲ pivot — log the switch-in next</Text> : null}</Text>
+          );
+        })}
         <Box marginTop={draftActions.length > 0 ? 1 : 0}>
           <Text>{'> '}</Text>
           <TextInput
@@ -1340,7 +1494,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
               // never collide because action lines don't start with '/'.
               const cmd = parseCommand(trimmed, BATTLE_COMMANDS);
               if (cmd) {
-                runBattleCommand(cmd.id);
+                runBattleCommand(cmd.id, cmd.args);
                 setInput('');
                 return;
               }
@@ -1509,6 +1663,7 @@ function HelpPanel() {
       <Text>  <Text color="white">/review</Text> (/r)     <Text dimColor>ask Pikachu (Claude) to review last turn</Text></Text>
       <Text>  <Text color="white">/pika</Text> (/p)       <Text dimColor>toggle Pikachu sprite (sixel preview)</Text></Text>
       <Text>  <Text color="white">/export</Text> (/x)     <Text dimColor>show current team as Showdown export</Text></Text>
+      <Text>  <Text color="white">/ask m1 vs o3</Text>    <Text dimColor>hypothetical matchup; "/ask Delphox-Mega vs Sneasler" works too</Text></Text>
       <Text>  <Text color="white">/help</Text> (/h, /?)   <Text dimColor>this panel</Text></Text>
       <Text>  <Text color="white">/quit</Text> (/q)       <Text dimColor>end match and return to menu</Text></Text>
       <Box marginTop={1}>

@@ -24,6 +24,7 @@ export type BattleCommandId =
   | 'review'
   | 'pika'
   | 'export'
+  | 'ask'
   | 'help'
   | 'quit';
 
@@ -43,6 +44,7 @@ export const BATTLE_COMMANDS: readonly BattleCommand[] = [
   { id: 'review',   aliases: ['review', 'r'],         description: 'Ask Pikachu (Claude) to review the last turn' },
   { id: 'pika',     aliases: ['pika', 'p'],           description: 'Toggle a Pikachu sprite (for sixel preview)' },
   { id: 'export',   aliases: ['export', 'x'],         description: 'Show the current team as a Showdown export' },
+  { id: 'ask',      aliases: ['ask'],                 description: 'Predict a hypothetical matchup: /ask m1 vs o3  or  /ask Delphox-Mega vs Sneasler' },
   { id: 'help',     aliases: ['help', 'h', '?'],      description: 'Show available commands' },
   { id: 'quit',     aliases: ['quit', 'q', 'end'],    description: 'End the match and return to the menu' },
 ];
@@ -50,12 +52,15 @@ export const BATTLE_COMMANDS: readonly BattleCommand[] = [
 export interface ParsedCommand<T extends string> {
   id: T;
   raw: string;
+  /** Everything after the verb token, untrimmed-internally but with leading/
+   *  trailing whitespace stripped. Empty string when the user provided no
+   *  arguments. Most commands ignore this; /ask uses it. */
+  args: string;
 }
 
 // Returns the canonical command id for an input string, or null if the input
 // doesn't start with '/' OR doesn't match any registered command. Trailing
-// whitespace is tolerated; arguments after the verb are ignored for now (no
-// command currently takes one).
+// whitespace is tolerated; the part after the verb is exposed as `args`.
 export function parseCommand<T extends string>(
   input: string,
   commands: readonly { id: T; aliases: readonly string[] }[],
@@ -63,10 +68,14 @@ export function parseCommand<T extends string>(
   const trimmed = input.trim();
   if (!trimmed.startsWith('/')) return null;
   // Take just the first whitespace-delimited token after the slash.
-  const verb = trimmed.slice(1).split(/\s+/)[0]?.toLowerCase() ?? '';
+  const rest = trimmed.slice(1);
+  const m = rest.match(/^(\S+)(?:\s+(.*))?$/);
+  if (!m) return null;
+  const verb = m[1]!.toLowerCase();
+  const args = (m[2] ?? '').trim();
   if (!verb) return null;
   for (const cmd of commands) {
-    if (cmd.aliases.includes(verb)) return { id: cmd.id, raw: trimmed };
+    if (cmd.aliases.includes(verb)) return { id: cmd.id, raw: trimmed, args };
   }
   return null;
 }

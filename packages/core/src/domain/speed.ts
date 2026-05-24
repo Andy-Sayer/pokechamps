@@ -25,25 +25,66 @@ function movePriority(name: string): number {
   return typeof m?.priority === 'number' ? m.priority : 0;
 }
 
+// Per-action context for priority resolution. Optional fields default to "no
+// information" — without an attacker ability we just use the move's natural
+// priority. Threading this avoids a circular ctx import in callers that
+// don't need ability awareness (tests, etc.).
+interface PriorityCtx {
+  attackerAbility?: string | null;
+  attackerHpPercent?: number; // 0..100, default 100
+}
+
+// Ability-driven priority bumps. Same bracket-equality contract as Quick
+// Claw: when an ability lifts a move out of its natural bracket, it stops
+// generating speed signals against same-natural-bracket actions — which is
+// correct, since the ability (not the stat) is what made it go first.
+//
+// Covered today:
+//   Prankster   +1 to status moves   (still skip-the-bracket even vs Dark:
+//                                      the move FAILS but it was still
+//                                      attempted in the +1 bracket)
+//   Gale Wings  +1 to Flying moves   (Gen 7+: only at 100% HP)
+//   Triage      +3 to healing moves
+//   Stall       -7 to all moves      (moves last in bracket)
+function abilityBracketBump(a: MoveAction, ctx: PriorityCtx): number {
+  if (a.kind === 'switch' || a.kind === 'mega') return 0;
+  const ab = ctx.attackerAbility?.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!ab) return 0;
+  const m = getMove(a.move) as any;
+  if (!m) return 0;
+  if (ab === 'prankster' && m.category === 'Status') return 1;
+  if (ab === 'galewings' && m.type === 'Flying' && (ctx.attackerHpPercent ?? 100) >= 100) return 1;
+  if (ab === 'triage' && (m.flags?.heal || m.heal || m.drain)) return 3;
+  if (ab === 'stall') return -7;
+  return 0;
+}
+
 // Effective priority bracket for an action. Brackets resolve top-down each
 // turn:
 //   +6 switches      — switch-vs-switch is a speed signal
 //   +5 mega          — mega-vs-mega is a speed signal (between switches
 //                       and move priorities); confirmed via Bulbapedia's
 //                       turn-order page
-//   +N moves         — move's intrinsic priority
+//   +N moves         — move's intrinsic priority + ability bumps + Quick Claw
 //
 // Cross-bracket pairs (switch-vs-move, mega-vs-move, etc.) get skipped via
 // the bracket equality check in inferOpponentSpeeds.
-function effectivePriority(a: MoveAction): number {
-  if (a.kind === 'switch') return 6;
+function effectivePriority(a: MoveAction, ctx: PriorityCtx = {}): number {
+  if (a.kind === 'switch') {
+    // Pivot-forced switches (U-turn -> switch) inherit the pivot move's
+    // bracket, not the natural +6 switch bracket. Use a sentinel value
+    // that no real action will match (-99) so the bracket-equality check
+    // never pairs them with anything — same effect as "skip this action".
+    if (a.pivot) return -99;
+    return 6;
+  }
   if (a.kind === 'mega')   return 5;
   // Quick Claw (+1 to whatever priority bracket the move is in) lifts the
   // action out of its natural bracket. Pairing against same-natural-
   // bracket actions then fails the bracket-equality check and produces
   // no speed signal — which is correct, since the claw was the reason
   // the mon went first, not its speed stat.
-  return movePriority(a.move) + (a.quickClaw ? 1 : 0);
+  return movePriority(a.move) + (a.quickClaw ? 1 : 0) + abilityBracketBump(a, ctx);
 }
 
 export interface SpeedInference {
@@ -126,6 +167,23 @@ export function inferOpponentSpeeds(match: Match, myTeam: PokemonSet[]): SpeedIn
     slot.speedCeiling = slot.speedCeiling == null ? v : Math.min(slot.speedCeiling, v);
   };
 
+  // Resolve attacker ability + HP for a given action so effectivePriority
+  // can apply Prankster / Gale Wings / Triage / Stall bumps. Falls back to
+  // null when unknown — without an ability we treat the move at its
+  // natural priority.
+  const ctxFor = (a: MoveAction): PriorityCtx => {
+    const idx = a.attackerTeamIndex;
+    if (idx == null) return {};
+    if (a.side === 'mine') {
+      const set = myTeam[idx];
+      const hp = match.myCurrentHp?.[idx] ?? 100;
+      return { attackerAbility: set?.ability ?? null, attackerHpPercent: hp };
+    }
+    const entry = match.opponentTeam[idx];
+    const hp = entry?.currentHpPercent ?? 100;
+    return { attackerAbility: entry?.ability ?? null, attackerHpPercent: hp };
+  };
+
   for (const turn of match.turns) {
     const trickRoom = !!turn.field?.trickRoom;
     const actions = orderedActions(turn);
@@ -136,7 +194,7 @@ export function inferOpponentSpeeds(match: Match, myTeam: PokemonSet[]): SpeedIn
         // Same priority bracket only. Switches share the +6 bracket so two
         // switches DO produce a speed signal; switch-vs-priority-0-move
         // falls in different brackets and gets skipped here.
-        if (effectivePriority(a) !== effectivePriority(b)) continue;
+        if (effectivePriority(a, ctxFor(a)) !== effectivePriority(b, ctxFor(b))) continue;
         // i < j guarantees a moved before b in the turn order.
 
         // ---- mine-vs-opp ---------------------------------------------------

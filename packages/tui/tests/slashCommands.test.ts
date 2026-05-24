@@ -55,6 +55,16 @@ describe('parseCommand', () => {
     expect(parseCommand('/info opp1', BATTLE_COMMANDS)?.id).toBe('info');
   });
 
+  it('captures everything after the verb as args', () => {
+    const r = parseCommand('/ask m1+mega vs o3', BATTLE_COMMANDS);
+    expect(r?.id).toBe('ask');
+    expect(r?.args).toBe('m1+mega vs o3');
+    // No args → empty string, not undefined.
+    expect(parseCommand('/next', BATTLE_COMMANDS)?.args).toBe('');
+    // Trailing whitespace stripped.
+    expect(parseCommand('/ask   Delphox vs Sneasler  ', BATTLE_COMMANDS)?.args).toBe('Delphox vs Sneasler');
+  });
+
   it('returns null for unknown verbs', () => {
     expect(parseCommand('/launch', BATTLE_COMMANDS)).toBeNull();
     expect(parseCommand('/', BATTLE_COMMANDS)).toBeNull();
@@ -67,7 +77,7 @@ describe('parseCommand', () => {
     expect(dedup.size).toBe(ids.length);
     // Compile-time check: each id matches the union — TS would complain
     // if a command had an unknown id, but a runtime spot-check is cheap.
-    const expected: BattleCommandId[] = ['next', 'undo', 'save', 'info', 'crit', 'allmoves', 'review', 'pika', 'export', 'help', 'quit'];
+    const expected: BattleCommandId[] = ['next', 'undo', 'save', 'info', 'crit', 'allmoves', 'review', 'pika', 'export', 'ask', 'help', 'quit'];
     for (const id of expected) expect(ids).toContain(id);
   });
 });

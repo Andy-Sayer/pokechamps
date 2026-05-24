@@ -50,6 +50,17 @@ export function isChargeMove(name: string): boolean {
   const m = getMove(name) as any;
   return !!(m?.flags?.charge);
 }
+
+// True for "pivot" moves that switch the attacker out after resolving
+// (U-turn, Volt Switch, Flip Turn, Parting Shot, Teleport, Chilly
+// Reception, Baton Pass, Shed Tail). The dex marks these via the
+// `selfSwitch` field — `true` for the basic forms, `'copyvolatile'` for
+// Baton Pass, `'shedtail'` for Shed Tail. We treat all of them the same
+// for prompt purposes (the user picks an incoming mon next).
+export function isPivotMove(name: string): boolean {
+  const m = getMove(name) as any;
+  return !!m?.selfSwitch;
+}
 export function getItem(name: string) {
   const id = toId(name);
   return itemsOverrides?.[id] ?? gen.items.get(name);

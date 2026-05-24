@@ -133,6 +133,13 @@ export interface MoveAction {
   // up in a higher bracket and doesn't generate a misleading speed
   // signal against natural-priority same-bracket actions.
   quickClaw?: boolean;
+  // True when this `kind: 'switch'` action was forced by a pivot move
+  // (U-turn, Volt Switch, Parting Shot, Teleport, Flip Turn, Chilly
+  // Reception, Baton Pass, Shed Tail). The switch happens within the
+  // pivot move's priority bracket, NOT at +6, so speed inference must
+  // skip it — otherwise we'd treat the forced switch as a free decision
+  // and derive bogus speed signals from when it landed in the turn.
+  pivot?: boolean;
   helpingHand?: boolean;
   critical?: boolean;
   notes?: string;

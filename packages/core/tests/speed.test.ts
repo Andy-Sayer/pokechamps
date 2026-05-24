@@ -158,6 +158,47 @@ describe('inferOpponentSpeeds', () => {
     expect(inf[0]!.speedCeiling).toBeUndefined();
   });
 
+  test('Prankster status move ignored — different bracket means no speed signal', () => {
+    // Whimsicott (Prankster, base 116 Spe) uses Tailwind (status, +1 bracket
+    // via Prankster) BEFORE my Jolly Sneasler's Close Combat. Without the
+    // ability bump we'd infer Whimsicott outspeeds Jolly Sneasler (false).
+    const myFast = mon({
+      species: 'Sneasler', nature: 'Jolly',
+      evs: { ...ZERO_EVS, spe: 252 },
+    });
+    const match = makeMatch(
+      [myFast],
+      ['Whimsicott'],
+      [turn([
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'Tailwind',     order: 1 }),
+        act({ side: 'mine',   attackerTeamIndex: 0, move: 'Close Combat', order: 2 }),
+      ])],
+    );
+    match.opponentTeam[0]!.ability = 'Prankster';
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    expect(inf[0]!.speedFloor).toBeUndefined();
+    expect(inf[0]!.speedCeiling).toBeUndefined();
+  });
+
+  test('Gale Wings flying move at full HP — no speed signal', () => {
+    const myFast = mon({
+      species: 'Sneasler', nature: 'Jolly',
+      evs: { ...ZERO_EVS, spe: 252 },
+    });
+    const match = makeMatch(
+      [myFast],
+      ['Talonflame'],
+      [turn([
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'Brave Bird',   order: 1 }),
+        act({ side: 'mine',   attackerTeamIndex: 0, move: 'Close Combat', order: 2 }),
+      ])],
+    );
+    match.opponentTeam[0]!.ability = 'Gale Wings';
+    match.opponentTeam[0]!.currentHpPercent = 100;
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    expect(inf[0]!.speedFloor).toBeUndefined();
+  });
+
   test('switch action does not participate in speed pairs', () => {
     const myFast = mon({
       species: 'Sneasler', nature: 'Jolly',

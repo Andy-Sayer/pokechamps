@@ -185,6 +185,28 @@ describe('match engine: finalizeTurn', () => {
     expect(result.match.opponentBrought).toEqual([0, 1, 2]);
   });
 
+  test('pivot move followed by a same-slot switch tags the switch as pivot', () => {
+    // U-turn used by mine slot 0, then mine slot 0 switches in another mon.
+    // finalizeTurn should set switch.pivot = true so speed inference skips
+    // the switch (a forced pivot switch is not a free decision).
+    const match = freshMatch();
+    const uturn: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, move: 'U-turn',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0,
+      damageHpPercent: 30, order: 1,
+    };
+    const sw: MoveAction = {
+      side: 'mine', attackerSlot: 0, kind: 'switch', move: 'Flutter Mane',
+      target: 'self', targetTeamIndex: 3, order: 2,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [uturn, sw], field: match.field }, activeIdx: startActive,
+    });
+    const persisted = r.match.turns[0]!.actions[1]!;
+    expect(persisted.kind).toBe('switch');
+    expect(persisted.pivot).toBe(true);
+  });
+
   test('mine-side switch onto Stealth Rock subtracts hazard damage', () => {
     // Flutter Mane is neutral to Rock so 12.5% chip on entry.
     const match = freshMatch({

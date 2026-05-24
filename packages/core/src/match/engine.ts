@@ -30,7 +30,7 @@ import {
   absorbsToxicSpikes,
 } from '../domain/hazards.js';
 import { applyMegaAction } from '../domain/megaResolve.js';
-import { isChargeMove } from '../domain/data.js';
+import { isChargeMove, isPivotMove } from '../domain/data.js';
 import type { StateUpdate, HazardUpdate } from '../domain/turnparser.js';
 
 export type ActiveIdx = {
@@ -377,6 +377,24 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
       inferenceNotes.push(`${opp.species}: ${candidateSets.length} spread(s)`);
     } catch {
       inferenceNotes.push(`${opp.species}: inference failed`);
+    }
+  }
+
+  // Tag pivot-follow switches. A pivot move (U-turn etc.) executes, then
+  // forces its user out — the user logs the switch as the next action by
+  // the same mon + slot. That switch happens within the pivot's priority
+  // bracket, not at the natural +6 switch bracket, so speed inference
+  // would draw false signals from it without this tag.
+  for (let i = 0; i < draftActions.length; i++) {
+    const swAct = draftActions[i]!;
+    if (swAct.kind !== 'switch') continue;
+    // Walk backwards for the most recent same-side+slot action.
+    for (let j = i - 1; j >= 0; j--) {
+      const prev = draftActions[j]!;
+      if (prev.side !== swAct.side || prev.attackerSlot !== swAct.attackerSlot) continue;
+      if (prev.kind === 'switch' || prev.kind === 'mega') break; // not a pivot chain
+      if (isPivotMove(prev.move)) swAct.pivot = true;
+      break;
     }
   }
 
