@@ -15,6 +15,8 @@ m1+quick > Sucker Punch > o1 > 40          ← Quick Claw proc (priority bracket
 m1+mega+crit > Flamethrower > o1 > 0       ← stacked modifiers
 m1 > Heat Wave > spread > o1:40, o2:35     ← spread → one MoveAction per target
 m1 > Beat Up > o1 > 99,98,97,96,90(crit)   ← multi-hit: comma = remaining HP per hit; (crit) per hit
+m1 > Close Combat > o1 > 1 sash            ← Focus Sash: survives at sliver, item consumed, hit skipped for inference
+m1 > Close Combat > o1 > 50 sash           ← survived w/ HP to spare → Sash didn't proc: full dmg infers + item learned (held)
 m1 > switch > Garchomp                     ← switch by species name
 m1 > switch > my4                          ← switch by team-index ref
 o2 > switch > op3                          ← opp switch

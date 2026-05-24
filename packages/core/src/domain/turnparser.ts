@@ -578,7 +578,30 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
 
   const damageTargetSide: FieldSide | undefined =
     typeof parsedTarget === 'object' ? parsedTarget.side : undefined;
-  const dmg = parseDamage(parts[3], damageTargetSide);
+
+  // Trailing `sash` in the damage slot: the target survived this hit via Focus
+  // Sash. `o1 > 1 sash` (remaining 1), `o1 > 0 sash` / `o1 > sash` (no/￪zero
+  // value → forced to a 1-sliver). Strip the flag, parse the rest as remaining.
+  let dmgTok: string | undefined = parts[3];
+  let sash = false;
+  if (dmgTok) {
+    const t = dmgTok.trim();
+    if (/^sash$/i.test(t)) { sash = true; dmgTok = undefined; }
+    else {
+      const m = t.match(/^(.*\S)\s+sash$/i);
+      if (m) { sash = true; dmgTok = m[1]; }
+    }
+  }
+  const dmg = parseDamage(dmgTok, damageTargetSide);
+  if (sash) {
+    if (damageTargetSide === 'mine') {
+      dmg.targetRemainingHpRaw = Math.max(1, dmg.targetRemainingHpRaw ?? 1);
+      dmg.damageRaw = undefined; dmg.damageHpPercent = undefined; dmg.targetRemainingHpPercent = undefined;
+    } else {
+      dmg.targetRemainingHpPercent = Math.max(1, dmg.targetRemainingHpPercent ?? 1);
+      dmg.damageHpPercent = undefined; dmg.damageRaw = undefined; dmg.targetRemainingHpRaw = undefined;
+    }
+  }
 
   const target: MoveAction['target'] =
     typeof parsedTarget === 'string'
@@ -605,6 +628,7 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
       mega: actor.mega || undefined,
       critical: actor.crit || undefined,
       quickClaw: actor.quickClaw || undefined,
+      sash: sash || undefined,
       ...dmg,
     }],
   };

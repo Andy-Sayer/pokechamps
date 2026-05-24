@@ -410,14 +410,14 @@ plays matches live + finds bugs by doing so:
    self-boosts. `abilities.ts`. Download / Trace deferred.
 2. ~~**A.3 part 1 — item removal in the calc.**~~ ✅ **Shipped** —
    Knock Off / consumed items dropped from damage predictions.
-3. **A.3 part 2 — infer the item FROM outcomes.** *(partly done.)*
+3. **A.3 part 2 — infer the item FROM outcomes.** *(mostly done.)*
    ✅ Choice-lock: `detectChoiceLock` flags a mon repeating one move ≥2
-   turns while staying in; roster shows `🔒Choice?`/`🔒Choice Scarf?`
-   (combined with `scarfSuspected`). Still open: **Focus Sash** auto-
-   detect (needs a calc check that the survived hit was a guaranteed
-   KO — misfire-prone, wants a conservative soft-hint design) and
-   Sand-chip → no-Safety-Goggles. Feeding signals into candidate
-   filtering (vs display-only) also TBD.
+   turns while staying in; roster shows `🔒Choice?`/`🔒Choice Scarf?`.
+   ✅ Focus Sash: explicit `… > o1 > N sash` annotation — proc (1-sliver)
+   consumes the item + skips inference; survive-with-HP records a held
+   Focus Sash + still infers off the full damage (`sashProcced` gates
+   both). Still open: Sand-chip → no-Safety-Goggles; auto-detecting
+   Sash without the explicit tag (deferred — misfire-prone).
 4. **B.1 — Bayesian candidate weighting.** Hybrid filter (hard cut with
    soft-likelihood fallback so the set never empties); "most likely" =
    highest score; ranges weight by candidate probability. Task #142.

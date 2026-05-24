@@ -39,6 +39,7 @@ import {
   certainAbility,
   type BoostMap,
 } from '../domain/abilities.js';
+import { sashProcced } from '../domain/itemSignals.js';
 import { isChargeMove, isPivotMove, isItemRemovingMove } from '../domain/data.js';
 import type { StateUpdate, HazardUpdate } from '../domain/turnparser.js';
 
@@ -466,10 +467,32 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     }
   }
 
+  // Focus Sash logged via `... > o1 > N sash`. If it PROCCED (1-HP sliver),
+  // the item is consumed and the capped damage is unreliable. If it did NOT
+  // proc (survived with HP to spare), the damage is the move's true output and
+  // we've simply learned the mon holds a Focus Sash (still held, not consumed).
+  for (const a of draftActions) {
+    if (!a.sash) continue;
+    if (typeof a.target !== 'object') continue;
+    const tIdx = a.targetTeamIndex;
+    if (tIdx == null) continue;
+    const procced = sashProcced(a);
+    if (a.target.side === 'theirs') {
+      const o = next.opponentTeam[tIdx];
+      if (!o) continue;
+      if (procced) { o.itemConsumed = 'Focus Sash'; o.fainted = false; if ((o.currentHpPercent ?? 0) <= 0) o.currentHpPercent = 1; }
+      else o.item = 'Focus Sash'; // held, not consumed — damage stands
+    } else if (procced) {
+      next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: 'Focus Sash' };
+      next.myFainted = (next.myFainted ?? []).filter(i => i !== tIdx);
+    }
+  }
+
   // Damage inference for every mine→theirs damaging action.
   for (const a of draftActions) {
     if (a.kind === 'switch' || a.kind === 'mega') continue;
     if (a.side !== 'mine') continue;
+    if (sashProcced(a)) continue; // Sash-capped damage understates the move — don't infer from it
     if (a.damageHpPercent == null && a.damageRaw == null) continue;
     if (typeof a.target !== 'object' || a.target.side !== 'theirs') continue;
     const attackerSet = next.myTeam[a.attackerTeamIndex ?? -1];

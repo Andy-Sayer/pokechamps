@@ -16,7 +16,7 @@ import { defaultOpponentSet } from '@pokechamps/core/domain/bring.js';
 import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs, hazardClearEffect, applyHazardClear } from '@pokechamps/core/domain/hazards.js';
 import { fieldMoveEffect, applyFieldMove } from '@pokechamps/core/domain/fieldMoves.js';
-import { detectChoiceLock, type ChoiceLock } from '@pokechamps/core/domain/itemSignals.js';
+import { detectChoiceLock, sashProcced, type ChoiceLock } from '@pokechamps/core/domain/itemSignals.js';
 import { switchInAbilityEffect, intimidateReaction, certainAbility, type BoostMap } from '@pokechamps/core/domain/abilities.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
 import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict } from '@pokechamps/core/domain/predictions.js';
@@ -662,9 +662,29 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
         next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: lost ?? `knocked off (${a.move})` };
       }
     }
+    // Focus Sash (`... > o1 > N sash`): proc (1-sliver) → item consumed, alive,
+    // skip inference; survived with HP to spare → item learned (held), damage
+    // stands for inference.
+    for (const a of draftActions) {
+      if (!a.sash) continue;
+      if (typeof a.target !== 'object') continue;
+      const tIdx = a.targetTeamIndex;
+      if (tIdx == null) continue;
+      const procced = sashProcced(a);
+      if (a.target.side === 'theirs') {
+        const o = next.opponentTeam[tIdx];
+        if (!o) continue;
+        if (procced) { o.itemConsumed = 'Focus Sash'; o.fainted = false; if ((o.currentHpPercent ?? 0) <= 0) o.currentHpPercent = 1; }
+        else o.item = 'Focus Sash';
+      } else if (procced) {
+        next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: 'Focus Sash' };
+        next.myFainted = (next.myFainted ?? []).filter(i => i !== tIdx);
+      }
+    }
     for (const a of draftActions) {
       if (a.kind === 'switch' || a.kind === 'mega') continue;
       if (a.side !== 'mine') continue;
+      if (sashProcced(a)) continue; // Sash-capped damage understates the move — skip inference
       if (a.damageHpPercent == null && a.damageRaw == null) continue;
       if (typeof a.target !== 'object' || a.target.side !== 'theirs') continue;
       const attackerSet = next.myTeam[a.attackerTeamIndex ?? -1];

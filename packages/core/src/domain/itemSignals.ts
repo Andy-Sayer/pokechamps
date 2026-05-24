@@ -1,4 +1,15 @@
-import type { Match } from './types.js';
+import type { Match, MoveAction } from './types.js';
+
+// Did a `sash`-annotated hit actually PROC the Focus Sash? It procs only when
+// the target ends at a 1-HP / 1% sliver — i.e. the damage was capped. If the
+// mon survived with more HP to spare, the Sash didn't trigger: the logged
+// damage is the move's true output (usable for inference), and we've merely
+// learned the mon HOLDS a Focus Sash.
+export function sashProcced(a: MoveAction): boolean {
+  if (!a.sash || typeof a.target !== 'object') return false;
+  const remaining = a.target.side === 'mine' ? a.targetRemainingHpRaw : a.targetRemainingHpPercent;
+  return remaining == null || remaining <= 1;
+}
 
 // Item signals inferred from move OUTCOMES rather than damage rolls (A.3
 // part 2). These complement the EV-grid solver in inference.ts, which can't

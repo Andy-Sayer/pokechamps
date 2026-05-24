@@ -142,6 +142,13 @@ export interface MoveAction {
   pivot?: boolean;
   helpingHand?: boolean;
   critical?: boolean;
+  // Set when the damage slot carried a trailing `sash`, e.g.
+  // `m1 > Close Combat > o1 > 1 sash`. finalizeTurn branches on the result:
+  //  - ended at a 1-HP/1% sliver → Sash PROCCED: item consumed, mon kept alive,
+  //    and the hit is skipped for inference (capped damage understates the move).
+  //  - survived with HP to spare → Sash did NOT proc: damage is the move's true
+  //    output (inference runs), and we record the item as a held Focus Sash.
+  sash?: boolean;
   notes?: string;
 }
 
