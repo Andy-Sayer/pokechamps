@@ -108,8 +108,17 @@ The original "Now" tier is mostly done. What's been merged on `main`:
 - **/override panel** — interactive manual state editor
   (`OverridePanel.tsx`): field (weather / terrain / Trick Room /
   Tailwind), per-active occupant / HP (raw mine, % opp) / status /
-  stat boosts. ↑↓ pick · ←→ change · digits set HP · Enter applies.
-  `applyOverride` extracted + unit-tested. (D polish + user request)
+  stat boosts. Two-step target-first nav + type-to-set values (`brn`,
+  `sun`, `+2`, species names). `applyOverride` extracted + unit-tested.
+  (D polish + user request)
+- **Parser: slot-vs-index refs unified** — state lines now accept
+  unambiguous `my1..my6` / `op1..op6` team refs everywhere (not just
+  switch targets), so a benched mon at team index 0/1 — unreachable by
+  the slot-overloaded `o1`/`m1` — can be targeted (`op1 = 30%`,
+  `my2 brn`, `op4 in o1`). `resolveRef` centralises it. Rosters label
+  benched mons with their `myN`/`opN` ref. (parser correctness + UX)
+
+Pillar status after the above:
 
 - **A — Battle model completeness** — mega done, charge done, pivots
   done, spread fixed, ability-priority for speed done, EOT
@@ -120,11 +129,12 @@ The original "Now" tier is mostly done. What's been merged on `main`:
   item triggers beyond Sash/Balloon/WP (Choice locks, Life Orb,
   berries), move side effects (Encore / Taunt / Disable / Magic Coat),
   Tera / Z / Dynamax gimmicks (Champions hasn't rotated to them yet).
-  Hazard **clearing** now done (Defog / Court Change / Rapid Spin /
-  Tidy Up — `hazards.ts`).
+  Hazard **clearing** done; field-setting moves done; **A.3 part 1**
+  (consumed/knocked items dropped from the calc) done.
 - **B — Inference quality** — Bayesian weighting still untouched
-  (#142). Item inference still binary (#7 in old order). Speed
-  inference is now reasonable for Prankster-style mons.
+  (#142). Item inference: calc now honours item removal (A.3 pt1), but
+  inferring the item FROM outcomes (Sash survival, Choice-lock — A.3
+  part 2) is still open. Speed inference reasonable for Prankster mons.
 - **C — Decision support** — multi-turn lookahead, endgame solver
   still untouched.
 - **D — TUI polish** — /undo + autocomplete suggester done; others
@@ -396,30 +406,30 @@ plays matches live + finds bugs by doing so:
 **Now (next 1–3 sessions):**
 
 1. ~~**A.2 — Switch-in ability triggers.**~~ ✅ **Shipped** — Intimidate
-   (+immunity / Defiant-style reactions), weather setters, terrain
-   setters, self-boosts. `abilities.ts`, wired into engine + TUI.
-   Download / Trace deferred (need foe-stat / ability-copy logic).
-2. **B.1 — Bayesian candidate weighting.** Replace binary in/out
-   filtering with probability scores. Each candidate gets a likelihood
-   given ALL observations; "most likely" picks the highest score;
-   damage ranges weight by candidate probability. Task #142.
-3. **A.3 — Item inference from move outcomes.** Garchomp survived a
-   guaranteed KO with 1 HP → Sash. Sand-immune mon took Sand chip →
-   no Safety Goggles. Move locked to one option for N turns → Choice
-   item. Largest single inference-quality win after Bayesian.
-4. **Audit completion (task #156).** Remaining gaps: Knock Off item
-   removal, Trick/Switcheroo item swap, Encore/Taunt/Disable
-   surfacing, Fake Out turn-1 gating, Sucker Punch fail conditions.
-   *(EOT weather/status ticks done — `endOfTurn.ts`; hazard clearing
-   done — `hazards.ts`.)*
+   (+immunity / Defiant-style reactions), weather/terrain setters,
+   self-boosts. `abilities.ts`. Download / Trace deferred.
+2. ~~**A.3 part 1 — item removal in the calc.**~~ ✅ **Shipped** —
+   Knock Off / consumed items dropped from damage predictions.
+3. **A.3 part 2 — infer the item FROM outcomes.** ← **next.** Garchomp
+   survives a guaranteed KO at 1 HP → Focus Sash. A mon repeats one
+   move while locked N turns → Choice item (complements `scarfSuspected`).
+   Sand-immune mon takes Sand chip → no Safety Goggles. Surfaces the
+   inferred item on the opp entry + into candidate filtering.
+4. **B.1 — Bayesian candidate weighting.** Hybrid filter (hard cut with
+   soft-likelihood fallback so the set never empties); "most likely" =
+   highest score; ranges weight by candidate probability. Task #142.
+5. **Audit completion (task #156).** Remaining gaps: Trick/Switcheroo
+   item swap, Encore/Taunt/Disable surfacing, Fake Out turn-1 gating,
+   Sucker Punch fail conditions. *(Knock Off item removal, EOT
+   weather/status, hazard clearing all done.)*
 
 **Soon (4–8 sessions):**
 
-5. **C.1 — Endgame solver.** Down-to-2-vs-2 enumerable; surface the
+6. **C.1 — Endgame solver.** Down-to-2-vs-2 enumerable; surface the
    optimal line. Stakes are highest, computation is bounded.
-6. **I.1 — GitHub Actions CI.** Run `npm test` on push. Cheap insurance
+7. **I.1 — GitHub Actions CI.** Run `npm test` on push. Cheap insurance
    against regressions.
-7. **D — More TUI polish.** Inline edit of draft actions; Tab cycling
+8. **D — More TUI polish.** Inline edit of draft actions; Tab cycling
    through autocomplete; resize-aware layouts; match-end summary
    screen; quick-replay through saved snapshots.
 
