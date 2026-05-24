@@ -61,6 +61,17 @@ export function isPivotMove(name: string): boolean {
   const m = getMove(name) as any;
   return !!m?.selfSwitch;
 }
+// Moves that remove (or consume) the target's held item on hit. Knock Off /
+// Thief / Covet / Corrosive Gas strip any item; Incinerate / Bug Bite / Pluck
+// destroy a held berry. We mark the target's item as gone for damage-calc
+// purposes either way. Trick / Switcheroo SWAP items (not handled here — that
+// needs to track the swapped-in item, a separate follow-up).
+const ITEM_REMOVING_MOVES = new Set([
+  'Knock Off', 'Thief', 'Covet', 'Corrosive Gas', 'Incinerate', 'Bug Bite', 'Pluck',
+]);
+export function isItemRemovingMove(name: string): boolean {
+  return ITEM_REMOVING_MOVES.has(name);
+}
 export function getItem(name: string) {
   const id = toId(name);
   return itemsOverrides?.[id] ?? gen.items.get(name);

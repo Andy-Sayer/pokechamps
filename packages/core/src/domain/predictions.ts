@@ -18,10 +18,13 @@ export interface MatchupCell {
 export type SpeedVerdict = 'faster' | 'slower' | 'tie' | 'unknown' | 'scarf-flag';
 
 // Candidate defender sets to evaluate. Falls back to the cheap default set
-// when inference hasn't started narrowing yet.
+// when inference hasn't started narrowing yet. When the mon's item has been
+// consumed (Sitrus/Sash) or knocked off (Knock Off/Thief/etc.), strip the item
+// so the calc no longer applies it — `opp.itemConsumed` is our marker.
 function defenderCandidates(opp: OpponentEntry, level: number): PokemonSet[] {
-  if (opp.candidates?.length) return opp.candidates;
-  return [defaultOpponentSet(opp, level)];
+  const base = opp.candidates?.length ? opp.candidates : [defaultOpponentSet(opp, level)];
+  if (opp.itemConsumed) return base.map(c => ({ ...c, item: undefined }));
+  return base;
 }
 
 // Best move for `attackerMoves` against a single defender set, by max-roll %.

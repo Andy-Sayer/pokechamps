@@ -39,7 +39,7 @@ import {
   certainAbility,
   type BoostMap,
 } from '../domain/abilities.js';
-import { isChargeMove, isPivotMove } from '../domain/data.js';
+import { isChargeMove, isPivotMove, isItemRemovingMove } from '../domain/data.js';
 import type { StateUpdate, HazardUpdate } from '../domain/turnparser.js';
 
 export type ActiveIdx = {
@@ -443,6 +443,27 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     if (!fm) continue;
     next.field = applyFieldMove(next.field ?? NEUTRAL_FIELD, a.side, fm);
     inferenceNotes.push(`${a.move} set field state`);
+  }
+
+  // Item-removing moves (Knock Off / Thief / Covet / berry-eaters). Mark the
+  // target's item gone so the damage calc stops applying it. We don't always
+  // know the opp's item — itemConsumed just needs to be truthy for the calc to
+  // strip it; on my side we record the real lost item name for display.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (!isItemRemovingMove(a.move)) continue;
+    if (typeof a.target !== 'object') continue;
+    const tIdx = a.targetTeamIndex;
+    if (tIdx == null) continue;
+    if (a.target.side === 'theirs') {
+      const o = next.opponentTeam[tIdx];
+      if (o && !o.itemConsumed) o.itemConsumed = `knocked off (${a.move})`;
+    } else {
+      if (next.myItemConsumed?.[tIdx] == null) {
+        const lost = next.myTeam[tIdx]?.item;
+        next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: lost ?? `knocked off (${a.move})` };
+      }
+    }
   }
 
   // Damage inference for every mine→theirs damaging action.

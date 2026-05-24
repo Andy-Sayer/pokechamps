@@ -11,7 +11,7 @@ import { inferOpponentSpeeds, applySpeedInference, actualSpeed, predictTurnOrder
 import { reviewLastTurn } from '@pokechamps/core/ai/prompts.js';
 import { isAvailable as aiAvailable } from '@pokechamps/core/ai/client.js';
 import type { Stores } from '@pokechamps/core/storage/index.js';
-import { getSpecies, isChargeMove, isPivotMove } from '@pokechamps/core/domain/data.js';
+import { getSpecies, isChargeMove, isPivotMove, isItemRemovingMove } from '@pokechamps/core/domain/data.js';
 import { defaultOpponentSet } from '@pokechamps/core/domain/bring.js';
 import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs, hazardClearEffect, applyHazardClear } from '@pokechamps/core/domain/hazards.js';
@@ -642,6 +642,21 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       next.field = applyFieldMove(next.field ?? NEUTRAL_FIELD, a.side, fm);
       inferenceNotes.push(`${a.move} set field state`);
     }
+    // Item-removing moves (Knock Off / Thief / Covet / berry-eaters).
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (!isItemRemovingMove(a.move)) continue;
+      if (typeof a.target !== 'object') continue;
+      const tIdx = a.targetTeamIndex;
+      if (tIdx == null) continue;
+      if (a.target.side === 'theirs') {
+        const o = next.opponentTeam[tIdx];
+        if (o && !o.itemConsumed) o.itemConsumed = `knocked off (${a.move})`;
+      } else if (next.myItemConsumed?.[tIdx] == null) {
+        const lost = next.myTeam[tIdx]?.item;
+        next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: lost ?? `knocked off (${a.move})` };
+      }
+    }
     for (const a of draftActions) {
       if (a.kind === 'switch' || a.kind === 'mega') continue;
       if (a.side !== 'mine') continue;
@@ -1201,6 +1216,9 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
     if (myIdx == null) return null;
     const mySet = match.myTeam[myIdx];
     if (!mySet) return null;
+    // For damage calcs, drop my item once it's been consumed / knocked off.
+    // Keep `mySet` itself intact for mega-stone detection + speed.
+    const myCalcSet = match.myItemConsumed?.[myIdx] ? { ...mySet, item: undefined } : mySet;
     const myHp = match.myCurrentHp?.[myIdx] ?? 100;
     const myBoosts = match.myBoosts?.[myIdx];
     const myStatus = match.myStatus?.[myIdx];
@@ -1240,7 +1258,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
           opp,
           oppIdx: oi,
           offense: predictOffense({
-            attacker: mySet, opponent: opp, field,
+            attacker: myCalcSet, opponent: opp, field,
             attackerGimmickActive: myMegaActive,
             defenderGimmickActive: oppActive,
             defenderCurrentHpPercent: opp.currentHpPercent,
@@ -1249,7 +1267,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
             defenderStatus: opp.status,
           }),
           offenseCrit: showCrits ? predictOffense({
-            attacker: mySet, opponent: opp, field,
+            attacker: myCalcSet, opponent: opp, field,
             attackerGimmickActive: myMegaActive,
             defenderGimmickActive: oppActive,
             defenderCurrentHpPercent: opp.currentHpPercent,
@@ -1261,7 +1279,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
           // `a` toggle: full per-move breakdown. When combined with `c` we also
           // compute the crit variant so each move line can show both ranges.
           allOffense: showAllMoves ? predictOffenseAll({
-            attacker: mySet, opponent: opp, field,
+            attacker: myCalcSet, opponent: opp, field,
             attackerGimmickActive: myMegaActive,
             defenderGimmickActive: oppActive,
             defenderCurrentHpPercent: opp.currentHpPercent,
@@ -1270,7 +1288,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
             defenderStatus: opp.status,
           }) : null,
           allOffenseCrit: showAllMoves && showCrits ? predictOffenseAll({
-            attacker: mySet, opponent: opp, field,
+            attacker: myCalcSet, opponent: opp, field,
             attackerGimmickActive: myMegaActive,
             defenderGimmickActive: oppActive,
             defenderCurrentHpPercent: opp.currentHpPercent,
@@ -1280,7 +1298,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
             critical: true,
           }) : null,
           threat: predictThreat({
-            opponent: opp, defender: mySet, field,
+            opponent: opp, defender: myCalcSet, field,
             attackerGimmickActive: oppActive,
             defenderGimmickActive: myMegaActive,
             defenderCurrentHpPercent: myHp,
@@ -1293,7 +1311,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
           // stats, so the row can surface "(mega: X-Y%)" alongside the base
           // numbers. Only built when the mon could still mega.
           offenseMega: myMegaOption ? predictOffense({
-            attacker: mySet, opponent: opp, field,
+            attacker: myCalcSet, opponent: opp, field,
             attackerGimmickActive: true,
             defenderGimmickActive: oppActive,
             defenderCurrentHpPercent: opp.currentHpPercent,
@@ -1302,7 +1320,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
             defenderStatus: opp.status,
           }) : null,
           threatMega: myMegaOption ? predictThreat({
-            opponent: opp, defender: mySet, field,
+            opponent: opp, defender: myCalcSet, field,
             attackerGimmickActive: oppActive,
             defenderGimmickActive: true,
             defenderCurrentHpPercent: myHp,

@@ -93,6 +93,13 @@ The original "Now" tier is mostly done. What's been merged on `main`:
   Trick Room (toggle), Tailwind + Reflect / Light Screen / Aurora Veil
   (acting side). Fills a real gap — the field had a display but nothing
   set weather/TR/tailwind/screens from moves.
+- **A.3 (part 1) — item removal in the calc.** Item-removing moves
+  (`isItemRemovingMove`: Knock Off / Thief / Covet / Corrosive Gas /
+  berry-eaters) mark the target's item gone in `finalizeTurn`; the
+  prediction calc now strips a consumed/knocked item (opp via
+  `opp.itemConsumed` in `predictions.defenderCandidates`, mine via a
+  `myCalcSet` in the matchup grid). Still open (A.3 part 2): inferring
+  the item FROM outcomes (Sash survival, Choice-lock).
 
 - **A — Battle model completeness** — mega done, charge done, pivots
   done, spread fixed, ability-priority for speed done, EOT
@@ -463,7 +470,7 @@ Each item should ship with:
 - A short commit message naming what real-world scenario the change
   unblocks
 
-Keep the suite green at every commit. Current baseline: **412 tests** (was 359 when this doc was first written).
+Keep the suite green at every commit. Current baseline: **416 tests** (was 359 when this doc was first written).
 
 ## Out of scope (deliberately)
 
