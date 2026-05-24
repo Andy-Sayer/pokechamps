@@ -1,6 +1,7 @@
 import { Generations, calculate, Pokemon as CalcPokemon, Move as CalcMove, Field, Side } from '@smogon/calc';
 import type { PokemonSet, FieldState, DamageObservation } from './types.js';
 import { activeGimmick } from './gimmicks/index.js';
+import { getMove } from './data.js';
 // Side-effect import: registers the format loader with the gimmick registry
 // so activeGimmick() resolves the configured gimmick (e.g. mega) rather than
 // silently falling back to noneGimmick. Without this, damage calcs that go
@@ -96,6 +97,16 @@ export function damageRange(args: {
   const atk = toCalcPokemon(args.attacker, args.attackerOpts);
   const def = toCalcPokemon(args.defender, args.defenderOpts);
   const moveOpts: Record<string, unknown> = { isCrit: args.critical };
+  // Spread modifier: in doubles, moves targeting both foes (allAdjacentFoes)
+  // or all adjacent (allAdjacent — both foes + ally) take a 0.75x damage
+  // multiplier. @smogon/calc honors this via the `isSpread` flag; we set it
+  // automatically from the move's dex target so callers don't have to.
+  // Single-target moves (normal, any) leave isSpread unset (single hit, no
+  // reduction).
+  const moveData = getMove(args.move) as any;
+  if (moveData?.target === 'allAdjacentFoes' || moveData?.target === 'allAdjacent') {
+    moveOpts.isSpread = true;
+  }
   activeGimmick().enrichCalcMove?.({
     set: args.attacker,
     active: !!args.attackerOpts?.gimmickActive,

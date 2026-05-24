@@ -368,6 +368,30 @@ describe('Mega evolution behavior', () => {
     expect(mega.max).toBeGreaterThan(base.max);
   });
 
+  test('Spread moves get the 0.75x doubles modifier auto-applied', () => {
+    // Heat Wave (allAdjacentFoes) should hit ~75% of single-target damage.
+    // Compare against Flamethrower (single target) from the same attacker
+    // into the same defender — base power is identical, so the only
+    // difference should be the spread multiplier.
+    const spread = damageRange({
+      attacker: megaY, defender: target, move: 'Heat Wave',
+      field: NEUTRAL_FIELD, attackerSide: 'mine',
+      attackerOpts: { gimmickActive: true },
+    });
+    const single = damageRange({
+      attacker: megaY, defender: target, move: 'Flamethrower',
+      field: NEUTRAL_FIELD, attackerSide: 'mine',
+      attackerOpts: { gimmickActive: true },
+    });
+    // Both 95 BP fire moves on the same attacker — single hits harder than
+    // spread by approximately the spread modifier (0.75x). Both ranges
+    // should overlap on the order-of-magnitude side, but spread.max <
+    // single.max.
+    expect(spread.max).toBeLessThan(single.max);
+    // Sanity: spread isn't accidentally zero.
+    expect(spread.max).toBeGreaterThan(0);
+  });
+
   test('Pre-mega Charizard holding Charizardite Y still calcs as base Charizard', () => {
     // Held stone alone does NOT auto-megify — the mon has to have actually
     // mega-evolved (active=true) for the calc to use the mega forme stats.
