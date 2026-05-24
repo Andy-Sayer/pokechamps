@@ -2,6 +2,8 @@
 
 Guidance for Claude Code when working in this repo.
 
+Longer-form notes live in [`docs/notes/`](docs/notes/README.md) — battle syntax, speed inference brackets, dual-forme predictions, spread modifier, roadmap. Read those when touching the related code; update them alongside the change.
+
 ## What this is
 
 Node TUI assistant for Pokémon Champions doubles:
@@ -10,7 +12,7 @@ Node TUI assistant for Pokémon Champions doubles:
 2. Log moves + damage turn-by-turn during a manual match.
 3. Infer opponent EV spreads/items/natures from observed damage and predict damage ranges for my moves.
 
-**Format**: Regulation Set M-A (Apr 8 – Jun 17, 2026) — 186 legal species, 117 legal items, **Mega Evolution** (not Tera), item + species clauses on, one mega per battle. Allow-lists live in `data/format.champions.json`. `PokemonSet` has no mega flag — a held mega stone is sufficient signal. `@smogon/calc` does NOT auto-resolve the mega forme from the item; instead the mega gimmick's `resolveSpecies` hook swaps the base forme for the mega forme name (e.g. Charizard + Charizardite Y -> `Charizard-Mega-Y`) before `damage.ts` constructs the calc Pokemon.
+**Format**: Regulation Set M-A (Apr 8 – Jun 17, 2026) — 186 legal species, 117 legal items, **Mega Evolution** (not Tera), item + species clauses on, one mega per battle. Allow-lists live in `data/format.champions.json`. `PokemonSet` has no mega flag — a held mega stone is sufficient signal at the **team validation** layer. For **in-battle damage calcs**, the mega gimmick's `resolveSpecies({set, active})` hook only swaps the base forme for the mega forme name (e.g. Charizard + Charizardite Y -> `Charizard-Mega-Y`) when `active === true`. Pre-mega (stone held, not yet activated) uses base-forme stats. After `/mega` is logged, `applyMegaAction` remaps candidate species names directly. See [`docs/notes/dual-forme-predictions.md`](docs/notes/dual-forme-predictions.md).
 
 ## Commands
 
