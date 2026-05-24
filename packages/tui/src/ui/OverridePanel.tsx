@@ -141,13 +141,14 @@ export function buildDraft(match: Match, activeIdx: ActiveIdxLite): Draft {
   };
 }
 
-// One navigable property line inside a target's editor.
+// One navigable property line inside a target's editor. `change` cycles the
+// value with ←/→; `setText` resolves a typed buffer to a value (so you can
+// type "brn" / "sun" / "+2" / a species name instead of arrowing).
 interface PropRow {
   label: string;
   display: string;
   change: (dir: 1 | -1) => void;
-  isHp?: boolean;
-  hpMax?: number;
+  setText?: (text: string) => void;
 }
 
 function cycle<T>(arr: T[], cur: T, dir: 1 | -1): T {
@@ -155,6 +156,22 @@ function cycle<T>(arr: T[], cur: T, dir: 1 | -1): T {
   const n = ((i < 0 ? 0 : i) + dir + arr.length) % arr.length;
   return arr[n]!;
 }
+
+// Resolve a typed buffer to one of `entries` by case-insensitive prefix.
+// "none"/"clear"/"-"/"x" select the entry labelled 'none' (the empty value).
+// Returns null when nothing matches (so the caller leaves the value alone).
+function resolveEnum<T>(text: string, entries: Array<{ value: T; label: string }>): { value: T } | null {
+  const t = text.trim().toLowerCase();
+  if (!t) return null;
+  if (['none', 'clear', '-', 'x'].includes(t)) {
+    const clear = entries.find(e => e.label.toLowerCase() === 'none');
+    if (clear) return { value: clear.value };
+  }
+  const hit = entries.find(e => e.label.toLowerCase().startsWith(t));
+  return hit ? { value: hit.value } : null;
+}
+
+const clampStage = (n: number) => Math.max(-6, Math.min(6, n));
 
 const slotTag = (s: SlotDraft) => `${s.side === 'mine' ? 'm' : 'o'}${s.slot + 1}`;
 const boostSummary = (b: Record<BoostStat, number>) =>
@@ -175,9 +192,9 @@ export function OverridePanel(props: {
   const [listSel, setListSel] = useState(0);
   const [editTarget, setEditTarget] = useState<'field' | number>('field');
   const [editSel, setEditSel] = useState(0);
-  // Active HP typing buffer for the focused HP row. null = not typing; the
-  // first digit starts a fresh value (replace), further digits append.
-  const [hpInput, setHpInput] = useState<string | null>(null);
+  // Typed-entry buffer for the focused row. Empty = not typing; resets on any
+  // navigation. Resolved live to a value via the row's setText.
+  const [buf, setBuf] = useState('');
 
   const set = (patch: Partial<Draft>) => setDraft(d => ({ ...d, ...patch }));
   const setSlot = (i: number, patch: Partial<SlotDraft>) =>
@@ -207,36 +224,47 @@ export function OverridePanel(props: {
   const listLen = targets.length + 2;
 
   // ---- property rows for the current edit target ----
+  const weatherEntries = WEATHERS.map(w => ({ value: w, label: w ?? 'none' }));
+  const terrainEntries = TERRAINS.map(t => ({ value: t, label: t ?? 'none' }));
+  const boolEntries = [{ value: true, label: 'on' }, { value: false, label: 'off' }];
+  const statusEntries = STATUSES.map(s => ({ value: s, label: s ?? 'none' }));
+
   const fieldProps = (): PropRow[] => [
-    { label: 'Weather', display: draft.weather ?? 'none', change: d => set({ weather: cycle(WEATHERS, draft.weather, d) }) },
-    { label: 'Terrain', display: draft.terrain ?? 'none', change: d => set({ terrain: cycle(TERRAINS, draft.terrain, d) }) },
-    { label: 'Trick Room', display: draft.trickRoom ? 'on' : 'off', change: () => set({ trickRoom: !draft.trickRoom }) },
-    { label: 'Tailwind (mine)', display: draft.twMine ? 'on' : 'off', change: () => set({ twMine: !draft.twMine }) },
-    { label: 'Tailwind (opp)', display: draft.twTheirs ? 'on' : 'off', change: () => set({ twTheirs: !draft.twTheirs }) },
+    { label: 'Weather', display: draft.weather ?? 'none', change: d => set({ weather: cycle(WEATHERS, draft.weather, d) }), setText: t => { const r = resolveEnum(t, weatherEntries); if (r) set({ weather: r.value }); } },
+    { label: 'Terrain', display: draft.terrain ?? 'none', change: d => set({ terrain: cycle(TERRAINS, draft.terrain, d) }), setText: t => { const r = resolveEnum(t, terrainEntries); if (r) set({ terrain: r.value }); } },
+    { label: 'Trick Room', display: draft.trickRoom ? 'on' : 'off', change: () => set({ trickRoom: !draft.trickRoom }), setText: t => { const r = resolveEnum(t, boolEntries); if (r) set({ trickRoom: r.value }); } },
+    { label: 'Tailwind (mine)', display: draft.twMine ? 'on' : 'off', change: () => set({ twMine: !draft.twMine }), setText: t => { const r = resolveEnum(t, boolEntries); if (r) set({ twMine: r.value }); } },
+    { label: 'Tailwind (opp)', display: draft.twTheirs ? 'on' : 'off', change: () => set({ twTheirs: !draft.twTheirs }), setText: t => { const r = resolveEnum(t, boolEntries); if (r) set({ twTheirs: r.value }); } },
   ];
   const slotProps = (i: number): PropRow[] => {
     const s = draft.slots[i]!;
     const opts = occupantsFor(s.side);
+    const occEntries = opts.map(o => ({ value: o, label: o == null ? 'none' : speciesFor(match, s.side, o) }));
     const rows: PropRow[] = [{
       label: 'Occupant',
       display: speciesFor(match, s.side, s.teamIndex),
       change: d => setSlot(i, { teamIndex: cycle(opts, s.teamIndex, d) }),
+      setText: t => { const r = resolveEnum(t, occEntries); if (r) setSlot(i, { teamIndex: r.value }); },
     }];
     if (s.teamIndex == null) return rows;
     const mx = s.side === 'mine' ? maxHpForSlot(match, 'mine', s.teamIndex) : 100;
     rows.push({
       label: 'HP',
       display: s.side === 'mine' ? `${s.hp}/${mx}` : `${s.hp}%`,
-      change: d => { setHpInput(null); setSlot(i, { hp: Math.max(0, Math.min(mx, s.hp + d)) }); },
-      isHp: true,
-      hpMax: mx,
+      change: d => setSlot(i, { hp: Math.max(0, Math.min(mx, s.hp + d)) }),
+      setText: t => { const digits = t.replace(/\D/g, ''); setSlot(i, { hp: digits ? Math.max(0, Math.min(mx, Number(digits))) : 0 }); },
     });
-    rows.push({ label: 'Status', display: s.status ?? 'none', change: d => setSlot(i, { status: cycle(STATUSES, s.status, d) }) });
+    rows.push({
+      label: 'Status', display: s.status ?? 'none',
+      change: d => setSlot(i, { status: cycle(STATUSES, s.status, d) }),
+      setText: t => { const r = resolveEnum(t, statusEntries); if (r) setSlot(i, { status: r.value }); },
+    });
     for (const stat of BOOST_STATS) {
       rows.push({
         label: stat,
         display: s.boosts[stat] > 0 ? `+${s.boosts[stat]}` : `${s.boosts[stat]}`,
-        change: d => setSlot(i, { boosts: { ...s.boosts, [stat]: Math.max(-6, Math.min(6, s.boosts[stat] + d)) } }),
+        change: d => setSlot(i, { boosts: { ...s.boosts, [stat]: clampStage(s.boosts[stat] + d) } }),
+        setText: t => { const m = t.match(/^([+-]?)(\d+)$/); if (m) setSlot(i, { boosts: { ...s.boosts, [stat]: clampStage((m[1] === '-' ? -1 : 1) * Number(m[2])) } }); },
       });
     }
     return rows;
@@ -261,29 +289,29 @@ export function OverridePanel(props: {
         if (listSel === APPLY) { apply(); return; }
         setEditTarget(targets[listSel]!.id);
         setEditSel(0);
-        setHpInput(null);
+        setBuf('');
         setMode('edit');
       }
       return;
     }
     // edit mode
-    if (key.escape || key.return) { setMode('list'); setHpInput(null); return; }
-    if (key.upArrow) { setEditSel(s => Math.max(0, s - 1)); setHpInput(null); return; }
-    if (key.downArrow) { setEditSel(s => Math.min(editRows.length - 1, s + 1)); setHpInput(null); return; }
+    if (key.escape || key.return) { setMode('list'); setBuf(''); return; }
+    if (key.upArrow) { setEditSel(s => Math.max(0, s - 1)); setBuf(''); return; }
+    if (key.downArrow) { setEditSel(s => Math.min(editRows.length - 1, s + 1)); setBuf(''); return; }
     const row = editRows[editSelClamped];
-    if (key.leftArrow) { setHpInput(null); row?.change(-1); return; }
-    if (key.rightArrow) { setHpInput(null); row?.change(1); return; }
-    if (row?.isHp && typeof editTarget === 'number') {
-      const mx = row.hpMax ?? 100;
-      if (/[0-9]/.test(ch)) {
-        const buf = (hpInput ?? '') + ch;
-        setHpInput(buf);
-        setSlot(editTarget, { hp: Math.max(0, Math.min(mx, Number(buf))) });
-      } else if (key.backspace || key.delete) {
-        const buf = (hpInput ?? '').slice(0, -1);
-        setHpInput(buf);
-        setSlot(editTarget, { hp: buf ? Math.max(0, Math.min(mx, Number(buf))) : 0 });
-      }
+    if (key.leftArrow) { setBuf(''); row?.change(-1); return; }
+    if (key.rightArrow) { setBuf(''); row?.change(1); return; }
+    if (key.backspace || key.delete) {
+      const nb = buf.slice(0, -1);
+      setBuf(nb);
+      row?.setText?.(nb);
+      return;
+    }
+    // Any other printable character is typed entry — resolve it live.
+    if (ch && /^[\x20-\x7e]$/.test(ch) && row?.setText) {
+      const nb = buf + ch;
+      setBuf(nb);
+      row.setText(nb);
     }
   });
 
@@ -316,11 +344,11 @@ export function OverridePanel(props: {
   return (
     <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor="magenta" paddingX={1}>
       <Text bold color="magenta">/override — {targetLabel}</Text>
-      <Text dimColor>↑/↓ pick · ←/→ change{editRows[editSelClamped]?.isHp ? ' · type digits to set HP' : ''} · Enter/Esc back to list</Text>
+      <Text dimColor>↑/↓ pick · ←/→ change · type to set (e.g. brn / sun / +2 / a species) · Enter/Esc back</Text>
       <Box flexDirection="column" marginTop={1}>
         {editRows.map((r, i) => (
           <Text key={r.label} color={i === editSelClamped ? 'cyan' : undefined} inverse={i === editSelClamped}>
-            {i === editSelClamped ? '› ' : '  '}{r.label.padEnd(12)} {r.display}
+            {i === editSelClamped ? '› ' : '  '}{r.label.padEnd(12)} {r.display}{i === editSelClamped && buf ? ` ‹${buf}›` : ''}
           </Text>
         ))}
       </Box>
