@@ -678,6 +678,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
         damageRaw: a.damageRaw,
         attackerGimmickActive: a.mega,
         defenderGimmickActive: opp.megaUsed,
+        critical: a.critical,
       };
       try {
         const candidates = inferSpread({

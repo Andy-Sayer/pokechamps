@@ -14,6 +14,7 @@ m1+crit > Close Combat > o1 > 0            ← critical hit
 m1+quick > Sucker Punch > o1 > 40          ← Quick Claw proc (priority bracket bump, no speed signal)
 m1+mega+crit > Flamethrower > o1 > 0       ← stacked modifiers
 m1 > Heat Wave > spread > o1:40, o2:35     ← spread → one MoveAction per target
+m1 > Beat Up > o1 > 99,98,97,96,90(crit)   ← multi-hit: comma = remaining HP per hit; (crit) per hit
 m1 > switch > Garchomp                     ← switch by species name
 m1 > switch > my4                          ← switch by team-index ref
 o2 > switch > op3                          ← opp switch

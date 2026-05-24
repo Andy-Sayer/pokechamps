@@ -542,6 +542,33 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
     return { ok: true, kind: 'action', actions };
   }
 
+  // Multi-hit single-target list: "o1 > Beat Up > o1 > 99,98,97,96,90(crit)".
+  // Each comma value is the target's REMAINING HP after that hit (side-aware
+  // unit — % for opp, raw for mine); an optional "(crit)" tags a critical hit.
+  // We emit one action per hit sharing the actor/move/order; finalizeTurn's
+  // running-HP map converts each to its own damage delta + inference
+  // observation, and the per-hit crit flag flows through to the calc.
+  if (typeof parsedTarget === 'object' && parts[3] && parts[3].includes(',')) {
+    const mh = parseMultiHit(parts[3], parsedTarget.side);
+    if (mh.ok === false) return mh;
+    const targetTeamIndex = activeTeamIndex(ctx, parsedTarget.side, parsedTarget.slot);
+    const actions: MoveAction[] = mh.hits.map(h => ({
+      side: actor.side,
+      attackerSlot: actor.slot,
+      kind: 'move',
+      move: verb,
+      attackerTeamIndex: attackerTeamIndex ?? undefined,
+      targetTeamIndex: targetTeamIndex ?? undefined,
+      target: { side: parsedTarget.side, slot: parsedTarget.slot },
+      order,
+      mega: actor.mega || undefined,
+      quickClaw: actor.quickClaw || undefined,
+      critical: h.critical || actor.crit || undefined,
+      ...h.dmg,
+    }));
+    return { ok: true, kind: 'action', actions };
+  }
+
   const damageTargetSide: FieldSide | undefined =
     typeof parsedTarget === 'object' ? parsedTarget.side : undefined;
   const dmg = parseDamage(parts[3], damageTargetSide);
@@ -574,6 +601,24 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
       ...dmg,
     }],
   };
+}
+
+// Multi-hit damage syntax for a single target: "99,98,97,96,90(crit)". Each
+// value is the target's remaining HP after that hit (side-aware unit), with an
+// optional "(crit)" suffix on any hit. Returns one entry per hit.
+function parseMultiHit(token: string, targetSide: FieldSide):
+  | { ok: true; hits: Array<{ dmg: ReturnType<typeof parseDamage>; critical: boolean }> }
+  | { ok: false; error: string }
+{
+  const hits: Array<{ dmg: ReturnType<typeof parseDamage>; critical: boolean }> = [];
+  for (const raw of token.split(',').map(s => s.trim()).filter(Boolean)) {
+    const m = raw.match(/^(\d+(?:\.\d+)?)(%?)\s*(\(\s*crit\s*\))?$/i);
+    if (!m) return { ok: false, error: `multi-hit value "${raw}" — expected e.g. 90 or 90(crit)` };
+    const dmg = parseDamage(m[1]! + (m[2] ?? ''), targetSide);
+    hits.push({ dmg, critical: !!m[3] });
+  }
+  if (hits.length === 0) return { ok: false, error: 'multi-hit needs at least one value' };
+  return { ok: true, hits };
 }
 
 // Spread damage syntax: "o1:40, o2:35" / "o1:40,o2:35" / per-target side-aware

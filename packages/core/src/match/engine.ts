@@ -488,6 +488,7 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
       damageRaw: a.damageRaw,
       attackerGimmickActive: a.mega,
       defenderGimmickActive: opp.megaUsed,
+      critical: a.critical,
     };
     try {
       const candidates = inferSpread({
