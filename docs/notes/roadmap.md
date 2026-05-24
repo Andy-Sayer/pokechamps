@@ -82,8 +82,11 @@ The original "Now" tier is mostly done. What's been merged on `main`:
   on switch-in. Opp abilities trigger only when certain (observed, or
   single-ability species). Wired into both the shared engine and the
   TUI's parallel `finalizeTurn`. (A.2)
-
-Pillar status after the above:
+- **Hazard clearing** — `hazards.ts` `hazardClearEffect` /
+  `applyHazardClear`: Rapid Spin / Mortal Spin (own-side, +Spe), Defog
+  (both sides + screens), Court Change (swap all side conditions), Tidy
+  Up (both sides). Auto-detected by move name in `finalizeTurn` (engine
+  + TUI). Completes the hazard story alongside switch-in application.
 
 - **A — Battle model completeness** — mega done, charge done, pivots
   done, spread fixed, ability-priority for speed done, EOT
@@ -93,9 +96,9 @@ Pillar status after the above:
   abilities (need foe-stat / ability-copy logic — deferred),
   item triggers beyond Sash/Balloon/WP (Choice locks, Life Orb,
   berries), move side effects (Encore / Taunt / Disable / Magic Coat),
-  hazard **clearing** (Defog / Court Change / Rapid Spin — none
-  present), Tera / Z / Dynamax gimmicks (Champions hasn't rotated to
-  them yet).
+  Tera / Z / Dynamax gimmicks (Champions hasn't rotated to them yet).
+  Hazard **clearing** now done (Defog / Court Change / Rapid Spin /
+  Tidy Up — `hazards.ts`).
 - **B — Inference quality** — Bayesian weighting still untouched
   (#142). Item inference still binary (#7 in old order). Speed
   inference is now reasonable for Prankster-style mons.
@@ -383,9 +386,9 @@ plays matches live + finds bugs by doing so:
    item. Largest single inference-quality win after Bayesian.
 4. **Audit completion (task #156).** Remaining gaps: Knock Off item
    removal, Trick/Switcheroo item swap, Encore/Taunt/Disable
-   surfacing, Fake Out turn-1 gating, Sucker Punch fail conditions,
-   hazard clearing (Defog/Court Change/Rapid Spin). *(EOT
-   weather/status ticks now done — `endOfTurn.ts`.)*
+   surfacing, Fake Out turn-1 gating, Sucker Punch fail conditions.
+   *(EOT weather/status ticks done — `endOfTurn.ts`; hazard clearing
+   done — `hazards.ts`.)*
 
 **Soon (4–8 sessions):**
 
@@ -420,7 +423,6 @@ plays matches live + finds bugs by doing so:
 |---|---|
 | Gimmicks (still to scaffold) | `packages/core/src/domain/gimmicks/{tera,zmove,dynamax}.ts` |
 | Ability triggers (switch-in) | `packages/core/src/domain/{abilities.ts}` **new**, `packages/core/src/match/engine.ts` (insertion point at the `applyHazardOnSwitchInto` calls, ~`:424` / `:696` — the existing switch-in seam) |
-| Hazard clearing (removal) | `packages/core/src/domain/hazards.ts` (extend; application already there), `match/engine.ts` |
 | Bayesian inference | `packages/core/src/domain/inference.ts`, `predictions.ts` |
 | Item inference | `packages/core/src/domain/inference.ts` |
 | Multi-spread Pikalytics *(de-prioritised)* | `packages/core/src/scripts/refresh-pikalytics.ts`, `pikalytics.ts` |
@@ -441,6 +443,8 @@ plays matches live + finds bugs by doing so:
 | Bulk HP / HP=0 KO | `packages/core/src/domain/turnparser.ts`, `packages/tui/src/ui/BattleScreen.tsx` (`applyStateUpdate`) |
 | End-of-turn weather + status | `packages/core/src/domain/endOfTurn.ts`, wired in `match/engine.ts` (~`:428`) |
 | Switch-in hazard application | `packages/core/src/domain/hazards.ts` (`applyHazardsToSwitchIn`), `match/engine.ts` (`applyHazardOnSwitchInto`) |
+| Switch-in ability triggers | `packages/core/src/domain/abilities.ts`, `match/engine.ts` (`applySwitchInAbility`), TUI `BattleScreen.tsx` (`applySwitchInAbilityInto`) |
+| Hazard clearing | `packages/core/src/domain/hazards.ts` (`hazardClearEffect` / `applyHazardClear`), `match/engine.ts` + TUI `finalizeTurn` |
 | On-the-fly Pikalytics fetch | `packages/core/src/domain/pikalyticsFetch.ts`, consumed by `packages/tui/src/ui/BattleScreen.tsx` |
 | Autocomplete suggester | `packages/core/src/domain/actionSuggest.ts` (`deriveSuggestionContext`) |
 
@@ -452,7 +456,7 @@ Each item should ship with:
 - A short commit message naming what real-world scenario the change
   unblocks
 
-Keep the suite green at every commit. Current baseline: **381 tests** (was 359 when this doc was first written).
+Keep the suite green at every commit. Current baseline: **402 tests** (was 359 when this doc was first written).
 
 ## Out of scope (deliberately)
 

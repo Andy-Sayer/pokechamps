@@ -28,6 +28,8 @@ import {
   applyHazardVerb,
   applyHazardsToSwitchIn,
   absorbsToxicSpikes,
+  hazardClearEffect,
+  applyHazardClear,
 } from '../domain/hazards.js';
 import { applyMegaAction } from '../domain/megaResolve.js';
 import {
@@ -416,6 +418,21 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
         next.myCharging = rest;
       }
     }
+  }
+
+  // Field-clearing moves (Defog / Rapid Spin / Court Change / Tidy Up).
+  // Logged as ordinary move actions — detected by name here and applied to
+  // the field so hazards/screens vanish without manual toggling.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    const clear = hazardClearEffect(a.move);
+    if (!clear) continue;
+    next.field = applyHazardClear(next.field ?? NEUTRAL_FIELD, a.side, clear.kind);
+    if (a.attackerTeamIndex != null) {
+      if (clear.userSpeedBoost) applyBoostsTo(next, a.side, a.attackerTeamIndex, { spe: clear.userSpeedBoost });
+      if (clear.userAtkBoost) applyBoostsTo(next, a.side, a.attackerTeamIndex, { atk: clear.userAtkBoost });
+    }
+    inferenceNotes.push(`${a.move} cleared hazards`);
   }
 
   // Damage inference for every mine→theirs damaging action.

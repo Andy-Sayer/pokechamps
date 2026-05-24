@@ -1,4 +1,4 @@
-import type { HazardState, PokemonSet, OpponentEntry } from './types.js';
+import type { HazardState, FieldState, PokemonSet, OpponentEntry } from './types.js';
 import { getSpecies, getAbility, getItem } from './data.js';
 import { effectiveness } from './typechart.js';
 
@@ -91,6 +91,65 @@ export function hazardGlyphs(h: HazardState | undefined): string | null {
   if (h.toxicSpikes) parts.push(`▲TS×${h.toxicSpikes}`);
   if (h.stickyWeb) parts.push('▲SW');
   return parts.length ? parts.join(' ') : null;
+}
+
+// Field-clearing moves (the removal half of the hazard story). These are
+// logged as ordinary move actions; the engine detects them by name and mutates
+// the field so hazards/screens disappear without the user toggling each off.
+//   self        — clears the USER's own side hazards (Rapid Spin / Mortal Spin)
+//   defog       — clears hazards AND screens on BOTH sides
+//   court-change— SWAPS all side conditions (hazards / screens / tailwind)
+//   tidy-up     — clears hazards on BOTH sides (Tidy Up)
+export type HazardClearKind = 'self' | 'defog' | 'court-change' | 'tidy-up';
+
+export interface HazardClearEffect {
+  kind: HazardClearKind;
+  userSpeedBoost?: number; // Rapid Spin / Tidy Up raise the user's Speed
+  userAtkBoost?: number;   // Tidy Up also raises the user's Attack
+}
+
+const HAZARD_CLEAR_MOVES: Record<string, HazardClearEffect> = {
+  'Rapid Spin': { kind: 'self', userSpeedBoost: 1 },
+  'Mortal Spin': { kind: 'self' },
+  Defog: { kind: 'defog' },
+  'Court Change': { kind: 'court-change' },
+  'Tidy Up': { kind: 'tidy-up', userAtkBoost: 1, userSpeedBoost: 1 },
+};
+
+export function hazardClearEffect(move: string): HazardClearEffect | null {
+  return HAZARD_CLEAR_MOVES[move] ?? null;
+}
+
+// Apply a field-clear to the FieldState, from the perspective of the user's
+// side. Returns a fresh FieldState; the caller applies any user stat boosts
+// separately (they live on the Match, not the field).
+export function applyHazardClear(
+  field: FieldState,
+  userSide: 'mine' | 'theirs',
+  kind: HazardClearKind,
+): FieldState {
+  const f: FieldState = { ...field };
+  if (kind === 'self') {
+    if (userSide === 'mine') f.myHazards = {};
+    else f.theirHazards = {};
+  } else if (kind === 'defog' || kind === 'tidy-up') {
+    f.myHazards = {};
+    f.theirHazards = {};
+    if (kind === 'defog') {
+      // Defog also removes screens from both sides.
+      f.myReflect = false;
+      f.myLightScreen = false;
+      f.theirReflect = false;
+      f.theirLightScreen = false;
+    }
+  } else if (kind === 'court-change') {
+    // Swap all side conditions between the two sides.
+    [f.myHazards, f.theirHazards] = [f.theirHazards, f.myHazards];
+    [f.myReflect, f.theirReflect] = [f.theirReflect, f.myReflect];
+    [f.myLightScreen, f.theirLightScreen] = [f.theirLightScreen, f.myLightScreen];
+    [f.myTailwind, f.theirTailwind] = [f.theirTailwind, f.myTailwind];
+  }
+  return f;
 }
 
 // Resolve the parser-friendly hazard verb to a HazardState mutation.

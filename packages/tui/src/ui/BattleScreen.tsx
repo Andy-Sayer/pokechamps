@@ -14,7 +14,7 @@ import type { Stores } from '@pokechamps/core/storage/index.js';
 import { getSpecies, isChargeMove, isPivotMove } from '@pokechamps/core/domain/data.js';
 import { defaultOpponentSet } from '@pokechamps/core/domain/bring.js';
 import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
-import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs } from '@pokechamps/core/domain/hazards.js';
+import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs, hazardClearEffect, applyHazardClear } from '@pokechamps/core/domain/hazards.js';
 import { switchInAbilityEffect, intimidateReaction, certainAbility, type BoostMap } from '@pokechamps/core/domain/abilities.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
 import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict } from '@pokechamps/core/domain/predictions.js';
@@ -620,6 +620,18 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
           next.myCharging = rest;
         }
       }
+    }
+    // Field-clearing moves (Defog / Rapid Spin / Court Change / Tidy Up).
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      const clear = hazardClearEffect(a.move);
+      if (!clear) continue;
+      next.field = applyHazardClear(next.field ?? NEUTRAL_FIELD, a.side, clear.kind);
+      if (a.attackerTeamIndex != null) {
+        if (clear.userSpeedBoost) applyBoostsInto(next, a.side, a.attackerTeamIndex, { spe: clear.userSpeedBoost });
+        if (clear.userAtkBoost) applyBoostsInto(next, a.side, a.attackerTeamIndex, { atk: clear.userAtkBoost });
+      }
+      inferenceNotes.push(`${a.move} cleared hazards`);
     }
     for (const a of draftActions) {
       if (a.kind === 'switch' || a.kind === 'mega') continue;
