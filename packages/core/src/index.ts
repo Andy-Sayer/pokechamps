@@ -15,6 +15,7 @@ export * from './domain/hazards.js';
 export * from './domain/fieldMoves.js';
 export * from './domain/itemSignals.js';
 export * from './domain/durations.js';
+export * from './domain/endgame.js';
 export * from './domain/abilities.js';
 export * from './domain/endOfTurn.js';
 export * from './domain/bring.js';
