@@ -130,8 +130,8 @@ The original "Now" tier is mostly done. What's been merged on `main`:
   TR turn rows). Shown in rosters + a grid "Field —" line. **Tailwind
   (4t)** added the same way (subagent).
 - **GitHub Actions CI** — `.github/workflows/test.yml`. (subagent)
-- **Endgame solver core** — `domain/endgame.ts` `solveEndgame`; not yet
-  TUI-wired. (subagent)
+- **Endgame solver** — `domain/endgame.ts` `solveEndgame` + `/endgame`
+  (`/eg`) command in the TUI. (subagents)
 - **Defog screen-scope fix** — opponent-side screens only (audit).
 
 Pillar status after the above:
@@ -459,10 +459,9 @@ plays matches live + finds bugs by doing so:
 
 **Soon (4–8 sessions):**
 
-6. **C.1 — Endgame solver.** ✅ *Core done* (`domain/endgame.ts`,
-   `solveEndgame` — 1-ply best-move-pair via predictOffense/Threat, 16
-   tests). **Not yet wired into the TUI** — surfacing (a `/endgame`
-   command, or auto when ≤2v2) is the remaining UX step.
+6. ~~**C.1 — Endgame solver.**~~ ✅ **Done** — `domain/endgame.ts`
+   `solveEndgame` (1-ply best-move-pair, 16 tests) + `/endgame` (`/eg`)
+   command surfacing per-mon best-play lines in the TUI.
 7. ~~**I.1 — GitHub Actions CI.**~~ ✅ **Done** — `.github/workflows/
    test.yml` (typecheck + test on push/PR). Runs once a remote exists.
 8. **D — More TUI polish.** Inline edit of draft actions; Tab cycling
