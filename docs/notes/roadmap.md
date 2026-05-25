@@ -2,7 +2,7 @@
 
 ## Context
 
-**Last updated 2026-05-24.** 462 tests across 4 workspaces, all green.
+**Last updated 2026-05-24.** 468 tests across 4 workspaces, all green.
 A root `vitest.config.ts`
 (`test.projects`) now aggregates every workspace's own config, so both
 `npm test` and a bare `npx vitest run` from the repo root pass —
@@ -123,6 +123,11 @@ The original "Now" tier is mostly done. What's been merged on `main`:
   cleared on switch/`cure`; Encore/Disable feed the opp threat pool.
   Fake Out / First Impression / Mat Block auto-gated by first-turn-out
   (`itemSignals.firstTurnOut`). Mechanics verified vs Bulbapedia. (audit)
+- **Turn counters for timed effects** — weather / Trick Room (5) and
+  Taunt / Encore (3) / Disable (4) seed a default count (`durations.ts`),
+  count down in the shared `endOfTurn` tick, auto-clear at 0. Overridable
+  via a trailing number on the state line and via `/override` (weather /
+  TR turn rows). Shown in rosters + a grid "Field —" line.
 
 Pillar status after the above:
 
@@ -509,7 +514,7 @@ Each item should ship with:
 - A short commit message naming what real-world scenario the change
   unblocks
 
-Keep the suite green at every commit. Current baseline: **462 tests** (was 359 when this doc was first written).
+Keep the suite green at every commit. Current baseline: **468 tests** (was 359 when this doc was first written).
 
 ## Out of scope (deliberately)
 
