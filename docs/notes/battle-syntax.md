@@ -58,7 +58,13 @@ o1 +2 atk +2 spa        ← multi-stat in one line
 o1 wp                   ← Weakness Policy: +2 atk +2 spa + itemConsumed
 o1 sash                 ← Focus Sash: HP→1 + itemConsumed
 o1 balloon              ← Air Balloon: itemConsumed (no HP change)
+o1 taunt                ← Taunt volatile (blocks status moves; display)
+o1 encore Fake Out      ← Encore: locks opp into a move → drives threat pool
+o1 disable Flare Blitz  ← Disable: removes a move from the opp threat pool
+o1 cure                 ← clears status AND taunt/encore/disable (also clear on switch-out)
 ```
+
+Encore/Taunt/Disable are move-restricting volatiles (Bulbapedia: Taunt 3t / Encore 3t / Disable 4t; we don't auto-count turns — cleared by `cure` or switch-out). They work on either side (`my2 taunt`). Encore locks the opp's predicted threat to that move; Disable removes it.
 
 ## Slash commands
 

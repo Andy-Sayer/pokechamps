@@ -7,7 +7,7 @@ export type SuggestionKind = 'none' | 'move' | 'switch-target' | 'state-verb';
 
 // Verbs accepted after `oN ` / `mN ` on a state line. Kept sorted by most
 // common first so an empty query lands on the helpful default.
-const STATE_VERBS = ['heal', 'damage', 'sitrus', 'wp', 'sash', 'balloon', 'brn', 'par', 'psn', 'tox', 'slp', 'frz', 'cure', 'ko', 'fainted', 'in'];
+const STATE_VERBS = ['heal', 'damage', 'sitrus', 'wp', 'sash', 'balloon', 'brn', 'par', 'psn', 'tox', 'slp', 'frz', 'cure', 'taunt', 'encore', 'disable', 'ko', 'fainted', 'in'];
 
 export interface SuggestionContext {
   kind: SuggestionKind;

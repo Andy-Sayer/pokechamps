@@ -753,12 +753,12 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       if (a.kind !== 'switch' || a.targetTeamIndex == null) continue;
       if (a.side === 'mine') {
         const outgoing = nextActive.mine[a.attackerSlot];
-        if (outgoing != null) delete next.myBoosts[outgoing];
+        if (outgoing != null) { delete next.myBoosts[outgoing]; next.myTaunted = (next.myTaunted ?? []).filter(i => i !== outgoing); if (next.myEncoreMove) delete next.myEncoreMove[outgoing]; if (next.myDisabledMove) delete next.myDisabledMove[outgoing]; }
         nextActive.mine[a.attackerSlot] = a.targetTeamIndex;
       } else {
         const outgoing = nextActive.theirs[a.attackerSlot];
         if (outgoing != null && next.opponentTeam[outgoing]) {
-          next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {} };
+          next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {}, taunted: undefined, encoreMove: undefined, disabledMove: undefined };
         }
         nextActive.theirs[a.attackerSlot] = a.targetTeamIndex;
       }
@@ -818,6 +818,9 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       myStatus: { ...(match.myStatus ?? {}) },
       myToxCounter: { ...(match.myToxCounter ?? {}) },
       mySleepCounter: { ...(match.mySleepCounter ?? {}) },
+      myTaunted: [...(match.myTaunted ?? [])],
+      myEncoreMove: { ...(match.myEncoreMove ?? {}) },
+      myDisabledMove: { ...(match.myDisabledMove ?? {}) },
     };
     const nextActive = {
       mine: [activeIdx.mine[0], activeIdx.mine[1]] as [number | null, number | null],
@@ -998,11 +1001,29 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
     if (update.cureStatus) {
       if (side === 'theirs') {
         const o = next.opponentTeam[teamIndex];
-        if (o) { o.status = undefined; o.toxCounter = undefined; o.sleepCounter = undefined; }
+        if (o) { o.status = undefined; o.toxCounter = undefined; o.sleepCounter = undefined; o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined; }
       } else {
         delete next.myStatus![teamIndex];
         delete next.myToxCounter![teamIndex];
         delete next.mySleepCounter?.[teamIndex];
+        next.myTaunted = next.myTaunted!.filter(i => i !== teamIndex);
+        delete next.myEncoreMove![teamIndex];
+        delete next.myDisabledMove![teamIndex];
+      }
+    }
+    // Move-restricting volatiles (taunt / encore / disable).
+    if (update.taunt || update.encoreMove != null || update.disableMove != null) {
+      if (side === 'theirs') {
+        const o = next.opponentTeam[teamIndex];
+        if (o) {
+          if (update.taunt) o.taunted = true;
+          if (update.encoreMove != null) o.encoreMove = update.encoreMove;
+          if (update.disableMove != null) o.disabledMove = update.disableMove;
+        }
+      } else {
+        if (update.taunt && !next.myTaunted!.includes(teamIndex)) next.myTaunted!.push(teamIndex);
+        if (update.encoreMove != null) next.myEncoreMove![teamIndex] = update.encoreMove;
+        if (update.disableMove != null) next.myDisabledMove![teamIndex] = update.disableMove;
       }
     }
     if (update.fainted) {
@@ -1024,13 +1045,13 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       // typically none for a first appearance.
       if (side === 'mine') {
         const outgoing = nextActive.mine[update.bringIntoSlot];
-        if (outgoing != null) delete next.myBoosts![outgoing];
+        if (outgoing != null) { delete next.myBoosts![outgoing]; next.myTaunted = (next.myTaunted ?? []).filter(i => i !== outgoing); if (next.myEncoreMove) delete next.myEncoreMove[outgoing]; if (next.myDisabledMove) delete next.myDisabledMove[outgoing]; }
         nextActive.mine[update.bringIntoSlot] = teamIndex;
       } else {
         const outgoing = nextActive.theirs[update.bringIntoSlot];
         if (outgoing != null) {
           const o = next.opponentTeam[outgoing];
-          if (o) o.currentBoosts = {};
+          if (o) { o.currentBoosts = {}; o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined; }
         }
         nextActive.theirs[update.bringIntoSlot] = teamIndex;
         const brought = new Set(next.opponentBrought ?? []);
@@ -1424,6 +1445,9 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
                 </Text>
                 {boosts && Object.keys(boosts).length > 0 && (
                   <Text color="yellow">      boosts: {formatBoosts(boosts)}</Text>
+                )}
+                {(match.myTaunted?.includes(teamIdx) || match.myEncoreMove?.[teamIdx] || match.myDisabledMove?.[teamIdx]) && (
+                  <Text color="magenta">      {match.myTaunted?.includes(teamIdx) ? '🤬Taunt ' : ''}{match.myEncoreMove?.[teamIdx] ? `🔁Encore ${match.myEncoreMove[teamIdx]} ` : ''}{match.myDisabledMove?.[teamIdx] ? `🚫Disable ${match.myDisabledMove[teamIdx]}` : ''}</Text>
                 )}
               </Box>
             );
@@ -1865,6 +1889,9 @@ function OppRow({ stores, entry, marker, color, choiceLock }: OppRowProps) {
         {entry.megaUsed ? <Text color="magenta"> M</Text> : null}
         {entry.charging ? <Text color="cyan"> ⚡charging {entry.charging.move}</Text> : null}
         {choiceLock && !entry.fainted && !entry.itemConsumed ? <Text color="yellow"> 🔒{entry.scarfSuspected ? 'Choice Scarf?' : 'Choice?'} {choiceLock.move} ×{choiceLock.turns}</Text> : null}
+        {entry.taunted ? <Text color="magenta"> 🤬Taunt</Text> : null}
+        {entry.encoreMove ? <Text color="magenta"> 🔁Encore {entry.encoreMove}</Text> : null}
+        {entry.disabledMove ? <Text color="magenta"> 🚫Disable {entry.disabledMove}</Text> : null}
       </Text>
       {fetching && (
         <Text dimColor>      (fetching Pikalytics…)</Text>

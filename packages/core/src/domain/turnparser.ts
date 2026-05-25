@@ -76,6 +76,10 @@ export interface StateUpdate {
   // Status set/clear.
   status?: 'brn' | 'par' | 'psn' | 'tox' | 'slp' | 'frz';
   cureStatus?: boolean;
+  // Move-restricting volatiles. `cureStatus` also clears all three.
+  taunt?: boolean;
+  encoreMove?: string;
+  disableMove?: string;
   fainted?: boolean;
   bringIntoSlot?: 0 | 1;
 }
@@ -327,6 +331,23 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
       return { ok: true, kind: 'state', update: { side, teamIndex, cureStatus: true } };
     }
     return { ok: true, kind: 'state', update: { side, teamIndex, status: verb as StateUpdate['status'] } };
+  }
+
+  // Move-restricting volatiles: "o1 taunt" / "o1 encore Flamethrower" /
+  // "o1 disable Protect". Encore/Disable take a free-text move name.
+  const tauntMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+taunt$/i);
+  if (tauntMatch) {
+    const ref = resolveRef(tauntMatch[1]!, parseInt(tauntMatch[2]!, 10), ctx);
+    if (!ref) return { ok: false, error: `${tauntMatch[1]}${tauntMatch[2]} has no active mon` };
+    return { ok: true, kind: 'state', update: { side: ref.side, teamIndex: ref.teamIndex, taunt: true } };
+  }
+  const volMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+(encore|disable)\s+(.+)$/i);
+  if (volMatch) {
+    const ref = resolveRef(volMatch[1]!, parseInt(volMatch[2]!, 10), ctx);
+    if (!ref) return { ok: false, error: `${volMatch[1]}${volMatch[2]} has no active mon` };
+    const move = volMatch[4]!.trim();
+    const key = volMatch[3]!.toLowerCase() === 'encore' ? 'encoreMove' : 'disableMove';
+    return { ok: true, kind: 'state', update: { side: ref.side, teamIndex: ref.teamIndex, [key]: move } };
   }
 
   // Named after-attack triggers: wp / sash / balloon.

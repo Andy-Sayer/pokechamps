@@ -317,9 +317,12 @@ export function predictThreat(args: {
   defenderStatus?: string;
   critical?: boolean;
 }): MatchupCell | null {
-  const moves = args.opponent.knownMoves.length
+  let moves = args.opponent.knownMoves.length
     ? args.opponent.knownMoves
     : pikalyticsMoves(args.opponent.species);
+  // Move-restricting volatiles: Encore forces a single move; Disable removes one.
+  if (args.opponent.encoreMove) moves = [args.opponent.encoreMove];
+  else if (args.opponent.disabledMove) moves = moves.filter(m => m !== args.opponent.disabledMove);
   if (!moves.length) return null;
 
   const cands = defenderCandidates(args.opponent, args.defender.level);

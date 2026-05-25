@@ -130,6 +130,13 @@ function applyHazardOnSwitchInto(
   }
 }
 
+// Clear my-side move-restricting volatiles for a team index (on switch-out).
+function clearMyVolatiles(match: Match, idx: number): void {
+  if (match.myTaunted) match.myTaunted = match.myTaunted.filter(i => i !== idx);
+  if (match.myEncoreMove) delete match.myEncoreMove[idx];
+  if (match.myDisabledMove) delete match.myDisabledMove[idx];
+}
+
 // Merge a boost map into a side's active-slot boosts, clamped to [-6, +6].
 // Mirrors the inline boost logic in applyHazardOnSwitchInto / applyStateUpdate.
 function applyBoostsTo(
@@ -577,12 +584,12 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     if (a.kind !== 'switch' || a.targetTeamIndex == null) continue;
     if (a.side === 'mine') {
       const outgoing = nextActive.mine[a.attackerSlot];
-      if (outgoing != null) delete next.myBoosts[outgoing];
+      if (outgoing != null) { delete next.myBoosts[outgoing]; clearMyVolatiles(next, outgoing); }
       nextActive.mine[a.attackerSlot] = a.targetTeamIndex;
     } else {
       const outgoing = nextActive.theirs[a.attackerSlot];
       if (outgoing != null && next.opponentTeam[outgoing]) {
-        next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {} };
+        next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {}, taunted: undefined, encoreMove: undefined, disabledMove: undefined };
       }
       nextActive.theirs[a.attackerSlot] = a.targetTeamIndex;
     }
@@ -665,6 +672,9 @@ function applyStateUpdateImpl(
     myStatus: { ...(match.myStatus ?? {}) },
     myToxCounter: { ...(match.myToxCounter ?? {}) },
     mySleepCounter: { ...(match.mySleepCounter ?? {}) },
+    myTaunted: [...(match.myTaunted ?? [])],
+    myEncoreMove: { ...(match.myEncoreMove ?? {}) },
+    myDisabledMove: { ...(match.myDisabledMove ?? {}) },
   };
   const nextActive: ActiveIdx = {
     mine: [activeIdx.mine[0], activeIdx.mine[1]],
@@ -823,11 +833,29 @@ function applyStateUpdateImpl(
   if (update.cureStatus) {
     if (side === 'theirs') {
       const o = next.opponentTeam[teamIndex];
-      if (o) { o.status = undefined; o.toxCounter = undefined; o.sleepCounter = undefined; }
+      if (o) { o.status = undefined; o.toxCounter = undefined; o.sleepCounter = undefined; o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined; }
     } else {
       delete next.myStatus![teamIndex];
       delete next.myToxCounter![teamIndex];
       delete next.mySleepCounter?.[teamIndex];
+      next.myTaunted = next.myTaunted!.filter(i => i !== teamIndex);
+      delete next.myEncoreMove![teamIndex];
+      delete next.myDisabledMove![teamIndex];
+    }
+  }
+  // Move-restricting volatiles (taunt / encore / disable).
+  if (update.taunt || update.encoreMove != null || update.disableMove != null) {
+    if (side === 'theirs') {
+      const o = next.opponentTeam[teamIndex];
+      if (o) {
+        if (update.taunt) o.taunted = true;
+        if (update.encoreMove != null) o.encoreMove = update.encoreMove;
+        if (update.disableMove != null) o.disabledMove = update.disableMove;
+      }
+    } else {
+      if (update.taunt && !next.myTaunted!.includes(teamIndex)) next.myTaunted!.push(teamIndex);
+      if (update.encoreMove != null) next.myEncoreMove![teamIndex] = update.encoreMove;
+      if (update.disableMove != null) next.myDisabledMove![teamIndex] = update.disableMove;
     }
   }
   if (update.fainted) {
@@ -846,13 +874,13 @@ function applyStateUpdateImpl(
   if (update.bringIntoSlot != null) {
     if (side === 'mine') {
       const outgoing = nextActive.mine[update.bringIntoSlot];
-      if (outgoing != null) delete next.myBoosts![outgoing];
+      if (outgoing != null) { delete next.myBoosts![outgoing]; clearMyVolatiles(next, outgoing); }
       nextActive.mine[update.bringIntoSlot] = teamIndex;
     } else {
       const outgoing = nextActive.theirs[update.bringIntoSlot];
       if (outgoing != null) {
         const o = next.opponentTeam[outgoing];
-        if (o) o.currentBoosts = {};
+        if (o) { o.currentBoosts = {}; o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined; }
       }
       nextActive.theirs[update.bringIntoSlot] = teamIndex;
       const brought = new Set(next.opponentBrought ?? []);

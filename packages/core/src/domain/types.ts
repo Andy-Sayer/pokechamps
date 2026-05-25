@@ -74,6 +74,13 @@ export interface OpponentEntry {
   // Sleep counter (1-3 remaining turns of sleep). Decrements each EOT for
   // slp; status auto-clears when it hits 0.
   sleepCounter?: number;
+  // Move-restricting volatiles (logged manually; cleared on switch-out or via
+  // `cure`). Taunt blocks status moves (3 turns); Encore locks the mon into
+  // one move (3 turns); Disable blocks one move (4 turns). We don't auto-count
+  // turns — the user clears them. Encore/Disable feed the opp's threat pool.
+  taunted?: boolean;
+  encoreMove?: string;
+  disabledMove?: string;
 }
 
 export interface HazardState {
@@ -213,6 +220,10 @@ export interface Match {
   // Set when /mega is logged. Display + base-stat lookups consult this
   // override; the underlying PokemonSet stays unchanged.
   myMegaForme?: Record<number, string>;
+  // myTeam index → move-restricting volatiles (parallel to OpponentEntry).
+  myTaunted?: number[];
+  myEncoreMove?: Record<number, string>;
+  myDisabledMove?: Record<number, string>;
   // myTeam index → charging-move state. Parallel to OpponentEntry.charging.
   // Set when a mine-side charge move logged with no damage; cleared when
   // the same mon's next damaging action lands.
