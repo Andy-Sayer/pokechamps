@@ -2,7 +2,7 @@
 
 ## Context
 
-**Last updated 2026-05-24.** 433 tests across 4 workspaces, all green.
+**Last updated 2026-05-24.** 462 tests across 4 workspaces, all green.
 A root `vitest.config.ts`
 (`test.projects`) now aggregates every workspace's own config, so both
 `npm test` and a bare `npx vitest run` from the repo root pass —
