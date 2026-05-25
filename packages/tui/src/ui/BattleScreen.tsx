@@ -29,6 +29,8 @@ import { BATTLE_COMMANDS, parseCommand, type BattleCommandId } from './slashComm
 import { deriveActiveIdx } from '@pokechamps/core/match/engine.js';
 import { applyMegaAction } from '@pokechamps/core/domain/megaResolve.js';
 import { getMegaOptions } from '@pokechamps/core/domain/gimmicks/mega.js';
+import { solveEndgame } from '@pokechamps/core/domain/endgame.js';
+import type { EndgamePosition } from '@pokechamps/core/domain/endgame.js';
 
 export interface BattleScreenProps {
   stores: Stores;
@@ -1149,6 +1151,34 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
           setMessage(`Removed: ${actionToLine(last, match)}`);
         }
         return true;
+      case 'endgame': {
+        const mine = activeIdx.mine
+          .filter((idx): idx is number => idx != null)
+          .map(idx => ({
+            set: match.myTeam[idx]!,
+            currentHpPercent: match.myCurrentHp?.[idx] ?? 100,
+          }));
+        const opp = activeIdx.theirs
+          .filter((idx): idx is number => idx != null)
+          .map(idx => ({
+            entry: match.opponentTeam[idx]!,
+            currentHpPercent: match.opponentTeam[idx]?.currentHpPercent ?? 100,
+          }));
+        const pos: EndgamePosition = { mine, opp, field };
+        const { recommendations } = solveEndgame(pos);
+        if (recommendations.length === 0) {
+          setMessage('No endgame recommendation (no live actives).');
+          return true;
+        }
+        const lines = recommendations.map(r => {
+          if (!r.targetSpecies && !r.move) return `${r.mySpecies}: no live targets`;
+          if (!r.move) return `${r.mySpecies} → ${r.targetSpecies}: no calculable move`;
+          const koTag = r.likelyKo ? ' (KO!)' : ` (${(r.breakdown.offenseScore * 100).toFixed(0)}% · net ${r.netScore.toFixed(1)})`;
+          return `${r.mySpecies} → ${r.targetSpecies}: ${r.move}${koTag}`;
+        });
+        setMessage(lines.join('\n'));
+        return true;
+      }
       case 'override': setOverrideOpen(true); return true;
       case 'crit': setShowCrits(c => !c); return true;
       case 'allmoves': setShowAllMoves(a => !a); return true;
