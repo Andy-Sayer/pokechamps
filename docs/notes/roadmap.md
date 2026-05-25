@@ -2,7 +2,7 @@
 
 ## Context
 
-**Last updated 2026-05-24.** 468 tests across 4 workspaces, all green.
+**Last updated 2026-05-24.** 469 tests across 4 workspaces, all green.
 A root `vitest.config.ts`
 (`test.projects`) now aggregates every workspace's own config, so both
 `npm test` and a bare `npx vitest run` from the repo root pass —
@@ -442,10 +442,15 @@ plays matches live + finds bugs by doing so:
    deliberately NOT adopted — the honest envelope stays.)*
 5. **Audit completion (task #156).** ✅ Encore/Taunt/Disable volatiles
    (state lines + threat-pool effect, verified vs Bulbapedia), ✅ Fake
-   Out / First Impression / Mat Block first-turn-out gating. Remaining:
+   Out / First Impression / Mat Block first-turn-out gating. ✅ Defog
+   screen-scope fix (opponent side only — audit finding). Remaining:
    Trick/Switcheroo item swap, Sucker Punch fail conditions, Sand-chip →
-   no-Goggles. *(Knock Off removal, EOT weather/status, hazard clearing
-   done.)*
+   no-Goggles. From the Haiku audit (all overridable today, low
+   priority): extended-duration items (Damp Rock / Light Clay → 8t)
+   not auto-applied (we default 5t); Tailwind has no 4-turn counter yet.
+   *(Knock Off removal, EOT weather/status, hazard clearing done; Snow
+   no-chip, spread 0.75, priority-abilities, Intimidate list all
+   verified correct.)*
 
 **Soon (4–8 sessions):**
 
@@ -514,7 +519,7 @@ Each item should ship with:
 - A short commit message naming what real-world scenario the change
   unblocks
 
-Keep the suite green at every commit. Current baseline: **468 tests** (was 359 when this doc was first written).
+Keep the suite green at every commit. Current baseline: **469 tests** (was 359 when this doc was first written).
 
 ## Out of scope (deliberately)
 
