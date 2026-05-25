@@ -63,7 +63,10 @@ export function applyFieldMove(
     f.trickRoom = !f.trickRoom;
     f.trickRoomTurns = f.trickRoom ? EFFECT_DURATIONS.trickRoom : undefined;
   }
-  if (e.tailwind) { if (userSide === 'mine') f.myTailwind = true; else f.theirTailwind = true; }
+  if (e.tailwind) {
+    if (userSide === 'mine') { f.myTailwind = true; f.myTailwindTurns = EFFECT_DURATIONS.tailwind; }
+    else { f.theirTailwind = true; f.theirTailwindTurns = EFFECT_DURATIONS.tailwind; }
+  }
   if (e.reflect) { if (userSide === 'mine') f.myReflect = true; else f.theirReflect = true; }
   if (e.lightScreen) { if (userSide === 'mine') f.myLightScreen = true; else f.theirLightScreen = true; }
   if (e.auroraVeil) {

@@ -101,6 +101,8 @@ export interface FieldState {
   // (count not known/seeded). Tick down each EOT; the effect clears at 0.
   weatherTurns?: number;
   trickRoomTurns?: number;
+  myTailwindTurns?: number;
+  theirTailwindTurns?: number;
   trickRoom: boolean;
   myTailwind: boolean;
   theirTailwind: boolean;

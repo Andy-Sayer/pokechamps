@@ -1507,8 +1507,8 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
                 field.weather ? `${field.weather}${field.weatherTurns != null ? `(${field.weatherTurns})` : ''}` : null,
                 field.terrain ? `${field.terrain} Terrain` : null,
                 field.trickRoom ? `Trick Room${field.trickRoomTurns != null ? `(${field.trickRoomTurns})` : ''}` : null,
-                field.myTailwind ? 'my Tailwind' : null,
-                field.theirTailwind ? 'opp Tailwind' : null,
+                field.myTailwind ? `my Tailwind${field.myTailwindTurns != null ? `(${field.myTailwindTurns})` : ''}` : null,
+                field.theirTailwind ? `opp Tailwind${field.theirTailwindTurns != null ? `(${field.theirTailwindTurns})` : ''}` : null,
               ].filter(Boolean).join(' · ')}
             </Text>
           )}

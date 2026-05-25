@@ -108,6 +108,8 @@ export function endOfTurn(
   const f = next.field;
   if (f.weatherTurns != null) { f.weatherTurns -= 1; if (f.weatherTurns <= 0) { notes.push(`${f.weather ?? 'weather'} ended`); f.weather = null; f.weatherTurns = undefined; } }
   if (f.trickRoomTurns != null) { f.trickRoomTurns -= 1; if (f.trickRoomTurns <= 0) { notes.push('Trick Room ended'); f.trickRoom = false; f.trickRoomTurns = undefined; } }
+  if (f.myTailwindTurns != null) { f.myTailwindTurns -= 1; if (f.myTailwindTurns <= 0) { notes.push('m Tailwind ended'); f.myTailwind = false; f.myTailwindTurns = undefined; } }
+  if (f.theirTailwindTurns != null) { f.theirTailwindTurns -= 1; if (f.theirTailwindTurns <= 0) { notes.push('o Tailwind ended'); f.theirTailwind = false; f.theirTailwindTurns = undefined; } }
 
   return { match: next, notes };
 }

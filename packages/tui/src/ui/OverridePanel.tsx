@@ -39,7 +39,9 @@ export interface Draft {
   trickRoom: boolean;
   trickRoomTurns: number; // 0 = untracked/none
   twMine: boolean;
+  twMineTurns: number;    // 0 = untracked/none; only written when twMine is on
   twTheirs: boolean;
+  twTheirsTurns: number;  // 0 = untracked/none; only written when twTheirs is on
   slots: SlotDraft[];
 }
 
@@ -72,7 +74,9 @@ export function applyOverride(
     trickRoom: draft.trickRoom,
     trickRoomTurns: draft.trickRoom && draft.trickRoomTurns > 0 ? draft.trickRoomTurns : undefined,
     myTailwind: draft.twMine,
+    myTailwindTurns: draft.twMine && draft.twMineTurns > 0 ? draft.twMineTurns : undefined,
     theirTailwind: draft.twTheirs,
+    theirTailwindTurns: draft.twTheirs && draft.twTheirsTurns > 0 ? draft.twTheirsTurns : undefined,
   };
   const next: Match = {
     ...match,
@@ -142,7 +146,9 @@ export function buildDraft(match: Match, activeIdx: ActiveIdxLite): Draft {
     trickRoom: !!f.trickRoom,
     trickRoomTurns: f.trickRoomTurns ?? 0,
     twMine: !!f.myTailwind,
+    twMineTurns: f.myTailwindTurns ?? 0,
     twTheirs: !!f.theirTailwind,
+    twTheirsTurns: f.theirTailwindTurns ?? 0,
     slots: [mk('mine', 0), mk('mine', 1), mk('theirs', 0), mk('theirs', 1)],
   };
 }
@@ -242,7 +248,9 @@ export function OverridePanel(props: {
     { label: 'Trick Room', display: draft.trickRoom ? 'on' : 'off', change: () => set({ trickRoom: !draft.trickRoom }), setText: t => { const r = resolveEnum(t, boolEntries); if (r) set({ trickRoom: r.value }); } },
     { label: 'Trick Room turns', display: draft.trickRoomTurns > 0 ? String(draft.trickRoomTurns) : '—', change: d => set({ trickRoomTurns: Math.max(0, draft.trickRoomTurns + d) }), setText: t => { const n = t.replace(/\D/g, ''); set({ trickRoomTurns: n ? Number(n) : 0 }); } },
     { label: 'Tailwind (mine)', display: draft.twMine ? 'on' : 'off', change: () => set({ twMine: !draft.twMine }), setText: t => { const r = resolveEnum(t, boolEntries); if (r) set({ twMine: r.value }); } },
+    { label: 'TW (mine) turns', display: draft.twMineTurns > 0 ? String(draft.twMineTurns) : '—', change: d => set({ twMineTurns: Math.max(0, draft.twMineTurns + d) }), setText: t => { const n = t.replace(/\D/g, ''); set({ twMineTurns: n ? Number(n) : 0 }); } },
     { label: 'Tailwind (opp)', display: draft.twTheirs ? 'on' : 'off', change: () => set({ twTheirs: !draft.twTheirs }), setText: t => { const r = resolveEnum(t, boolEntries); if (r) set({ twTheirs: r.value }); } },
+    { label: 'TW (opp) turns', display: draft.twTheirsTurns > 0 ? String(draft.twTheirsTurns) : '—', change: d => set({ twTheirsTurns: Math.max(0, draft.twTheirsTurns + d) }), setText: t => { const n = t.replace(/\D/g, ''); set({ twTheirsTurns: n ? Number(n) : 0 }); } },
   ];
   const slotProps = (i: number): PropRow[] => {
     const s = draft.slots[i]!;

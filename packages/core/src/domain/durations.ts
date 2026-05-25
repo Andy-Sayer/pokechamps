@@ -6,6 +6,7 @@
 export const EFFECT_DURATIONS = {
   weather: 5,
   trickRoom: 5,
+  tailwind: 4,
   taunt: 3,
   encore: 3,
   disable: 4,
