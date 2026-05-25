@@ -16,7 +16,7 @@ import { defaultOpponentSet } from '@pokechamps/core/domain/bring.js';
 import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs, hazardClearEffect, applyHazardClear } from '@pokechamps/core/domain/hazards.js';
 import { fieldMoveEffect, applyFieldMove } from '@pokechamps/core/domain/fieldMoves.js';
-import { detectChoiceLock, sashProcced, type ChoiceLock } from '@pokechamps/core/domain/itemSignals.js';
+import { detectChoiceLock, sashProcced, firstTurnOut, isFirstTurnMove, type ChoiceLock } from '@pokechamps/core/domain/itemSignals.js';
 import { switchInAbilityEffect, intimidateReaction, certainAbility, type BoostMap } from '@pokechamps/core/domain/abilities.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
 import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict, type MatchupCell, type Confidence } from '@pokechamps/core/domain/predictions.js';
@@ -1279,6 +1279,9 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       : null;
     const mySpeedBase = actualSpeed(mySet);
     const mySpeedMega = myMegaOption ? actualSpeed(mySet, myMegaOption.forme) : null;
+    // Fake Out / First Impression / Mat Block only fire on the mon's first turn
+    // out — drop them from my offense once this mon has acted since entering.
+    const myFresh = firstTurnOut(match, 'mine', myIdx);
     // Common args for prediction calls — only the active flag flips when we
     // compute the "what if I mega'd" variant.
     const baseOpts = {
@@ -1286,6 +1289,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       defenderBoosts: undefined as Partial<Record<string, number>> | undefined,
       attackerStatus: myStatus,
       defenderStatus: undefined as string | undefined,
+      attackerFirstTurnOut: myFresh,
     };
     return {
       mySet,
@@ -1300,6 +1304,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       myMegaForme: myMegaOption?.forme ?? null,
       rows: match.opponentTeam.map((opp, oi) => {
         const oppActive = opp.megaUsed ?? false;
+        const oppFresh = firstTurnOut(match, 'theirs', oi);
         return {
           opp,
           oppIdx: oi,
@@ -1352,6 +1357,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
             defenderBoosts: myBoosts,
             attackerStatus: opp.status,
             defenderStatus: myStatus,
+            attackerFirstTurnOut: oppFresh,
           }),
           // Dual-forme: compute the same offense + threat using post-mega
           // stats, so the row can surface "(mega: X-Y%)" alongside the base
@@ -1374,6 +1380,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
             defenderBoosts: myBoosts,
             attackerStatus: opp.status,
             defenderStatus: myStatus,
+            attackerFirstTurnOut: oppFresh,
           }) : null,
           speed: speedVerdict({ mySet, opp, field, myFormeOverride: myMegaActive ? match.myMegaForme?.[myIdx] : undefined }),
           speedMega: myMegaOption ? speedVerdict({ mySet, opp, field, myFormeOverride: myMegaOption.forme }) : null,
@@ -1448,6 +1455,9 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
                 )}
                 {(match.myTaunted?.includes(teamIdx) || match.myEncoreMove?.[teamIdx] || match.myDisabledMove?.[teamIdx]) && (
                   <Text color="magenta">      {match.myTaunted?.includes(teamIdx) ? '🤬Taunt ' : ''}{match.myEncoreMove?.[teamIdx] ? `🔁Encore ${match.myEncoreMove[teamIdx]} ` : ''}{match.myDisabledMove?.[teamIdx] ? `🚫Disable ${match.myDisabledMove[teamIdx]}` : ''}</Text>
+                )}
+                {isActive && m.moves.some(isFirstTurnMove) && !firstTurnOut(match, 'mine', teamIdx) && (
+                  <Text dimColor>      {m.moves.filter(isFirstTurnMove).join('/')} spent (not first turn out)</Text>
                 )}
               </Box>
             );

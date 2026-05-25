@@ -4,6 +4,7 @@ import { defaultOpponentSet } from './bring.js';
 import { actualSpeed } from './speed.js';
 import { getPikalytics } from './pikalytics.js';
 import { mostLikelyIndex } from './inference.js';
+import { isFirstTurnMove } from './itemSignals.js';
 
 export type Confidence = 'high' | 'med' | 'low';
 
@@ -131,16 +132,22 @@ export function predictOffense(args: {
   attackerStatus?: string;
   defenderStatus?: string;
   critical?: boolean;
+  // False → the attacker is past its first turn out, so Fake Out / First
+  // Impression / Mat Block can't be used and are dropped from consideration.
+  attackerFirstTurnOut?: boolean;
 }): MatchupCell | null {
   const cands = defenderCandidates(args.opponent, args.attacker.level);
   if (!cands.length) return null;
+  const atkMoves = args.attackerFirstTurnOut === false
+    ? args.attacker.moves.filter(m => !isFirstTurnMove(m))
+    : args.attacker.moves;
 
   // For each candidate, find this attacker's best move (max-damaging).
   // Tally votes by move name (which move wins most often) AND track each
   // move's min/max across all candidates. Pick the most-frequent best move;
   // tiebreak by highest sum of max damage. Report that move's range.
   const perCandidate = cands.map(c =>
-    bestMoveAgainst(args.attacker, c, args.attacker.moves, args.field, 'mine', {
+    bestMoveAgainst(args.attacker, c, atkMoves, args.field, 'mine', {
       attackerGimmickActive: args.attackerGimmickActive,
       defenderGimmickActive: args.defenderGimmickActive,
       attackerBoosts: args.attackerBoosts,
@@ -247,11 +254,15 @@ export function predictOffenseAll(args: {
   attackerStatus?: string;
   defenderStatus?: string;
   critical?: boolean;
+  attackerFirstTurnOut?: boolean;
 }): MatchupCell[] {
   const cands = defenderCandidates(args.opponent, args.attacker.level);
   if (!cands.length) return [];
+  const atkMoves = args.attackerFirstTurnOut === false
+    ? args.attacker.moves.filter(m => !isFirstTurnMove(m))
+    : args.attacker.moves;
   const out: MatchupCell[] = [];
-  for (const move of args.attacker.moves) {
+  for (const move of atkMoves) {
     let minPercent = Infinity;
     let maxPercent = -Infinity;
     let koChance = '';
@@ -316,6 +327,9 @@ export function predictThreat(args: {
   attackerStatus?: string;
   defenderStatus?: string;
   critical?: boolean;
+  // False → this opp is past its first turn out: drop Fake Out / First
+  // Impression / Mat Block from its threat pool (they can't fire).
+  attackerFirstTurnOut?: boolean;
 }): MatchupCell | null {
   let moves = args.opponent.knownMoves.length
     ? args.opponent.knownMoves
@@ -323,6 +337,7 @@ export function predictThreat(args: {
   // Move-restricting volatiles: Encore forces a single move; Disable removes one.
   if (args.opponent.encoreMove) moves = [args.opponent.encoreMove];
   else if (args.opponent.disabledMove) moves = moves.filter(m => m !== args.opponent.disabledMove);
+  if (args.attackerFirstTurnOut === false) moves = moves.filter(m => !isFirstTurnMove(m));
   if (!moves.length) return null;
 
   const cands = defenderCandidates(args.opponent, args.defender.level);

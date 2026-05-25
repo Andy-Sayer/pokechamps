@@ -118,6 +118,12 @@ The original "Now" tier is mostly done. What's been merged on `main`:
   `my2 brn`, `op4 in o1`). `resolveRef` centralises it. Rosters label
   benched mons with their `myN`/`opN` ref. (parser correctness + UX)
 
+- **Move-restricting volatiles + first-turn gating** — Encore / Taunt /
+  Disable logged as state lines (either side), surfaced in both rosters,
+  cleared on switch/`cure`; Encore/Disable feed the opp threat pool.
+  Fake Out / First Impression / Mat Block auto-gated by first-turn-out
+  (`itemSignals.firstTurnOut`). Mechanics verified vs Bulbapedia. (audit)
+
 Pillar status after the above:
 
 - **A — Battle model completeness** — mega done, charge done, pivots
@@ -429,10 +435,12 @@ plays matches live + finds bugs by doing so:
    envelope width; `low` when it's still a prior). Display shows
    `move X-Y% (ko) · likely L-H% (hi)`. *(Probability-weighted ranges
    deliberately NOT adopted — the honest envelope stays.)*
-5. **Audit completion (task #156).** Remaining gaps: Trick/Switcheroo
-   item swap, Encore/Taunt/Disable surfacing, Fake Out turn-1 gating,
-   Sucker Punch fail conditions. *(Knock Off item removal, EOT
-   weather/status, hazard clearing all done.)*
+5. **Audit completion (task #156).** ✅ Encore/Taunt/Disable volatiles
+   (state lines + threat-pool effect, verified vs Bulbapedia), ✅ Fake
+   Out / First Impression / Mat Block first-turn-out gating. Remaining:
+   Trick/Switcheroo item swap, Sucker Punch fail conditions, Sand-chip →
+   no-Goggles. *(Knock Off removal, EOT weather/status, hazard clearing
+   done.)*
 
 **Soon (4–8 sessions):**
 
@@ -501,7 +509,7 @@ Each item should ship with:
 - A short commit message naming what real-world scenario the change
   unblocks
 
-Keep the suite green at every commit. Current baseline: **433 tests** (was 359 when this doc was first written).
+Keep the suite green at every commit. Current baseline: **462 tests** (was 359 when this doc was first written).
 
 ## Out of scope (deliberately)
 

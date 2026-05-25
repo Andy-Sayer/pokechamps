@@ -26,6 +26,8 @@ m1 mega y                                  ← mega variant disambiguator (Chari
 
 Pivot moves (U-turn / Volt Switch / Flip Turn / Parting Shot / Teleport / Chilly Reception / Baton Pass / Shed Tail) are auto-detected via the dex `selfSwitch` field. After the pivot move log the switch as a normal next action — `finalizeTurn` tags it `pivot: true` so speed inference skips it (the switch happened inside the pivot move's bracket, not the natural +6 switch bracket).
 
+First-turn-only moves (Fake Out / First Impression / Mat Block) are auto-gated: once a mon has acted since it last entered the field, those moves are dropped from its offense/threat predictions (switching out and back resets it — Bulbapedia rule). No logging needed; derived from turn history (`itemSignals.firstTurnOut`).
+
 Field-clearing moves are auto-detected by name (`packages/core/src/domain/hazards.ts` → `hazardClearEffect`). Just log the move normally — `finalizeTurn` mutates the field so you don't toggle each hazard off by hand:
 - **Rapid Spin** / **Mortal Spin** — clear the user's own-side hazards (Rapid Spin also +1 user Speed).
 - **Defog** — clear hazards **and** screens on both sides.

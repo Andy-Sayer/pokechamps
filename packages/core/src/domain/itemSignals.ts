@@ -1,4 +1,32 @@
-import type { Match, MoveAction } from './types.js';
+import type { Match, MoveAction, FieldSide } from './types.js';
+
+// Moves that only work on the user's FIRST turn after entering battle
+// (Bulbapedia: succeeds only "first thing upon entering"; switching out and
+// back resets it). Fake Out / First Impression flinch; Mat Block protects.
+const FIRST_TURN_MOVES = new Set(['Fake Out', 'First Impression', 'Mat Block']);
+export function isFirstTurnMove(move: string): boolean {
+  return FIRST_TURN_MOVES.has(move);
+}
+
+// Can the mon at `teamIndex` still use a first-turn-only move? True iff it has
+// made no move since it last entered the field. Entry = the most recent
+// switch-in bringing it to its slot (or turn 0 for a lead). Switching out and
+// back in resets eligibility, matching the real mechanic.
+export function firstTurnOut(match: Match, side: FieldSide, teamIndex: number): boolean {
+  let entryTurn = 0;
+  for (const turn of match.turns) {
+    for (const a of turn.actions) {
+      if (a.side === side && a.kind === 'switch' && a.targetTeamIndex === teamIndex) entryTurn = turn.index;
+    }
+  }
+  for (const turn of match.turns) {
+    if (turn.index <= entryTurn) continue;
+    for (const a of turn.actions) {
+      if (a.side === side && a.kind === 'move' && a.attackerTeamIndex === teamIndex) return false;
+    }
+  }
+  return true;
+}
 
 // Did a `sash`-annotated hit actually PROC the Focus Sash? It procs only when
 // the target ends at a 1-HP / 1% sliver — i.e. the damage was capped. If the
