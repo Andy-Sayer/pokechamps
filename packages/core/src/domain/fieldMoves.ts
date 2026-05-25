@@ -1,4 +1,5 @@
 import type { FieldState } from './types.js';
+import { EFFECT_DURATIONS } from './durations.js';
 
 // Field-setting moves. Weather / terrain / Trick Room / Tailwind / screens are
 // logged as ordinary (usually targetless) move actions — the parser already
@@ -56,9 +57,12 @@ export function applyFieldMove(
   e: FieldMoveEffect,
 ): FieldState {
   const f: FieldState = { ...field };
-  if (e.weather) f.weather = e.weather;
+  if (e.weather) { f.weather = e.weather; f.weatherTurns = EFFECT_DURATIONS.weather; }
   if (e.terrain) f.terrain = e.terrain;
-  if (e.trickRoom === 'toggle') f.trickRoom = !f.trickRoom;
+  if (e.trickRoom === 'toggle') {
+    f.trickRoom = !f.trickRoom;
+    f.trickRoomTurns = f.trickRoom ? EFFECT_DURATIONS.trickRoom : undefined;
+  }
   if (e.tailwind) { if (userSide === 'mine') f.myTailwind = true; else f.theirTailwind = true; }
   if (e.reflect) { if (userSide === 'mine') f.myReflect = true; else f.theirReflect = true; }
   if (e.lightScreen) { if (userSide === 'mine') f.myLightScreen = true; else f.theirLightScreen = true; }

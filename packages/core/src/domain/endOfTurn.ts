@@ -25,6 +25,13 @@ export function endOfTurn(
     myStatus: { ...(match.myStatus ?? {}) },
     myToxCounter: { ...(match.myToxCounter ?? {}) },
     mySleepCounter: { ...(match.mySleepCounter ?? {}) },
+    myTaunted: [...(match.myTaunted ?? [])],
+    myEncoreMove: { ...(match.myEncoreMove ?? {}) },
+    myDisabledMove: { ...(match.myDisabledMove ?? {}) },
+    myTauntTurns: { ...(match.myTauntTurns ?? {}) },
+    myEncoreTurns: { ...(match.myEncoreTurns ?? {}) },
+    myDisableTurns: { ...(match.myDisableTurns ?? {}) },
+    field: { ...(match.field ?? field) },
   };
 
   // Apply per-active EOT effects. Order: weather → status → leftovers
@@ -51,6 +58,10 @@ export function endOfTurn(
       else o.sleepCounter = c;
     }
     if ((o.currentHpPercent ?? 100) === 0) o.fainted = true;
+    // Move-restricting volatiles count down; clear at 0.
+    if (o.tauntTurns != null) { o.tauntTurns -= 1; if (o.tauntTurns <= 0) { o.taunted = undefined; o.tauntTurns = undefined; notes.push(`o${idx + 1} Taunt ended`); } }
+    if (o.encoreTurns != null) { o.encoreTurns -= 1; if (o.encoreTurns <= 0) { o.encoreMove = undefined; o.encoreTurns = undefined; notes.push(`o${idx + 1} Encore ended`); } }
+    if (o.disableTurns != null) { o.disableTurns -= 1; if (o.disableTurns <= 0) { o.disabledMove = undefined; o.disableTurns = undefined; notes.push(`o${idx + 1} Disable ended`); } }
   };
 
   const applyToMine = (idx: number | null) => {
@@ -82,12 +93,21 @@ export function endOfTurn(
       }
     }
     if ((next.myCurrentHp![idx] ?? 100) === 0 && !next.myFainted!.includes(idx)) next.myFainted!.push(idx);
+    // My-side volatiles count down; clear at 0.
+    if (next.myTauntTurns![idx] != null) { const t = next.myTauntTurns![idx]! - 1; if (t <= 0) { next.myTaunted = next.myTaunted!.filter(i => i !== idx); delete next.myTauntTurns![idx]; notes.push(`m${idx + 1} Taunt ended`); } else next.myTauntTurns![idx] = t; }
+    if (next.myEncoreTurns![idx] != null) { const t = next.myEncoreTurns![idx]! - 1; if (t <= 0) { delete next.myEncoreMove![idx]; delete next.myEncoreTurns![idx]; notes.push(`m${idx + 1} Encore ended`); } else next.myEncoreTurns![idx] = t; }
+    if (next.myDisableTurns![idx] != null) { const t = next.myDisableTurns![idx]! - 1; if (t <= 0) { delete next.myDisabledMove![idx]; delete next.myDisableTurns![idx]; notes.push(`m${idx + 1} Disable ended`); } else next.myDisableTurns![idx] = t; }
   };
 
   applyToMine(activeIdx.mine[0]);
   applyToMine(activeIdx.mine[1]);
   applyToOpp(activeIdx.theirs[0]);
   applyToOpp(activeIdx.theirs[1]);
+
+  // Field conditions count down on the persistent field; clear at 0.
+  const f = next.field;
+  if (f.weatherTurns != null) { f.weatherTurns -= 1; if (f.weatherTurns <= 0) { notes.push(`${f.weather ?? 'weather'} ended`); f.weather = null; f.weatherTurns = undefined; } }
+  if (f.trickRoomTurns != null) { f.trickRoomTurns -= 1; if (f.trickRoomTurns <= 0) { notes.push('Trick Room ended'); f.trickRoom = false; f.trickRoomTurns = undefined; } }
 
   return { match: next, notes };
 }

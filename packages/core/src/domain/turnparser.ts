@@ -80,6 +80,9 @@ export interface StateUpdate {
   taunt?: boolean;
   encoreMove?: string;
   disableMove?: string;
+  // Optional override of the volatile's countdown (turns remaining). When
+  // omitted the apply layer seeds the default (Taunt/Encore 3, Disable 4).
+  volatileTurns?: number;
   fainted?: boolean;
   bringIntoSlot?: 0 | 1;
 }
@@ -335,19 +338,25 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
 
   // Move-restricting volatiles: "o1 taunt" / "o1 encore Flamethrower" /
   // "o1 disable Protect". Encore/Disable take a free-text move name.
-  const tauntMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+taunt$/i);
+  // "o1 taunt" / "o1 taunt 2" (optional turn-count override).
+  const tauntMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+taunt(?:\s+(\d+))?$/i);
   if (tauntMatch) {
     const ref = resolveRef(tauntMatch[1]!, parseInt(tauntMatch[2]!, 10), ctx);
     if (!ref) return { ok: false, error: `${tauntMatch[1]}${tauntMatch[2]} has no active mon` };
-    return { ok: true, kind: 'state', update: { side: ref.side, teamIndex: ref.teamIndex, taunt: true } };
+    const turns = tauntMatch[3] ? parseInt(tauntMatch[3], 10) : undefined;
+    return { ok: true, kind: 'state', update: { side: ref.side, teamIndex: ref.teamIndex, taunt: true, volatileTurns: turns } };
   }
+  // "o1 encore Fake Out" / "o1 disable Protect 3" — optional trailing count.
   const volMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+(encore|disable)\s+(.+)$/i);
   if (volMatch) {
     const ref = resolveRef(volMatch[1]!, parseInt(volMatch[2]!, 10), ctx);
     if (!ref) return { ok: false, error: `${volMatch[1]}${volMatch[2]} has no active mon` };
-    const move = volMatch[4]!.trim();
+    let move = volMatch[4]!.trim();
+    let turns: number | undefined;
+    const tm = move.match(/^(.*\S)\s+(\d+)$/);
+    if (tm) { move = tm[1]!; turns = parseInt(tm[2]!, 10); }
     const key = volMatch[3]!.toLowerCase() === 'encore' ? 'encoreMove' : 'disableMove';
-    return { ok: true, kind: 'state', update: { side: ref.side, teamIndex: ref.teamIndex, [key]: move } };
+    return { ok: true, kind: 'state', update: { side: ref.side, teamIndex: ref.teamIndex, [key]: move, volatileTurns: turns } };
   }
 
   // Named after-attack triggers: wp / sash / balloon.

@@ -40,6 +40,7 @@ import {
   type BoostMap,
 } from '../domain/abilities.js';
 import { sashProcced } from '../domain/itemSignals.js';
+import { EFFECT_DURATIONS } from '../domain/durations.js';
 import { isChargeMove, isPivotMove, isItemRemovingMove } from '../domain/data.js';
 import type { StateUpdate, HazardUpdate } from '../domain/turnparser.js';
 
@@ -135,6 +136,15 @@ function clearMyVolatiles(match: Match, idx: number): void {
   if (match.myTaunted) match.myTaunted = match.myTaunted.filter(i => i !== idx);
   if (match.myEncoreMove) delete match.myEncoreMove[idx];
   if (match.myDisabledMove) delete match.myDisabledMove[idx];
+  if (match.myTauntTurns) delete match.myTauntTurns[idx];
+  if (match.myEncoreTurns) delete match.myEncoreTurns[idx];
+  if (match.myDisableTurns) delete match.myDisableTurns[idx];
+}
+
+// Clear opp move-restricting volatiles + their counters (switch-out / cure).
+function clearOppVolatiles(o: OpponentEntry): void {
+  o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined;
+  o.tauntTurns = undefined; o.encoreTurns = undefined; o.disableTurns = undefined;
 }
 
 // Merge a boost map into a side's active-slot boosts, clamped to [-6, +6].
@@ -190,7 +200,7 @@ function applySwitchInAbility(
   // normal weather override (we don't model primordial-weather locks).
   if (effect.weather || effect.terrain) {
     const f: FieldState = { ...(match.field ?? NEUTRAL_FIELD) };
-    if (effect.weather) { f.weather = effect.weather; notes.push(`${incoming.species}'s ${ability} set ${effect.weather}`); }
+    if (effect.weather) { f.weather = effect.weather; f.weatherTurns = EFFECT_DURATIONS.weather; notes.push(`${incoming.species}'s ${ability} set ${effect.weather}`); }
     if (effect.terrain) { f.terrain = effect.terrain; notes.push(`${incoming.species}'s ${ability} set ${effect.terrain} Terrain`); }
     match.field = f;
   }
@@ -318,6 +328,12 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     opponentBrought: [...broughtSet].sort((a, b) => a - b) as Match['opponentBrought'],
     myCurrentHp: { ...(match.myCurrentHp ?? {}) },
     myFainted: [...(match.myFainted ?? [])],
+    // Copy volatile maps so switch-out clears don't mutate the caller's match.
+    myEncoreMove: { ...(match.myEncoreMove ?? {}) },
+    myDisabledMove: { ...(match.myDisabledMove ?? {}) },
+    myTauntTurns: { ...(match.myTauntTurns ?? {}) },
+    myEncoreTurns: { ...(match.myEncoreTurns ?? {}) },
+    myDisableTurns: { ...(match.myDisableTurns ?? {}) },
   };
 
   // Walk damaging actions in order, deriving each action's damageHpPercent
@@ -589,7 +605,9 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     } else {
       const outgoing = nextActive.theirs[a.attackerSlot];
       if (outgoing != null && next.opponentTeam[outgoing]) {
-        next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {}, taunted: undefined, encoreMove: undefined, disabledMove: undefined };
+        const o = { ...next.opponentTeam[outgoing], currentBoosts: {} };
+        clearOppVolatiles(o);
+        next.opponentTeam[outgoing] = o;
       }
       nextActive.theirs[a.attackerSlot] = a.targetTeamIndex;
     }
@@ -675,6 +693,9 @@ function applyStateUpdateImpl(
     myTaunted: [...(match.myTaunted ?? [])],
     myEncoreMove: { ...(match.myEncoreMove ?? {}) },
     myDisabledMove: { ...(match.myDisabledMove ?? {}) },
+    myTauntTurns: { ...(match.myTauntTurns ?? {}) },
+    myEncoreTurns: { ...(match.myEncoreTurns ?? {}) },
+    myDisableTurns: { ...(match.myDisableTurns ?? {}) },
   };
   const nextActive: ActiveIdx = {
     mine: [activeIdx.mine[0], activeIdx.mine[1]],
@@ -833,14 +854,12 @@ function applyStateUpdateImpl(
   if (update.cureStatus) {
     if (side === 'theirs') {
       const o = next.opponentTeam[teamIndex];
-      if (o) { o.status = undefined; o.toxCounter = undefined; o.sleepCounter = undefined; o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined; }
+      if (o) { o.status = undefined; o.toxCounter = undefined; o.sleepCounter = undefined; clearOppVolatiles(o); }
     } else {
       delete next.myStatus![teamIndex];
       delete next.myToxCounter![teamIndex];
       delete next.mySleepCounter?.[teamIndex];
-      next.myTaunted = next.myTaunted!.filter(i => i !== teamIndex);
-      delete next.myEncoreMove![teamIndex];
-      delete next.myDisabledMove![teamIndex];
+      clearMyVolatiles(next, teamIndex);
     }
   }
   // Move-restricting volatiles (taunt / encore / disable).
@@ -848,14 +867,14 @@ function applyStateUpdateImpl(
     if (side === 'theirs') {
       const o = next.opponentTeam[teamIndex];
       if (o) {
-        if (update.taunt) o.taunted = true;
-        if (update.encoreMove != null) o.encoreMove = update.encoreMove;
-        if (update.disableMove != null) o.disabledMove = update.disableMove;
+        if (update.taunt) { o.taunted = true; o.tauntTurns = update.volatileTurns ?? EFFECT_DURATIONS.taunt; }
+        if (update.encoreMove != null) { o.encoreMove = update.encoreMove; o.encoreTurns = update.volatileTurns ?? EFFECT_DURATIONS.encore; }
+        if (update.disableMove != null) { o.disabledMove = update.disableMove; o.disableTurns = update.volatileTurns ?? EFFECT_DURATIONS.disable; }
       }
     } else {
-      if (update.taunt && !next.myTaunted!.includes(teamIndex)) next.myTaunted!.push(teamIndex);
-      if (update.encoreMove != null) next.myEncoreMove![teamIndex] = update.encoreMove;
-      if (update.disableMove != null) next.myDisabledMove![teamIndex] = update.disableMove;
+      if (update.taunt) { if (!next.myTaunted!.includes(teamIndex)) next.myTaunted!.push(teamIndex); next.myTauntTurns![teamIndex] = update.volatileTurns ?? EFFECT_DURATIONS.taunt; }
+      if (update.encoreMove != null) { next.myEncoreMove![teamIndex] = update.encoreMove; next.myEncoreTurns![teamIndex] = update.volatileTurns ?? EFFECT_DURATIONS.encore; }
+      if (update.disableMove != null) { next.myDisabledMove![teamIndex] = update.disableMove; next.myDisableTurns![teamIndex] = update.volatileTurns ?? EFFECT_DURATIONS.disable; }
     }
   }
   if (update.fainted) {
@@ -880,7 +899,7 @@ function applyStateUpdateImpl(
       const outgoing = nextActive.theirs[update.bringIntoSlot];
       if (outgoing != null) {
         const o = next.opponentTeam[outgoing];
-        if (o) { o.currentBoosts = {}; o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined; }
+        if (o) { o.currentBoosts = {}; clearOppVolatiles(o); }
       }
       nextActive.theirs[update.bringIntoSlot] = teamIndex;
       const brought = new Set(next.opponentBrought ?? []);

@@ -81,6 +81,10 @@ export interface OpponentEntry {
   taunted?: boolean;
   encoreMove?: string;
   disabledMove?: string;
+  // Countdown turns for the volatiles above (tick each EOT; clear at 0).
+  tauntTurns?: number;
+  encoreTurns?: number;
+  disableTurns?: number;
 }
 
 export interface HazardState {
@@ -93,6 +97,10 @@ export interface HazardState {
 export interface FieldState {
   weather?: 'Sun' | 'Rain' | 'Sand' | 'Snow' | 'Hail' | 'Harsh Sunshine' | 'Heavy Rain' | null;
   terrain?: 'Electric' | 'Grassy' | 'Misty' | 'Psychic' | null;
+  // Turns remaining (countdown) for the timed conditions. Undefined = untracked
+  // (count not known/seeded). Tick down each EOT; the effect clears at 0.
+  weatherTurns?: number;
+  trickRoomTurns?: number;
   trickRoom: boolean;
   myTailwind: boolean;
   theirTailwind: boolean;
@@ -224,6 +232,10 @@ export interface Match {
   myTaunted?: number[];
   myEncoreMove?: Record<number, string>;
   myDisabledMove?: Record<number, string>;
+  // Countdown turns for my-side volatiles (parallel to the maps above).
+  myTauntTurns?: Record<number, number>;
+  myEncoreTurns?: Record<number, number>;
+  myDisableTurns?: Record<number, number>;
   // myTeam index → charging-move state. Parallel to OpponentEntry.charging.
   // Set when a mine-side charge move logged with no damage; cleared when
   // the same mon's next damaging action lands.
