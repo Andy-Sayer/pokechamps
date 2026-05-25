@@ -39,14 +39,23 @@ describe('applyHazardClear', () => {
     expect(f.theirHazards).toEqual({ stickyWeb: true });
   });
 
-  test('defog clears hazards and screens on both sides', () => {
+  test('defog clears hazards both sides; screens only on the target (opponent) side', () => {
+    // Used by "theirs" → clears MY screens (the opponent of the user), leaves
+    // the user's own (theirs) screens. Hazards clear on both sides.
     const f = applyHazardClear(base, 'theirs', 'defog');
     expect(f.myHazards).toEqual({});
     expect(f.theirHazards).toEqual({});
-    expect(f.myReflect).toBe(false);
-    expect(f.theirLightScreen).toBe(false);
+    expect(f.myReflect).toBe(false);        // opponent-of-user side: cleared
+    expect(f.theirLightScreen).toBe(true);  // user's own side: kept
     // Tailwind is not touched by Defog.
     expect(f.myTailwind).toBe(true);
+  });
+
+  test('defog used by mine clears the opponent (theirs) screens only', () => {
+    const withTheirScreen: FieldState = { ...base, theirReflect: true, myLightScreen: true };
+    const f = applyHazardClear(withTheirScreen, 'mine', 'defog');
+    expect(f.theirReflect).toBe(false);  // opponent side cleared
+    expect(f.myLightScreen).toBe(true);  // user's own side kept
   });
 
   test('court-change swaps all side conditions', () => {

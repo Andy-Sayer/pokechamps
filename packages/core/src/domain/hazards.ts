@@ -132,16 +132,17 @@ export function applyHazardClear(
   if (kind === 'self') {
     if (userSide === 'mine') f.myHazards = {};
     else f.theirHazards = {};
-  } else if (kind === 'defog' || kind === 'tidy-up') {
+  } else if (kind === 'defog') {
+    // Defog removes entry hazards from BOTH sides, but screens (Reflect /
+    // Light Screen / Aurora Veil) only from the TARGET's side — i.e. the side
+    // opposite the user. (Bulbapedia: Defog.)
     f.myHazards = {};
     f.theirHazards = {};
-    if (kind === 'defog') {
-      // Defog also removes screens from both sides.
-      f.myReflect = false;
-      f.myLightScreen = false;
-      f.theirReflect = false;
-      f.theirLightScreen = false;
-    }
+    if (userSide === 'mine') { f.theirReflect = false; f.theirLightScreen = false; }
+    else { f.myReflect = false; f.myLightScreen = false; }
+  } else if (kind === 'tidy-up') {
+    f.myHazards = {};
+    f.theirHazards = {};
   } else if (kind === 'court-change') {
     // Swap all side conditions between the two sides.
     [f.myHazards, f.theirHazards] = [f.theirHazards, f.myHazards];

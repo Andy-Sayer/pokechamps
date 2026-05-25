@@ -30,7 +30,7 @@ First-turn-only moves (Fake Out / First Impression / Mat Block) are auto-gated: 
 
 Field-clearing moves are auto-detected by name (`packages/core/src/domain/hazards.ts` → `hazardClearEffect`). Just log the move normally — `finalizeTurn` mutates the field so you don't toggle each hazard off by hand:
 - **Rapid Spin** / **Mortal Spin** — clear the user's own-side hazards (Rapid Spin also +1 user Speed).
-- **Defog** — clear hazards **and** screens on both sides.
+- **Defog** — clear hazards on **both** sides; clear screens on the **opponent's** side only (the user keeps their own screens — Bulbapedia).
 - **Court Change** — swap all side conditions (hazards / screens / Tailwind) between sides.
 - **Tidy Up** — clear hazards on both sides (+1 user Atk & Speed).
 
