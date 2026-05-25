@@ -2,7 +2,7 @@
 
 ## Context
 
-**Last updated 2026-05-24.** 469 tests across 4 workspaces, all green.
+**Last updated 2026-05-24.** 492 tests across 4 workspaces, all green.
 A root `vitest.config.ts`
 (`test.projects`) now aggregates every workspace's own config, so both
 `npm test` and a bare `npx vitest run` from the repo root pass —
@@ -127,7 +127,12 @@ The original "Now" tier is mostly done. What's been merged on `main`:
   Taunt / Encore (3) / Disable (4) seed a default count (`durations.ts`),
   count down in the shared `endOfTurn` tick, auto-clear at 0. Overridable
   via a trailing number on the state line and via `/override` (weather /
-  TR turn rows). Shown in rosters + a grid "Field —" line.
+  TR turn rows). Shown in rosters + a grid "Field —" line. **Tailwind
+  (4t)** added the same way (subagent).
+- **GitHub Actions CI** — `.github/workflows/test.yml`. (subagent)
+- **Endgame solver core** — `domain/endgame.ts` `solveEndgame`; not yet
+  TUI-wired. (subagent)
+- **Defog screen-scope fix** — opponent-side screens only (audit).
 
 Pillar status after the above:
 
@@ -454,10 +459,12 @@ plays matches live + finds bugs by doing so:
 
 **Soon (4–8 sessions):**
 
-6. **C.1 — Endgame solver.** Down-to-2-vs-2 enumerable; surface the
-   optimal line. Stakes are highest, computation is bounded.
-7. **I.1 — GitHub Actions CI.** Run `npm test` on push. Cheap insurance
-   against regressions.
+6. **C.1 — Endgame solver.** ✅ *Core done* (`domain/endgame.ts`,
+   `solveEndgame` — 1-ply best-move-pair via predictOffense/Threat, 16
+   tests). **Not yet wired into the TUI** — surfacing (a `/endgame`
+   command, or auto when ≤2v2) is the remaining UX step.
+7. ~~**I.1 — GitHub Actions CI.**~~ ✅ **Done** — `.github/workflows/
+   test.yml` (typecheck + test on push/PR). Runs once a remote exists.
 8. **D — More TUI polish.** Inline edit of draft actions; Tab cycling
    through autocomplete; resize-aware layouts; match-end summary
    screen; quick-replay through saved snapshots.
@@ -519,7 +526,7 @@ Each item should ship with:
 - A short commit message naming what real-world scenario the change
   unblocks
 
-Keep the suite green at every commit. Current baseline: **469 tests** (was 359 when this doc was first written).
+Keep the suite green at every commit. Current baseline: **492 tests** (was 359 when this doc was first written).
 
 ## Out of scope (deliberately)
 
