@@ -374,6 +374,14 @@ Beyond that:
 
 ### G. Server / web *(low priority — TUI is primary)*
 
+- ~~**Shareable deployment.**~~ ✅ Shipped — provider-agnostic VM deploy
+  (Oracle Always Free recommended) via `docker-compose.prod.yml` (server
+  + Caddy auto-HTTPS), SQLite persisted to a Docker volume on real disk.
+  TUI bundled to a single `tui.mjs` + `data/` (`npm run bundle:tui`,
+  `scripts/bundle-tui.mjs` → esbuild) and served unauthenticated from
+  `GET /download/tui.tar.gz`; the friend runs `node tui/tui.mjs`. Data-dir
+  resolution in `data.ts` now probes `POKECHAMPS_DATA_DIR` / source /
+  bundle-adjacent / cwd so the bundle finds game data. Runbook: `DEPLOY.md`.
 - **Medium security items.** Per-route body limits, per-account login
   throttle, WS payload caps, generic error responses. Audit list
   exists in old plan notes.

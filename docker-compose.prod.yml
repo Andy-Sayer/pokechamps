@@ -1,0 +1,71 @@
+# Production stack for a single small VM (e.g. an Oracle Cloud Always Free
+# instance, a $5 VPS, or anything that gives you a real disk + a public IP).
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml logs -f
+#   docker compose -f docker-compose.prod.yml down
+#
+# Two containers:
+#   server — the Fastify API + the /download/tui.tar.gz client bundle, built
+#            from Dockerfile.prod. Persists sqlite to the `server_data` volume
+#            on the VM's real disk (DATABASE_URL=/data/pokechamps.sqlite).
+#   caddy  — TLS-terminating reverse proxy. Caddy fetches + renews a Let's
+#            Encrypt cert automatically for the domain in DOMAIN, so the
+#            server itself never touches certificates.
+#
+# Required env (put them in a .env file next to this one — see DEPLOY.md):
+#   DOMAIN          your hostname, e.g. pokechamps.example.com
+#   JWT_SECRET      `openssl rand -hex 32` — server refuses to boot without it
+#   ANTHROPIC_API_KEY  (optional) enables the AI review/explain features
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    image: pokechamps-server:prod
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      LOG_LEVEL: info
+      DATABASE_URL: file:/data/pokechamps.sqlite
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      # Caddy sits in front and stamps X-Forwarded-For; trust it so rate-limit
+      # buckets keyed on req.ip reflect real clients (see app.ts).
+      TRUST_PROXY: "1"
+      # CORS allowlist for the read-only web client. The TUI is not a browser
+      # origin, so it isn't subject to CORS; this only matters if you also
+      # serve the web viewer. Safe to point at your own domain.
+      POKECHAMPS_WEB_ORIGIN: https://${DOMAIN}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - server_data:/data
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  server_data:
+  caddy_data:
+  caddy_config:

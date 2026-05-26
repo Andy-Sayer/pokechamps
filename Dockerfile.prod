@@ -40,18 +40,26 @@ COPY packages/web/package.json     ./packages/web/package.json
 # Full install (devDeps included) — needed for tsc/tsx in the typecheck step.
 RUN npm install
 
-# Source for the two workspaces we actually need to typecheck. We skip tui
-# and web to keep the builder fast; their type errors aren't blockers for
-# shipping the server.
+# Source for the workspaces the builder needs. core + server for the typecheck;
+# tui + scripts + data so we can also produce the downloadable TUI bundle here
+# (esbuild → dist/pokechamps-tui.tar.gz) and ship it from the same image.
 COPY tsconfig.base.json ./
 COPY packages/core/tsconfig.json   ./packages/core/tsconfig.json
 COPY packages/core/src             ./packages/core/src
 COPY packages/server/tsconfig.json ./packages/server/tsconfig.json
 COPY packages/server/src           ./packages/server/src
+COPY packages/tui/tsconfig.json    ./packages/tui/tsconfig.json
+COPY packages/tui/src              ./packages/tui/src
+COPY scripts                       ./scripts
+COPY data                          ./data
 
 # Fail fast on type errors. If this passes, the runtime stage will work.
 RUN npm -w @pokechamps/core run typecheck \
  && npm -w @pokechamps/server run typecheck
+
+# Bundle the TUI client (single .mjs + data/, tarred). The runtime stage copies
+# the tarball; the server's /download/tui.tar.gz route serves it.
+RUN npm run bundle:tui
 
 # ---------------------------------------------------------------------------
 # Stage 2: runtime
@@ -101,6 +109,10 @@ COPY tsconfig.base.json            ./tsconfig.base.json
 # ../../../../data relative to its own file, i.e. /app/data here. Without
 # it every getSpecies() falls back to @pkmn/dex with no format allow-list.
 COPY data ./data
+
+# The downloadable TUI bundle, built in the builder stage. The /download route
+# resolves it at /app/dist/pokechamps-tui.tar.gz by default (no env needed).
+COPY --from=builder /app/dist/pokechamps-tui.tar.gz ./dist/pokechamps-tui.tar.gz
 
 # Fly mounts the persistent volume at /data (see fly.toml). The server's
 # DATABASE_URL defaults to that path — pre-create it so the first boot

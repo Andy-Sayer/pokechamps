@@ -1,94 +1,136 @@
-# Deploy: PokeChamps Server → Fly.io
+# Deploy: PokeChamps server + downloadable TUI
 
-Phase 5 runbook. Single small machine + one persistent sqlite volume. For the
-long-term blue/green plan see `~/.claude/plans/blue-green-deploy.md`.
+Goal: host the **server** on a small always-on box and let a friend download
+and run the **TUI** client against it. Persistence is a single SQLite file on
+the box's real disk — no managed database.
 
-## Prereqs
+The stack is two containers (`docker-compose.prod.yml`):
 
-- `flyctl` installed (`brew install flyctl` / `iwr https://fly.io/install.ps1 -useb | iex`)
-- A Fly account with billing attached
+- **server** — Fastify API + the `/download/tui.tar.gz` client bundle, built
+  from `Dockerfile.prod`. SQLite lives on a Docker volume (`server_data`).
+- **caddy** — TLS reverse proxy; auto-provisions a Let's Encrypt cert for your
+  domain. WebSockets pass through transparently.
 
-## First-time setup
+## Picking a host
+
+Any box with a public IP, a real (non-ephemeral) disk, and Docker works. The
+file-based persistence is the constraint: most free **PaaS** tiers (Render,
+Koyeb, Fly's new free allowance) give an **ephemeral** filesystem that's wiped
+on every deploy/restart, which would lose the SQLite file. So prefer a VM:
+
+| Option | Cost | Notes |
+|---|---|---|
+| **Oracle Cloud Always Free** | $0 forever | 1 Arm VM (up to 4 vCPU / 24 GB) or 2 small AMD VMs, real block storage. The recommended path below. |
+| Hetzner / Netcup / a $4–6 VPS | ~$5/mo | Simplest if you don't want Oracle's signup friction. |
+| Fly.io + a paid volume | ~$3.50/mo | `fly.toml` is still in the repo if you go this way; see "Fly.io" at the bottom. |
+
+Everything below targets a generic Ubuntu VM, so it applies to Oracle, a VPS,
+or anything in between.
+
+## 1. Provision the VM (Oracle Always Free)
+
+1. Create an Oracle Cloud account, then **Compute → Instances → Create**.
+2. Shape: **VM.Standard.A1.Flex** (Arm, Always Free eligible) — 1–2 OCPU /
+   6–12 GB RAM is plenty. Image: **Canonical Ubuntu 22.04+**.
+3. Add your SSH public key, create the instance, note the **public IP**.
+4. **Networking → open the ports.** In the instance's VCN security list (or a
+   Network Security Group), add ingress rules for TCP **80** and **443** from
+   `0.0.0.0/0`. Oracle also firewalls at the OS level — open it there too:
+   ```sh
+   sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80  -j ACCEPT
+   sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
+   sudo netfilter-persistent save
+   ```
+
+## 2. Point your domain at it
+
+Caddy needs a real hostname to get a TLS cert. Add a DNS **A record** for e.g.
+`pokechamps.example.com` → the VM's public IP. A free subdomain from
+DuckDNS/Afraid works if you don't own a domain. Wait for it to resolve
+(`ping pokechamps.example.com`) before step 4 or cert issuance will fail.
+
+## 3. Install Docker + clone
 
 ```sh
-# 1. Auth
-flyctl auth login
-
-# 2. Claim an app name. --no-deploy stops Fly from running a deploy with no
-#    secrets or volume in place yet. Accept the rewrite to fly.toml's `app`.
-#    When prompted "Would you like to copy its configuration to the new app?"
-#    answer Yes — that preserves the build/env/mounts blocks.
-flyctl launch --no-deploy --copy-config
-
-# 3. Pick a region and uncomment `primary_region` in fly.toml. List with:
-flyctl platform regions
-
-# 4. Create the persistent volume in the same region. 10GB is overkill but
-#    cheap — Fly's smallest is 1GB.
-flyctl volumes create pokechamps_data --size 10 --region <region>
-
-# 5. Set required secrets. JWT_SECRET MUST be set or the server refuses to
-#    boot (auth/jwt.ts:resolveJwtSecret).
-flyctl secrets set JWT_SECRET=$(openssl rand -hex 32)
-
-# 6. (Optional) AI features
-flyctl secrets set ANTHROPIC_API_KEY=sk-ant-...
+# On the VM:
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER   # log out/in so docker works without sudo
+git clone <your-repo-url> pokechamps && cd pokechamps
 ```
 
-## Deploy
+## 4. Configure + launch
+
+Create a `.env` next to `docker-compose.prod.yml`:
 
 ```sh
-flyctl deploy
+cat > .env <<EOF
+DOMAIN=pokechamps.example.com
+JWT_SECRET=$(openssl rand -hex 32)
+# Optional — enables AI review/explain:
+# ANTHROPIC_API_KEY=sk-ant-...
+EOF
 ```
 
-The build uses `Dockerfile.prod` (multi-stage: typecheck → slim runtime).
-First build takes ~3–4 min; cached rebuilds are under a minute.
+Build and start:
+
+```sh
+docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml logs -f   # watch cert issuance + boot
+```
+
+First build is ~3–5 min (it also bundles the TUI). Caddy fetches the cert on
+first request to the domain. Verify:
+
+```sh
+curl https://pokechamps.example.com/health     # {"status":"ok",...}
+```
+
+## 5. Your friend installs the TUI
+
+They need **Node 20+** and nothing else — no repo, no npm install:
+
+```sh
+curl -fL https://pokechamps.example.com/download/tui.tar.gz -o pokechamps-tui.tar.gz
+tar xzf pokechamps-tui.tar.gz
+node tui/tui.mjs
+```
+
+In the TUI: **Server Settings** → set the server URL to
+`https://pokechamps.example.com`, then register/log in. The bundle ships its
+own copy of the game data, so damage/format lookups work entirely client-side;
+the server is just shared storage for teams + match state.
+
+> The bundle is produced by `npm run bundle:tui` (esbuild → a single `tui.mjs`
+> plus a `data/` dir, tarred) and baked into the server image at build time, so
+> `/download/tui.tar.gz` always matches the deployed server.
 
 ## Operate
 
 ```sh
-flyctl status            # machines + health
-flyctl logs              # tail logs
-flyctl logs --no-tail    # dump recent + exit
-flyctl ssh console       # shell into the running machine
-flyctl ssh sftp shell    # browse /data over sftp if you need to pull the sqlite file
+docker compose -f docker-compose.prod.yml ps         # container health
+docker compose -f docker-compose.prod.yml logs -f server
+docker compose -f docker-compose.prod.yml restart server
+docker compose -f docker-compose.prod.yml pull && \
+  docker compose -f docker-compose.prod.yml up -d --build   # deploy new code
 ```
 
-The sqlite database is at `/data/pokechamps.sqlite` on the mounted volume.
-WAL files (`-wal`, `-shm`) sit alongside it; checkpointed cleanly on SIGTERM
-via the graceful-shutdown handler in `packages/server/src/index.ts`.
+### Backups
 
-## Rollback
+The whole datastore is one SQLite file on the `server_data` volume. To grab a
+consistent copy (WAL-safe):
 
 ```sh
-flyctl releases                       # list past releases + their image refs
-flyctl deploy --image <prev-image>    # redeploy a previous image
+docker compose -f docker-compose.prod.yml exec server \
+  sh -c 'cd /data && tar czf - pokechamps.sqlite*' > backup-$(date +%F).tar.gz
 ```
 
-Volume data is preserved across rollbacks (the schema is forward-only via
-`migrations.ts`, so rolling the code back to a version that doesn't know about
-a newer column is generally safe — it just ignores the column).
+Restore by stopping the server, extracting back into the volume, and starting.
 
-## Update secrets
+## Fly.io (alternative)
 
-```sh
-flyctl secrets set KEY=value          # triggers a rolling restart
-flyctl secrets unset KEY
-flyctl secrets list
-```
-
-## Cost sanity
-
-- 1× `shared-cpu-1x` 512MB machine, mostly idle: ~$2/mo
-- 10GB volume: ~$1.50/mo
-- Auto-stop on idle is enabled (`auto_stop_machines = "stop"`); cold start
-  adds ~1s to the first request after idle. Set `min_machines_running = 1`
-  in fly.toml if you want zero cold starts.
-
-## Long-term: blue/green
-
-When single-instance downtime during deploys starts hurting, follow
-`~/.claude/plans/blue-green-deploy.md`. The short version: split into two
-Fly apps behind a third "router" app, swap traffic at the router level,
-and add a litestream replica so the green env starts from a hot copy of
-the blue env's sqlite.
+`fly.toml` + `Dockerfile.prod` still work on Fly if you prefer it. The short
+version: `flyctl launch --no-deploy --copy-config`, create a paid volume
+(`flyctl volumes create pokechamps_data --size 1`), set
+`flyctl secrets set JWT_SECRET=$(openssl rand -hex 32)`, then `flyctl deploy`.
+Fly's edge already terminates TLS, so you skip Caddy. Note Fly's free allowance
+no longer includes a persistent volume, hence the ~$3.50/mo.

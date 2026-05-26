@@ -1,0 +1,11 @@
+# Caddy reverse proxy for the PokeChamps server. Caddy auto-provisions and
+# renews a Let's Encrypt cert for {$DOMAIN} (set in .env / docker-compose.prod
+# environment), so the Fastify server only ever speaks plain HTTP internally.
+#
+# WebSockets (the /matches/:id/live channel) pass through reverse_proxy
+# transparently — Caddy upgrades the connection without extra config.
+
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy server:3000
+}

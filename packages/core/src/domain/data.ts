@@ -6,7 +6,36 @@ import type { ChampionsFormat } from './types.js';
 import { _setFormatLoader } from './gimmicks/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const dataDir = join(__dirname, '..', '..', '..', '..', 'data');
+
+// Resolve the editable game-data dir. The repo layout puts it at the monorepo
+// root (../../../../data from this source file), but a bundled TUI (esbuild
+// single-file .mjs shipped alongside a data/ dir — see DEPLOY.md) has a totally
+// different on-disk shape. So instead of one hard-coded relative path we probe
+// an ordered list of candidates and take the first that actually holds the
+// data (we sniff species.json as the marker file). POKECHAMPS_DATA_DIR wins
+// outright for explicit overrides.
+function resolveDataDir(): string {
+  const marker = 'species.json';
+  const candidates = [
+    process.env.POKECHAMPS_DATA_DIR,
+    // Source-tree layout: packages/core/src/domain → repo-root/data.
+    join(__dirname, '..', '..', '..', '..', 'data'),
+    // Bundled layout: tui.mjs + data/ unpacked into the same dir.
+    join(__dirname, 'data'),
+    // Bundled layout where the launcher sits one level above data/.
+    join(__dirname, '..', 'data'),
+    // Last resort: a data/ dir in the process's working directory.
+    join(process.cwd(), 'data'),
+  ].filter((d): d is string => Boolean(d));
+  for (const dir of candidates) {
+    if (existsSync(join(dir, marker))) return dir;
+  }
+  // Nothing found — return the source-tree path so error messages point
+  // somewhere sensible; loadJsonIfExists will just fall back to @pkmn/dex.
+  return candidates[0]!;
+}
+
+const dataDir = resolveDataDir();
 
 function loadJsonIfExists<T>(filename: string): Record<string, T> | null {
   const p = join(dataDir, filename);

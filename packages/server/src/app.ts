@@ -18,6 +18,7 @@ import matchesRoutes from './routes/matches.js';
 import matchActionsRoutes from './routes/match-actions.js';
 import wsMatchRoutes from './routes/ws-match.js';
 import pikalyticsRoutes from './routes/pikalytics.js';
+import downloadRoutes from './routes/download.js';
 
 export interface BuildAppOptions {
   /** Override the default logger (set false to silence in tests). */
@@ -179,6 +180,10 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<BuiltApp> {
   // upgrade handler stays out of the REST file.
   await app.register(wsMatchRoutes, { prefix: '/matches' });
   await app.register(pikalyticsRoutes, { prefix: '/pikalytics' });
+  // Unauthenticated bundle download so a new friend can fetch the TUI client
+  // before they have an account. The CSP set by helmet is fine — we serve a
+  // gzip attachment, not HTML.
+  await app.register(downloadRoutes, { prefix: '/download' });
 
   return { app, migration };
 }

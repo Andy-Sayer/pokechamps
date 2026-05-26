@@ -7,6 +7,9 @@
   "workspaces": [
     "packages/*"
   ],
+  "devDependencies": {
+    "esbuild": "^0.28.0"
+  },
   "scripts": {
     "start": "npm -w @pokechamps/tui start",
     "typecheck": "npm -w @pokechamps/core run typecheck && npm -w @pokechamps/tui run typecheck && npm -w @pokechamps/server run typecheck && npm -w @pokechamps/web run typecheck",
@@ -15,6 +18,7 @@
     "server:docker": "docker compose up --build",
     "server:docker:watch": "docker compose watch",
     "server:docker:down": "docker compose down",
+    "bundle:tui": "node scripts/bundle-tui.mjs",
     "refresh-data": "npm -w @pokechamps/core run refresh-data",
     "refresh-pikalytics": "npm -w @pokechamps/core run refresh-pikalytics",
     "demo-team": "npm -w @pokechamps/core run demo-team",
