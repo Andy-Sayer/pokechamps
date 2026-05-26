@@ -465,30 +465,55 @@ plays matches live + finds bugs by doing so:
    no-chip, spread 0.75, priority-abilities, Intimidate list all
    verified correct.)*
 
-**Soon (4–8 sessions):**
-
 6. ~~**C.1 — Endgame solver.**~~ ✅ **Done** — `domain/endgame.ts`
    `solveEndgame` (1-ply best-move-pair, 16 tests) + `/endgame` (`/eg`)
    command surfacing per-mon best-play lines in the TUI.
 7. ~~**I.1 — GitHub Actions CI.**~~ ✅ **Done** — `.github/workflows/
    test.yml` (typecheck + test on push/PR). Runs once a remote exists.
-8. **D — More TUI polish.** Inline edit of draft actions; Tab cycling
-   through autocomplete; resize-aware layouts; match-end summary
-   screen; quick-replay through saved snapshots.
+8. ~~**G.1 — Shareable deployment.**~~ ✅ **Done** — TUI esbuild bundle +
+   `/download/tui.tar.gz`; Oracle VM + Caddy compose; SQLite on disk.
+   See `DEPLOY.md` and [[project_tui_bundle_deploy]].
 
-   *(F.1 multi-spread Pikalytics deliberately dropped from this tier —
-   see pillar F. Only revisit on a clear ~50/50 two-spread split.)*
+**Soon (next 1–4 sessions) — the freshly-opened front:**
+
+9. **Operational validation of the deploy** *(verifies the one piece
+   I couldn't test locally).* Provision the Oracle VM, run the real
+   `docker compose -f docker-compose.prod.yml up --build` (first true
+   test of the multi-stage image + alpine `tar` bundle step), point DNS,
+   confirm Caddy issues a cert, have the friend `node tui/tui.mjs`
+   against it end-to-end. Likely shakeout: arm64 native build of
+   `better-sqlite3` on the A1 shape, `.env`/CORS origin, firewall rules.
+   Push to a remote first so CI (I.1) starts running and the friend can
+   `git clone`.
+10. **D — TUI polish.** Inline edit of draft actions; Tab cycling
+    through autocomplete; resize-aware layouts; match-end summary
+    screen; quick-replay through saved snapshots.
+11. **Audit + inference leftovers** *(small, well-scoped commits).*
+    Trick/Switcheroo item swap; Sucker Punch fail conditions; extended-
+    duration items (Damp Rock / Light Clay → 8t) auto-applied instead of
+    defaulting to 5t; Sand-chip → no-Safety-Goggles signal; Download /
+    Trace switch-in abilities (deferred from A.2).
+
+    *(F.1 multi-spread Pikalytics deliberately dropped from this tier —
+    see pillar F. Only revisit on a clear ~50/50 two-spread split.)*
 
 **Later (no fixed timeline):**
 
-9. **A.1 — Tera gimmick scaffold.** Mega's pattern is the template.
-   Wait for Champions to actually rotate to Tera before spending the
-   effort.
-10. **A.4 — Dynamax + Z-Move gimmicks.** Champions hasn't enabled them.
-11. **C.2 — Multi-turn lookahead.** Wants Bayesian inference done
-    first.
-12. **F.2 — Champions client API integration** if/when one exists.
-13. **G.2 — Web expansion / mobile.** Only if usage grows.
+12. **J — End-to-end replay validation** (north-star, own section
+    above). Now partly unblocked: CI exists, and once a remote is live
+    (step 9) the corpus can run on push. Biggest single regression-
+    safety win — real replays drive the production pipeline and assert
+    move-legality + damage consistency.
+13. **A.1 — Tera gimmick scaffold.** Mega's pattern is the template.
+    Wait for Champions to actually rotate to Tera before spending the
+    effort.
+14. **A.4 — Dynamax + Z-Move gimmicks.** Champions hasn't enabled them.
+15. **C.2 — Multi-turn lookahead.** Wants Bayesian inference done first.
+16. **G — Match share links + per-opp tracking.** `/match/:id/public`
+    read-only URL; cross-match opp history (ELO trend, common brings).
+    Natural follow-ons now the server is deployable.
+17. **F.2 — Champions client API integration** if/when one exists.
+18. **G.2 — Web expansion / mobile.** Only if usage grows.
 14. **H — AI feature expansion.** Opt-in only, conservative scope.
     (User explicitly distrusts LLM judgement on VGC — see
     feedback_pokemon_strategy memory.)
