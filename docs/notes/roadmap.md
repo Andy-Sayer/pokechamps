@@ -489,10 +489,12 @@ plays matches live + finds bugs by doing so:
     through autocomplete; resize-aware layouts; match-end summary
     screen; quick-replay through saved snapshots.
 11. **Audit + inference leftovers** *(small, well-scoped commits).*
-    Trick/Switcheroo item swap; Sucker Punch fail conditions; extended-
-    duration items (Damp Rock / Light Clay → 8t) auto-applied instead of
-    defaulting to 5t; Sand-chip → no-Safety-Goggles signal; Download /
-    Trace switch-in abilities (deferred from A.2).
+    ✅ Extended-duration items (Damp/Heat/Smooth/Icy Rock → 8t weather,
+    Light Clay → 8t screens); ✅ Download / Trace switch-in abilities;
+    ✅ Sand-chip → no-Safety-Goggles inference signal. All mirrored into
+    the TUI finalizeTurn. **Still open:** Trick/Switcheroo item swap and
+    Sucker Punch fail conditions (both touch the dual-finalizeTurn path,
+    deferred from the parallel-agent batch).
 
     *(F.1 multi-spread Pikalytics deliberately dropped from this tier —
     see pillar F. Only revisit on a clear ~50/50 two-spread split.)*
