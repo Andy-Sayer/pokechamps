@@ -141,14 +141,25 @@ its serverUrl + matchId. Text-only output, but touches `BattleScreen.tsx`
 **3. TUI spectator (deferred)** — the web viewer is the natural spectator; a
 curses spectator is possible later but not worth it for v1.
 
-### Prerequisite: the host must be in remote mode
+### Prerequisite: the host must be in remote mode — ✅ ALREADY SATISFIED
 
 Live sharing requires the match to live on the server so mutations broadcast.
-That means the host plays logged-in to the server (httpStore), and each
-turn/state hits `/matches/:id/turns|state` (→ broadcast). **Verify during TUI
-work:** confirm remote-mode BattleScreen writes each turn to the server
-(vs. finalizing locally and only PATCHing on save). If it batches, add a
-per-turn POST in remote mode so spectators see live updates, not just-on-save.
+That means the host plays logged-in to the server (httpStore).
+
+**Verified 2026-05-26:** `BattleScreen.tsx` calls `saveMatchAsync(stores, next,
+…)` at the tail of **every** state-changing handler — `finalizeTurn` (line
+840), `applyHazardUpdate` (855), state updates, mega, etc. (6 call sites).
+`saveMatchAsync` → `stores.matches.update(id, match)` → in `httpStore` that's
+`PATCH /matches/:id` → `broadcastMatch(id, match, 'crud')`. So in remote mode a
+spectator subscribed via `?share=` receives a `crud` update after **every
+logged turn** with no further work. The realtime path is complete end-to-end;
+Phase C's `/share` command is *only* link generation, not plumbing.
+
+(Note: this PATCHes the whole match blob rather than POSTing to `/turns`, so the
+server trusts the client's computed match. Fine for spectating — the broadcast
+match blob is the display source of truth. A future hardening could route
+remote-mode turns through `/turns` for server-side re-validation, but it's
+orthogonal to spectating.)
 
 ## Phasing
 
