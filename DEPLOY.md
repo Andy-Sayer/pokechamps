@@ -66,6 +66,9 @@ Create a `.env` next to `docker-compose.prod.yml`:
 cat > .env <<EOF
 DOMAIN=pokechamps.example.com
 JWT_SECRET=$(openssl rand -hex 32)
+# Spectator share links (/share command) are built from this. Set it to your
+# real https origin so the links you hand out point at the right place.
+POKECHAMPS_PUBLIC_URL=https://pokechamps.example.com
 # Optional — enables AI review/explain:
 # ANTHROPIC_API_KEY=sk-ant-...
 EOF
@@ -87,10 +90,15 @@ curl https://pokechamps.example.com/health     # {"status":"ok",...}
 
 ## 5. Your friend installs the TUI
 
-They need **Node 20+** and nothing else — no repo, no npm install:
+They need **Node 20+** and nothing else — no repo, no npm install. Hand them
+[`SHARE.md`](SHARE.md), which has the full friend-facing guide (with the
+"is this safe?" rationale, checksum verification, and a build-it-yourself
+option). The short version:
 
 ```sh
-curl -fL https://pokechamps.example.com/download/tui.tar.gz -o pokechamps-tui.tar.gz
+curl -fL https://pokechamps.example.com/download/tui.tar.gz        -o pokechamps-tui.tar.gz
+curl -fL https://pokechamps.example.com/download/tui.tar.gz.sha256 -o pokechamps-tui.tar.gz.sha256
+shasum -a 256 -c pokechamps-tui.tar.gz.sha256    # verify → "...: OK"
 tar xzf pokechamps-tui.tar.gz
 node tui/tui.mjs
 ```
@@ -98,7 +106,9 @@ node tui/tui.mjs
 In the TUI: **Server Settings** → set the server URL to
 `https://pokechamps.example.com`, then register/log in. The bundle ships its
 own copy of the game data, so damage/format lookups work entirely client-side;
-the server is just shared storage for teams + match state.
+the server is just shared storage for teams + match state. To watch a live
+match, the host runs `/share` in-battle and sends the link; the friend picks
+**"Spectate a shared match"** and pastes it.
 
 > The bundle is produced by `npm run bundle:tui` (esbuild → a single `tui.mjs`
 > plus a `data/` dir, tarred) and baked into the server image at build time, so

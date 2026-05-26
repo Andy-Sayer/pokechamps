@@ -38,6 +38,9 @@ services:
       # origin, so it isn't subject to CORS; this only matters if you also
       # serve the web viewer. Safe to point at your own domain.
       POKECHAMPS_WEB_ORIGIN: https://${DOMAIN}
+      # Public origin used to build spectator share links (/share command).
+      # Falls back to https://${DOMAIN} if POKECHAMPS_PUBLIC_URL isn't in .env.
+      POKECHAMPS_PUBLIC_URL: ${POKECHAMPS_PUBLIC_URL:-https://${DOMAIN}}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - server_data:/data

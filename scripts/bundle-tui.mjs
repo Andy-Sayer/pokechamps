@@ -14,10 +14,11 @@
 // The TUI pulls in zero native modules (better-sqlite3 is server-only), so a
 // flat single-file bundle is safe. Run with: npm run bundle:tui
 import { build } from 'esbuild';
-import { rmSync, mkdirSync, cpSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { rmSync, mkdirSync, cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const distDir = join(repoRoot, 'dist');
@@ -75,6 +76,16 @@ rmSync(tarball, { force: true });
 const tarArgs = process.platform === 'win32' ? ['--force-local'] : [];
 execFileSync('tar', [...tarArgs, '-czf', tarball, '-C', distDir, 'tui'], { stdio: 'inherit' });
 
+// SHA-256 checksum so a downloader can verify integrity (and reproduce the
+// build to confirm authenticity — see SHARE.md). Written in the sha256sum
+// format `<hex>  <filename>` so `sha256sum -c pokechamps-tui.tar.gz.sha256`
+// works directly.
+const digest = createHash('sha256').update(readFileSync(tarball)).digest('hex');
+const checksumFile = `${tarball}.sha256`;
+writeFileSync(checksumFile, `${digest}  ${basename(tarball)}\n`);
+
 console.log(`\n[bundle-tui] wrote ${join(bundleDir, 'tui.mjs')}`);
 console.log(`[bundle-tui] wrote ${tarball}`);
+console.log(`[bundle-tui] wrote ${checksumFile}`);
+console.log(`[bundle-tui] sha256: ${digest}`);
 console.log('[bundle-tui] friend runs:  tar xzf pokechamps-tui.tar.gz && node tui/tui.mjs');

@@ -110,9 +110,10 @@ COPY tsconfig.base.json            ./tsconfig.base.json
 # it every getSpecies() falls back to @pkmn/dex with no format allow-list.
 COPY data ./data
 
-# The downloadable TUI bundle, built in the builder stage. The /download route
-# resolves it at /app/dist/pokechamps-tui.tar.gz by default (no env needed).
-COPY --from=builder /app/dist/pokechamps-tui.tar.gz ./dist/pokechamps-tui.tar.gz
+# The downloadable TUI bundle + its SHA-256, built in the builder stage. The
+# /download routes resolve them at /app/dist/ by default (no env needed).
+COPY --from=builder /app/dist/pokechamps-tui.tar.gz        ./dist/pokechamps-tui.tar.gz
+COPY --from=builder /app/dist/pokechamps-tui.tar.gz.sha256 ./dist/pokechamps-tui.tar.gz.sha256
 
 # Fly mounts the persistent volume at /data (see fly.toml). The server's
 # DATABASE_URL defaults to that path — pre-create it so the first boot

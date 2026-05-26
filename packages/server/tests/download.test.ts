@@ -54,4 +54,24 @@ describe('GET /download/tui.tar.gz', () => {
     expect(res.statusCode).toBe(404);
     expect(res.json()).toMatchObject({ error: 'tui_bundle_not_built' });
   });
+
+  it('serves the .sha256 checksum as text, no auth required', async () => {
+    const bundle = join(tmp, 'pokechamps-tui.tar.gz');
+    writeFileSync(bundle, Buffer.from('fake-gzip-bytes'));
+    const sum = `deadbeef  pokechamps-tui.tar.gz\n`;
+    writeFileSync(`${bundle}.sha256`, sum);
+    process.env.POKECHAMPS_TUI_BUNDLE = bundle;
+
+    const res = await app.inject({ method: 'GET', url: '/download/tui.tar.gz.sha256' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/plain');
+    expect(res.body).toBe(sum);
+  });
+
+  it('404s the checksum when it is missing', async () => {
+    process.env.POKECHAMPS_TUI_BUNDLE = join(tmp, 'does-not-exist.tar.gz');
+    const res = await app.inject({ method: 'GET', url: '/download/tui.tar.gz.sha256' });
+    expect(res.statusCode).toBe(404);
+  });
 });
