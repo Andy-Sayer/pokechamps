@@ -48,6 +48,12 @@ export interface MatchStore {
   // Live-update hook for Phase 3 collaborators. fileStore returns a no-op
   // unsubscribe — there are no other writers in local mode.
   subscribe(id: string, onChange: (m: Match) => void): () => void;
+  // Live spectator sharing (remote mode only). share() mints/returns a
+  // capability token + spectator URL; unshare() revokes it. Optional —
+  // fileStore omits them, and callers treat their absence as "local mode,
+  // sharing unavailable". See docs/notes/live-share-plan.md.
+  share?(id: string): Promise<{ token: string; url: string }>;
+  unshare?(id: string): Promise<void>;
 }
 
 export interface PikalyticsStore {

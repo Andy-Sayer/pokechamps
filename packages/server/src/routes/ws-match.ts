@@ -27,6 +27,8 @@ interface LiveParams {
 interface LiveQuery {
   token?: string;
   ticket?: string;
+  /** Spectator capability token — read-only live access via a share link. */
+  share?: string;
 }
 
 const wsMatchRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {

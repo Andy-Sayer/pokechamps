@@ -39,6 +39,14 @@ export interface BattleScreenProps {
   // menu and have the parent route accordingly. Default behaviour is back
   // to main menu.
   onEnd: (intent?: 'menu' | 'new-match') => void;
+  // Spectator mode: render the full host viewpoint read-only. The parent feeds
+  // live state by passing a fresh `match` prop on each WS frame (synced into
+  // local state below); input + commands are disabled and a banner replaces the
+  // turn composer. We only add a read path — finalizeTurn is never called here,
+  // so the host path is untouched. See docs/notes/live-share-plan.md.
+  spectator?: boolean;
+  // One-line connection status for the spectator banner ('● live' etc.).
+  spectatorLabel?: string;
 }
 
 // fire-and-forget snapshot save with an error surface via setMessage. Local
@@ -427,11 +435,21 @@ function synthOppEntry(set: PokemonSet): OpponentEntry {
   };
 }
 
-export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProps) {
+export function BattleScreen({ stores, match: initial, onEnd, spectator = false, spectatorLabel }: BattleScreenProps) {
   const [match, setMatch] = useState<Match>(initial);
   const [input, setInput] = useState('');
   const [draftActions, setDraftActions] = useState<MoveAction[]>([]);
   const [activeIdx, setActiveIdx] = useState(() => initialActiveIndices(initial));
+
+  // Spectator mode: the parent re-renders us with a fresh `match` prop on every
+  // live WS frame. Mirror it into local state (and re-derive the active slots
+  // from the full turn history) so the read-only render tracks the host. In
+  // host mode this effect never runs, so the local-edit path is untouched.
+  useEffect(() => {
+    if (!spectator) return;
+    setMatch(initial);
+    setActiveIdx(deriveActiveIdx(initial) as ReturnType<typeof initialActiveIndices>);
+  }, [spectator, initial]);
   const [message, setMessage] = useState<string>('');
   // Index in the in-progress autocomplete suggestion list.
   const [highlight, setHighlight] = useState(0);
@@ -1169,6 +1187,23 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
         return true;
       }
       case 'quit': onEnd(); return true;
+      case 'share': {
+        // Remote-mode only — sharing needs the match to live on the server.
+        if (!stores.matches.share || !stores.matches.unshare) {
+          setMessage('Sharing needs remote mode — set a server in Server Settings and sign in.');
+          return true;
+        }
+        if (args.trim().toLowerCase() === 'off') {
+          void stores.matches.unshare(match.id)
+            .then(() => setMessage('Live share revoked. Existing viewers will drop on reconnect.'))
+            .catch(err => setMessage(`Couldn't revoke share: ${err?.message ?? err}`));
+          return true;
+        }
+        void stores.matches.share(match.id)
+          .then(({ url }) => setMessage(`Live share link (send to a friend): ${url}`))
+          .catch(err => setMessage(`Couldn't create share: ${err?.message ?? err}`));
+        return true;
+      }
       case 'save':
         saveMatchAsync(stores, match, setMessage);
         setMessage(`Snapshot saved (${match.id}).`);
@@ -1282,6 +1317,11 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
   // since printable hotkeys collide with typing into the action input.
   // Slash commands cover the rest — see TextInput onSubmit below.
   useInput((_ch, key) => {
+    // Spectator: the only interaction is Esc to leave. No drafting, no commands.
+    if (spectator) {
+      if (key.escape) onEnd();
+      return;
+    }
     // Match over: Esc exits; /save still works via the input.
     if (match.outcome) {
       if (key.escape) onEnd();
@@ -1752,7 +1792,13 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
         );
       })()}
 
-      {/* Turn composer */}
+      {/* Spectator banner replaces the turn composer — read-only, no input. */}
+      {spectator ? (
+        <Box marginTop={1} borderStyle="round" paddingX={1} flexDirection="column">
+          <Text color="green">{spectatorLabel ?? '● spectating'} · read-only</Text>
+          <Text dimColor>Watching the host's live view. Press Esc to leave.</Text>
+        </Box>
+      ) : (
       <Box flexDirection="column" marginTop={1} borderStyle="round" paddingX={1}>
         <Text bold>Turn {match.turns.length + 1} in progress ({draftActions.length} action{draftActions.length === 1 ? '' : 's'})</Text>
         {draftActions.map((a, i) => {
@@ -1847,6 +1893,7 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
           </Box>
         )}
       </Box>
+      )}
 
       {/* Recent turn history */}
       {match.turns.length > 0 && (

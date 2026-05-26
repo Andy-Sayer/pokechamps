@@ -18,6 +18,7 @@ import { getDb } from '../db/connection.js';
 import { verifyPassword } from './passwords.js';
 import type { JwtPayload } from './jwt.js';
 import { consumeTicket } from '../ws/tickets.js';
+import { resolveShare } from '../db/shares.js';
 import { readTokenVersion } from './jwt.js';
 
 const BEARER = /^Bearer\s+(.+)$/i;
@@ -50,15 +51,41 @@ async function tryApiToken(token: string): Promise<JwtPayload | null> {
 
 export interface LiveAuthResult {
   user: JwtPayload;
-  /** Set when the auth came via a ticket — the caller must verify the
-   *  ticket's matchId matches the URL parameter to prevent cross-match reuse. */
+  /** Set when the auth came via a ticket OR a share token — the caller must
+   *  verify this matches the URL's match id to prevent cross-match reuse. */
   ticketMatchId?: string;
+  /** True when authed via a share token (read-only spectator). The live route
+   *  is read-only regardless, but this lets callers distinguish a spectator
+   *  from the owner if they ever need to. */
+  spectator?: boolean;
 }
 
 export async function verifyTokenForLive(
   app: FastifyInstance,
-  request: FastifyRequest<{ Querystring: { token?: string; ticket?: string } }>,
+  request: FastifyRequest<{ Querystring: { token?: string; ticket?: string; share?: string } }>,
 ): Promise<LiveAuthResult | null> {
+  // 0) Share path (spectator): persistent, multi-use capability token. Resolves
+  // to the OWNER's id + the match it unlocks; the route then loads that match
+  // and the scope check (ticketMatchId === matchId) prevents cross-match reuse.
+  // Read-only is guaranteed by the socket ignoring inbound frames.
+  const share = (request.query.share ?? '').trim();
+  if (share) {
+    const resolved = resolveShare(getDb(), share);
+    if (!resolved) return null;
+    const db = getDb();
+    const row = db
+      .prepare<[string], { email: string; token_version: number }>(
+        'SELECT email, token_version FROM users WHERE id = ?',
+      )
+      .get(resolved.ownerId);
+    if (!row) return null;
+    return {
+      user: { sub: resolved.ownerId, email: row.email, tv: row.token_version },
+      ticketMatchId: resolved.matchId,
+      spectator: true,
+    };
+  }
+
   // 1) Ticket path (browser): single-use, scoped, 30s TTL.
   const ticket = (request.query.ticket ?? '').trim();
   if (ticket) {

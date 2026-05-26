@@ -116,6 +116,14 @@ function createMatchStore(cfg: HttpStoreConfig): MatchStore {
         body: JSON.stringify({ match }),
       });
     },
+    async share(id: string): Promise<{ token: string; url: string }> {
+      return await request<{ token: string; url: string }>(
+        cfg, `/matches/${encodeURIComponent(id)}/share`, { method: 'POST' },
+      );
+    },
+    async unshare(id: string): Promise<void> {
+      await request(cfg, `/matches/${encodeURIComponent(id)}/share`, { method: 'DELETE' });
+    },
     subscribe(id: string, onChange: (m: Match) => void): () => void {
       // The browser WS handshake can't set arbitrary headers, so we always
       // pass the token in the query — works for both Node and browser clients.
