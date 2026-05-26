@@ -19,6 +19,8 @@ import matchActionsRoutes from './routes/match-actions.js';
 import wsMatchRoutes from './routes/ws-match.js';
 import pikalyticsRoutes from './routes/pikalytics.js';
 import downloadRoutes from './routes/download.js';
+import sharesRoutes from './routes/shares.js';
+import spectateRoutes from './routes/spectate.js';
 
 export interface BuildAppOptions {
   /** Override the default logger (set false to silence in tests). */
@@ -179,11 +181,17 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<BuiltApp> {
   // WebSocket live channel: GET /matches/:id/live. Sibling plugin so the
   // upgrade handler stays out of the REST file.
   await app.register(wsMatchRoutes, { prefix: '/matches' });
+  // Owner-side share-token management (POST/GET/DELETE /matches/:id/share).
+  // Authed + ownership-scoped. Live spectating, see live-share-plan.md.
+  await app.register(sharesRoutes, { prefix: '/matches' });
   await app.register(pikalyticsRoutes, { prefix: '/pikalytics' });
   // Unauthenticated bundle download so a new friend can fetch the TUI client
   // before they have an account. The CSP set by helmet is fine — we serve a
   // gzip attachment, not HTML.
   await app.register(downloadRoutes, { prefix: '/download' });
+  // Unauthenticated read-only spectator snapshot (GET /spectate/:token). The
+  // share token is the capability; mutation routes never accept it.
+  await app.register(spectateRoutes, { prefix: '/spectate' });
 
   return { app, migration };
 }

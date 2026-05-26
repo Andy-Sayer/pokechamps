@@ -309,6 +309,6 @@ describe('health', () => {
     const body = r.json() as { status: string; db: string; schemaLatest: string };
     expect(body.status).toBe('ok');
     expect(body.db).toBe('ok');
-    expect(body.schemaLatest).toBe('005_user_token_version');
+    expect(body.schemaLatest).toBe('006_match_shares');
   });
 });
