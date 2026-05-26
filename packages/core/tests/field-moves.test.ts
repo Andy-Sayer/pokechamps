@@ -2,6 +2,7 @@
 // unit tests for the effect table + applyFieldMove, plus engine integration.
 import { describe, test, expect } from 'vitest';
 import { fieldMoveEffect, applyFieldMove } from '../src/domain/fieldMoves.js';
+import { weatherDuration, screenDuration } from '../src/domain/durations.js';
 import { finalizeTurn, type ActiveIdx } from '../src/match/engine.js';
 import type { Match, PokemonSet, OpponentEntry, MoveAction, FieldState } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } from '../src/domain/types.js';
@@ -33,6 +34,39 @@ describe('fieldMoveEffect', () => {
   });
 });
 
+describe('weatherDuration', () => {
+  test('defaults to 5 turns without an item', () => {
+    expect(weatherDuration()).toBe(5);
+    expect(weatherDuration(null)).toBe(5);
+    expect(weatherDuration(undefined)).toBe(5);
+  });
+  test('extends to 8 turns with Damp Rock / Heat Rock / Smooth Rock / Icy Rock', () => {
+    expect(weatherDuration('Damp Rock')).toBe(8);
+    expect(weatherDuration('Heat Rock')).toBe(8);
+    expect(weatherDuration('Smooth Rock')).toBe(8);
+    expect(weatherDuration('Icy Rock')).toBe(8);
+  });
+  test('stays at 5 turns with unrelated items', () => {
+    expect(weatherDuration('Choice Scarf')).toBe(5);
+    expect(weatherDuration('Assault Vest')).toBe(5);
+  });
+});
+
+describe('screenDuration', () => {
+  test('defaults to 5 turns without Light Clay', () => {
+    expect(screenDuration()).toBe(5);
+    expect(screenDuration(null)).toBe(5);
+    expect(screenDuration(undefined)).toBe(5);
+  });
+  test('extends to 8 turns with Light Clay', () => {
+    expect(screenDuration('Light Clay')).toBe(8);
+  });
+  test('stays at 5 turns with unrelated items', () => {
+    expect(screenDuration('Choice Scarf')).toBe(5);
+    expect(screenDuration('Heat Rock')).toBe(5);
+  });
+});
+
 describe('applyFieldMove', () => {
   test('Trick Room toggles', () => {
     const on = applyFieldMove(NEUTRAL_FIELD, 'mine', { trickRoom: 'toggle' });
@@ -52,6 +86,29 @@ describe('applyFieldMove', () => {
     const f = applyFieldMove(NEUTRAL_FIELD, 'mine', { auroraVeil: true });
     expect(f.myReflect).toBe(true);
     expect(f.myLightScreen).toBe(true);
+  });
+  test('weather duration defaults to 5 turns', () => {
+    const f = applyFieldMove(NEUTRAL_FIELD, 'mine', { weather: 'Sun' });
+    expect(f.weather).toBe('Sun');
+    expect(f.weatherTurns).toBe(5);
+  });
+  test('weather duration extends to 8 with Heat Rock', () => {
+    const f = applyFieldMove(NEUTRAL_FIELD, 'mine', { weather: 'Sun' }, 'Heat Rock');
+    expect(f.weatherTurns).toBe(8);
+  });
+  test('screen duration defaults to 5 turns', () => {
+    const f = applyFieldMove(NEUTRAL_FIELD, 'mine', { reflect: true });
+    expect(f.myReflect).toBe(true);
+    expect(f.myReflectTurns).toBe(5);
+  });
+  test('screen duration extends to 8 with Light Clay', () => {
+    const f = applyFieldMove(NEUTRAL_FIELD, 'mine', { lightScreen: true }, 'Light Clay');
+    expect(f.myLightScreenTurns).toBe(8);
+  });
+  test('Aurora Veil respects Light Clay for both screens', () => {
+    const f = applyFieldMove(NEUTRAL_FIELD, 'mine', { auroraVeil: true }, 'Light Clay');
+    expect(f.myReflectTurns).toBe(8);
+    expect(f.myLightScreenTurns).toBe(8);
   });
 });
 

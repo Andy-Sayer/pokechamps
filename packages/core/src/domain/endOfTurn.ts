@@ -110,6 +110,10 @@ export function endOfTurn(
   if (f.trickRoomTurns != null) { f.trickRoomTurns -= 1; if (f.trickRoomTurns <= 0) { notes.push('Trick Room ended'); f.trickRoom = false; f.trickRoomTurns = undefined; } }
   if (f.myTailwindTurns != null) { f.myTailwindTurns -= 1; if (f.myTailwindTurns <= 0) { notes.push('m Tailwind ended'); f.myTailwind = false; f.myTailwindTurns = undefined; } }
   if (f.theirTailwindTurns != null) { f.theirTailwindTurns -= 1; if (f.theirTailwindTurns <= 0) { notes.push('o Tailwind ended'); f.theirTailwind = false; f.theirTailwindTurns = undefined; } }
+  if (f.myReflectTurns != null) { f.myReflectTurns -= 1; if (f.myReflectTurns <= 0) { notes.push('m Reflect ended'); f.myReflect = false; f.myReflectTurns = undefined; } }
+  if (f.myLightScreenTurns != null) { f.myLightScreenTurns -= 1; if (f.myLightScreenTurns <= 0) { notes.push('m Light Screen ended'); f.myLightScreen = false; f.myLightScreenTurns = undefined; } }
+  if (f.theirReflectTurns != null) { f.theirReflectTurns -= 1; if (f.theirReflectTurns <= 0) { notes.push('o Reflect ended'); f.theirReflect = false; f.theirReflectTurns = undefined; } }
+  if (f.theirLightScreenTurns != null) { f.theirLightScreenTurns -= 1; if (f.theirLightScreenTurns <= 0) { notes.push('o Light Screen ended'); f.theirLightScreen = false; f.theirLightScreenTurns = undefined; } }
 
   return { match: next, notes };
 }

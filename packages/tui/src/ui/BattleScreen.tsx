@@ -18,7 +18,7 @@ import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyp
 import { fieldMoveEffect, applyFieldMove } from '@pokechamps/core/domain/fieldMoves.js';
 import { EFFECT_DURATIONS } from '@pokechamps/core/domain/durations.js';
 import { detectChoiceLock, sashProcced, firstTurnOut, isFirstTurnMove, type ChoiceLock } from '@pokechamps/core/domain/itemSignals.js';
-import { switchInAbilityEffect, intimidateReaction, certainAbility, type BoostMap } from '@pokechamps/core/domain/abilities.js';
+import { switchInAbilityEffect, intimidateReaction, certainAbility, resolveDownloadBoost, type BoostMap } from '@pokechamps/core/domain/abilities.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
 import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict, type MatchupCell, type Confidence } from '@pokechamps/core/domain/predictions.js';
 import { PikaSpinner } from './PikaSpinner.js';
@@ -205,6 +205,40 @@ function applySwitchInAbilityInto(
       if (reaction.reaction) applyBoostsInto(match, foeSide, foeIdx, reaction.reaction);
     }
     notes.push(`${incoming.species}'s Intimidate lowered foe Attack`);
+  }
+  // Download: +1 Atk or +1 SpA vs the first foe's lower base defense.
+  if (effect.download) {
+    const foeSide: 'mine' | 'theirs' = side === 'mine' ? 'theirs' : 'mine';
+    const foeSlots = foeSide === 'mine' ? active.mine : active.theirs;
+    for (const foeIdx of foeSlots) {
+      if (foeIdx == null) continue;
+      const foe = foeSide === 'mine' ? match.myTeam[foeIdx] : match.opponentTeam[foeIdx];
+      if (!foe) continue;
+      const baseStats = (getSpecies(foe.species) as any)?.stats ?? {};
+      const boost = resolveDownloadBoost(baseStats.def ?? 100, baseStats.spd ?? 100);
+      applyBoostsInto(match, side, teamIndex, { [boost.stat]: 1 });
+      notes.push(`${incoming.species}'s Download boosted its ${boost.stat === 'atk' ? 'Attack' : 'Sp. Atk'}`);
+      break;
+    }
+  }
+  // Trace: copy the first foe's ability on switch-in.
+  if (effect.trace) {
+    const foeSide: 'mine' | 'theirs' = side === 'mine' ? 'theirs' : 'mine';
+    const foeSlots = foeSide === 'mine' ? active.mine : active.theirs;
+    for (const foeIdx of foeSlots) {
+      if (foeIdx == null) continue;
+      const foe = foeSide === 'mine' ? match.myTeam[foeIdx] : match.opponentTeam[foeIdx];
+      if (!foe) continue;
+      const foeAbility = side === 'mine'
+        ? (foe as OpponentEntry).ability
+        : (foe as PokemonSet).ability;
+      if (foeAbility) {
+        if (side === 'mine') (match.myTeam[teamIndex] as any).ability = foeAbility;
+        else (match.opponentTeam[teamIndex] as any).ability = foeAbility;
+        notes.push(`${incoming.species}'s Trace copied ${foe.species}'s ${foeAbility}`);
+      }
+      break;
+    }
   }
   return notes;
 }
@@ -653,7 +687,15 @@ export function BattleScreen({ stores, match: initial, onEnd }: BattleScreenProp
       if (a.kind === 'switch' || a.kind === 'mega') continue;
       const fm = fieldMoveEffect(a.move);
       if (!fm) continue;
-      next.field = applyFieldMove(next.field ?? NEUTRAL_FIELD, a.side, fm);
+      // Setter's held item adjusts duration (Damp/Heat/Smooth/Icy Rock → 8t
+      // weather; Light Clay → 8t screens). Mirror of engine.ts.
+      let setterItem: string | null | undefined;
+      if (a.attackerTeamIndex != null) {
+        setterItem = a.side === 'mine'
+          ? next.myTeam[a.attackerTeamIndex]?.item
+          : next.opponentTeam[a.attackerTeamIndex]?.item;
+      }
+      next.field = applyFieldMove(next.field ?? NEUTRAL_FIELD, a.side, fm, setterItem);
       inferenceNotes.push(`${a.move} set field state`);
     }
     // Item-removing moves (Knock Off / Thief / Covet / berry-eaters).

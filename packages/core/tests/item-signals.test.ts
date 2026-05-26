@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { detectChoiceLock } from '../src/domain/itemSignals.js';
+import { detectChoiceLock, observedSandChip } from '../src/domain/itemSignals.js';
 import type { Match, MoveAction, Turn } from '../src/domain/types.js';
 import { NEUTRAL_FIELD } from '../src/domain/types.js';
 
@@ -61,5 +61,35 @@ describe('detectChoiceLock', () => {
     const m = matchWith([turn(1, [oppMove(1, 'Moonblast')]), turn(2, [oppMove(1, 'Moonblast')])]);
     expect(detectChoiceLock(m, 0)).toBeNull();
     expect(detectChoiceLock(m, 1)).toEqual({ move: 'Moonblast', turns: 2 });
+  });
+});
+
+describe('observedSandChip', () => {
+  test('detects sand chip damage from inference notes', () => {
+    const notes = ['o1 -6% (Sand)', 'o2 took damage'];
+    expect(observedSandChip({} as any, 0, notes)).toBe(true);
+  });
+
+  test('ignores other damage types', () => {
+    const notes = ['o1 -6% (Burn)', 'o2 took damage'];
+    expect(observedSandChip({} as any, 0, notes)).toBe(false);
+  });
+
+  test('matches the correct opponent index', () => {
+    const notes = ['o1 -6% (Sand)', 'o2 -3% (Poison)'];
+    expect(observedSandChip({} as any, 0, notes)).toBe(true); // o1 = opp[0]
+    expect(observedSandChip({} as any, 1, notes)).toBe(false); // o2 doesn't have Sand
+  });
+
+  test('returns false for empty notes', () => {
+    expect(observedSandChip({} as any, 0, [])).toBe(false);
+  });
+
+  test('handles multi-digit opponent indices', () => {
+    const notes = ['o10 -6% (Sand)'];
+    // o10 would be opponentTeam[9] (zero-indexed, but notes are 1-indexed)
+    // Actually, observedSandChip checks for oppIdx, so o(oppIdx+1)
+    // oppIdx=9 => o10, so this should match
+    expect(observedSandChip({} as any, 9, notes)).toBe(true);
   });
 });

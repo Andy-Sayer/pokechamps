@@ -76,3 +76,38 @@ describe('mostLikely (minimum-stat-points principle)', () => {
     expect(pick).toBe(investedB);
   });
 });
+
+describe('Item signals: sandChipObserved', () => {
+  test('excludes Safety Goggles when sand chip is observed', () => {
+    const withoutSignal = inferSpread({ ...base, observation: observe(29) });
+    // At least one candidate should have Safety Goggles if sand chip wasn't observed
+    const hasGoggles = withoutSignal.some(c => c.item === 'Safety Goggles');
+
+    const withSignal = inferSpread({
+      ...base,
+      observation: observe(29),
+      sandChipObserved: true,
+    });
+    // No candidate should have Safety Goggles when sand chip is observed
+    const hasGogglesWithSignal = withSignal.some(c => c.item === 'Safety Goggles');
+    expect(hasGogglesWithSignal).toBe(false);
+  });
+
+  test('sand chip signal works with narrowed candidate sets', () => {
+    // First narrow to a set with Safety Goggles
+    const first = inferSpread({ ...base, observation: observe(29) });
+    const filtered = first.filter(c => c.item === 'Safety Goggles' || c.item === 'Assault Vest');
+
+    // Then apply sand chip signal on the narrowed set
+    const second = inferSpread({
+      ...base,
+      observation: observe(29),
+      startingCandidates: filtered,
+      sandChipObserved: true,
+    });
+    // All candidates should now be Assault Vest (Safety Goggles filtered out)
+    for (const c of second) {
+      expect(c.item).not.toBe('Safety Goggles');
+    }
+  });
+});

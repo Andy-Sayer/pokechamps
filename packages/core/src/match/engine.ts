@@ -37,11 +37,12 @@ import {
   switchInAbilityEffect,
   intimidateReaction,
   certainAbility,
+  resolveDownloadBoost,
   type BoostMap,
 } from '../domain/abilities.js';
 import { sashProcced } from '../domain/itemSignals.js';
 import { EFFECT_DURATIONS } from '../domain/durations.js';
-import { isChargeMove, isPivotMove, isItemRemovingMove } from '../domain/data.js';
+import { isChargeMove, isPivotMove, isItemRemovingMove, getSpecies } from '../domain/data.js';
 import type { StateUpdate, HazardUpdate } from '../domain/turnparser.js';
 
 export type ActiveIdx = {
@@ -229,6 +230,55 @@ function applySwitchInAbility(
       if (reaction.reaction) applyBoostsTo(match, foeSide, foeIdx, reaction.reaction);
     }
     notes.push(`${incoming.species}'s Intimidate lowered foe Attack`);
+  }
+
+  // Download: boost Atk or SpA based on which of the opponent's defenses is lower.
+  if (effect.download) {
+    const foeSide: 'mine' | 'theirs' = side === 'mine' ? 'theirs' : 'mine';
+    const foeSlots = foeSide === 'mine' ? active.mine : active.theirs;
+    // Only boost from the first opponent we find (if multiple actives, use the
+    // first one). In real VGC, Download triggers once per switch-in on one foe.
+    for (const foeIdx of foeSlots) {
+      if (foeIdx == null) continue;
+      const foe = foeSide === 'mine' ? match.myTeam[foeIdx] : match.opponentTeam[foeIdx];
+      if (!foe) continue;
+      // Calculate which stat to boost based on the foe's base Def vs SpD.
+      const baseStats = (getSpecies(foe.species) as any)?.stats ?? {};
+      const defVal = baseStats.def ?? 100;
+      const spdVal = baseStats.spd ?? 100;
+      const boost = resolveDownloadBoost(defVal, spdVal);
+      applyBoostsTo(match, side, teamIndex, { [boost.stat]: 1 });
+      notes.push(`${incoming.species}'s Download boosted its ${boost.stat === 'atk' ? 'Attack' : 'Sp. Atk'}`);
+      break; // Only boost once per switch-in
+    }
+  }
+
+  // Trace: copy an opponent's ability on switch-in.
+  if (effect.trace) {
+    const foeSide: 'mine' | 'theirs' = side === 'mine' ? 'theirs' : 'mine';
+    const foeSlots = foeSide === 'mine' ? active.mine : active.theirs;
+    // Copy from the first opponent we find. In real VGC, Trace picks one
+    // opponent's ability when the user enters (implementation detail: pick slot 0).
+    for (const foeIdx of foeSlots) {
+      if (foeIdx == null) continue;
+      const foe = foeSide === 'mine' ? match.myTeam[foeIdx] : match.opponentTeam[foeIdx];
+      if (!foe) continue;
+      const foeAbility = foeSide === 'mine'
+        ? (foe as PokemonSet).ability
+        : (foe as OpponentEntry).ability;
+      if (foeAbility) {
+        // On my side: update the PokemonSet's ability.
+        if (side === 'mine') {
+          (match.myTeam[teamIndex] as any).ability = foeAbility;
+          notes.push(`${incoming.species}'s Trace copied ${foe.species}'s ${foeAbility}`);
+        } else {
+          // On opponent side: update the OpponentEntry's ability.
+          (match.opponentTeam[teamIndex] as any).ability = foeAbility;
+          notes.push(`Opp ${incoming.species}'s Trace copied ${foe.species}'s ${foeAbility}`);
+        }
+      }
+      break; // Only trace once per switch-in
+    }
   }
 
   return notes;
@@ -465,7 +515,16 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     if (a.kind === 'switch' || a.kind === 'mega') continue;
     const fm = fieldMoveEffect(a.move);
     if (!fm) continue;
-    next.field = applyFieldMove(next.field ?? NEUTRAL_FIELD, a.side, fm);
+    // Retrieve the setter's held item for duration adjustment (Damp Rock, Heat Rock, etc.)
+    let setterItem: string | null | undefined;
+    if (a.attackerTeamIndex != null) {
+      if (a.side === 'mine') {
+        setterItem = next.myTeam[a.attackerTeamIndex]?.item;
+      } else {
+        setterItem = next.opponentTeam[a.attackerTeamIndex]?.item;
+      }
+    }
+    next.field = applyFieldMove(next.field ?? NEUTRAL_FIELD, a.side, fm, setterItem);
     inferenceNotes.push(`${a.move} set field state`);
   }
 

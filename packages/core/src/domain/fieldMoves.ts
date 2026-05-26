@@ -1,5 +1,5 @@
 import type { FieldState } from './types.js';
-import { EFFECT_DURATIONS } from './durations.js';
+import { EFFECT_DURATIONS, weatherDuration, screenDuration } from './durations.js';
 
 // Field-setting moves. Weather / terrain / Trick Room / Tailwind / screens are
 // logged as ordinary (usually targetless) move actions — the parser already
@@ -51,13 +51,16 @@ export function fieldMoveEffect(move: string): FieldMoveEffect | null {
 }
 
 // Apply a field-setting move from the user's side. Returns a fresh FieldState.
+// The optional setterItem is used to determine extended durations (e.g. Damp Rock
+// for Rain, Light Clay for screens).
 export function applyFieldMove(
   field: FieldState,
   userSide: 'mine' | 'theirs',
   e: FieldMoveEffect,
+  setterItem?: string | null,
 ): FieldState {
   const f: FieldState = { ...field };
-  if (e.weather) { f.weather = e.weather; f.weatherTurns = EFFECT_DURATIONS.weather; }
+  if (e.weather) { f.weather = e.weather; f.weatherTurns = weatherDuration(setterItem); }
   if (e.terrain) f.terrain = e.terrain;
   if (e.trickRoom === 'toggle') {
     f.trickRoom = !f.trickRoom;
@@ -67,11 +70,18 @@ export function applyFieldMove(
     if (userSide === 'mine') { f.myTailwind = true; f.myTailwindTurns = EFFECT_DURATIONS.tailwind; }
     else { f.theirTailwind = true; f.theirTailwindTurns = EFFECT_DURATIONS.tailwind; }
   }
-  if (e.reflect) { if (userSide === 'mine') f.myReflect = true; else f.theirReflect = true; }
-  if (e.lightScreen) { if (userSide === 'mine') f.myLightScreen = true; else f.theirLightScreen = true; }
+  const screenDurationTurns = screenDuration(setterItem);
+  if (e.reflect) {
+    if (userSide === 'mine') { f.myReflect = true; f.myReflectTurns = screenDurationTurns; }
+    else { f.theirReflect = true; f.theirReflectTurns = screenDurationTurns; }
+  }
+  if (e.lightScreen) {
+    if (userSide === 'mine') { f.myLightScreen = true; f.myLightScreenTurns = screenDurationTurns; }
+    else { f.theirLightScreen = true; f.theirLightScreenTurns = screenDurationTurns; }
+  }
   if (e.auroraVeil) {
-    if (userSide === 'mine') { f.myReflect = true; f.myLightScreen = true; }
-    else { f.theirReflect = true; f.theirLightScreen = true; }
+    if (userSide === 'mine') { f.myReflect = true; f.myReflectTurns = screenDurationTurns; f.myLightScreen = true; f.myLightScreenTurns = screenDurationTurns; }
+    else { f.theirReflect = true; f.theirReflectTurns = screenDurationTurns; f.theirLightScreen = true; f.theirLightScreenTurns = screenDurationTurns; }
   }
   return f;
 }

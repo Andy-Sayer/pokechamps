@@ -85,6 +85,10 @@ export interface OpponentEntry {
   tauntTurns?: number;
   encoreTurns?: number;
   disableTurns?: number;
+  // True if we've observed this mon take sandstorm chip damage. Proves it
+  // doesn't hold Safety Goggles and isn't Sand-immune. Used to exclude
+  // Safety Goggles from the item candidate set.
+  sandChipObserved?: boolean;
 }
 
 export interface HazardState {
@@ -103,6 +107,10 @@ export interface FieldState {
   trickRoomTurns?: number;
   myTailwindTurns?: number;
   theirTailwindTurns?: number;
+  myReflectTurns?: number;
+  myLightScreenTurns?: number;
+  theirReflectTurns?: number;
+  theirLightScreenTurns?: number;
   trickRoom: boolean;
   myTailwind: boolean;
   theirTailwind: boolean;

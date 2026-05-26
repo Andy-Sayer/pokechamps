@@ -6,6 +6,7 @@ import {
   switchInAbilityEffect,
   intimidateReaction,
   certainAbility,
+  resolveDownloadBoost,
 } from '../src/domain/abilities.js';
 import { finalizeTurn, type ActiveIdx } from '../src/match/engine.js';
 import type { Match, PokemonSet, OpponentEntry, MoveAction } from '../src/domain/types.js';
@@ -32,10 +33,33 @@ describe('switchInAbilityEffect', () => {
     expect(switchInAbilityEffect('Intrepid Sword')?.selfBoosts).toEqual({ atk: 1 });
     expect(switchInAbilityEffect('Dauntless Shield')?.selfBoosts).toEqual({ def: 1 });
   });
+  test('Download flags a download effect', () => {
+    expect(switchInAbilityEffect('Download')?.download).toBe(true);
+  });
+  test('Trace flags a trace effect', () => {
+    expect(switchInAbilityEffect('Trace')?.trace).toBe(true);
+  });
   test('abilities with no switch-in effect return null', () => {
     expect(switchInAbilityEffect('Levitate')).toBeNull();
     expect(switchInAbilityEffect(undefined)).toBeNull();
     expect(switchInAbilityEffect(null)).toBeNull();
+  });
+});
+
+describe('resolveDownloadBoost', () => {
+  test('boosts Atk when Def <= SpD (tiebreaker to Atk)', () => {
+    const b1 = resolveDownloadBoost(100, 100);
+    expect(b1.stat).toBe('atk');
+    expect(b1.lowerDefense).toBe('def');
+
+    const b2 = resolveDownloadBoost(100, 110);
+    expect(b2.stat).toBe('atk');
+    expect(b2.lowerDefense).toBe('def');
+  });
+  test('boosts SpA when SpD < Def', () => {
+    const b = resolveDownloadBoost(120, 100);
+    expect(b.stat).toBe('spa');
+    expect(b.lowerDefense).toBe('spd');
   });
 });
 
@@ -151,5 +175,15 @@ describe('finalizeTurn: switch-in abilities', () => {
     const match = freshMatch({ myTeam });
     const r = finalizeTurn({ match, turn: { actions: [mineSwitch(2)], field: match.field }, activeIdx: startActive });
     expect(r.match.field?.terrain).toBe('Grassy');
+  });
+
+  test('Download ability is recognized', () => {
+    const effect = switchInAbilityEffect('Download');
+    expect(effect?.download).toBe(true);
+  });
+
+  test('Trace ability is recognized', () => {
+    const effect = switchInAbilityEffect('Trace');
+    expect(effect?.trace).toBe(true);
   });
 });

@@ -77,3 +77,24 @@ export function detectChoiceLock(match: Match, oppIdx: number): ChoiceLock | nul
   }
   return run && run.count >= 2 ? { move: run.move, turns: run.count } : null;
 }
+
+// Detect if an opponent mon takes sand-chip damage, proving it's not holding
+// Safety Goggles (and doesn't have Sand immunity by type/ability). This signal
+// flags the opponent entry to exclude Safety Goggles from the item candidate set.
+//
+// Returns true if we've observed the mon taking sandstorm damage at end of turn
+// (indicated by a note in inferenceNotes containing "o<idx>" and the sandstorm
+// damage pattern). The caller (finalizeTurn in match/engine.ts) should mark
+// the opponent entry's `sandChipObserved` flag if this returns true.
+export function observedSandChip(match: Match, oppIdx: number, inferenceNotes: string[]): boolean {
+  // Look for EOT notes that match the sand chip pattern:
+  // "o<idx> -6% (Sand)" or similar (1/16 damage = 6.25%, displayed as -6%)
+  const oppLabel = `o${oppIdx + 1}`;
+  const sandChipPattern = /Sand/;
+  for (const note of inferenceNotes) {
+    if (note.includes(oppLabel) && sandChipPattern.test(note)) {
+      return true;
+    }
+  }
+  return false;
+}

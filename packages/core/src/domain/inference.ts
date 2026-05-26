@@ -113,6 +113,8 @@ export interface InferenceInput {
   // latency bounded; the TUI omits it so off-meta opps still get inferred.
   // When skipped, an inference that exhausts the priors returns [].
   quickOnly?: boolean;
+  // Item signals: exclude Safety Goggles if the mon has taken sand chip damage.
+  sandChipObserved?: boolean;
 }
 
 // Plain candidate list (likelihood order preserved). Most callers want this.
@@ -135,7 +137,11 @@ export function scoreSpread(input: InferenceInput): ScoredCandidate[] {
   const gimmickItems = (activeGimmick().enumerateOpponentVariants?.(toId(input.defenderSpecies)) ?? [])
     .map(v => v.item)
     .filter((i): i is string => !!i);
-  const items = Array.from(new Set([...baseItems, ...gimmickItems]));
+  let items = Array.from(new Set([...baseItems, ...gimmickItems]));
+  // Item signals: exclude Safety Goggles if we've observed sand chip damage.
+  if (input.sandChipObserved) {
+    items = items.filter(i => i !== 'Safety Goggles');
+  }
   const natures = input.priorNatures ?? NATURES_TO_TRY;
 
   // Pikalytics priors: if the species is in our cached top-N, build narrower

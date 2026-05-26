@@ -25,6 +25,12 @@ export interface SwitchInAbilityEffect {
   weather?: NonNullable<FieldState['weather']>;
   // Terrain to set on the field.
   terrain?: NonNullable<FieldState['terrain']>;
+  // Download: on switch-in, boost the higher of the opponent's defenses.
+  // The exact calculation (+1 Atk or +1 SpA) depends on comparing opponent's Def vs SpD.
+  download?: boolean;
+  // Trace: copy an opponent's ability on switch-in. The engine applies this
+  // by copying the ability from one of the opposing actives.
+  trace?: boolean;
 }
 
 // Snow Warning sets Snow in gen 9 (not Hail). Sand Stream → Sand, Drought →
@@ -67,7 +73,9 @@ export function switchInAbilityEffect(
   if (t) e.terrain = t;
   const sb = SELF_BOOST_ABILITIES[ability];
   if (sb) e.selfBoosts = sb;
-  return e.intimidate || e.weather || e.terrain || e.selfBoosts ? e : null;
+  if (ability === 'Download') e.download = true;
+  if (ability === 'Trace') e.trace = true;
+  return e.intimidate || e.weather || e.terrain || e.selfBoosts || e.download || e.trace ? e : null;
 }
 
 // How a foe reacts to an incoming Intimidate.
@@ -97,6 +105,23 @@ export function intimidateReaction(
   if (foeAbility === 'Competitive') return { blocked: false, reaction: { spa: 2 } };
   if (foeAbility === 'Rattled') return { blocked: false, reaction: { spe: 1 } };
   return { blocked: false };
+}
+
+// Download boost resolution: which stat should be boosted (+1 Atk or +1 SpA)?
+// Compares the opponent's Def vs SpD; boosts the corresponding offensive stat
+// for the one that is lower (Def lower → +1 Atk, SpD lower → +1 SpA).
+// If Def == SpD, Atk is boosted (game rule: Atk takes the tiebreaker).
+export interface DownloadBoost {
+  stat: 'atk' | 'spa';
+  lowerDefense: 'def' | 'spd'; // which defense was lower
+}
+
+export function resolveDownloadBoost(defenderDef: number, defenderSpd: number): DownloadBoost {
+  if (defenderSpd < defenderDef) {
+    return { stat: 'spa', lowerDefense: 'spd' };
+  }
+  // Def <= SpD: boost Atk (tiebreaker)
+  return { stat: 'atk', lowerDefense: 'def' };
 }
 
 // Resolve the ability to attribute to a (possibly opponent) mon switching in.
