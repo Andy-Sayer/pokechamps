@@ -16,6 +16,9 @@ import { MatchHistory } from './ui/MatchHistory.js';
 import { ServerSettings } from './ui/ServerSettings.js';
 import { TeamManagement } from './ui/TeamManagement.js';
 import { AddTeamPicker } from './ui/AddTeamPicker.js';
+import { SpectateConnect } from './ui/SpectateConnect.js';
+import { SpectatorScreen } from './ui/SpectatorScreen.js';
+import type { ShareTarget } from './spectate.js';
 
 type Route =
   | { kind: 'menu' }
@@ -33,7 +36,9 @@ type Route =
   | { kind: 'opponent'; myTeam: PokemonSet[]; teamName: string }
   | { kind: 'bring'; myTeam: PokemonSet[]; opponent: OpponentEntry[]; teamName: string }
   | { kind: 'opponent-lead'; myTeam: PokemonSet[]; opponent: OpponentEntry[]; teamName: string; bring: [number, number, number, number] }
-  | { kind: 'battle'; match: Match };
+  | { kind: 'battle'; match: Match }
+  | { kind: 'spectate-connect' }
+  | { kind: 'spectating'; target: ShareTarget };
 
 function App() {
   const { exit } = useApp();
@@ -74,6 +79,7 @@ function App() {
       else if (k === 'history') setRoute({ kind: 'history' });
       else if (k === 'server') setRoute({ kind: 'server' });
       else if (k === 'new-match') setRoute({ kind: 'pick-team' });
+      else if (k === 'spectate') setRoute({ kind: 'spectate-connect' });
     }} />;
   }
   if (route.kind === 'team-management') {
@@ -197,6 +203,16 @@ function App() {
   }
   if (route.kind === 'battle') {
     return <BattleScreen stores={stores} match={route.match} onEnd={intent => setRoute(intent === 'new-match' ? { kind: 'pick-team' } : { kind: 'menu' })} />;
+  }
+  if (route.kind === 'spectate-connect') {
+    return <SpectateConnect
+      fallbackBaseUrl={config.serverUrl}
+      onConnect={target => setRoute({ kind: 'spectating', target })}
+      onCancel={() => setRoute({ kind: 'menu' })}
+    />;
+  }
+  if (route.kind === 'spectating') {
+    return <SpectatorScreen stores={stores} target={route.target} onExit={() => setRoute({ kind: 'menu' })} />;
   }
   return <Text>Unknown route</Text>;
 }

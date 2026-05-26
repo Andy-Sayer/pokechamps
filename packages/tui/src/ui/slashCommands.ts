@@ -27,6 +27,7 @@ export type BattleCommandId =
   | 'ask'
   | 'endgame'
   | 'override'
+  | 'share'
   | 'help'
   | 'quit';
 
@@ -49,6 +50,7 @@ export const BATTLE_COMMANDS: readonly BattleCommand[] = [
   { id: 'ask',      aliases: ['ask'],                 description: 'Predict a hypothetical matchup: /ask m1 vs o3  or  /ask Delphox-Mega vs Sneasler' },
   { id: 'endgame',  aliases: ['endgame', 'eg'],       description: 'Best-play recommendation for the current actives (1-ply endgame solver)' },
   { id: 'override', aliases: ['override', 'ov'],      description: 'Open the manual state editor (field / HP / status / boosts / positions)' },
+  { id: 'share',    aliases: ['share', 'sh'],         description: 'Live-share this match (remote mode): /share for a spectator link, /share off to revoke' },
   { id: 'help',     aliases: ['help', 'h', '?'],      description: 'Show available commands' },
   { id: 'quit',     aliases: ['quit', 'q', 'end'],    description: 'End the match and return to the menu' },
 ];

@@ -100,8 +100,30 @@ share. One active token per match (the owner endpoint is create-or-return).
 
 ### Client surfaces
 
-**1. Web spectator (primary, lowest-friction — build after UI review)**
-A friend opens a URL in any browser, no install, no account:
+> **DECISION (2026-05-26):** The spectator client is the **TUI**, not a web
+> page — the friend already has the TUI. And they see the **full host
+> viewpoint** (board + opponent inference + damage matchup grid), i.e. exactly
+> what the host sees. The web spectator below is therefore **dropped**; the
+> implemented client is **TUI spectator mode** (see "TUI spectator", below).
+> Because the full viewpoint *is* `BattleScreen`'s read-only render, we reuse
+> `BattleScreen` via a `spectator` prop rather than duplicating the matchup /
+> inference rendering in a separate screen. Spectator mode only adds a read
+> path (WS-fed match + disabled input + banner) — it never calls finalizeTurn,
+> so the host path is untouched.
+
+**TUI spectator mode (the chosen client)**
+- New main-menu entry "Spectate a shared match" → paste the share link
+  (`https://host/spectate/<token>`); the TUI parses base URL + token.
+- Fetch the snapshot via `GET /spectate/:token` (→ match, incl. `match.id`),
+  then subscribe to `GET /matches/:matchId/live?share=<token>` for live frames.
+- Render via `BattleScreen` with `spectator: true`: match state comes from the
+  subscription (a `useEffect` re-`setMatch` on each frame), the input box +
+  `useInput` command handling are gated off, and a "● live · spectating
+  <host>'s view · read-only" banner replaces the input row.
+- No account needed for the spectator — the share token is the capability.
+
+**(dropped) Web spectator** — superseded by the TUI decision above. Kept for
+historical context only:
 ```
 https://<host>/spectate.html?t=<token>      (or  /#/spectate/<token>)
 ```
@@ -167,13 +189,19 @@ orthogonal to spectating.)
   migration + share store + owner endpoints + spectator snapshot + WS `?share=`
   + full server test coverage. Headless, security-sensitive, fully testable —
   done autonomously.
-- **Phase B — web spectator UI:** after the mockup above is approved. Small
-  `api.ts` + `liveMatch.ts` additions + a spectator entry that skips login +
-  the banner chrome.
-- **Phase C — TUI `/share` command:** host-side link generation. Confirm
-  remote-mode per-turn writes first.
-- **Phase D (optional) — redacted spectator view; close-on-revoke; tighter
-  rate-limit bucket on `/spectate/*`.**
+- **Phase B — web spectator UI:** ❌ DROPPED (TUI-spectator decision above).
+- **Phase C — TUI spectator + host `/share` (BUILT 2026-05-26):**
+  - Host: `/share` (`/sh`) battle command (remote mode) → `POST
+    /matches/:id/share` → prints the spectator link; `/share off` revokes.
+    `MatchStore.share/unshare` (optional; httpStore impl, fileStore omits →
+    "remote mode only").
+  - Spectator: main-menu "Spectate a shared match" → `SpectateConnect` (paste
+    link, `parseShareInput`) → `SpectatorScreen` (fetch snapshot + subscribe
+    via `?share=`) → renders `BattleScreen` with `spectator: true` (full host
+    viewpoint, input disabled, live banner). `spectate.ts` helper +
+    7 parse-unit tests. Ships in the downloadable bundle.
+- **Phase D (optional, not built) — redacted spectator view; close live
+  sockets on revoke; tighter rate-limit bucket on `/spectate/*`.**
 
 ## Open choices deferred (sensible defaults taken)
 
