@@ -16,3 +16,11 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      # Surface new dependency advisories. Fails CI on a high/critical in the
+      # runtime (prod) tree so a regression is caught at PR time. Dev-only
+      # advisories don't gate (they're not shipped); review them via the
+      # Actions log if this step's separate informational audit flags them.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+      - name: Audit (informational, all deps)
+        run: npm audit || true

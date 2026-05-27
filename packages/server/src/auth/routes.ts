@@ -6,6 +6,7 @@
 // (clients want a precise field name, not just "Bad Request").
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import { timingSafeEqual } from 'node:crypto';
 import { getDb } from '../db/connection.js';
 import { hashPassword, verifyPassword } from './passwords.js';
 import { newId, newTokenSecret } from './ids.js';
@@ -14,7 +15,23 @@ import { readTokenVersion, type JwtPayload } from './jwt.js';
 const credentialsSchema = z.object({
   email: z.string().email().max(255),
   password: z.string().min(8).max(200),
+  // Invite code — required only when REGISTRATION_SECRET is set on the server.
+  invite: z.string().max(200).optional(),
 });
+
+// Registration gate. When REGISTRATION_SECRET is set, /register requires a
+// matching `invite` (constant-time compare). Unset → registration is open
+// (dev / single-user convenience). See SHARE.md + DEPLOY.md.
+function inviteAccepted(provided: string | undefined): boolean {
+  const required = process.env.REGISTRATION_SECRET;
+  if (!required) return true;
+  if (!provided) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(required);
+  // timingSafeEqual throws on length mismatch — guard so a wrong-length guess
+  // returns false instead of erroring (and doesn't leak length via exception).
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 const createTokenSchema = z.object({
   name: z.string().min(1).max(100).optional(),
@@ -54,7 +71,11 @@ const authRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   app.post('/register', credentialRateLimit, async (request, reply) => {
     const parsed = credentialsSchema.safeParse(request.body);
     if (!parsed.success) return badRequest(reply, parsed.error);
-    const { email, password } = parsed.data;
+    const { email, password, invite } = parsed.data;
+
+    if (!inviteAccepted(invite)) {
+      return reply.code(403).send({ error: 'invalid or missing invite code' });
+    }
 
     const existing = db
       .prepare<[string], { id: string }>('SELECT id FROM users WHERE email = ? COLLATE NOCASE')
