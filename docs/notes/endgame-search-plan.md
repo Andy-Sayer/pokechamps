@@ -30,9 +30,16 @@ Reuses the existing per-turn predictors so we don't reinvent damage:
 - **Candidate pruning** is mandatory or the tree explodes (see below): for each
   active, consider only its top-K moves by 1-ply `predictOffense` (K≈2–3) × its
   legal targets. So ≤~6 joint actions/side instead of up to 64.
-- **Turn order** from `predictTurnOrder` (speed-aware). A mon that's KO'd before
-  it acts doesn't act — this is the whole point of modelling order (KO-first
-  avoids retaliation), and the 1-ply solver can't see it.
+- **Turn order** is speed-aware and taken **worst-case for me** (maximin): the
+  opponent's speed is their range **ceiling** (not midpoint), and is bumped to
+  the **mega forme's** max-investment speed when the species can mega
+  (`megaMaxSpeed`) — so the search assumes Aerodactyl-Mega outspeeds rather
+  than missing it. Under Trick Room the worst case flips to their floor. A mon
+  KO'd before it acts doesn't act — modelling order is the whole point
+  (KO-first avoids retaliation), which the 1-ply solver can't see.
+  *(Deferred: opponent **mega damage** — threat dmg is still base-forme; and
+  **my own mega** as a searched action — my damage/speed stay base-forme, which
+  is conservative for me. Both noted as follow-ups.)*
 - **Damage is collapsed to a single representative value** (likely-mid % from
   `predictOffense`/`predictThreat`) so the tree stays finite. Ranges are NOT
   branched on (that's exponential); the honest min/max envelope stays a

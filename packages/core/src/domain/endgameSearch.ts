@@ -23,9 +23,11 @@
  * All exports are PURE — no I/O, no mutation of inputs.
  */
 import type { PokemonSet, OpponentEntry, FieldState, Match } from './types.js';
+import { ZERO_EVS, MAX_IVS } from './types.js';
 import { predictOffense, predictThreat } from './predictions.js';
 import { actualSpeed, effectiveSpeedRange } from './speed.js';
 import { getMove } from './data.js';
+import { getMegaOptions } from './gimmicks/mega.js';
 import { maxHpFor } from './damage.js';
 
 // ---------------------------------------------------------------------------
@@ -159,12 +161,40 @@ function movePriority(move: string): number {
   return m?.priority ?? 0;
 }
 
-function oppSpeedOf(entry: OpponentEntry): number {
+// Worst-case mega-forme speed for a species at L50 (max Spe investment, +Spe
+// nature), or null if it can't mega. We don't know the opp's real EVs, so the
+// conservative bound for "could it outspeed me after mega" is the cap.
+export function megaMaxSpeed(species: string): number | null {
+  const options = getMegaOptions(species);
+  if (options.length === 0) return null;
+  const maxSet: PokemonSet = {
+    species, level: 50, nature: 'Jolly',
+    evs: { ...ZERO_EVS, spe: 252 }, ivs: { ...MAX_IVS }, moves: [],
+  };
+  let best: number | null = null;
+  for (const opt of options) {
+    const spe = actualSpeed(maxSet, opt.forme);
+    if (best == null || spe > best) best = spe;
+  }
+  return best;
+}
+
+// Representative opponent speed for the turn-order sort, taken WORST-CASE for me
+// (maximin): if the opp's speed is uncertain we assume the order that hurts me.
+// Outside Trick Room that's their speed CEILING — bumped to the mega forme's
+// max if they could mega (the thing the midpoint used to miss). Under Trick
+// Room, slower acts first, so the worst case is their floor.
+function oppSpeedOf(entry: OpponentEntry, field: FieldState): number {
   const r = effectiveSpeedRange(entry);
-  if (r) return (r.min + r.max) / 2;
-  // Fallback: a candidate set's actual speed, else a neutral guess.
-  const c = entry.candidates?.[0];
-  return c ? actualSpeed(c) : 100;
+  const tr = !!field.trickRoom;
+  let s = r
+    ? (tr ? r.min : r.max)
+    : (entry.candidates?.[0] ? actualSpeed(entry.candidates[0]!) : 100);
+  if (!tr) {
+    const mega = megaMaxSpeed(entry.species);
+    if (mega != null && mega > s) s = mega;
+  }
+  return s;
 }
 
 function buildTables(input: SearchInput): Tables {
@@ -181,7 +211,7 @@ function buildTables(input: SearchInput): Tables {
     mySpecies: mine.map(m => m.set.species),
     oppSpecies: opp.map(o => o.entry.species),
     mySpeed: mine.map(m => actualSpeed(m.set)),
-    oppSpeed: opp.map(o => oppSpeedOf(o.entry)),
+    oppSpeed: opp.map(o => oppSpeedOf(o.entry, input.field)),
     off, thr, mySpread, mySpreadActors,
     field: input.field,
   };

@@ -3,7 +3,7 @@
 // predictThreat compute real damage; assertions stay on verdict/targets/score
 // sign to be robust to exact rolls.
 import { describe, test, expect } from 'vitest';
-import { searchToDepth, searchIterative, searchInputFromMatch, type SearchInput } from '../src/domain/endgameSearch.js';
+import { searchToDepth, searchIterative, searchInputFromMatch, megaMaxSpeed, type SearchInput } from '../src/domain/endgameSearch.js';
 import type { PokemonSet, OpponentEntry, Match } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } from '../src/domain/types.js';
 import { maxHpFor } from '../src/domain/damage.js';
@@ -75,6 +75,16 @@ describe('searchToDepth', () => {
     };
     const r = searchToDepth(input, 3);
     expect(r.plays.length).toBe(0);
+  });
+});
+
+describe('megaMaxSpeed (conservative opp speed for turn order)', () => {
+  test('returns a speed for a mega-capable species, null otherwise', () => {
+    const aero = megaMaxSpeed('Aerodactyl');
+    expect(aero).not.toBeNull();
+    expect(aero!).toBeGreaterThan(150); // mega Aerodactyl is very fast at L50
+    // A species with no mega forme.
+    expect(megaMaxSpeed('Amoonguss')).toBeNull();
   });
 });
 
