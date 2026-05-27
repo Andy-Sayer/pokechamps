@@ -93,13 +93,28 @@ export function isPivotMove(name: string): boolean {
 // Moves that remove (or consume) the target's held item on hit. Knock Off /
 // Thief / Covet / Corrosive Gas strip any item; Incinerate / Bug Bite / Pluck
 // destroy a held berry. We mark the target's item as gone for damage-calc
-// purposes either way. Trick / Switcheroo SWAP items (not handled here — that
-// needs to track the swapped-in item, a separate follow-up).
+// purposes either way. Item-SWAP moves (Trick / Switcheroo) are handled
+// separately via isItemSwapMove — they exchange items rather than remove.
 const ITEM_REMOVING_MOVES = new Set([
   'Knock Off', 'Thief', 'Covet', 'Corrosive Gas', 'Incinerate', 'Bug Bite', 'Pluck',
 ]);
 export function isItemRemovingMove(name: string): boolean {
   return ITEM_REMOVING_MOVES.has(name);
+}
+// Trick / Switcheroo exchange the user's and target's held items. The engine
+// swaps the tracked item on each side so subsequent damage calcs use the new
+// holdings (e.g. a Choice item dumped onto the foe, or the foe's berry taken).
+const ITEM_SWAP_MOVES = new Set(['Trick', 'Switcheroo']);
+export function isItemSwapMove(name: string): boolean {
+  return ITEM_SWAP_MOVES.has(name);
+}
+// "Punish-the-attacker" moves that FAIL unless the target is attacking this
+// turn (and the user is faster within the priority bracket): Sucker Punch,
+// Thunderclap, Upper Hand. Their predicted damage is conditional — we surface
+// that caveat rather than presenting it as guaranteed.
+const ATTACK_CONDITIONAL_MOVES = new Set(['Sucker Punch', 'Thunderclap', 'Upper Hand']);
+export function isAttackConditionalMove(name: string): boolean {
+  return ATTACK_CONDITIONAL_MOVES.has(name);
 }
 export function getItem(name: string) {
   const id = toId(name);
