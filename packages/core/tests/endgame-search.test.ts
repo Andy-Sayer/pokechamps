@@ -78,6 +78,33 @@ describe('searchToDepth', () => {
   });
 });
 
+describe('spread moves', () => {
+  // Delphox with Heat Wave (allAdjacentFoes) vs two foes both weak to it.
+  const delphox = mon({
+    species: 'Delphox', ability: 'Blaze', nature: 'Timid',
+    evs: { hp: 0, atk: 0, def: 0, spa: 252, spd: 4, spe: 252 }, moves: ['Heat Wave', 'Psychic'],
+  });
+  const abomasnow = mon({ species: 'Abomasnow', ability: 'Snow Warning', moves: ['Blizzard'] });
+  const ferrothorn = mon({ species: 'Ferrothorn', ability: 'Iron Barbs', moves: ['Power Whip'] });
+
+  test('recommends the spread move against two foes it hits, targeting all foes', () => {
+    const input: SearchInput = {
+      mine: [{ set: delphox, hpPercent: 100, active: true }],
+      opp: [
+        { entry: oppOf(abomasnow), hpPercent: 100, active: true },
+        { entry: oppOf(ferrothorn), hpPercent: 100, active: true },
+      ],
+      field: { ...NEUTRAL_FIELD },
+    };
+    const r = searchToDepth(input, 1);
+    const play = r.plays.find(p => p.mySpecies === 'Delphox');
+    expect(play).toBeTruthy();
+    expect(play!.move).toBe('Heat Wave');
+    expect(play!.spread).toBe(true);
+    expect(play!.targetSpecies).toBe('all foes');
+  });
+});
+
 describe('searchInputFromMatch', () => {
   function freshMatch(): Match {
     return {

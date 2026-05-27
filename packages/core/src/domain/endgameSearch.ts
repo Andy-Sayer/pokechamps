@@ -54,6 +54,8 @@ export interface SearchPlay {
   mySpecies: string;
   move: string;
   targetSpecies: string;
+  /** True when `move` is a spread move hitting all live foes at once. */
+  spread?: boolean;
 }
 export interface SearchResult {
   /** How many plies deep this result was computed to. */
@@ -72,12 +74,18 @@ export interface SearchResult {
 const WIN = 100_000;          // terminal magnitude; faster wins score higher
 const MATERIAL = 1_000;       // per-mon material weight (dominates HP)
 const MAX_ACTIVE = 2;
+// Sentinel target meaning "spread move — hit every live foe" (vs a foe index).
+const SPREAD = -1;
 
 // ---------------------------------------------------------------------------
 // Internal flat model (indices into precomputed arrays)
 // ---------------------------------------------------------------------------
 
 interface Cell { dmg: number; move: string; priority: number } // dmg as % of target max
+
+/** A spread move option for one of my mons: the move plus its (already
+ *  spread-reduced) damage vs each opp index. Hits every live foe at once. */
+interface SpreadOpt { move: string; priority: number; dmg: number[] }
 
 interface Tables {
   myN: number;
@@ -86,9 +94,41 @@ interface Tables {
   oppSpecies: string[];
   mySpeed: number[];           // effective base speed (pre-field)
   oppSpeed: number[];
-  off: Cell[][];               // off[mi][oj] — my mi attacking opp oj
+  off: Cell[][];               // off[mi][oj] — my mi attacking opp oj (best single-target)
   thr: Cell[][];               // thr[oj][mi] — opp oj attacking my mi
+  mySpread: (SpreadOpt | null)[]; // mySpread[mi] — best spread move, or null
+  mySpreadActors: Set<number>; // indices of mine that have a spread option
   field: FieldState;
+}
+
+// Doubles spread moves hit all opposing actives. Heat Wave / Rock Slide /
+// Blizzard etc. are 'allAdjacentFoes'; Earthquake / Surf are 'allAdjacent'
+// (also hits the ally — we only model foe damage). predictOffense already
+// applies the 0.75 spread modifier to the damage value.
+function isSpreadMove(move: string): boolean {
+  const t = (getMove(move) as { target?: string } | undefined)?.target;
+  return t === 'allAdjacentFoes' || t === 'allAdjacent';
+}
+
+// Best spread move for my mon (by total damage across the current opponents),
+// or null if it has none. Damage per opp index parallels `opps`.
+function bestSpread(set: PokemonSet, opps: SearchOppMon[], field: FieldState): SpreadOpt | null {
+  const spreads = (set.moves ?? []).filter(isSpreadMove);
+  if (spreads.length === 0) return null;
+  let best: { opt: SpreadOpt; total: number } | null = null;
+  for (const mv of spreads) {
+    const atk: PokemonSet = { ...set, moves: [mv] };
+    const dmg = opps.map(o => {
+      const c = predictOffense({ attacker: atk, opponent: o.entry, field });
+      if (!c) return 0;
+      const lo = c.likelyMinPercent ?? c.minPercent;
+      const hi = c.likelyMaxPercent ?? c.maxPercent;
+      return (lo + hi) / 2;
+    });
+    const total = dmg.reduce((a, b) => a + b, 0);
+    if (!best || total > best.total) best = { opt: { move: mv, priority: movePriority(mv), dmg }, total };
+  }
+  return best?.opt ?? null;
 }
 
 interface State {
@@ -132,6 +172,9 @@ function buildTables(input: SearchInput): Tables {
   const opp = input.opp;
   const off: Cell[][] = mine.map(m => opp.map(o => cellFromOffense(m.set, o.entry, input.field)));
   const thr: Cell[][] = opp.map(o => mine.map(m => cellFromThreat(o.entry, m.set, input.field)));
+  const mySpread = mine.map(m => bestSpread(m.set, opp, input.field));
+  const mySpreadActors = new Set<number>();
+  mySpread.forEach((s, i) => { if (s) mySpreadActors.add(i); });
   return {
     myN: mine.length,
     oppN: opp.length,
@@ -139,7 +182,7 @@ function buildTables(input: SearchInput): Tables {
     oppSpecies: opp.map(o => o.entry.species),
     mySpeed: mine.map(m => actualSpeed(m.set)),
     oppSpeed: opp.map(o => oppSpeedOf(o.entry)),
-    off, thr,
+    off, thr, mySpread, mySpreadActors,
     field: input.field,
   };
 }
@@ -183,8 +226,8 @@ function resolveTurn(
 
   const actings: Acting[] = [];
   for (const [actor, target] of myTargets) {
-    const cell = t.off[actor]![target]!;
-    actings.push({ side: 'mine', actor, target, priority: cell.priority, speed: effSpeed(t.mySpeed[actor]!, !!t.field.myTailwind) });
+    const priority = target === SPREAD ? t.mySpread[actor]!.priority : t.off[actor]![target]!.priority;
+    actings.push({ side: 'mine', actor, target, priority, speed: effSpeed(t.mySpeed[actor]!, !!t.field.myTailwind) });
   }
   for (const [actor, target] of oppTargets) {
     const cell = t.thr[actor]![target]!;
@@ -200,6 +243,16 @@ function resolveTurn(
   for (const act of actings) {
     if (act.side === 'mine') {
       if (myHp[act.actor]! <= 0) continue;          // KO'd before acting
+      if (act.target === SPREAD) {
+        // Spread move — hit every live foe with this move's (already
+        // spread-reduced) damage vs each.
+        const sp = t.mySpread[act.actor]!;
+        for (let foe = 0; foe < oppHp.length; foe++) {
+          if (oppHp[foe]! <= 0) continue;
+          oppHp[foe] = Math.max(0, oppHp[foe]! - (sp.dmg[foe] ?? 0));
+        }
+        continue;
+      }
       if (oppHp[act.target]! <= 0) continue;        // target already down → fizzle
       oppHp[act.target] = Math.max(0, oppHp[act.target]! - t.off[act.actor]![act.target]!.dmg);
     } else {
@@ -245,17 +298,20 @@ function refill(
 }
 
 // All joint target assignments for a side's live actives (cartesian product of
-// each active's live-foe targets). Empty when there are no live foes.
-function jointActions(active: number[], foeHp: number[]): Array<Map<number, number>> {
+// each active's options). Each active's options are the live foes (single-
+// target) plus, for actors in `spreadActors`, the SPREAD sentinel (hit all
+// foes). Empty when there are no live foes.
+function jointActions(active: number[], foeHp: number[], spreadActors?: Set<number>): Array<Map<number, number>> {
   const liveFoes = foeHp.map((h, j) => (h > 0 ? j : -1)).filter(j => j >= 0);
   if (liveFoes.length === 0) return [];
   let combos: Array<Map<number, number>> = [new Map()];
   for (const actor of active) {
+    const options = spreadActors?.has(actor) ? [...liveFoes, SPREAD] : liveFoes;
     const next: Array<Map<number, number>> = [];
     for (const combo of combos) {
-      for (const foe of liveFoes) {
+      for (const opt of options) {
         const m = new Map(combo);
-        m.set(actor, foe);
+        m.set(actor, opt);
         next.push(m);
       }
     }
@@ -298,7 +354,7 @@ function value(t: Tables, s: State, depth: number, alpha: number): number {
   if (term !== null) return term;
   if (depth === 0) return leafScore(s);
 
-  const myJoints = jointActions(s.myActive, s.oppHp);
+  const myJoints = jointActions(s.myActive, s.oppHp, t.mySpreadActors);
   const oppJoints = jointActions(s.oppActive, s.myHp);
   if (myJoints.length === 0) return leafScore(s);
 
@@ -364,7 +420,7 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
 // iterative driver so the (expensive) damage matrices are built only once per
 // position, not once per depth.
 function rootSearch(t: Tables, s0: State, depth: number): SearchResult {
-  const myJoints = jointActions(s0.myActive, s0.oppHp);
+  const myJoints = jointActions(s0.myActive, s0.oppHp, t.mySpreadActors);
   let bestJoint: Map<number, number> | null = null;
   let bestScore = -Infinity;
 
@@ -384,11 +440,20 @@ function rootSearch(t: Tables, s0: State, depth: number): SearchResult {
   const plays: SearchPlay[] = [];
   if (bestJoint) {
     for (const [actor, target] of bestJoint) {
-      plays.push({
-        mySpecies: t.mySpecies[actor]!,
-        move: t.off[actor]![target]!.move,
-        targetSpecies: t.oppSpecies[target]!,
-      });
+      if (target === SPREAD) {
+        plays.push({
+          mySpecies: t.mySpecies[actor]!,
+          move: t.mySpread[actor]!.move,
+          targetSpecies: 'all foes',
+          spread: true,
+        });
+      } else {
+        plays.push({
+          mySpecies: t.mySpecies[actor]!,
+          move: t.off[actor]![target]!.move,
+          targetSpecies: t.oppSpecies[target]!,
+        });
+      }
     }
   }
   const verdict: SearchResult['verdict'] =

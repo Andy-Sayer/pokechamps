@@ -38,6 +38,12 @@ Reuses the existing per-turn predictors so we don't reinvent damage:
   branched on (that's exponential); the honest min/max envelope stays a
   display-time concept, not a search-time one. (Possible later: min/max
   bracketing of the *root* move only.)
+- **Spread moves (my side) — handled.** Each of my actives also gets a "spread"
+  option (the SPREAD sentinel) when its set has an `allAdjacentFoes` /
+  `allAdjacent` move; it applies that move's (already 0.75-reduced) damage to
+  *every* live foe in one action, and the recommendation shows "→ all foes".
+  Opponent spread moves are still modelled single-target (deferred — predictThreat
+  doesn't take a forced move; opp modelling is already approximate).
 - **KO + replacement:** when an active faints and the side has live bench, bring
   in a replacement heuristically (best 1-ply matchup vs the current foes). We do
   **not** enumerate voluntary switches as actions in v1 — that's the main
@@ -119,5 +125,6 @@ indicator. `/endgame` stays as the on-demand detailed view.
 ## Non-goals (v1)
 
 Exact equilibrium play; enumerating voluntary switches; branching on damage
-rolls; modelling every secondary effect (status/weather chip carry through via
-the field state we already track, but we don't search status-fishing lines).
+rolls; opponent-side spread moves (my side IS handled — see turn model);
+modelling every secondary effect (status/weather chip carry through via the
+field state we already track, but we don't search status-fishing lines).

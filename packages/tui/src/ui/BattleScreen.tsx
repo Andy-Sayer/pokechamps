@@ -1583,14 +1583,18 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       {!match.outcome && bestSearch && bestSearch.plays.length > 0 && (() => {
         const v = bestSearch.verdict;
         const vColor = v === 'winning' ? 'green' : v === 'losing' ? 'red' : 'yellow';
-        const vText = v === 'winning' ? 'likely win' : v === 'losing' ? 'likely loss' : 'even';
+        const decided = bestSearch.score >= 100_000 || bestSearch.score <= -100_000;
+        const vText = decided
+          ? (v === 'winning' ? 'forced win' : 'forced loss')
+          : (v === 'winning' ? 'likely win' : v === 'losing' ? 'likely loss' : 'even');
+        const turns = bestSearch.depth;
+        const conf = `${turns} turn${turns === 1 ? '' : 's'} ahead`;
         const plays = bestSearch.plays
           .map(p => `${p.mySpecies}→${p.move || '—'}→${p.targetSpecies}`)
           .join(' · ');
-        const thinking = bestSearch.score >= 100_000 || bestSearch.score <= -100_000 ? '' : ` (depth ${bestSearch.depth})`;
         return (
           <Text>
-            <Text color="magenta">⌁ best play{thinking}: </Text>
+            <Text color="magenta">⌁ best play </Text><Text dimColor>({conf})</Text><Text color="magenta">: </Text>
             {plays}  <Text color={vColor}>— {vText}</Text>
           </Text>
         );
