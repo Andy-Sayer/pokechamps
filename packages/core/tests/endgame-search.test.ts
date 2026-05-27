@@ -88,6 +88,25 @@ describe('megaMaxSpeed (conservative opp speed for turn order)', () => {
   });
 });
 
+describe('mega modelling', () => {
+  test('handles mega-capable mons on both sides; megaMon (if set) is mine', () => {
+    const megaDelphox = mon({
+      species: 'Delphox', item: 'Delphoxite', ability: 'Blaze', nature: 'Timid',
+      evs: { hp: 0, atk: 0, def: 0, spa: 252, spd: 4, spe: 252 }, moves: ['Psychic', 'Mystical Fire'],
+    });
+    const aero = mon({ species: 'Aerodactyl', ability: 'Pressure', moves: ['Rock Slide', 'Stone Edge'] });
+    const input: SearchInput = {
+      mine: [{ set: megaDelphox, hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(aero), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD },
+    };
+    const r = searchToDepth(input, 2);
+    expect(r.plays.length).toBe(1);
+    expect(r.plays[0]!.mySpecies).toBe('Delphox');
+    if (r.megaMon) expect(r.megaMon).toBe('Delphox');
+  });
+});
+
 describe('spread moves', () => {
   // Delphox with Heat Wave (allAdjacentFoes) vs two foes both weak to it.
   const delphox = mon({

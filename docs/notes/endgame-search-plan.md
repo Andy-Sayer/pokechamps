@@ -30,16 +30,21 @@ Reuses the existing per-turn predictors so we don't reinvent damage:
 - **Candidate pruning** is mandatory or the tree explodes (see below): for each
   active, consider only its top-K moves by 1-ply `predictOffense` (K≈2–3) × its
   legal targets. So ≤~6 joint actions/side instead of up to 64.
-- **Turn order** is speed-aware and taken **worst-case for me** (maximin): the
-  opponent's speed is their range **ceiling** (not midpoint), and is bumped to
-  the **mega forme's** max-investment speed when the species can mega
-  (`megaMaxSpeed`) — so the search assumes Aerodactyl-Mega outspeeds rather
-  than missing it. Under Trick Room the worst case flips to their floor. A mon
-  KO'd before it acts doesn't act — modelling order is the whole point
-  (KO-first avoids retaliation), which the 1-ply solver can't see.
-  *(Deferred: opponent **mega damage** — threat dmg is still base-forme; and
-  **my own mega** as a searched action — my damage/speed stay base-forme, which
-  is conservative for me. Both noted as follow-ups.)*
+- **Turn order** is speed-aware and taken **worst-case for me** (maximin):
+  outside Trick Room the opponent's speed is their range **ceiling** (floor
+  under TR), not the midpoint. A mon KO'd before it acts doesn't act —
+  modelling order is the whole point (KO-first avoids retaliation), which the
+  1-ply solver can't see.
+- **Mega Evolution is a root decision per side.** I MAXIMISE over {no mega,
+  mega my stone-holder}; the opponent MINIMISES over {no mega, mega each
+  mega-capable active} (worst-case for me — we assume they hold the stone since
+  the item is unknown). Each (myMega, oppMega) combo rebuilds the damage
+  matrices + speeds with the relevant formes (`gimmickActive` on predict;
+  `megaifyOppEntry` forces the opp's stone; `megaMaxSpeed` for the mega speed),
+  built once per combo and reused across depths. So mega Aerodactyl's +Atk
+  damage AND mega Delphox surviving it are both seen, and the recommendation
+  says "mega <mon>" (`megaMon`) when that's the best line. Spread-move damage
+  still uses the base attacker forme (minor; noted).
 - **Damage is collapsed to a single representative value** (likely-mid % from
   `predictOffense`/`predictThreat`) so the tree stays finite. Ranges are NOT
   branched on (that's exponential); the honest min/max envelope stays a
@@ -133,5 +138,7 @@ indicator. `/endgame` stays as the on-demand detailed view.
 
 Exact equilibrium play; enumerating voluntary switches; branching on damage
 rolls; opponent-side spread moves (my side IS handled — see turn model);
-modelling every secondary effect (status/weather chip carry through via the
-field state we already track, but we don't search status-fishing lines).
+mega for future switch-ins (only currently-active mons are mega candidates);
+mega-attacker damage on *spread* moves; modelling every secondary effect
+(status/weather chip carry through via the field state we already track, but we
+don't search status-fishing lines).

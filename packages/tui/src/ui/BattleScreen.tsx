@@ -1592,10 +1592,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         const plays = bestSearch.plays
           .map(p => `${p.mySpecies}→${p.move || '—'}→${p.targetSpecies}`)
           .join(' · ');
+        const mega = bestSearch.megaMon ? `mega ${bestSearch.megaMon} · ` : '';
         return (
           <Text>
             <Text color="magenta">⌁ best play </Text><Text dimColor>({conf})</Text><Text color="magenta">: </Text>
-            {plays}  <Text color={vColor}>— {vText}</Text>
+            {mega ? <Text color="cyan">{mega}</Text> : null}{plays}  <Text color={vColor}>— {vText}</Text>
           </Text>
         );
       })()}

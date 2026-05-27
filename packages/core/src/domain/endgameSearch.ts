@@ -26,8 +26,9 @@ import type { PokemonSet, OpponentEntry, FieldState, Match } from './types.js';
 import { ZERO_EVS, MAX_IVS } from './types.js';
 import { predictOffense, predictThreat } from './predictions.js';
 import { actualSpeed, effectiveSpeedRange } from './speed.js';
-import { getMove } from './data.js';
+import { getMove, toId } from './data.js';
 import { getMegaOptions } from './gimmicks/mega.js';
+import { defaultOpponentSet } from './bring.js';
 import { maxHpFor } from './damage.js';
 
 // ---------------------------------------------------------------------------
@@ -67,6 +68,8 @@ export interface SearchResult {
   /** Recommended move for each of my live actives this turn (best joint action). */
   plays: SearchPlay[];
   verdict: 'winning' | 'even' | 'losing';
+  /** Species I should Mega-Evolve this turn for the best line, if any. */
+  megaMon?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,15 +143,17 @@ interface State {
   oppActive: number[];
 }
 
-function cellFromOffense(attacker: PokemonSet, defender: OpponentEntry, field: FieldState): Cell {
-  const c = predictOffense({ attacker, opponent: defender, field });
+interface GimmickFlags { attackerGimmickActive?: boolean; defenderGimmickActive?: boolean }
+
+function cellFromOffense(attacker: PokemonSet, defender: OpponentEntry, field: FieldState, g: GimmickFlags = {}): Cell {
+  const c = predictOffense({ attacker, opponent: defender, field, ...g });
   if (!c) return { dmg: 0, move: '', priority: 0 };
   const lo = c.likelyMinPercent ?? c.minPercent;
   const hi = c.likelyMaxPercent ?? c.maxPercent;
   return { dmg: (lo + hi) / 2, move: c.move, priority: movePriority(c.move) };
 }
-function cellFromThreat(attacker: OpponentEntry, defender: PokemonSet, field: FieldState): Cell {
-  const c = predictThreat({ opponent: attacker, defender, field });
+function cellFromThreat(attacker: OpponentEntry, defender: PokemonSet, field: FieldState, g: GimmickFlags = {}): Cell {
+  const c = predictThreat({ opponent: attacker, defender, field, ...g });
   if (!c) return { dmg: 0, move: '', priority: 0 };
   const lo = c.likelyMinPercent ?? c.minPercent;
   const hi = c.likelyMaxPercent ?? c.maxPercent;
@@ -179,29 +184,60 @@ export function megaMaxSpeed(species: string): number | null {
   return best;
 }
 
-// Representative opponent speed for the turn-order sort, taken WORST-CASE for me
-// (maximin): if the opp's speed is uncertain we assume the order that hurts me.
-// Outside Trick Room that's their speed CEILING — bumped to the mega forme's
-// max if they could mega (the thing the midpoint used to miss). Under Trick
-// Room, slower acts first, so the worst case is their floor.
-function oppSpeedOf(entry: OpponentEntry, field: FieldState): number {
+// Opponent speed for the turn-order sort WITHOUT any mega bump (mega is now an
+// explicit plan choice). Worst-case for me: ceiling outside Trick Room, floor
+// under it.
+function oppBaseSpeed(entry: OpponentEntry, field: FieldState): number {
   const r = effectiveSpeedRange(entry);
-  const tr = !!field.trickRoom;
-  let s = r
-    ? (tr ? r.min : r.max)
-    : (entry.candidates?.[0] ? actualSpeed(entry.candidates[0]!) : 100);
-  if (!tr) {
-    const mega = megaMaxSpeed(entry.species);
-    if (mega != null && mega > s) s = mega;
-  }
-  return s;
+  if (r) return field.trickRoom ? r.min : r.max;
+  return entry.candidates?.[0] ? actualSpeed(entry.candidates[0]!) : 100;
 }
 
-function buildTables(input: SearchInput): Tables {
+// The mega forme my mon would become IF it megas — only when it actually holds
+// the matching stone. null otherwise.
+function myMegaForme(set: PokemonSet): string | null {
+  if (!set.item) return null;
+  const itemId = toId(set.item);
+  const match = getMegaOptions(set.species).find(o => toId(o.stone) === itemId);
+  return match?.forme ?? null;
+}
+
+// The opponent's (assumed worst-case) mega forme + its stone, or null if the
+// species has no mega. We don't know the opp's real item, so for the
+// adversarial "could they mega" branch we assume they hold the stone.
+function oppMegaInfo(species: string): { forme: string; stone: string } | null {
+  const opts = getMegaOptions(species);
+  return opts[0] ? { forme: opts[0].forme, stone: opts[0].stone } : null;
+}
+
+// An opponent entry rewritten to hold its mega stone, so predict*'s
+// gimmickActive path resolves the mega forme. Falls back to a default set when
+// inference hasn't produced candidates yet.
+function megaifyOppEntry(entry: OpponentEntry): OpponentEntry {
+  const info = oppMegaInfo(entry.species);
+  if (!info) return entry;
+  const base = entry.candidates?.length ? entry.candidates : [defaultOpponentSet(entry, 50)];
+  return { ...entry, candidates: base.map(c => ({ ...c, item: info.stone })) };
+}
+
+/** Which active (≤1 per side) is mega-evolved in a given search branch. */
+interface MegaPlan { myMega: number | null; oppMega: number | null }
+
+function buildTables(input: SearchInput, plan: MegaPlan): Tables {
   const mine = input.mine;
   const opp = input.opp;
-  const off: Cell[][] = mine.map(m => opp.map(o => cellFromOffense(m.set, o.entry, input.field)));
-  const thr: Cell[][] = opp.map(o => mine.map(m => cellFromThreat(o.entry, m.set, input.field)));
+  // Opp entries with the mega'd one holding its stone (so gimmickActive megas it).
+  const oppEntries = opp.map((o, j) => (j === plan.oppMega ? megaifyOppEntry(o.entry) : o.entry));
+  const off: Cell[][] = mine.map((m, mi) => oppEntries.map((oe, oj) =>
+    cellFromOffense(m.set, oe, input.field, {
+      attackerGimmickActive: mi === plan.myMega,
+      defenderGimmickActive: oj === plan.oppMega,
+    })));
+  const thr: Cell[][] = oppEntries.map((oe, oj) => mine.map((m, mi) =>
+    cellFromThreat(oe, m.set, input.field, {
+      attackerGimmickActive: oj === plan.oppMega,
+      defenderGimmickActive: mi === plan.myMega,
+    })));
   const mySpread = mine.map(m => bestSpread(m.set, opp, input.field));
   const mySpreadActors = new Set<number>();
   mySpread.forEach((s, i) => { if (s) mySpreadActors.add(i); });
@@ -210,8 +246,8 @@ function buildTables(input: SearchInput): Tables {
     oppN: opp.length,
     mySpecies: mine.map(m => m.set.species),
     oppSpecies: opp.map(o => o.entry.species),
-    mySpeed: mine.map(m => actualSpeed(m.set)),
-    oppSpeed: opp.map(o => oppSpeedOf(o.entry, input.field)),
+    mySpeed: mine.map((m, mi) => actualSpeed(m.set, mi === plan.myMega ? (myMegaForme(m.set) ?? undefined) : undefined)),
+    oppSpeed: opp.map((o, oj) => (oj === plan.oppMega ? (megaMaxSpeed(o.entry.species) ?? oppBaseSpeed(o.entry, input.field)) : oppBaseSpeed(o.entry, input.field))),
     off, thr, mySpread, mySpreadActors,
     field: input.field,
   };
@@ -500,9 +536,47 @@ export interface PositionSearch {
   toDepth(depth: number): SearchResult;
 }
 export function createSearch(input: SearchInput): PositionSearch {
-  const t = buildTables(input);
   const s0 = initialState(input);
-  return { toDepth: (depth: number) => rootSearch(t, s0, depth) };
+
+  // Mega is a root decision per side. I pick whether (and which active) to mega
+  // to MAXIMISE my worst case; the opponent picks whether to mega to MINIMISE
+  // it (worst-case for me). Only currently-active, mega-capable mons are
+  // candidates (mega is decided now, not for a future switch-in — a documented
+  // v1 limit). Tables are built once per (myMega, oppMega) combo and reused
+  // across depths.
+  const myPlans: Array<number | null> = [null];
+  s0.myActive.forEach(i => { if (myMegaForme(input.mine[i]!.set)) myPlans.push(i); });
+  const oppPlans: Array<number | null> = [null];
+  s0.oppActive.forEach(j => { if (oppMegaInfo(input.opp[j]!.entry.species)) oppPlans.push(j); });
+
+  const tables = new Map<string, Tables>();
+  for (const myMega of myPlans) {
+    for (const oppMega of oppPlans) {
+      tables.set(`${myMega},${oppMega}`, buildTables(input, { myMega, oppMega }));
+    }
+  }
+
+  return {
+    toDepth(depth: number): SearchResult {
+      let bestVal = -Infinity;
+      let bestResult: SearchResult | null = null;
+      let bestMyMega: number | null = null;
+      for (const myMega of myPlans) {
+        // Opponent replies with their worst-for-me mega choice.
+        let worstVal = Infinity;
+        let worstResult: SearchResult | null = null;
+        for (const oppMega of oppPlans) {
+          const res = rootSearch(tables.get(`${myMega},${oppMega}`)!, s0, depth);
+          if (res.score < worstVal) { worstVal = res.score; worstResult = res; }
+        }
+        if (worstVal > bestVal) { bestVal = worstVal; bestResult = worstResult; bestMyMega = myMega; }
+      }
+      const result = bestResult ?? rootSearch(tables.get('null,null')!, s0, depth);
+      return bestMyMega != null
+        ? { ...result, megaMon: input.mine[bestMyMega]!.set.species }
+        : result;
+    },
+  };
 }
 
 /** Search the position to a fixed depth (plies) and return the best joint play. */
