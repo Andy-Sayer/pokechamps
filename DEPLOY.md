@@ -69,9 +69,14 @@ JWT_SECRET=$(openssl rand -hex 32)
 # Spectator share links (/share command) are built from this. Set it to your
 # real https origin so the links you hand out point at the right place.
 POKECHAMPS_PUBLIC_URL=https://pokechamps.example.com
+# Registration gate: with this set, new accounts need this invite code (you
+# give it to your friend once). Unset = anyone with the URL can register.
+REGISTRATION_SECRET=$(openssl rand -hex 16)
 # Optional — enables AI review/explain:
 # ANTHROPIC_API_KEY=sk-ant-...
 EOF
+# Note your invite code so you can give it to your friend:
+grep REGISTRATION_SECRET .env
 ```
 
 Build and start:

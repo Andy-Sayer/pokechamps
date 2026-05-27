@@ -41,6 +41,8 @@ services:
       # Public origin used to build spectator share links (/share command).
       # Falls back to https://${DOMAIN} if POKECHAMPS_PUBLIC_URL isn't in .env.
       POKECHAMPS_PUBLIC_URL: ${POKECHAMPS_PUBLIC_URL:-https://${DOMAIN}}
+      # Registration invite code. Unset → open registration.
+      REGISTRATION_SECRET: ${REGISTRATION_SECRET:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - server_data:/data

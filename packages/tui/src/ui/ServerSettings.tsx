@@ -19,7 +19,7 @@ export interface ServerSettingsProps {
 type Mode =
   | { kind: 'menu' }
   | { kind: 'connect' }
-  | { kind: 'login' | 'register'; step: 'email' | 'password' | 'submitting'; email: string; password: string }
+  | { kind: 'login' | 'register'; step: 'email' | 'password' | 'invite' | 'submitting'; email: string; password: string; invite: string }
   | { kind: 'result'; ok: boolean; message: string };
 
 interface AuthResponse {
@@ -32,11 +32,13 @@ async function postAuth(
   path: '/auth/login' | '/auth/register',
   email: string,
   password: string,
+  invite?: string,
 ): Promise<AuthResponse> {
   const res = await fetch(`${serverUrl}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    // invite is only meaningful for /register; harmless on /login.
+    body: JSON.stringify(invite ? { email, password, invite } : { email, password }),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -116,13 +118,40 @@ export function ServerSettings({ config, onConfigChange, onExit }: ServerSetting
                   setMode({ kind: 'result', ok: false, message: 'No server URL set — connect first.' });
                   return;
                 }
+                // Register collects an invite code next; login submits now.
+                if (mode.kind === 'register') {
+                  setMode({ ...mode, step: 'invite' });
+                  return;
+                }
                 setMode({ ...mode, step: 'submitting' });
-                postAuth(
-                  config.serverUrl,
-                  mode.kind === 'login' ? '/auth/login' : '/auth/register',
-                  mode.email,
-                  mode.password,
-                )
+                postAuth(config.serverUrl, '/auth/login', mode.email, mode.password)
+                  .then(res => {
+                    onConfigChange({ ...config, token: res.token, email: res.user.email });
+                    setMode({ kind: 'result', ok: true, message: `${verb} successful — signed in as ${res.user.email}` });
+                  })
+                  .catch(err => {
+                    setMode({ kind: 'result', ok: false, message: String(err.message ?? err) });
+                  });
+              }}
+            />
+          </Box>
+          <Text dimColor>Esc to cancel</Text>
+        </Box>
+      );
+    }
+    if (mode.step === 'invite') {
+      return (
+        <Box flexDirection="column" padding={1}>
+          <Text bold color="cyan">{verb} — invite code</Text>
+          <Text dimColor>The server owner gives you this. Leave blank if they didn't.</Text>
+          <Box marginTop={1}>
+            <Text>Invite: </Text>
+            <TextInput
+              value={mode.invite}
+              onChange={v => setMode({ ...mode, invite: v })}
+              onSubmit={() => {
+                setMode({ ...mode, step: 'submitting' });
+                postAuth(config.serverUrl!, '/auth/register', mode.email, mode.password, mode.invite || undefined)
                   .then(res => {
                     onConfigChange({ ...config, token: res.token, email: res.user.email });
                     setMode({ kind: 'result', ok: true, message: `${verb} successful — signed in as ${res.user.email}` });
@@ -183,8 +212,8 @@ export function ServerSettings({ config, onConfigChange, onExit }: ServerSetting
         items={items}
         onSelect={item => {
           if (item.value === 'connect') setMode({ kind: 'connect' });
-          else if (item.value === 'login') setMode({ kind: 'login', step: 'email', email: config.email ?? '', password: '' });
-          else if (item.value === 'register') setMode({ kind: 'register', step: 'email', email: '', password: '' });
+          else if (item.value === 'login') setMode({ kind: 'login', step: 'email', email: config.email ?? '', password: '', invite: '' });
+          else if (item.value === 'register') setMode({ kind: 'register', step: 'email', email: '', password: '', invite: '' });
           else if (item.value === 'logout') {
             const next = { ...config };
             delete next.token;

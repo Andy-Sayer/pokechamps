@@ -67,7 +67,9 @@ node tui/tui.mjs
 In the TUI:
 
 1. **Server settings** → set the server URL to `<HOST>`.
-2. **Register** an account (email + password — local to this server only).
+2. **Register** an account (email + password — local to this server only). If
+   the host turned on an invite code, they'll have given you one — enter it when
+   prompted (leave blank if they didn't).
 3. To **watch a live match**: the host sends you a link like
    `<HOST>/spectate/<token>`. Choose **"Spectate a shared match"** from the
    main menu and paste it. You'll see their board, inference, and damage grid

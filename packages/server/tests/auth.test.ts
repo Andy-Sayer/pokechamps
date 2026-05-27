@@ -108,6 +108,42 @@ describe('auth: register + login + me', () => {
   });
 });
 
+describe('auth: registration invite gate (REGISTRATION_SECRET)', () => {
+  // inviteAccepted() reads process.env per request, so we can toggle the env
+  // around inject() calls without rebuilding the app.
+  afterEach(() => { delete process.env.REGISTRATION_SECRET; });
+
+  it('blocks registration without the invite when a secret is set (403)', async () => {
+    process.env.REGISTRATION_SECRET = 'open-sesame';
+    const r = await app.inject({ method: 'POST', url: '/auth/register', payload: REGISTER_BODY });
+    expect(r.statusCode).toBe(403);
+  });
+
+  it('blocks a wrong invite (403)', async () => {
+    process.env.REGISTRATION_SECRET = 'open-sesame';
+    const r = await app.inject({
+      method: 'POST', url: '/auth/register',
+      payload: { ...REGISTER_BODY, invite: 'nope' },
+    });
+    expect(r.statusCode).toBe(403);
+  });
+
+  it('allows registration with the correct invite (200)', async () => {
+    process.env.REGISTRATION_SECRET = 'open-sesame';
+    const r = await app.inject({
+      method: 'POST', url: '/auth/register',
+      payload: { ...REGISTER_BODY, invite: 'open-sesame' },
+    });
+    expect(r.statusCode).toBe(200);
+    expect((r.json() as { token: string }).token).toBeTruthy();
+  });
+
+  it('stays open when no secret is set (invite ignored)', async () => {
+    const r = await app.inject({ method: 'POST', url: '/auth/register', payload: REGISTER_BODY });
+    expect(r.statusCode).toBe(200);
+  });
+});
+
 describe('auth: API tokens', () => {
   async function registerAndJwt(): Promise<string> {
     const reg = await app.inject({
