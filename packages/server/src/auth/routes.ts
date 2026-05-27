@@ -81,7 +81,14 @@ const authRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       .prepare<[string], { id: string }>('SELECT id FROM users WHERE email = ? COLLATE NOCASE')
       .get(email);
     if (existing) {
-      return reply.code(409).send({ error: 'email already registered' });
+      // Anti-enumeration: don't confirm the email exists, and don't return
+      // faster than the happy path. The success branch spends ~250ms in
+      // bcrypt; a fast "already registered" reply would let an attacker probe
+      // which emails have accounts via timing. So we burn an equivalent hash
+      // and return a generic message. (Registration is also invite-gated, so
+      // an uninvited attacker can't reach this branch at all.)
+      await hashPassword(password);
+      return reply.code(409).send({ error: 'registration could not be completed' });
     }
 
     const id = newId();
