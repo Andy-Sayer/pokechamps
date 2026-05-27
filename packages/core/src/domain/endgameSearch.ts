@@ -22,10 +22,11 @@
  *
  * All exports are PURE — no I/O, no mutation of inputs.
  */
-import type { PokemonSet, OpponentEntry, FieldState } from './types.js';
+import type { PokemonSet, OpponentEntry, FieldState, Match } from './types.js';
 import { predictOffense, predictThreat } from './predictions.js';
 import { actualSpeed, effectiveSpeedRange } from './speed.js';
 import { getMove } from './data.js';
+import { maxHpFor } from './damage.js';
 
 // ---------------------------------------------------------------------------
 // Input
@@ -320,11 +321,49 @@ function value(t: Tables, s: State, depth: number, alpha: number): number {
 // Public API
 // ---------------------------------------------------------------------------
 
-/** Search the position to a fixed depth (plies) and return the best joint play. */
-export function searchToDepth(input: SearchInput, depth: number): SearchResult {
-  const t = buildTables(input);
-  const s0 = initialState(input);
+/** Active-slot shape (team indices currently on the field, per side). */
+export interface ActiveSlots {
+  mine: [number | null, number | null];
+  theirs: [number | null, number | null];
+}
 
+/**
+ * Build a SearchInput from the live Match + active slots. My side is the
+ * brought 4 (live only); the opponent is the mons we've actually seen
+ * (`opponentBrought`). My HP is stored raw (→ converted to %); the opponent's
+ * is already a %. Benched-but-live mons are included so the search can model
+ * replacements after a KO.
+ */
+export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchInput {
+  const myActive = new Set<number>(active.mine.filter((x): x is number => x != null));
+  const oppActive = new Set<number>(active.theirs.filter((x): x is number => x != null));
+
+  const mine: SearchMyMon[] = [];
+  for (const idx of match.bring) {
+    const set = match.myTeam[idx];
+    if (!set) continue;
+    if (match.myFainted?.includes(idx)) continue;
+    const raw = match.myCurrentHp?.[idx];
+    const max = maxHpFor(set);
+    const hpPercent = raw == null || max <= 0 ? 100 : Math.max(0, Math.min(100, (raw / max) * 100));
+    mine.push({ set, hpPercent, active: myActive.has(idx) });
+  }
+
+  const opp: SearchOppMon[] = [];
+  for (const idx of match.opponentBrought ?? []) {
+    const entry = match.opponentTeam[idx];
+    if (!entry) continue;
+    const hpPercent = entry.fainted ? 0 : (entry.currentHpPercent ?? 100);
+    opp.push({ entry, hpPercent, active: oppActive.has(idx) });
+  }
+
+  return { mine, opp, field: match.field };
+}
+
+// Root maximin over a prebuilt table/state — shared by searchToDepth and the
+// iterative driver so the (expensive) damage matrices are built only once per
+// position, not once per depth.
+function rootSearch(t: Tables, s0: State, depth: number): SearchResult {
   const myJoints = jointActions(s0.myActive, s0.oppHp);
   let bestJoint: Map<number, number> | null = null;
   let bestScore = -Infinity;
@@ -359,19 +398,38 @@ export function searchToDepth(input: SearchInput, depth: number): SearchResult {
   return { depth, score: bestScore, plays, verdict };
 }
 
+/** A reusable search over one position: builds the (expensive) damage matrices
+ *  ONCE, then answers any-depth queries cheaply. The background driver builds
+ *  this once per position change and deepens against it. */
+export interface PositionSearch {
+  toDepth(depth: number): SearchResult;
+}
+export function createSearch(input: SearchInput): PositionSearch {
+  const t = buildTables(input);
+  const s0 = initialState(input);
+  return { toDepth: (depth: number) => rootSearch(t, s0, depth) };
+}
+
+/** Search the position to a fixed depth (plies) and return the best joint play. */
+export function searchToDepth(input: SearchInput, depth: number): SearchResult {
+  return createSearch(input).toDepth(depth);
+}
+
 /**
  * Iterative deepening: search depth 1, 2, … up to `maxDepth`, invoking
  * `onDepth` after each completes (so a background driver can publish improving
- * results). Returns the deepest result. Pure aside from the optional callback.
+ * results). Returns the deepest result. Tables are built once. Pure aside from
+ * the optional callback.
  */
 export function searchIterative(
   input: SearchInput,
   maxDepth: number,
   onDepth?: (r: SearchResult) => void,
 ): SearchResult {
+  const search = createSearch(input);
   let last: SearchResult = { depth: 0, score: 0, plays: [], verdict: 'even' };
   for (let d = 1; d <= maxDepth; d++) {
-    last = searchToDepth(input, d);
+    last = search.toDepth(d);
     onDepth?.(last);
   }
   return last;

@@ -32,6 +32,7 @@ import { applyMegaAction } from '@pokechamps/core/domain/megaResolve.js';
 import { getMegaOptions } from '@pokechamps/core/domain/gimmicks/mega.js';
 import { solveEndgame } from '@pokechamps/core/domain/endgame.js';
 import type { EndgamePosition } from '@pokechamps/core/domain/endgame.js';
+import { createSearch, searchInputFromMatch, type SearchResult } from '@pokechamps/core/domain/endgameSearch.js';
 
 export interface BattleScreenProps {
   stores: Stores;
@@ -521,6 +522,51 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   }, [initial.id, stores]);
 
   const field: FieldState = match.field ?? NEUTRAL_FIELD;
+
+  // Always-on background lookahead. Whenever the position changes, restart
+  // iterative deepening (depth 1, 2, …) on a cooperative schedule — one depth
+  // per macrotask so Ink stays responsive — and publish the improving best
+  // play. Cancels on the next position change or unmount. See
+  // docs/notes/endgame-search-plan.md.
+  const [bestSearch, setBestSearch] = useState<SearchResult | null>(null);
+  // A cheap signature of everything the search depends on, so the effect only
+  // re-runs when the board actually changes (not on every keystroke render).
+  const posSig = useMemo(() => JSON.stringify([
+    match.bring, match.opponentBrought, match.myCurrentHp, match.myFainted,
+    match.opponentTeam.map(o => [o.species, o.currentHpPercent, o.fainted]),
+    activeIdx, field.weather, field.terrain, field.trickRoom, field.myTailwind, field.theirTailwind,
+    match.outcome,
+  ]), [match, activeIdx, field]);
+  useEffect(() => {
+    if (match.outcome) { setBestSearch(null); return; }
+    const input = searchInputFromMatch(match, activeIdx);
+    const liveMine = input.mine.filter(m => m.hpPercent > 0).length;
+    const liveOpp = input.opp.filter(o => o.hpPercent > 0).length;
+    if (liveMine === 0 || liveOpp === 0) { setBestSearch(null); return; }
+
+    // Build the damage matrices once; deepen against them.
+    const search = createSearch(input);
+    let cancelled = false;
+    let depth = 1;
+    const MAX_DEPTH = 4;
+    const BUDGET_MS = 1500;
+    const start = Date.now();
+    const step = () => {
+      if (cancelled || depth > MAX_DEPTH) return;
+      const res = search.toDepth(depth);
+      if (cancelled) return;
+      setBestSearch(res);
+      depth += 1;
+      // Keep deepening only while we're within budget and a terminal hasn't
+      // been proven (a forced win/loss won't change with more depth).
+      const decided = Math.abs(res.score) >= 100_000;
+      if (depth <= MAX_DEPTH && !decided && Date.now() - start < BUDGET_MS) {
+        setTimeout(step, 0);
+      }
+    };
+    const handle = setTimeout(step, 0);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [posSig]); // eslint-disable-line react-hooks/exhaustive-deps
   const bringTeam = match.bring.map(i => match.myTeam[i]!);
   // Grows over the match — starts as the 2 leads, each opp switch may add
   // a new index up to a cap of 4 distinct mons.
@@ -1534,6 +1580,21 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   return (
     <Box flexDirection="column" padding={1}>
       <Text bold color="cyan">Battle — turn {match.turns.length + 1}{draftActions.length ? ' (composing)' : ''}</Text>
+      {!match.outcome && bestSearch && bestSearch.plays.length > 0 && (() => {
+        const v = bestSearch.verdict;
+        const vColor = v === 'winning' ? 'green' : v === 'losing' ? 'red' : 'yellow';
+        const vText = v === 'winning' ? 'likely win' : v === 'losing' ? 'likely loss' : 'even';
+        const plays = bestSearch.plays
+          .map(p => `${p.mySpecies}→${p.move || '—'}→${p.targetSpecies}`)
+          .join(' · ');
+        const thinking = bestSearch.score >= 100_000 || bestSearch.score <= -100_000 ? '' : ` (depth ${bestSearch.depth})`;
+        return (
+          <Text>
+            <Text color="magenta">⌁ best play{thinking}: </Text>
+            {plays}  <Text color={vColor}>— {vText}</Text>
+          </Text>
+        );
+      })()}
       {match.outcome && (
         <Box flexDirection="column" borderStyle="double" borderColor={match.outcome === 'victory' ? 'green' : match.outcome === 'defeat' ? 'red' : 'yellow'} paddingX={2} marginY={1}>
           <Text bold color={match.outcome === 'victory' ? 'green' : match.outcome === 'defeat' ? 'red' : 'yellow'}>

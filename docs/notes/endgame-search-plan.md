@@ -102,9 +102,17 @@ indicator. `/endgame` stays as the on-demand detailed view.
 
 ## Phasing
 
-- **A (this turn):** pure core + iterative deepening + tests.
-- **B:** cooperative background scheduler in the TUI; publish improving results.
-- **C:** the always-on UI line; retire the need to invoke `/endgame`.
+- **A — ✅ SHIPPED:** pure core + iterative deepening + tests
+  (`endgameSearch.ts`). `createSearch(input)` builds the damage matrices once
+  and answers any-depth queries cheaply.
+- **B — ✅ SHIPPED:** cooperative background scheduler in `BattleScreen` — a
+  `useEffect` keyed on a position signature runs one depth per macrotask
+  (`setTimeout(0)`), publishing the improving result, capped at depth 4 / 1.5s
+  and stopping early on a proven win/loss. `searchInputFromMatch(match, active)`
+  maps live board → SearchInput.
+- **C — ✅ SHIPPED:** always-on `⌁ best play (depth N): …` line under the
+  battle header, colour-coded by verdict. `/endgame` stays as the on-demand
+  detailed view.
 - **Later:** alpha-beta depth gains; voluntary-switch actions; root-move min/max
   bracketing; mixed-strategy refinement if maximin proves too pessimistic.
 

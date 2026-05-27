@@ -3,9 +3,10 @@
 // predictThreat compute real damage; assertions stay on verdict/targets/score
 // sign to be robust to exact rolls.
 import { describe, test, expect } from 'vitest';
-import { searchToDepth, searchIterative, type SearchInput } from '../src/domain/endgameSearch.js';
-import type { PokemonSet, OpponentEntry } from '../src/domain/types.js';
+import { searchToDepth, searchIterative, searchInputFromMatch, type SearchInput } from '../src/domain/endgameSearch.js';
+import type { PokemonSet, OpponentEntry, Match } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } from '../src/domain/types.js';
+import { maxHpFor } from '../src/domain/damage.js';
 
 function mon(p: Partial<PokemonSet> & { species: string; moves: string[] }): PokemonSet {
   return { level: 50, nature: 'Hardy', evs: { ...ZERO_EVS }, ivs: MAX_IVS, ...p };
@@ -74,6 +75,35 @@ describe('searchToDepth', () => {
     };
     const r = searchToDepth(input, 3);
     expect(r.plays.length).toBe(0);
+  });
+});
+
+describe('searchInputFromMatch', () => {
+  function freshMatch(): Match {
+    return {
+      id: 't', startedAt: '2026-05-26T00:00:00.000Z',
+      myTeam: [flutter, garchomp, incin, mon({ species: 'Rillaboom', moves: ['Grassy Glide'] })],
+      opponentTeam: ['Incineroar', 'Amoonguss', 'Garchomp', 'Talonflame'].map(species => ({ species, knownMoves: [] } as OpponentEntry)),
+      bring: [0, 1, 2, 3], opponentBrought: [0, 1], turns: [], field: { ...NEUTRAL_FIELD },
+      active: { mine: [null, null], theirs: [null, null] },
+    };
+  }
+
+  test('maps actives, bench, raw→% HP, and seen opponents', () => {
+    const m = freshMatch();
+    m.myFainted = [2];                          // Incineroar fainted → excluded
+    m.myCurrentHp = { 1: Math.round(maxHpFor(garchomp) / 2) }; // Garchomp at 50%
+    m.opponentTeam[1]!.currentHpPercent = 30;
+    const input = searchInputFromMatch(m, { mine: [0, 1], theirs: [0, 1] });
+
+    // 3 live brought mons (Incineroar excluded).
+    expect(input.mine.map(x => x.set.species)).toEqual(['Flutter Mane', 'Garchomp', 'Rillaboom']);
+    expect(input.mine.find(x => x.set.species === 'Garchomp')!.hpPercent).toBeCloseTo(50, 0);
+    expect(input.mine.find(x => x.set.species === 'Flutter Mane')!.active).toBe(true);
+    expect(input.mine.find(x => x.set.species === 'Rillaboom')!.active).toBe(false); // benched
+    // Only the 2 seen opponents.
+    expect(input.opp.map(x => x.entry.species)).toEqual(['Incineroar', 'Amoonguss']);
+    expect(input.opp[1]!.hpPercent).toBe(30);
   });
 });
 
