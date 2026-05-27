@@ -205,6 +205,22 @@ describe('GET /matches/:id/live?share= (spectator socket)', () => {
     spectator.ws.close();
   });
 
+  it('closes spectator sockets when the owner revokes the share', async () => {
+    const { token } = await registerUser(app, 'alice@test.example');
+    const id = await createMatch(token);
+    const share = (await app.inject({ method: 'POST', url: `/matches/${id}/share`, headers: authHeaders(token) }).then(r => r.json())) as { token: string };
+
+    await app.ready();
+    const spectator = await connect(`/matches/${id}/live?share=${share.token}`);
+    expect((await spectator.recv()).type).toBe('snapshot');
+
+    // Owner revokes → the spectator socket is closed with the revoke code.
+    const del = await app.inject({ method: 'DELETE', url: `/matches/${id}/share`, headers: authHeaders(token) });
+    expect(del.statusCode).toBe(204);
+    const { code } = await spectator.closed;
+    expect(code).toBe(4403);
+  });
+
   it('closes 4401 for an invalid share token', async () => {
     const { token } = await registerUser(app, 'alice@test.example');
     const id = await createMatch(token);

@@ -16,6 +16,7 @@ import { getDb } from '../db/connection.js';
 import type { JwtPayload } from '../auth/jwt.js';
 import { loadMatch } from './match-storage.js';
 import { createShare, getShareForMatch, revokeShare } from '../db/shares.js';
+import { closeSpectators } from '../ws/hub.js';
 
 // Public base URL for spectator links. Prefer an explicit env (set it to your
 // real https origin in prod); otherwise reconstruct from the request so dev
@@ -68,6 +69,9 @@ const sharesRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       const match = loadMatch(db, user.sub, request.params.id);
       if (!match) return reply.code(404).send({ error: 'match not found' });
       revokeShare(db, user.sub, request.params.id);
+      // Drop any spectators currently watching — revoke takes effect now, not
+      // just on their next reconnect.
+      closeSpectators(request.params.id);
       return reply.code(204).send();
     },
   );

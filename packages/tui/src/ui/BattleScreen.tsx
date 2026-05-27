@@ -11,7 +11,7 @@ import { inferOpponentSpeeds, applySpeedInference, actualSpeed, predictTurnOrder
 import { reviewLastTurn } from '@pokechamps/core/ai/prompts.js';
 import { isAvailable as aiAvailable } from '@pokechamps/core/ai/client.js';
 import type { Stores } from '@pokechamps/core/storage/index.js';
-import { getSpecies, isChargeMove, isPivotMove, isItemRemovingMove } from '@pokechamps/core/domain/data.js';
+import { getSpecies, isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove } from '@pokechamps/core/domain/data.js';
 import { defaultOpponentSet } from '@pokechamps/core/domain/bring.js';
 import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs, hazardClearEffect, applyHazardClear } from '@pokechamps/core/domain/hazards.js';
@@ -350,10 +350,10 @@ function runAskCommand(
                   sp === 'tie' ? '≈ tie' : sp === 'scarf-flag' ? '⚡ scarf risk' :
                   '? unknown';
   const offTxt = off
-    ? `${off.move} ${off.minPercent.toFixed(0)}-${off.maxPercent.toFixed(0)}% (${off.koChance})`
+    ? `${off.move} ${off.minPercent.toFixed(0)}-${off.maxPercent.toFixed(0)}% (${off.koChance})${off.conditional ? ` ⚠ ${off.conditional}` : ''}`
     : 'n/a';
   const thrTxt = thr
-    ? `${thr.move} ${thr.minPercent.toFixed(0)}-${thr.maxPercent.toFixed(0)}% (${thr.koChance})`
+    ? `${thr.move} ${thr.minPercent.toFixed(0)}-${thr.maxPercent.toFixed(0)}% (${thr.koChance})${thr.conditional ? ` ⚠ ${thr.conditional}` : ''}`
     : 'n/a';
   return `${mine.label} vs ${opp.label}\n  → ${offTxt}\n  ← ${thrTxt}\n  speed: ${verdict}`;
 }
@@ -730,6 +730,23 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         const lost = next.myTeam[tIdx]?.item;
         next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: lost ?? `knocked off (${a.move})` };
       }
+    }
+    // Item-swap moves (Trick / Switcheroo) — exchange held items. Mirror of
+    // engine.ts. The opp item may be unknown (undefined); the swap still
+    // records what we know on each side.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (!isItemSwapMove(a.move)) continue;
+      if (typeof a.target !== 'object') continue;
+      const aIdx = a.attackerTeamIndex;
+      const tIdx = a.targetTeamIndex;
+      if (aIdx == null || tIdx == null) continue;
+      const attackerItem = (a.side === 'mine' ? next.myTeam[aIdx]?.item : next.opponentTeam[aIdx]?.item) ?? undefined;
+      const targetItem = (a.target.side === 'mine' ? next.myTeam[tIdx]?.item : next.opponentTeam[tIdx]?.item) ?? undefined;
+      if (a.side === 'mine') { if (next.myTeam[aIdx]) next.myTeam[aIdx]!.item = targetItem; }
+      else { if (next.opponentTeam[aIdx]) next.opponentTeam[aIdx]!.item = targetItem; }
+      if (a.target.side === 'mine') { if (next.myTeam[tIdx]) next.myTeam[tIdx]!.item = attackerItem; }
+      else { if (next.opponentTeam[tIdx]) next.opponentTeam[tIdx]!.item = attackerItem; }
     }
     // Focus Sash (`... > o1 > N sash`): proc (1-sliver) → item consumed, alive,
     // skip inference; survived with HP to spare → item learned (held), damage
@@ -2134,7 +2151,7 @@ function MatchupRow({ marker, opp, offense, offenseCrit, allOffense, allOffenseC
     return ` · likely ${cell.likelyMinPercent.toFixed(0)}-${cell.likelyMaxPercent.toFixed(0)}% (${confTag(cell.confidence)})`;
   };
   const offTxt = offense
-    ? `${offense.move} ${offense.minPercent.toFixed(0)}-${offense.maxPercent.toFixed(0)}% (${offense.koChance})${likelyTxt(offense)}`
+    ? `${offense.move} ${offense.minPercent.toFixed(0)}-${offense.maxPercent.toFixed(0)}% (${offense.koChance})${likelyTxt(offense)}${offense.conditional ? ` ⚠ ${offense.conditional}` : ''}`
     : 'n/a';
   const critTxt = offenseCrit
     ? ` / crit ${offenseCrit.minPercent.toFixed(0)}-${offenseCrit.maxPercent.toFixed(0)}%`

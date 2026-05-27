@@ -93,6 +93,23 @@ first request to the domain. Verify:
 curl https://pokechamps.example.com/health     # {"status":"ok",...}
 ```
 
+## Environment variables (reference)
+
+Set these in the `.env` next to `docker-compose.prod.yml` (the compose file
+reads them and passes them to the container). After changing any, re-run
+`docker compose -f docker-compose.prod.yml up -d --build`.
+
+| Variable | Required | What it does |
+|---|---|---|
+| `DOMAIN` | **yes** | Your hostname (e.g. `pokechamps.duckdns.org`). Caddy gets the TLS cert for it; also the default for the two URLs below. |
+| `JWT_SECRET` | **yes** | Signing key for login tokens. `openssl rand -hex 32`. The server refuses to boot in prod without it. Rotating it logs everyone out. |
+| `POKECHAMPS_PUBLIC_URL` | recommended | Public origin used to build spectator **share links** (the `/share` command). Set to your real `https://<DOMAIN>` so links point at the right place. Defaults to `https://${DOMAIN}`. |
+| `REGISTRATION_SECRET` | recommended | **Invite code.** When set, new accounts must supply it to register — you give it to your friend once. `openssl rand -hex 16`. Unset = anyone with the URL can register. (`grep REGISTRATION_SECRET .env` to read it back.) |
+| `POKECHAMPS_WEB_ORIGIN` | auto | CORS allowlist for the optional web viewer. Compose defaults it to `https://${DOMAIN}`; the TUI isn't a browser origin so this rarely matters. |
+| `TRUST_PROXY` | auto | Set to `1` (compose does this) so rate-limit buckets key off the real client IP behind Caddy, not the proxy's. |
+| `DATABASE_URL` | auto | SQLite file path. Compose sets `file:/data/pokechamps.sqlite` on the persistent volume — don't change it unless you know why. |
+| `ANTHROPIC_API_KEY` | optional | Enables the opt-in AI review/explain hooks. Leave unset to keep all AI features off (the default). |
+
 ## 5. Your friend installs the TUI
 
 They need **Node 20+** and nothing else — no repo, no npm install. Hand them

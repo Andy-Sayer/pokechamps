@@ -81,6 +81,8 @@ describe('auth: register + login + me', () => {
       payload: REGISTER_BODY,
     });
     expect(dup.statusCode).toBe(409);
+    // Anti-enumeration: the message must NOT confirm the email exists.
+    expect((dup.json() as { error: string }).error).not.toMatch(/already|exist|registered/i);
   });
 
   it('rejects wrong password with 401', async () => {

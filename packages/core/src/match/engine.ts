@@ -42,7 +42,7 @@ import {
 } from '../domain/abilities.js';
 import { sashProcced } from '../domain/itemSignals.js';
 import { EFFECT_DURATIONS } from '../domain/durations.js';
-import { isChargeMove, isPivotMove, isItemRemovingMove, getSpecies } from '../domain/data.js';
+import { isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, getSpecies } from '../domain/data.js';
 import type { StateUpdate, HazardUpdate } from '../domain/turnparser.js';
 
 export type ActiveIdx = {
@@ -547,6 +547,26 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
         next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: lost ?? `knocked off (${a.move})` };
       }
     }
+  }
+
+  // Item-swap moves (Trick / Switcheroo). Exchange the user's and target's
+  // held items so later damage calcs use the new holdings. The opp's item may
+  // be unknown (undefined) — swapping still records what we DO know: the foe
+  // now holds the user's item, the user now holds whatever the foe had.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (!isItemSwapMove(a.move)) continue;
+    if (typeof a.target !== 'object') continue;
+    const aIdx = a.attackerTeamIndex;
+    const tIdx = a.targetTeamIndex;
+    if (aIdx == null || tIdx == null) continue;
+    const attackerItem = (a.side === 'mine' ? next.myTeam[aIdx]?.item : next.opponentTeam[aIdx]?.item) ?? undefined;
+    const targetItem = (a.target.side === 'mine' ? next.myTeam[tIdx]?.item : next.opponentTeam[tIdx]?.item) ?? undefined;
+    if (a.side === 'mine') { if (next.myTeam[aIdx]) next.myTeam[aIdx]!.item = targetItem; }
+    else { if (next.opponentTeam[aIdx]) next.opponentTeam[aIdx]!.item = targetItem; }
+    if (a.target.side === 'mine') { if (next.myTeam[tIdx]) next.myTeam[tIdx]!.item = attackerItem; }
+    else { if (next.opponentTeam[tIdx]) next.opponentTeam[tIdx]!.item = attackerItem; }
+    inferenceNotes.push(`${a.move}: swapped items`);
   }
 
   // Focus Sash logged via `... > o1 > N sash`. If it PROCCED (1-HP sliver),

@@ -5,6 +5,7 @@ import { actualSpeed } from './speed.js';
 import { getPikalytics } from './pikalytics.js';
 import { mostLikelyIndex } from './inference.js';
 import { isFirstTurnMove } from './itemSignals.js';
+import { isAttackConditionalMove } from './data.js';
 
 export type Confidence = 'high' | 'med' | 'low';
 
@@ -22,6 +23,10 @@ export interface MatchupCell {
   likelyMinPercent?: number;
   likelyMaxPercent?: number;
   confidence?: Confidence;
+  /** Set when the move's damage is conditional (e.g. Sucker Punch only lands
+   *  if the target attacks this turn). A short caveat the UI surfaces so the
+   *  number isn't read as guaranteed. */
+  conditional?: string;
 }
 
 // Confidence in the prediction: no inference yet → low (it's a Pikalytics /
@@ -213,6 +218,7 @@ export function predictOffense(args: {
     likelyMinPercent: likely?.min,
     likelyMaxPercent: likely?.max,
     confidence: confidenceFor(!!args.opponent.candidates?.length, minPercent, maxPercent),
+    conditional: isAttackConditionalMove(chosenMove) ? 'only if target attacks' : undefined,
   };
 }
 
@@ -402,6 +408,7 @@ export function predictThreat(args: {
     likelyMinPercent: likely?.min,
     likelyMaxPercent: likely?.max,
     confidence: confidenceFor(!!args.opponent.candidates?.length, minPercent, maxPercent),
+    conditional: isAttackConditionalMove(chosenMove) ? 'only if you attack' : undefined,
   };
 }
 
