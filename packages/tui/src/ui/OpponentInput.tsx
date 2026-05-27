@@ -41,14 +41,17 @@ export function OpponentInput({ stores, onDone, onCancel }: OpponentInputProps) 
 
   useInput((_input, key) => {
     if (key.escape) { onCancel(); return; }
+    if (suggestions.length === 0) return;
     if (key.upArrow) {
       setHighlight(h => Math.max(0, h - 1));
     } else if (key.downArrow) {
       setHighlight(h => Math.min(suggestions.length - 1, h + 1));
-    } else if (key.tab && suggestions[highlight]) {
-      // Tab autocompletes the textbox without committing — lets the user
-      // refine further if the match isn't right.
-      setValue(suggestions[highlight]!);
+    } else if (key.tab) {
+      // Tab cycles the highlighted suggestion (Shift+Tab backwards), wrapping
+      // at the ends. Enter commits whatever's highlighted.
+      setHighlight(h => key.shift
+        ? (h - 1 + suggestions.length) % suggestions.length
+        : (h + 1) % suggestions.length);
     }
   });
 
@@ -79,7 +82,7 @@ export function OpponentInput({ stores, onDone, onCancel }: OpponentInputProps) 
   return (
     <Box flexDirection="column" padding={1}>
       <Text bold color="cyan">Opponent team — enter the 6 species you see in preview</Text>
-      <Text dimColor>Type to filter · ↑/↓ to pick · Tab to autocomplete · Enter to commit · ESC to cancel</Text>
+      <Text dimColor>Type to filter · ↑/↓ or Tab/⇧Tab to cycle · Enter to commit · ESC to cancel</Text>
 
       <Box flexDirection="column" marginTop={1}>
         {species.map((s, i) => (

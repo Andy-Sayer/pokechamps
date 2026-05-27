@@ -7,7 +7,12 @@ Context: the original "TUI polish" subagent (the #2 batch) never ran — it
 stalled on a sandbox shell-permission wall — so none of this got built. These
 are small, high-frequency-of-use wins on the screens you touch every match.
 
-## 1. Match-end summary screen *(highest value, self-contained)*
+## 1. Match-end summary screen — ✅ SHIPPED 2026-05-26
+
+Built as `MatchSummary.tsx` rendered inside BattleScreen's existing outcome
+box (not a separate route — lower risk, same value). Pure exported
+`summarizeMatch()` + 3 tests. Shows brought 4, both sides' final HP, turns,
+KO tally. Original note below for context.
 
 **Today:** when a match ends (`/quit`, or all four faint), `BattleScreen`
 calls `onEnd()` and you drop straight back to the menu — no recap.
@@ -36,7 +41,10 @@ calls `onEnd()` and you drop straight back to the menu — no recap.
 Effort: ~1 new component + a route hop. Risk: low (pure render of existing
 state; doesn't touch finalizeTurn).
 
-## 2. Tab-cycle autocomplete at opponent input *(small, self-contained)*
+## 2. Tab-cycle autocomplete at opponent input — ✅ SHIPPED 2026-05-26
+
+Tab cycles the highlighted suggestion (Shift+Tab back, wrapping); Enter
+commits the highlight. `OpponentInput.tsx`. Original note below.
 
 **Today:** `OpponentInput.tsx` filters the Champions legal list as you type but
 the suggestion list isn't keyboard-cyclable.

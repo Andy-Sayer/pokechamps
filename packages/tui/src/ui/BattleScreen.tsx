@@ -24,6 +24,7 @@ import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type Sp
 import { PikaSpinner } from './PikaSpinner.js';
 import { ExportPanel } from './ExportPanel.js';
 import { OverridePanel } from './OverridePanel.js';
+import { MatchSummary } from './MatchSummary.js';
 import { formatShowdownTeamSP } from '@pokechamps/core/domain/showdown.js';
 import { BATTLE_COMMANDS, parseCommand, type BattleCommandId } from './slashCommands.js';
 import { deriveActiveIdx } from '@pokechamps/core/match/engine.js';
@@ -1538,6 +1539,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
           <Text bold color={match.outcome === 'victory' ? 'green' : match.outcome === 'defeat' ? 'red' : 'yellow'}>
             {match.outcome === 'victory' ? '🏆 Victory!' : match.outcome === 'defeat' ? '💀 Defeat.' : '🤝 Tie.'}
           </Text>
+          <MatchSummary match={match} />
           <SelectInput
             isFocused
             items={[
