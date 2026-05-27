@@ -60,7 +60,7 @@ const wsMatchRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
         return;
       }
 
-      subscribe(matchId, socket);
+      subscribe(matchId, socket, auth.spectator === true);
       const snapshot: LiveEnvelope = { type: 'snapshot', match };
       try {
         socket.send(JSON.stringify(snapshot));
