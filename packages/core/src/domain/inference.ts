@@ -1,6 +1,6 @@
 import type { DamageObservation, PokemonSet, Stats } from './types.js';
 import { damageRange, observationToAbsoluteDamage } from './damage.js';
-import { getSpecies, toId } from './data.js';
+import { getSpecies, getMove, toId } from './data.js';
 import { activeGimmick } from './gimmicks/index.js';
 import { getPikalytics, evFromSp } from './pikalytics.js';
 
@@ -208,6 +208,68 @@ export function scoreSpread(input: InferenceInput): ScoredCandidate[] {
   return scoredFallback
     .sort((a, b) => b.likelihood - a.likelihood)
     .slice(0, HYBRID_FALLBACK_K);
+}
+
+// Offensive inference. The defensive solver (scoreSpread) only ever varies
+// HP/Def/SpD; the opponent's Atk/SpA are otherwise left at the Pikalytics prior
+// (or 0). When the OPPONENT lands a damaging move on one of MY known mons we can
+// run the mirror problem: hold my mon fixed (known) and find which of the
+// opponent's offensive-stat (Atk for physical, SpA for special) investments
+// reproduce the observed damage. Each existing candidate keeps its inferred
+// bulk/nature/item; we assign the offensive-stat buckets consistent with the
+// hit (and drop a candidate whose nature/item can't reach the damage at all —
+// e.g. a -Atk nature ruled out by a big physical hit). Returns the refined
+// candidate set; a no-op (returns the input) for moves whose damage doesn't
+// scale with the attacker's offensive stat.
+export function scoreOffensiveSpread(input: {
+  attackerSpecies: string;
+  attackerLevel: number;
+  startingCandidates: SpreadCandidate[];
+  attackerMoves: string[];
+  move: string;
+  defenderSet: PokemonSet;       // my known mon (the target)
+  observation: DamageObservation;
+}): ScoredCandidate[] {
+  const m = getMove(input.move) as {
+    category?: string; damage?: unknown; overrideOffensiveStat?: unknown; overrideOffensivePokemon?: unknown;
+  } | undefined;
+  const passthrough = (): ScoredCandidate[] =>
+    input.startingCandidates.map(c => ({ candidate: c, within: true, likelihood: 0 }));
+  // Only standard Physical/Special moves whose damage scales with the user's
+  // Atk/SpA. Skip status, fixed-damage (Seismic Toss…), Body Press (uses Def),
+  // and Foul Play (uses the target's Atk).
+  if (!m || (m.category !== 'Physical' && m.category !== 'Special')) return passthrough();
+  if (m.damage || m.overrideOffensiveStat || m.overrideOffensivePokemon === 'target') return passthrough();
+  const stat: keyof Stats = m.category === 'Physical' ? 'atk' : 'spa';
+
+  const obs = observationToAbsoluteDamage(input.observation, input.defenderSet);
+  const out: ScoredCandidate[] = [];
+  for (const c of input.startingCandidates) {
+    const otherTotal = (Object.values(c.evs) as number[]).reduce((a, b) => a + b, 0) - c.evs[stat];
+    for (const ev of COARSE_EVS) {
+      if (otherTotal + ev > 508) break; // budget; COARSE_EVS ascends so the rest also fail
+      const cand: SpreadCandidate = { ...c, evs: { ...c.evs, [stat]: ev } };
+      const attacker = fullSet(input.attackerSpecies, cand, input.attackerLevel, input.attackerMoves);
+      let predicted;
+      try {
+        predicted = damageRange({
+          attacker,
+          defender: input.defenderSet,
+          move: input.move,
+          field: input.observation.field,
+          attackerSide: 'theirs',
+          attackerOpts: { gimmickActive: input.observation.attackerGimmickActive, boosts: input.observation.attackerBoosts as any },
+          defenderOpts: { gimmickActive: input.observation.defenderGimmickActive, boosts: input.observation.defenderBoosts as any },
+          helpingHand: input.observation.helpingHand,
+          critical: input.observation.critical,
+        });
+      } catch { continue; }
+      const within = predicted.max >= obs.lo && predicted.min <= obs.hi;
+      if (within) out.push({ candidate: cand, within: true, likelihood: candidateLikelihood(predicted.rolls, obs.lo, obs.hi) });
+    }
+  }
+  if (!out.length) return passthrough(); // contradictory/odd hit — keep prior belief
+  return out.sort((a, b) => b.likelihood - a.likelihood);
 }
 
 // Build candidates from Pikalytics' top items × top abilities × the single top

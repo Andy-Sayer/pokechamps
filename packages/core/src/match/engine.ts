@@ -20,7 +20,7 @@ import type {
   Turn,
 } from '../domain/types.js';
 import { NEUTRAL_FIELD } from '../domain/types.js';
-import { scoreSpread } from '../domain/inference.js';
+import { scoreSpread, scoreOffensiveSpread } from '../domain/inference.js';
 import { maxHpFor } from '../domain/damage.js';
 import { endOfTurn } from '../domain/endOfTurn.js';
 import { inferOpponentSpeeds, applySpeedInference } from '../domain/speed.js';
@@ -645,6 +645,46 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     } catch {
       inferenceNotes.push(`${opp.species}: inference failed`);
     }
+  }
+
+  // Offensive inference: when an opponent lands a damaging move on one of MY
+  // known mons, narrow their Atk/SpA investment (the defensive solver never
+  // touches those, so threats were otherwise computed from prior/zero offense).
+  // Chains onto the candidates we already have.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (a.side !== 'theirs') continue;
+    if (sashProcced(a)) continue;
+    if (a.damageHpPercent == null && a.damageRaw == null) continue;
+    if (typeof a.target !== 'object' || a.target.side !== 'mine') continue;
+    const oppIdx = a.attackerTeamIndex;
+    const myIdx = a.targetTeamIndex;
+    if (oppIdx == null || myIdx == null) continue;
+    const opp = next.opponentTeam[oppIdx];
+    const defenderSet = next.myTeam[myIdx];
+    if (!opp?.candidates?.length || !defenderSet) continue;
+    // Use the opp's active forme (mega if they've mega'd) for the calc.
+    const attackerSpecies = opp.megaUsed && opp.megaForme ? opp.megaForme : opp.species;
+    const obs: DamageObservation = {
+      attackerSide: 'theirs', attackerSpecies, defenderSide: 'mine', defenderSpecies: defenderSet.species,
+      move: a.move, field,
+      damageHpPercent: a.damageHpPercent, damageRaw: a.damageRaw,
+      defenderGimmickActive: next.myMegaUsed?.includes(myIdx),
+      critical: a.critical,
+    };
+    try {
+      const scored = scoreOffensiveSpread({
+        attackerSpecies, attackerLevel: defenderSet.level,
+        startingCandidates: opp.candidates.map(c => ({ evs: c.evs, nature: c.nature, item: c.item, ability: c.ability })),
+        attackerMoves: opp.knownMoves, move: a.move, defenderSet, observation: obs,
+      });
+      const candidateSets: PokemonSet[] = scored.map(s => ({
+        species: opp.candidates![0]!.species, level: defenderSet.level,
+        item: s.candidate.item, ability: s.candidate.ability, nature: s.candidate.nature,
+        evs: s.candidate.evs, ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 }, moves: opp.knownMoves,
+      }));
+      next.opponentTeam[oppIdx] = { ...next.opponentTeam[oppIdx]!, candidates: candidateSets, candidateLikelihoods: scored.map(s => s.likelihood) };
+    } catch { /* keep prior belief */ }
   }
 
   // Tag pivot-follow switches. A pivot move (U-turn etc.) executes, then

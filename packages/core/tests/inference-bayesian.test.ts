@@ -111,3 +111,49 @@ describe('Item signals: sandChipObserved', () => {
     }
   });
 });
+
+describe('scoreOffensiveSpread — infer opponent Atk/SpA from their hit on a known mon', () => {
+  const mkMon = (p: Partial<PokemonSet> & { species: string }): PokemonSet => ({
+    level: 50, nature: 'Hardy', evs: { ...ZERO_EVS }, ivs: MAX_IVS, moves: [], ...p,
+  });
+  // My known defender.
+  const myIncin = mkMon({ species: 'Incineroar', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 4 } });
+
+  test('a max-Atk physical hit forces high inferred Atk and prunes the 0-Atk reading', async () => {
+    const { scoreOffensiveSpread } = await import('../src/domain/inference.js');
+    const { damageRange } = await import('../src/domain/damage.js');
+    // Reference damage from an actual 252-Atk Adamant Garchomp Earthquake.
+    const ref = damageRange({
+      attacker: mkMon({ species: 'Garchomp', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Earthquake'] }),
+      defender: myIncin, move: 'Earthquake', field: NEUTRAL_FIELD, attackerSide: 'theirs',
+    });
+    const observedPct = (ref.minPercent + ref.maxPercent) / 2;
+    const scored = scoreOffensiveSpread({
+      attackerSpecies: 'Garchomp', attackerLevel: 50,
+      startingCandidates: [{ evs: { ...ZERO_EVS }, nature: 'Adamant' }],
+      attackerMoves: ['Earthquake'], move: 'Earthquake', defenderSet: myIncin,
+      observation: {
+        attackerSide: 'theirs', attackerSpecies: 'Garchomp', defenderSide: 'mine',
+        defenderSpecies: 'Incineroar', move: 'Earthquake', field: NEUTRAL_FIELD, damageHpPercent: observedPct,
+      },
+    });
+    expect(scored.length).toBeGreaterThan(0);
+    // 0-Atk cannot explain a max-Atk hit → every surviving candidate invests Atk.
+    expect(scored.every(s => s.candidate.evs.atk > 0)).toBe(true);
+    expect(Math.max(...scored.map(s => s.candidate.evs.atk))).toBeGreaterThanOrEqual(196);
+  });
+
+  test('passes through unchanged for moves whose damage ignores the user offense (Foul Play)', async () => {
+    const { scoreOffensiveSpread } = await import('../src/domain/inference.js');
+    const start: SpreadCandidate[] = [{ evs: { ...ZERO_EVS }, nature: 'Adamant' }];
+    const scored = scoreOffensiveSpread({
+      attackerSpecies: 'Grimmsnarl', attackerLevel: 50, startingCandidates: start,
+      attackerMoves: ['Foul Play'], move: 'Foul Play', defenderSet: myIncin,
+      observation: {
+        attackerSide: 'theirs', attackerSpecies: 'Grimmsnarl', defenderSide: 'mine',
+        defenderSpecies: 'Incineroar', move: 'Foul Play', field: NEUTRAL_FIELD, damageHpPercent: 40,
+      },
+    });
+    expect(scored.map(s => s.candidate)).toEqual(start);
+  });
+});

@@ -4,7 +4,7 @@ import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
 import type { Match, FieldState, DamageObservation, MoveAction, OpponentEntry, PokemonSet } from '@pokechamps/core/domain/types.js';
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
-import { scoreSpread, mostLikely } from '@pokechamps/core/domain/inference.js';
+import { scoreSpread, scoreOffensiveSpread, mostLikely } from '@pokechamps/core/domain/inference.js';
 import { maxHpFor } from '@pokechamps/core/domain/damage.js';
 import { endOfTurn } from '@pokechamps/core/domain/endOfTurn.js';
 import { inferOpponentSpeeds, applySpeedInference, actualSpeed, predictTurnOrder, effectiveSpeedRange } from '@pokechamps/core/domain/speed.js';
@@ -532,8 +532,15 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // A cheap signature of everything the search depends on, so the effect only
   // re-runs when the board actually changes (not on every keystroke render).
   const posSig = useMemo(() => JSON.stringify([
-    match.bring, match.opponentBrought, match.myCurrentHp, match.myFainted,
-    match.opponentTeam.map(o => [o.species, o.currentHpPercent, o.fainted]),
+    match.bring, match.opponentBrought, match.myCurrentHp, match.myFainted, match.myBoosts, match.myStatus,
+    // Include inferred state — candidate count/spread + speed bounds + status —
+    // so the search also re-runs when a damage/speed observation narrows the
+    // belief without changing raw HP.
+    match.opponentTeam.map(o => [
+      o.species, o.currentHpPercent, o.fainted, o.status, o.speedFloor, o.speedCeiling,
+      o.candidates?.length,
+      o.candidates?.[0] && [o.candidates[0].evs.hp, o.candidates[0].evs.atk, o.candidates[0].evs.def, o.candidates[0].evs.spa, o.candidates[0].evs.spd, o.candidates[0].nature, o.candidates[0].item],
+    ]),
     activeIdx, field.weather, field.terrain, field.trickRoom, field.myTailwind, field.theirTailwind,
     match.outcome,
   ]), [match, activeIdx, field]);
@@ -870,6 +877,44 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       } catch (e) {
         inferenceNotes.push(`${opp.species}: inference failed`);
       }
+    }
+
+    // Offensive inference: opp landed a damaging move on one of my known mons →
+    // narrow their Atk/SpA (the defensive solver never touches those). Mirror of
+    // engine.ts. Chains onto the candidates we already have.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.side !== 'theirs') continue;
+      if (sashProcced(a)) continue;
+      if (a.damageHpPercent == null && a.damageRaw == null) continue;
+      if (typeof a.target !== 'object' || a.target.side !== 'mine') continue;
+      const oppIdx = a.attackerTeamIndex;
+      const myIdx = a.targetTeamIndex;
+      if (oppIdx == null || myIdx == null) continue;
+      const opp = next.opponentTeam[oppIdx];
+      const defenderSet = next.myTeam[myIdx];
+      if (!opp?.candidates?.length || !defenderSet) continue;
+      const attackerSpecies = opp.megaUsed && opp.megaForme ? opp.megaForme : opp.species;
+      const obs: DamageObservation = {
+        attackerSide: 'theirs', attackerSpecies, defenderSide: 'mine', defenderSpecies: defenderSet.species,
+        move: a.move, field,
+        damageHpPercent: a.damageHpPercent, damageRaw: a.damageRaw,
+        defenderGimmickActive: next.myMegaUsed?.includes(myIdx),
+        critical: a.critical,
+      };
+      try {
+        const scored = scoreOffensiveSpread({
+          attackerSpecies, attackerLevel: defenderSet.level,
+          startingCandidates: opp.candidates.map(c => ({ evs: c.evs, nature: c.nature, item: c.item, ability: c.ability })),
+          attackerMoves: opp.knownMoves, move: a.move, defenderSet, observation: obs,
+        });
+        const candidateSets = scored.map(s => ({
+          species: opp.candidates![0]!.species, level: defenderSet.level,
+          item: s.candidate.item, ability: s.candidate.ability, nature: s.candidate.nature,
+          evs: s.candidate.evs, ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 }, moves: opp.knownMoves,
+        }));
+        next.opponentTeam[oppIdx] = { ...next.opponentTeam[oppIdx]!, candidates: candidateSets, candidateLikelihoods: scored.map(s => s.likelihood) };
+      } catch { /* keep prior belief */ }
     }
 
     // Speed inference uses the whole match history. Apply to opp team.
