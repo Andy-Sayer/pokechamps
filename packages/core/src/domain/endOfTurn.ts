@@ -1,6 +1,7 @@
 import type { Match, FieldState, OpponentEntry, PokemonSet } from './types.js';
 import { maxHpFor } from './damage.js';
 import { getSpecies } from './data.js';
+import { defaultOpponentSet } from './bring.js';
 
 // Returns a fresh Match with end-of-turn effects applied to the four actives:
 //   - Weather chip (sandstorm/hail/snow), with type immunities
@@ -103,6 +104,60 @@ export function endOfTurn(
   applyToMine(activeIdx.mine[1]);
   applyToOpp(activeIdx.theirs[0]);
   applyToOpp(activeIdx.theirs[1]);
+
+  // Leech Seed residual: drain 1/8 of the target's max HP, heal the seeder by
+  // the same ABSOLUTE HP (converted to the seeder's % of max). If the seeder
+  // has since switched out, the drain still hits but the heal is wasted.
+  const maxHpForSide = (side: 'mine' | 'theirs', idx: number): number => {
+    if (side === 'mine') return next.myTeam[idx] ? maxHpFor(next.myTeam[idx]!) : 0;
+    const e = next.opponentTeam[idx];
+    if (!e) return 0;
+    const cand = e.candidates?.[0] as PokemonSet | undefined;
+    return cand ? maxHpFor(cand) : maxHpFor(defaultOpponentSet(e, 50));
+  };
+  const applyLeechSeed = (side: 'mine' | 'theirs', idx: number | null) => {
+    if (idx == null) return;
+    const info = side === 'theirs' ? next.opponentTeam[idx]?.leechSeeded : next.myLeechSeeded?.[idx];
+    if (!info) return;
+    const targetMax = maxHpForSide(side, idx);
+    if (!targetMax) return;
+    const drainPct = 100 / 8; // 12.5% of target max
+    // Apply drain.
+    if (side === 'theirs') {
+      const o = next.opponentTeam[idx];
+      if (!o || o.fainted) return;
+      const after = clampHp((o.currentHpPercent ?? 100) - drainPct);
+      o.currentHpPercent = after;
+      notes.push(`o${idx + 1} -${drainPct.toFixed(0)}% (Leech Seed)`);
+      if (after === 0) o.fainted = true;
+    } else {
+      if (next.myFainted!.includes(idx)) return;
+      const after = clampHp((next.myCurrentHp![idx] ?? 100) - drainPct);
+      next.myCurrentHp![idx] = after;
+      notes.push(`m${idx + 1} -${drainPct.toFixed(0)}% (Leech Seed)`);
+      if (after === 0 && !next.myFainted!.includes(idx)) next.myFainted!.push(idx);
+    }
+    // Heal the seeder if still active in their slot and not fainted.
+    const sActive = (info.seederSide === 'mine' ? activeIdx.mine : activeIdx.theirs).includes(info.seederIndex);
+    if (!sActive) return;
+    const seederMax = maxHpForSide(info.seederSide, info.seederIndex);
+    if (!seederMax) return;
+    const healPct = Math.min(100, ((drainPct / 100) * targetMax / seederMax) * 100);
+    if (info.seederSide === 'theirs') {
+      const so = next.opponentTeam[info.seederIndex];
+      if (so && !so.fainted) {
+        so.currentHpPercent = clampHp((so.currentHpPercent ?? 100) + healPct);
+        notes.push(`o${info.seederIndex + 1} +${healPct.toFixed(0)}% (Leech Seed)`);
+      }
+    } else if (!next.myFainted!.includes(info.seederIndex)) {
+      next.myCurrentHp![info.seederIndex] = clampHp((next.myCurrentHp![info.seederIndex] ?? 100) + healPct);
+      notes.push(`m${info.seederIndex + 1} +${healPct.toFixed(0)}% (Leech Seed)`);
+    }
+  };
+  applyLeechSeed('mine', activeIdx.mine[0]);
+  applyLeechSeed('mine', activeIdx.mine[1]);
+  applyLeechSeed('theirs', activeIdx.theirs[0]);
+  applyLeechSeed('theirs', activeIdx.theirs[1]);
 
   // Field conditions count down on the persistent field; clear at 0.
   const f = next.field;

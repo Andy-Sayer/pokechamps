@@ -140,12 +140,15 @@ function clearMyVolatiles(match: Match, idx: number): void {
   if (match.myTauntTurns) delete match.myTauntTurns[idx];
   if (match.myEncoreTurns) delete match.myEncoreTurns[idx];
   if (match.myDisableTurns) delete match.myDisableTurns[idx];
+  // Leech Seed clears when the seeded mon switches out.
+  if (match.myLeechSeeded) delete match.myLeechSeeded[idx];
 }
 
 // Clear opp move-restricting volatiles + their counters (switch-out / cure).
 function clearOppVolatiles(o: OpponentEntry): void {
   o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined;
   o.tauntTurns = undefined; o.encoreTurns = undefined; o.disableTurns = undefined;
+  o.leechSeeded = undefined;
 }
 
 // Merge a boost map into a side's active-slot boosts, clamped to [-6, +6].
@@ -384,6 +387,7 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     myTauntTurns: { ...(match.myTauntTurns ?? {}) },
     myEncoreTurns: { ...(match.myEncoreTurns ?? {}) },
     myDisableTurns: { ...(match.myDisableTurns ?? {}) },
+    myLeechSeeded: { ...(match.myLeechSeeded ?? {}) },
   };
 
   // Walk damaging actions in order, deriving each action's damageHpPercent
@@ -526,6 +530,36 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     }
     next.field = applyFieldMove(next.field ?? NEUTRAL_FIELD, a.side, fm, setterItem);
     inferenceNotes.push(`${a.move} set field state`);
+  }
+
+  // Leech Seed: set the volatile on a foe target. Fails on Grass-types
+  // (immune) and on already-seeded targets. Cleared on switch-out by
+  // clearMy/OppVolatiles, drained + heals at EOT in endOfTurn.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (a.move !== 'Leech Seed') continue;
+    if (typeof a.target !== 'object') continue;
+    const tIdx = a.targetTeamIndex;
+    const sIdx = a.attackerTeamIndex;
+    if (tIdx == null || sIdx == null) continue;
+    if (a.target.side === 'theirs') {
+      const o = next.opponentTeam[tIdx];
+      if (!o || o.leechSeeded) continue;
+      const formeName = o.megaUsed && o.megaForme ? o.megaForme : o.species;
+      const types = (getSpecies(formeName) as { types?: string[] } | undefined)?.types;
+      if (types?.includes('Grass')) continue;
+      o.leechSeeded = { seederSide: a.side, seederIndex: sIdx };
+      inferenceNotes.push(`o${tIdx + 1} seeded`);
+    } else {
+      const set = next.myTeam[tIdx];
+      if (!set) continue;
+      if (next.myLeechSeeded?.[tIdx]) continue;
+      const formeName = next.myMegaUsed?.includes(tIdx) && next.myMegaForme?.[tIdx] ? next.myMegaForme[tIdx] : set.species;
+      const types = (getSpecies(formeName) as { types?: string[] } | undefined)?.types;
+      if (types?.includes('Grass')) continue;
+      next.myLeechSeeded = { ...(next.myLeechSeeded ?? {}), [tIdx]: { seederSide: a.side, seederIndex: sIdx } };
+      inferenceNotes.push(`m${tIdx + 1} seeded`);
+    }
   }
 
   // Item-removing moves (Knock Off / Thief / Covet / berry-eaters). Mark the
@@ -815,6 +849,7 @@ function applyStateUpdateImpl(
     myTauntTurns: { ...(match.myTauntTurns ?? {}) },
     myEncoreTurns: { ...(match.myEncoreTurns ?? {}) },
     myDisableTurns: { ...(match.myDisableTurns ?? {}) },
+    myLeechSeeded: { ...(match.myLeechSeeded ?? {}) },
   };
   const nextActive: ActiveIdx = {
     mine: [activeIdx.mine[0], activeIdx.mine[1]],

@@ -632,6 +632,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       myTaunted: [...(match.myTaunted ?? [])],
       myTauntTurns: { ...(match.myTauntTurns ?? {}) },
       myEncoreTurns: { ...(match.myEncoreTurns ?? {}) },
+      myLeechSeeded: { ...(match.myLeechSeeded ?? {}) },
       myDisableTurns: { ...(match.myDisableTurns ?? {}) },
     };
 
@@ -771,6 +772,35 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       }
       next.field = applyFieldMove(next.field ?? NEUTRAL_FIELD, a.side, fm, setterItem);
       inferenceNotes.push(`${a.move} set field state`);
+    }
+    // Leech Seed: set the volatile on a foe target. Fails on Grass-types
+    // (immune) and on already-seeded targets. Mirror of engine.ts. Cleared on
+    // switch-out, drained + heals at EOT in endOfTurn.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.move !== 'Leech Seed') continue;
+      if (typeof a.target !== 'object') continue;
+      const tIdx = a.targetTeamIndex;
+      const sIdx = a.attackerTeamIndex;
+      if (tIdx == null || sIdx == null) continue;
+      if (a.target.side === 'theirs') {
+        const o = next.opponentTeam[tIdx];
+        if (!o || o.leechSeeded) continue;
+        const formeName = o.megaUsed && o.megaForme ? o.megaForme : o.species;
+        const types = (getSpecies(formeName) as { types?: string[] } | undefined)?.types;
+        if (types?.includes('Grass')) continue;
+        o.leechSeeded = { seederSide: a.side, seederIndex: sIdx };
+        inferenceNotes.push(`o${tIdx + 1} seeded`);
+      } else {
+        const set = next.myTeam[tIdx];
+        if (!set) continue;
+        if (next.myLeechSeeded?.[tIdx]) continue;
+        const formeName = next.myMegaUsed?.includes(tIdx) && next.myMegaForme?.[tIdx] ? next.myMegaForme[tIdx] : set.species;
+        const types = (getSpecies(formeName) as { types?: string[] } | undefined)?.types;
+        if (types?.includes('Grass')) continue;
+        next.myLeechSeeded = { ...(next.myLeechSeeded ?? {}), [tIdx]: { seederSide: a.side, seederIndex: sIdx } };
+        inferenceNotes.push(`m${tIdx + 1} seeded`);
+      }
     }
     // Item-removing moves (Knock Off / Thief / Covet / berry-eaters).
     for (const a of draftActions) {
@@ -933,12 +963,12 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (a.kind !== 'switch' || a.targetTeamIndex == null) continue;
       if (a.side === 'mine') {
         const outgoing = nextActive.mine[a.attackerSlot];
-        if (outgoing != null) { delete next.myBoosts[outgoing]; next.myTaunted = (next.myTaunted ?? []).filter(i => i !== outgoing); if (next.myEncoreMove) delete next.myEncoreMove[outgoing]; if (next.myDisabledMove) delete next.myDisabledMove[outgoing]; if (next.myTauntTurns) delete next.myTauntTurns[outgoing]; if (next.myEncoreTurns) delete next.myEncoreTurns[outgoing]; if (next.myDisableTurns) delete next.myDisableTurns[outgoing]; }
+        if (outgoing != null) { delete next.myBoosts[outgoing]; next.myTaunted = (next.myTaunted ?? []).filter(i => i !== outgoing); if (next.myEncoreMove) delete next.myEncoreMove[outgoing]; if (next.myDisabledMove) delete next.myDisabledMove[outgoing]; if (next.myTauntTurns) delete next.myTauntTurns[outgoing]; if (next.myEncoreTurns) delete next.myEncoreTurns[outgoing]; if (next.myDisableTurns) delete next.myDisableTurns[outgoing]; if (next.myLeechSeeded) delete next.myLeechSeeded[outgoing]; }
         nextActive.mine[a.attackerSlot] = a.targetTeamIndex;
       } else {
         const outgoing = nextActive.theirs[a.attackerSlot];
         if (outgoing != null && next.opponentTeam[outgoing]) {
-          next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {}, taunted: undefined, encoreMove: undefined, disabledMove: undefined, tauntTurns: undefined, encoreTurns: undefined, disableTurns: undefined };
+          next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {}, taunted: undefined, encoreMove: undefined, disabledMove: undefined, tauntTurns: undefined, encoreTurns: undefined, disableTurns: undefined, leechSeeded: undefined };
         }
         nextActive.theirs[a.attackerSlot] = a.targetTeamIndex;
       }

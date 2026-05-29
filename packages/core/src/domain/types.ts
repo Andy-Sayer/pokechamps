@@ -89,6 +89,11 @@ export interface OpponentEntry {
   // doesn't hold Safety Goggles and isn't Sand-immune. Used to exclude
   // Safety Goggles from the item candidate set.
   sandChipObserved?: boolean;
+  // Leech Seed volatile: set when this mon was seeded; cleared on switch-out
+  // (and on Rapid Spin). Tracks the SEEDER's identity so the EOT residual can
+  // heal the right mon — and skip the heal if the seeder has since switched
+  // out or fainted (the drain still applies to the target either way).
+  leechSeeded?: { seederSide: 'mine' | 'theirs'; seederIndex: number };
 }
 
 export interface HazardState {
@@ -246,6 +251,8 @@ export interface Match {
   myTauntTurns?: Record<number, number>;
   myEncoreTurns?: Record<number, number>;
   myDisableTurns?: Record<number, number>;
+  // myTeam index → Leech Seed seeder identity (parallel to OpponentEntry.leechSeeded).
+  myLeechSeeded?: Record<number, { seederSide: 'mine' | 'theirs'; seederIndex: number }>;
   // myTeam index → charging-move state. Parallel to OpponentEntry.charging.
   // Set when a mine-side charge move logged with no damage; cleared when
   // the same mon's next damaging action lands.
