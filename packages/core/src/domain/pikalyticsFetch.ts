@@ -75,7 +75,12 @@ function persistEntry(species: string, entry: PikalyticsEntry): void {
     } else {
       data = { format: FORMAT, fetchedAt: new Date().toISOString().slice(0, 10), topPokemon: [], pokemon: {} };
     }
-    data.pokemon[species] = entry;
+    // Preserve a known rank/usage — this background entry carries rank/usage 0,
+    // which must not overwrite the static top-N ranking of an already-ranked mon.
+    const prev = data.pokemon[species];
+    data.pokemon[species] = prev
+      ? { ...entry, rank: prev.rank || entry.rank, usage: prev.usage || entry.usage }
+      : entry;
     const tmp = `${path}.tmp`;
     writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8');
     renameSync(tmp, path);
