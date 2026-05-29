@@ -9,8 +9,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDir = join(__dirname, '..', '..', '..', '..', 'data');
 
 const FORMAT = 'gen9championsvgc2026regma';
-const TOP_N = 10;
+const TOP_N = 60;
 const BASE = 'https://www.pikalytics.com/ai/pokedex';
+const REQUEST_DELAY_MS = 200; // be polite to pikalytics across the per-species fetches
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 interface PercentRow { name: string; pct: number }
 interface Spread { nature: string; sp: [number, number, number, number, number, number]; pct: number }
@@ -158,14 +161,15 @@ async function main() {
   const pokemon: Record<string, PikalyticsEntry> = {};
   for (const species of top) {
     const url = `${BASE}/${FORMAT}/${encodeURIComponent(species)}`;
-    console.log(`  - ${species}`);
+    const meta = usageByRank.get(species) ?? { rank: 0, usage: 0 };
+    console.log(`  - ${species} (rank ${meta.rank}, ${meta.usage}%)`);
     try {
       const md = await fetchText(url);
-      const meta = usageByRank.get(species) ?? { rank: 0, usage: 0 };
       pokemon[species] = { rank: meta.rank, usage: meta.usage, ...parseEntry(md, species) };
     } catch (e) {
       console.warn(`    skipped: ${(e as Error).message}`);
     }
+    await sleep(REQUEST_DELAY_MS);
   }
 
   const out: PikalyticsFile = {
