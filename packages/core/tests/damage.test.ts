@@ -431,3 +431,37 @@ describe('damageRange — multi-hit moves total per-hit damage', () => {
     expect(r.maxPercent).toBeCloseTo(parseFloat(m![2]!), 0);
   });
 });
+
+describe('mega forme abilities are applied in the calc', () => {
+  // The set carries the base ability; once active, the mega forme's ability
+  // must take over (it changes damage). Sets hold the mega stone (required for
+  // the gimmick to resolve the forme).
+  const mk = (p: Partial<PokemonSet> & { species: string }): PokemonSet => ({
+    level: 50, nature: 'Hardy', evs: { ...ZERO_EVS }, ivs: MAX_IVS, moves: [], ...p,
+  });
+  const wall = mk({ species: 'Garchomp', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 } });
+
+  test('Tough Claws (Aerodactyl-Mega) boosts a contact move vs the base ability', () => {
+    const aero = mk({ species: 'Aerodactyl', ability: 'Rock Head', item: 'Aerodactylite', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Crunch'] });
+    const base = damageRange({ attacker: aero, defender: wall, move: 'Crunch', field: NEUTRAL_FIELD, attackerSide: 'theirs', attackerOpts: { gimmickActive: false } });
+    const mega = damageRange({ attacker: aero, defender: wall, move: 'Crunch', field: NEUTRAL_FIELD, attackerSide: 'theirs', attackerOpts: { gimmickActive: true } });
+    expect(mega.desc).toContain('Tough Claws');
+    expect(mega.maxPercent).toBeGreaterThan(base.maxPercent); // ×1.3 contact
+  });
+
+  test('Thick Fat (Venusaur-Mega) halves incoming Fire damage on defense', () => {
+    const ven = mk({ species: 'Venusaur', ability: 'Overgrow', item: 'Venusaurite', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, spd: 252 } });
+    const atk = mk({ species: 'Charizard', ability: 'Blaze', nature: 'Modest', evs: { ...ZERO_EVS, spa: 252 }, moves: ['Flamethrower'] });
+    const base = damageRange({ attacker: atk, defender: ven, move: 'Flamethrower', field: NEUTRAL_FIELD, attackerSide: 'mine', defenderOpts: { gimmickActive: false } });
+    const mega = damageRange({ attacker: atk, defender: ven, move: 'Flamethrower', field: NEUTRAL_FIELD, attackerSide: 'mine', defenderOpts: { gimmickActive: true } });
+    expect(mega.maxPercent).toBeLessThan(base.maxPercent * 0.75); // Thick Fat ≈ ½
+  });
+
+  test('Mega Sol (Meganium-Mega) makes its moves act as if Sun is active', () => {
+    const meg = mk({ species: 'Meganium', ability: 'Overgrow', item: 'Meganiumite', nature: 'Modest', evs: { ...ZERO_EVS, spa: 252 }, moves: ['Flamethrower'] });
+    const noMega = damageRange({ attacker: meg, defender: wall, move: 'Flamethrower', field: NEUTRAL_FIELD, attackerSide: 'theirs', attackerOpts: { gimmickActive: false } });
+    const mega = damageRange({ attacker: meg, defender: wall, move: 'Flamethrower', field: NEUTRAL_FIELD, attackerSide: 'theirs', attackerOpts: { gimmickActive: true } });
+    expect(mega.desc).toContain('Sun');
+    expect(mega.maxPercent).toBeGreaterThan(noMega.maxPercent); // Fire ×1.5
+  });
+});
