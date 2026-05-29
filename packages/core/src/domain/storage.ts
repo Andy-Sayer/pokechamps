@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { PokemonSet, Match } from './types.js';
@@ -26,6 +26,13 @@ export function saveTeam(name: string, team: PokemonSet[]): string {
   const path = join(teamsDir, `${safe}.json`);
   writeFileSync(path, JSON.stringify(team, null, 2));
   return path;
+}
+
+// Delete a saved team. Name is sanitized the same way saveTeam writes it, so a
+// list entry's name (already a filename) round-trips. No-op if absent.
+export function deleteTeam(name: string): void {
+  const safe = name.replace(/[^a-zA-Z0-9_-]/g, '_');
+  rmSync(join(teamsDir, `${safe}.json`), { force: true });
 }
 
 export function saveMatch(match: Match): string {

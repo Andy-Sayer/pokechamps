@@ -2,7 +2,7 @@ import { describe, test, expect, afterEach } from 'vitest';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { saveTeam, listTeams, saveMatch } from '../src/domain/storage.js';
+import { saveTeam, listTeams, deleteTeam, saveMatch } from '../src/domain/storage.js';
 import type { PokemonSet, Match } from '../src/domain/types.js';
 import { ZERO_EVS, MAX_IVS, NEUTRAL_FIELD } from '../src/domain/types.js';
 
@@ -68,6 +68,19 @@ describe('storage', () => {
     expect(base).not.toContain('!');
     expect(base).not.toContain(' ');
     expect(existsSync(path)).toBe(true);
+  });
+
+  test('deleteTeam removes the file; round-trips a list-entry name and is a no-op if absent', () => {
+    const name = `vitest-del-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const path = saveTeam(name, [makeSet()]);
+    createdFiles.push(path);
+    expect(listTeams().some(t => t.name === name)).toBe(true);
+
+    deleteTeam(name);
+    expect(existsSync(path)).toBe(false);
+    expect(listTeams().some(t => t.name === name)).toBe(false);
+    // Absent name is a harmless no-op.
+    expect(() => deleteTeam(name)).not.toThrow();
   });
 
   test('saveMatch writes a snapshot file at matches/<id>.json', () => {

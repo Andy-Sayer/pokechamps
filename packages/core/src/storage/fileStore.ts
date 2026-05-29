@@ -6,6 +6,7 @@ import type { Match, PokemonSet } from '../domain/types.js';
 import {
   listTeams,
   saveTeam,
+  deleteTeam,
   saveMatch,
   listMatches,
 } from '../domain/storage.js';
@@ -38,10 +39,9 @@ function createTeamStore(): TeamStore {
       saveTeam(name, team);
       return Promise.resolve();
     },
-    delete(_name: string): Promise<void> {
-      // Not exposed by the legacy sync API yet — callers don't use it today.
-      // Stubbed so the interface compiles; httpStore will implement it for real.
-      return Promise.reject(new Error('TeamStore.delete not implemented for fileStore'));
+    delete(name: string): Promise<void> {
+      deleteTeam(name);
+      return Promise.resolve();
     },
   };
 }
