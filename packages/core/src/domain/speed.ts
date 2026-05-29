@@ -504,18 +504,63 @@ export function predictTurnOrder(args: {
   return rows;
 }
 
+// Choice Scarf is ruled out when we KNOW the item isn't a scarf, or the mon has
+// been seen using 2+ distinct damaging moves (so it can't be Choice-locked at
+// all). Only then can a high speed floor be attributed to a +Speed nature /
+// investment rather than a scarf.
+function scarfRuledOut(e: OpponentEntry): boolean {
+  if (e.itemConsumed) return true; // scarves aren't consumed
+  if (e.item) return !/choice\s*scarf/i.test(e.item);
+  const damaging = new Set(
+    (e.knownMoves ?? []).filter(m => {
+      const cat = (getMove(m) as { category?: string } | undefined)?.category;
+      return cat && cat !== 'Status';
+    }),
+  );
+  return damaging.size >= 2;
+}
+
+// +Speed nature that preserves the offense the mon actually uses: Timid (−Atk)
+// if it has a known special move, else Jolly (−SpA).
+function plusSpeedNature(e: OpponentEntry): string {
+  const hasSpecial = (e.knownMoves ?? []).some(m => (getMove(m) as { category?: string } | undefined)?.category === 'Special');
+  return hasSpecial ? 'Timid' : 'Jolly';
+}
+
+// Raise a candidate to reach `floor`: keep it if it already does, else assign
+// the minimal Spe EV under its current nature, else (scarf ruled out) promote to
+// a +Speed nature. Returns null if even a +Speed-natured, budget-limited spread
+// can't reach the floor — i.e. an over-bulky spread proven too slow to be real.
+function fitToFloor(c: PokemonSet, floor: number, e: OpponentEntry): PokemonSet | null {
+  if (actualSpeed(c) >= floor) return c;
+  const otherTotal = (Object.values(c.evs) as number[]).reduce((a, b) => a + b, 0) - c.evs.spe;
+  const tryNature = (nature: string): PokemonSet | null => {
+    for (let ev = 0; ev <= 252; ev += 4) {
+      if (otherTotal + ev > 508) break;
+      const cand: PokemonSet = { ...c, nature, evs: { ...c.evs, spe: ev } };
+      if (actualSpeed(cand) >= floor) return cand;
+    }
+    return null;
+  };
+  const sameNature = tryNature(c.nature);
+  if (sameNature) return sameNature;
+  const ps = plusSpeedNature(e);
+  return ps !== c.nature ? tryNature(ps) : null;
+}
+
 // Merge an inference result into the opponent entries (mutating). Returns
 // the same array for fluent use.
 //
-// Side effect that callers rely on: when a speed bound tightens, we also
-// prune `entry.candidates` to spreads whose actualSpeed satisfies the bound.
-// This is how speed observations propagate into damage predictions — a
-// "must have ≥ X speed" rule drops candidates whose SP went elsewhere, so
-// the surviving candidates have less budget for other stats too. (Nature is
-// honored because actualSpeed applies the multiplier.)
+// Two candidate effects from a speed bound:
+//   - Default: prune spreads whose actualSpeed violates the bound (a "must have
+//     ≥ X speed" rule drops spreads whose SP went elsewhere).
+//   - Confidence commit: when Choice Scarf is RULED OUT, a floor must be met by
+//     stat — so we assign the minimal Spe EV (and, only if required, a +Speed
+//     nature) to each candidate, which also shrinks their bulk budget and drops
+//     spreads too bulky to also be that fast.
 //
-// Defensive: if the filter would empty the candidate list, we keep the
-// original — better a wider belief than a contradiction from a mistyped log.
+// Defensive: never empty the candidate list — keep the prior belief if every
+// spread would be removed (guards against a contradictory mistyped log).
 export function applySpeedInference(
   opponentTeam: OpponentEntry[],
   inferences: SpeedInference[],
@@ -528,7 +573,16 @@ export function applySpeedInference(
     e.scarfSuspected = s.scarfSuspected;
     e.scarfChance = s.scarfChance;
 
-    if (e.candidates?.length && (s.speedFloor != null || s.speedCeiling != null)) {
+    if (!e.candidates?.length) continue;
+
+    if (s.speedFloor != null && scarfRuledOut(e)) {
+      // Confidence commit: a proven-non-scarf floor is real speed investment.
+      let fitted = e.candidates
+        .map(c => fitToFloor(c, s.speedFloor!, e))
+        .filter((c): c is PokemonSet => c != null);
+      if (s.speedCeiling != null) fitted = fitted.filter(c => actualSpeed(c) <= s.speedCeiling!);
+      if (fitted.length > 0) e.candidates = fitted;
+    } else if (s.speedFloor != null || s.speedCeiling != null) {
       const filtered = e.candidates.filter(c => {
         const spd = actualSpeed(c);
         if (s.speedFloor != null && spd < s.speedFloor) return false;

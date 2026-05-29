@@ -243,33 +243,49 @@ export function scoreOffensiveSpread(input: {
   const stat: keyof Stats = m.category === 'Physical' ? 'atk' : 'spa';
 
   const obs = observationToAbsoluteDamage(input.observation, input.defenderSet);
-  const out: ScoredCandidate[] = [];
-  for (const c of input.startingCandidates) {
-    const otherTotal = (Object.values(c.evs) as number[]).reduce((a, b) => a + b, 0) - c.evs[stat];
-    for (const ev of COARSE_EVS) {
-      if (otherTotal + ev > 508) break; // budget; COARSE_EVS ascends so the rest also fail
-      const cand: SpreadCandidate = { ...c, evs: { ...c.evs, [stat]: ev } };
-      const attacker = fullSet(input.attackerSpecies, cand, input.attackerLevel, input.attackerMoves);
-      let predicted;
-      try {
-        predicted = damageRange({
-          attacker,
-          defender: input.defenderSet,
-          move: input.move,
-          field: input.observation.field,
-          attackerSide: 'theirs',
-          attackerOpts: { gimmickActive: input.observation.attackerGimmickActive, boosts: input.observation.attackerBoosts as any },
-          defenderOpts: { gimmickActive: input.observation.defenderGimmickActive, boosts: input.observation.defenderBoosts as any },
-          helpingHand: input.observation.helpingHand,
-          critical: input.observation.critical,
-        });
-      } catch { continue; }
-      const within = predicted.max >= obs.lo && predicted.min <= obs.hi;
-      if (within) out.push({ candidate: cand, within: true, likelihood: candidateLikelihood(predicted.rolls, obs.lo, obs.hi) });
+  // For each candidate, sweep the offensive-stat buckets that fit the budget and
+  // keep the ones whose forward damage range contains the observed value.
+  const solve = (cands: SpreadCandidate[]): ScoredCandidate[] => {
+    const out: ScoredCandidate[] = [];
+    for (const c of cands) {
+      const otherTotal = (Object.values(c.evs) as number[]).reduce((a, b) => a + b, 0) - c.evs[stat];
+      for (const ev of COARSE_EVS) {
+        if (otherTotal + ev > 508) break; // budget; COARSE_EVS ascends so the rest also fail
+        const cand: SpreadCandidate = { ...c, evs: { ...c.evs, [stat]: ev } };
+        const attacker = fullSet(input.attackerSpecies, cand, input.attackerLevel, input.attackerMoves);
+        let predicted;
+        try {
+          predicted = damageRange({
+            attacker,
+            defender: input.defenderSet,
+            move: input.move,
+            field: input.observation.field,
+            attackerSide: 'theirs',
+            attackerOpts: { gimmickActive: input.observation.attackerGimmickActive, boosts: input.observation.attackerBoosts as any },
+            defenderOpts: { gimmickActive: input.observation.defenderGimmickActive, boosts: input.observation.defenderBoosts as any },
+            helpingHand: input.observation.helpingHand,
+            critical: input.observation.critical,
+          });
+        } catch { continue; }
+        if (predicted.max >= obs.lo && predicted.min <= obs.hi) {
+          out.push({ candidate: cand, within: true, likelihood: candidateLikelihood(predicted.rolls, obs.lo, obs.hi) });
+        }
+      }
     }
+    return out.sort((a, b) => b.likelihood - a.likelihood);
+  };
+
+  let result = solve(input.startingCandidates);
+  if (!result.length) {
+    // Confidence trigger: no current-nature spread can explain the hit even at
+    // max investment → it's an extreme hit that forces the boosting nature. Only
+    // here do we override the inherited nature (Adamant for physical, Modest for
+    // special) — natures otherwise stay loose.
+    const boost = stat === 'atk' ? 'Adamant' : 'Modest';
+    const promoted = input.startingCandidates.filter(c => c.nature !== boost).map(c => ({ ...c, nature: boost }));
+    if (promoted.length) result = solve(promoted);
   }
-  if (!out.length) return passthrough(); // contradictory/odd hit — keep prior belief
-  return out.sort((a, b) => b.likelihood - a.likelihood);
+  return result.length ? result : passthrough(); // still nothing → keep prior belief
 }
 
 // Build candidates from Pikalytics' top items × top abilities × the single top

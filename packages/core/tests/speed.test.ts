@@ -741,3 +741,27 @@ describe('applySpeedInference: candidate filter', () => {
     expect(opp.scarfSuspected).toBe(true);
   });
 });
+
+describe('applySpeedInference: proven-non-scarf floor commits +Speed nature/EVs', () => {
+  const set = (p: Partial<PokemonSet> & { species: string }): PokemonSet => ({
+    level: 50, nature: 'Adamant', evs: { ...ZERO_EVS }, ivs: MAX_IVS, moves: [], ...p,
+  });
+  test('promotes a flexible spread to Jolly and drops the over-bulky one', () => {
+    const adaMax = actualSpeed(set({ species: 'Garchomp', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252, spe: 252 } }));
+    const jolMax = actualSpeed(set({ species: 'Garchomp', nature: 'Jolly', evs: { ...ZERO_EVS, spe: 252 } }));
+    const floor = Math.floor((adaMax + jolMax) / 2); // requires +Speed, but reachable
+    expect(floor).toBeGreaterThan(adaMax);
+    expect(floor).toBeLessThanOrEqual(jolMax);
+
+    const flexible = set({ species: 'Garchomp', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 } }); // room for Spe
+    const bulky = set({ species: 'Garchomp', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, def: 252 } }); // no Spe budget
+    // Two distinct damaging moves seen ⇒ not Choice-locked ⇒ scarf ruled out.
+    const opp: OpponentEntry = { species: 'Garchomp', knownMoves: ['Earthquake', 'Dragon Claw'], candidates: [flexible, bulky] };
+    applySpeedInference([opp], [{ speedFloor: floor }]);
+
+    expect(opp.candidates).toHaveLength(1);            // over-bulky spread dropped
+    expect(opp.candidates![0]!.nature).toBe('Jolly');  // committed +Speed nature
+    expect(opp.candidates![0]!.evs.spe).toBeGreaterThan(0);
+    expect(actualSpeed(opp.candidates![0]!)).toBeGreaterThanOrEqual(floor);
+  });
+});

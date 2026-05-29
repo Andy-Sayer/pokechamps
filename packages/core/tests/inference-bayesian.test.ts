@@ -157,3 +157,31 @@ describe('scoreOffensiveSpread — infer opponent Atk/SpA from their hit on a kn
     expect(scored.map(s => s.candidate)).toEqual(start);
   });
 });
+
+describe('scoreOffensiveSpread — extreme hit promotes the offensive nature', () => {
+  const mk = (p: Partial<PokemonSet> & { species: string }): PokemonSet => ({
+    level: 50, nature: 'Hardy', evs: { ...ZERO_EVS }, ivs: MAX_IVS, moves: [], ...p,
+  });
+  const myIncin = mk({ species: 'Incineroar', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 4 } });
+
+  test('a hit no neutral nature can produce commits to +Atk (Adamant)', async () => {
+    const { scoreOffensiveSpread } = await import('../src/domain/inference.js');
+    const { damageRange } = await import('../src/domain/damage.js');
+    // Top roll of a max-Atk Adamant Earthquake — unreachable by a neutral nature.
+    const ref = damageRange({
+      attacker: mk({ species: 'Garchomp', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Earthquake'] }),
+      defender: myIncin, move: 'Earthquake', field: NEUTRAL_FIELD, attackerSide: 'theirs',
+    });
+    const scored = scoreOffensiveSpread({
+      attackerSpecies: 'Garchomp', attackerLevel: 50,
+      startingCandidates: [{ evs: { ...ZERO_EVS }, nature: 'Hardy' }], // neutral only
+      attackerMoves: ['Earthquake'], move: 'Earthquake', defenderSet: myIncin,
+      observation: {
+        attackerSide: 'theirs', attackerSpecies: 'Garchomp', defenderSide: 'mine',
+        defenderSpecies: 'Incineroar', move: 'Earthquake', field: NEUTRAL_FIELD, damageHpPercent: ref.maxPercent,
+      },
+    });
+    expect(scored.length).toBeGreaterThan(0);
+    expect(scored.every(s => s.candidate.nature === 'Adamant')).toBe(true);
+  });
+});
