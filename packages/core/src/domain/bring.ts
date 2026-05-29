@@ -44,10 +44,14 @@ function pairDefense(my: PokemonSet, opp: PokemonSet): number {
 // Heuristic placeholder set used when we have no info about an opponent: a level-50
 // neutral spread with no item / no boosting ability.
 export function defaultOpponentSet(entry: OpponentEntry, level: number): PokemonSet {
-  const species = getSpecies(entry.species);
+  // Use the post-mega forme's base stats once the opp has mega-evolved, so a
+  // candidate-less default still calcs on the right stats (mega Aerodactyl's
+  // +Atk etc.). applyMegaAction sets megaUsed + megaForme.
+  const speciesName = entry.megaUsed && entry.megaForme ? entry.megaForme : entry.species;
+  const species = getSpecies(speciesName);
   const abilities = species?.abilities ? (Object.values(species.abilities) as string[]) : [];
   return {
-    species: species?.name ?? entry.species,
+    species: species?.name ?? speciesName,
     level,
     item: entry.item ?? undefined,
     ability: entry.ability ?? abilities[0] ?? undefined,

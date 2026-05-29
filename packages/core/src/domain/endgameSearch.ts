@@ -30,10 +30,15 @@ import { getMove, toId } from './data.js';
 import { getMegaOptions } from './gimmicks/mega.js';
 import { defaultOpponentSet } from './bring.js';
 import { maxHpFor } from './damage.js';
+import { getPikalytics } from './pikalytics.js';
 
 // ---------------------------------------------------------------------------
 // Input
 // ---------------------------------------------------------------------------
+
+/** Chance (0..1) a mon survives one lethal-from-full hit (Focus Sash / Sturdy),
+ *  plus a short label for risk display. */
+export interface Survival { prob: number; label: string }
 
 export interface SearchMyMon {
   set: PokemonSet;
@@ -41,16 +46,42 @@ export interface SearchMyMon {
   hpPercent: number;
   /** True if this mon is currently on the field. Up to 2 of mine are active. */
   active: boolean;
+  /** Already mega-evolved this battle → use its mega stats unconditionally. */
+  megaActive?: boolean;
+  /** Live stat-stage boosts on this active (cleared on switch-out). Feeds the
+   *  damage calc AND the Spe stage into turn order. */
+  boosts?: Partial<Record<string, number>>;
+  /** Non-volatile status (burn halves physical damage, paralysis halves speed). */
+  status?: string;
+  /** Focus Sash / Sturdy survival (my items are known, so prob is 0 or 1). */
+  survival?: Survival;
 }
 export interface SearchOppMon {
   entry: OpponentEntry;
   hpPercent: number;
   active: boolean;
+  /** Already mega-evolved → entry.candidates already carry the mega forme. */
+  megaActive?: boolean;
+  boosts?: Partial<Record<string, number>>;
+  status?: string;
+  /** Focus Sash / Sturdy survival — probabilistic (from inference or usage %). */
+  survival?: Survival;
 }
 export interface SearchInput {
   mine: SearchMyMon[];
   opp: SearchOppMon[];
   field: FieldState;
+  /** This side has already used its (once-per-battle) mega — no hypothetical
+   *  mega branch should be offered for it. */
+  myMegaSpent?: boolean;
+  oppMegaSpent?: boolean;
+  /** True once all of the opponent's brought Pokémon (4 in VGC) are revealed.
+   *  Until then we can never claim a forced WIN — KOing the visible mons isn't
+   *  winning the game. */
+  allOppRevealed?: boolean;
+  /** Opponent's KNOWN-but-not-yet-brought mons (seen at preview). The search
+   *  doesn't model switches, but we surface the scariest as a concrete risk. */
+  oppBench?: OpponentEntry[];
 }
 
 export interface SearchPlay {
@@ -60,6 +91,19 @@ export interface SearchPlay {
   /** True when `move` is a spread move hitting all live foes at once. */
   spread?: boolean;
 }
+/** A named uncertainty that affects the outcome, with its probability. */
+export interface SearchRisk {
+  /** Human label, e.g. "Aerodactyl Focus Sash" or "Heat Wave low roll vs Abomasnow". */
+  label: string;
+  /** Probability (0..1) the BAD-for-me resolution happens. Omitted for caveats
+   *  with no meaningful number (e.g. unrevealed bench). */
+  prob?: number;
+  /** Short effect note, e.g. "survives a lethal hit". */
+  effect: string;
+  /** True if this uncertainty, resolved against me, flips the expected verdict. */
+  blocking: boolean;
+}
+
 export interface SearchResult {
   /** How many plies deep this result was computed to. */
   depth: number;
@@ -70,6 +114,17 @@ export interface SearchResult {
   verdict: 'winning' | 'even' | 'losing';
   /** Species I should Mega-Evolve this turn for the best line, if any. */
   megaMon?: string;
+  /** True only when the outcome is GUARANTEED: it holds under worst-case rolls,
+   *  modelled survival items, and worst-case opp mega/speed — and (for a win)
+   *  all brought opp mons are revealed. */
+  forced: boolean;
+  /** Approximate probability I achieve the expected-pass outcome, ∏(1−p) over
+   *  blocking risks. Undefined when not computable. */
+  winChance?: number;
+  /** Whether all brought opp mons are known (gates a forced win). */
+  allOppRevealed: boolean;
+  /** Named uncertainties (survival items, swing rolls, unrevealed bench). */
+  risks: SearchRisk[];
 }
 
 // ---------------------------------------------------------------------------
@@ -86,19 +141,55 @@ const SPREAD = -1;
 // Internal flat model (indices into precomputed arrays)
 // ---------------------------------------------------------------------------
 
-interface Cell { dmg: number; move: string; priority: number } // dmg as % of target max
+// Damage as % of target max, at three roll points so the tree can be evaluated
+// under different regimes without rebuilding the (expensive) matrix. Roll risk
+// is derived from the dmgMin..dmgMax envelope vs the target's HP at use time.
+interface Cell { dmgMin: number; dmgMid: number; dmgMax: number; move: string; priority: number; multiHit: boolean; koRolls: number[] }
 
 /** A spread move option for one of my mons: the move plus its (already
- *  spread-reduced) damage vs each opp index. Hits every live foe at once. */
-interface SpreadOpt { move: string; priority: number; dmg: number[] }
+ *  spread-reduced) damage vs each opp index, at min/mid/max rolls. */
+interface SpreadOpt { move: string; priority: number; dmgMin: number[]; dmgMid: number[]; dmgMax: number[] }
+
+// Which roll point each side uses. "pessimistic"/"optimistic" are from MY
+// perspective: pessimistic = my low rolls + opp high rolls (+ opp survives);
+// optimistic = the reverse. expected = mid rolls, current behaviour.
+type Regime = 'expected' | 'pessimistic' | 'optimistic';
+interface Pass {
+  regime: Regime;
+  /** Per-index: should a Focus Sash / Sturdy survive-at-1 be applied this pass? */
+  survMy: boolean[];
+  survOpp: boolean[];
+}
+function myRoll(c: Cell, r: Regime): number {
+  return r === 'pessimistic' ? c.dmgMin : r === 'optimistic' ? c.dmgMax : c.dmgMid;
+}
+function oppRoll(c: Cell, r: Regime): number {
+  return r === 'pessimistic' ? c.dmgMax : r === 'optimistic' ? c.dmgMin : c.dmgMid;
+}
+function mySpreadRoll(s: SpreadOpt, r: Regime): number[] {
+  return r === 'pessimistic' ? s.dmgMin : r === 'optimistic' ? s.dmgMax : s.dmgMid;
+}
+
+// Probability the hit KOs a target at current HP `h`. Prefers the EMPIRICAL
+// distribution: the fraction of pooled rolls (across every surviving candidate
+// spread × roll) that reach `h` — this folds in the chance the opponent is
+// bulkier than the likely spread, not just roll variance. Falls back to a
+// uniform envelope estimate when rolls aren't available (e.g. spread moves).
+function rollKoProb(c: Cell, h: number): number {
+  if (c.koRolls.length) return c.koRolls.filter(r => r >= h).length / c.koRolls.length;
+  if (c.dmgMax <= c.dmgMin) return c.dmgMid >= h ? 1 : 0;
+  return Math.max(0, Math.min(1, (c.dmgMax - h) / (c.dmgMax - c.dmgMin)));
+}
 
 interface Tables {
   myN: number;
   oppN: number;
   mySpecies: string[];
   oppSpecies: string[];
-  mySpeed: number[];           // effective base speed (pre-field)
+  mySpeed: number[];           // effective base speed incl. Spe stage (pre-field)
   oppSpeed: number[];
+  myPar: boolean[];            // paralyzed → halve speed at sort time
+  oppPar: boolean[];
   off: Cell[][];               // off[mi][oj] — my mi attacking opp oj (best single-target)
   thr: Cell[][];               // thr[oj][mi] — opp oj attacking my mi
   mySpread: (SpreadOpt | null)[]; // mySpread[mi] — best spread move, or null
@@ -116,22 +207,35 @@ function isSpreadMove(move: string): boolean {
 }
 
 // Best spread move for my mon (by total damage across the current opponents),
-// or null if it has none. Damage per opp index parallels `opps`.
-function bestSpread(set: PokemonSet, opps: SearchOppMon[], field: FieldState): SpreadOpt | null {
-  const spreads = (set.moves ?? []).filter(isSpreadMove);
+// or null if it has none. Damage per opp index parallels `opps`. Honors the
+// attacker's mega/boosts/status and each defender's mega/boosts/status so the
+// spread numbers match the single-target cells.
+function bestSpread(
+  m: SearchMyMon,
+  opps: SearchOppMon[],
+  field: FieldState,
+  o: { attackerGimmickActive: boolean; defHypoMega: (j: number) => boolean },
+): SpreadOpt | null {
+  const spreads = (m.set.moves ?? []).filter(isSpreadMove);
   if (spreads.length === 0) return null;
   let best: { opt: SpreadOpt; total: number } | null = null;
   for (const mv of spreads) {
-    const atk: PokemonSet = { ...set, moves: [mv] };
-    const dmg = opps.map(o => {
-      const c = predictOffense({ attacker: atk, opponent: o.entry, field });
-      if (!c) return 0;
-      const lo = c.likelyMinPercent ?? c.minPercent;
-      const hi = c.likelyMaxPercent ?? c.maxPercent;
-      return (lo + hi) / 2;
-    });
-    const total = dmg.reduce((a, b) => a + b, 0);
-    if (!best || total > best.total) best = { opt: { move: mv, priority: movePriority(mv), dmg }, total };
+    const atk: PokemonSet = { ...m.set, moves: [mv] };
+    const cells = opps.map((opp, j) => cellFrom(predictOffense({
+      attacker: atk, opponent: opp.entry, field,
+      attackerGimmickActive: o.attackerGimmickActive,
+      defenderGimmickActive: o.defHypoMega(j),
+      attackerBoosts: m.boosts, attackerStatus: m.status,
+      defenderBoosts: opp.boosts, defenderStatus: opp.status,
+    })));
+    const opt: SpreadOpt = {
+      move: mv, priority: movePriority(mv),
+      dmgMin: cells.map(c => c.dmgMin),
+      dmgMid: cells.map(c => c.dmgMid),
+      dmgMax: cells.map(c => c.dmgMax),
+    };
+    const total = opt.dmgMid.reduce((a, b) => a + b, 0);
+    if (!best || total > best.total) best = { opt, total };
   }
   return best?.opt ?? null;
 }
@@ -143,27 +247,61 @@ interface State {
   oppActive: number[];
 }
 
-interface GimmickFlags { attackerGimmickActive?: boolean; defenderGimmickActive?: boolean }
-
-function cellFromOffense(attacker: PokemonSet, defender: OpponentEntry, field: FieldState, g: GimmickFlags = {}): Cell {
-  const c = predictOffense({ attacker, opponent: defender, field, ...g });
-  if (!c) return { dmg: 0, move: '', priority: 0 };
-  const lo = c.likelyMinPercent ?? c.minPercent;
-  const hi = c.likelyMaxPercent ?? c.maxPercent;
-  return { dmg: (lo + hi) / 2, move: c.move, priority: movePriority(c.move) };
+// Gimmick flags plus the live boosts/status that shape the damage roll. Keys
+// mirror predictOffense / predictThreat args so they can be spread straight in.
+interface CellOpts {
+  attackerGimmickActive?: boolean;
+  defenderGimmickActive?: boolean;
+  attackerBoosts?: Partial<Record<string, number>>;
+  defenderBoosts?: Partial<Record<string, number>>;
+  attackerStatus?: string;
+  defenderStatus?: string;
 }
-function cellFromThreat(attacker: OpponentEntry, defender: PokemonSet, field: FieldState, g: GimmickFlags = {}): Cell {
-  const c = predictThreat({ opponent: attacker, defender, field, ...g });
-  if (!c) return { dmg: 0, move: '', priority: 0 };
+
+// Build a Cell's three roll points from a MatchupCell. mid = likely-spread
+// midpoint (the old representative value); min/max = the honest envelope edges
+// (worst/best roll across surviving candidate spreads).
+function cellFrom(c: ReturnType<typeof predictOffense>): Cell {
+  if (!c) return { dmgMin: 0, dmgMid: 0, dmgMax: 0, move: '', priority: 0, multiHit: false, koRolls: [] };
   const lo = c.likelyMinPercent ?? c.minPercent;
   const hi = c.likelyMaxPercent ?? c.maxPercent;
-  return { dmg: (lo + hi) / 2, move: c.move, priority: movePriority(c.move) };
+  return {
+    dmgMin: c.minPercent,
+    dmgMid: (lo + hi) / 2,
+    dmgMax: c.maxPercent,
+    move: c.move,
+    priority: movePriority(c.move),
+    multiHit: isMultiHit(c.move),
+    koRolls: c.percentRolls ?? [],
+  };
+}
+function cellFromOffense(attacker: PokemonSet, defender: OpponentEntry, field: FieldState, o: CellOpts = {}): Cell {
+  return cellFrom(predictOffense({ attacker, opponent: defender, field, ...o }));
+}
+function cellFromThreat(attacker: OpponentEntry, defender: PokemonSet, field: FieldState, o: CellOpts = {}): Cell {
+  return cellFrom(predictThreat({ opponent: attacker, defender, field, ...o }));
+}
+
+// Spe stat-stage multiplier. +n → (2+n)/2, −n → 2/(2+|n|). Folded into the
+// base speed used for turn order (a stat-level change, like nature/EVs).
+function speStageMult(stage: number | undefined): number {
+  const n = stage ?? 0;
+  if (n === 0) return 1;
+  return n > 0 ? (2 + n) / 2 : 2 / (2 - n);
 }
 
 function movePriority(move: string): number {
   if (!move) return 0;
   const m = getMove(move) as { priority?: number } | undefined;
   return m?.priority ?? 0;
+}
+
+// Multi-hit moves (Dual Wingbeat, Bullet Seed, Rock Blast…) strike 2+ times, so
+// they break through Focus Sash / Sturdy (the first hit drops the survival, the
+// next KOs). Truthy `multihit` (a number or [min,max]) marks them.
+function isMultiHit(move: string): boolean {
+  if (!move) return false;
+  return !!(getMove(move) as { multihit?: number | number[] } | undefined)?.multihit;
 }
 
 // Worst-case mega-forme speed for a species at L50 (max Spe investment, +Spe
@@ -226,19 +364,31 @@ interface MegaPlan { myMega: number | null; oppMega: number | null }
 function buildTables(input: SearchInput, plan: MegaPlan): Tables {
   const mine = input.mine;
   const opp = input.opp;
-  // Opp entries with the mega'd one holding its stone (so gimmickActive megas it).
+  // My mon is mega in this branch if the plan megas it OR it already mega'd.
+  const myMega = (mi: number) => mi === plan.myMega || !!mine[mi]!.megaActive;
+  // Opp gimmick flag is only needed for the HYPOTHETICAL mega (plan.oppMega) —
+  // an already-mega'd opp carries the mega forme in its candidates already, so
+  // the calc uses mega stats without the flag.
+  const oppHypoMega = (oj: number) => oj === plan.oppMega;
+  // Megaify only the hypothetical opp; already-mega'd opps are used as-is.
   const oppEntries = opp.map((o, j) => (j === plan.oppMega ? megaifyOppEntry(o.entry) : o.entry));
   const off: Cell[][] = mine.map((m, mi) => oppEntries.map((oe, oj) =>
     cellFromOffense(m.set, oe, input.field, {
-      attackerGimmickActive: mi === plan.myMega,
-      defenderGimmickActive: oj === plan.oppMega,
+      attackerGimmickActive: myMega(mi),
+      defenderGimmickActive: oppHypoMega(oj),
+      attackerBoosts: m.boosts, attackerStatus: m.status,
+      defenderBoosts: opp[oj]!.boosts, defenderStatus: opp[oj]!.status,
     })));
   const thr: Cell[][] = oppEntries.map((oe, oj) => mine.map((m, mi) =>
     cellFromThreat(oe, m.set, input.field, {
-      attackerGimmickActive: oj === plan.oppMega,
-      defenderGimmickActive: mi === plan.myMega,
+      attackerGimmickActive: oppHypoMega(oj),
+      defenderGimmickActive: myMega(mi),
+      attackerBoosts: opp[oj]!.boosts, attackerStatus: opp[oj]!.status,
+      defenderBoosts: m.boosts, defenderStatus: m.status,
     })));
-  const mySpread = mine.map(m => bestSpread(m.set, opp, input.field));
+  const mySpread = mine.map((m, mi) => bestSpread(m, opp, input.field, {
+    attackerGimmickActive: myMega(mi), defHypoMega: oppHypoMega,
+  }));
   const mySpreadActors = new Set<number>();
   mySpread.forEach((s, i) => { if (s) mySpreadActors.add(i); });
   return {
@@ -246,8 +396,15 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppN: opp.length,
     mySpecies: mine.map(m => m.set.species),
     oppSpecies: opp.map(o => o.entry.species),
-    mySpeed: mine.map((m, mi) => actualSpeed(m.set, mi === plan.myMega ? (myMegaForme(m.set) ?? undefined) : undefined)),
-    oppSpeed: opp.map((o, oj) => (oj === plan.oppMega ? (megaMaxSpeed(o.entry.species) ?? oppBaseSpeed(o.entry, input.field)) : oppBaseSpeed(o.entry, input.field))),
+    // Spe stat stage folds into the base speed (a stat-level change); Tailwind
+    // and paralysis are applied at sort time in resolveTurn.
+    mySpeed: mine.map((m, mi) => actualSpeed(m.set, myMega(mi) ? (myMegaForme(m.set) ?? undefined) : undefined) * speStageMult(m.boosts?.spe)),
+    // Hypothetical opp mega → mega-speed cap; otherwise oppBaseSpeed, which
+    // already returns mega speed for an already-mega'd opp (effectiveSpeedRange
+    // keys off its mega forme).
+    oppSpeed: opp.map((o, oj) => (oj === plan.oppMega ? (megaMaxSpeed(o.entry.species) ?? oppBaseSpeed(o.entry, input.field)) : oppBaseSpeed(o.entry, input.field)) * speStageMult(o.boosts?.spe)),
+    myPar: mine.map(m => m.status === 'par'),
+    oppPar: opp.map(o => o.status === 'par'),
     off, thr, mySpread, mySpreadActors,
     field: input.field,
   };
@@ -270,10 +427,11 @@ function initialState(input: SearchInput): State {
 // Turn resolution
 // ---------------------------------------------------------------------------
 
-// Effective speed with field modifiers. Tailwind doubles; Trick Room is handled
-// at sort time (we invert the comparison), not here.
-function effSpeed(base: number, tailwind: boolean): number {
-  return base * (tailwind ? 2 : 1);
+// Effective speed with field modifiers. Tailwind doubles; paralysis halves;
+// Trick Room is handled at sort time (we invert the comparison), not here. The
+// Spe stat stage is already folded into `base`.
+function effSpeed(base: number, tailwind: boolean, paralyzed: boolean): number {
+  return base * (tailwind ? 2 : 1) * (paralyzed ? 0.5 : 1);
 }
 
 interface Acting { side: 'mine' | 'opp'; actor: number; target: number; priority: number; speed: number }
@@ -285,19 +443,35 @@ function resolveTurn(
   s: State,
   myTargets: Map<number, number>,
   oppTargets: Map<number, number>,
+  pass: Pass,
 ): State {
   const myHp = s.myHp.slice();
   const oppHp = s.oppHp.slice();
   const tr = !!t.field.trickRoom;
+  const r = pass.regime;
+  // Survival charges available this turn (Focus Sash / Sturdy), consumed on
+  // first use. Only meaningful from full HP — enforced at apply time.
+  const oppSurv = pass.survOpp.slice();
+  const mySurv = pass.survMy.slice();
+
+  // Apply `dmg` to hp[idx]; if it would be lethal FROM FULL HP and a survival
+  // charge is available, clamp to 1 and consume it (Focus Sash / Sturdy). A
+  // multi-hit move breaks through survival, so `breaks` skips the clamp.
+  const apply = (hp: number[], idx: number, dmg: number, surv: boolean[], breaks: boolean) => {
+    const before = hp[idx]!;
+    const after = before - dmg;
+    if (!breaks && after <= 0 && before >= 100 && surv[idx]) { surv[idx] = false; hp[idx] = 1; }
+    else hp[idx] = Math.max(0, after);
+  };
 
   const actings: Acting[] = [];
   for (const [actor, target] of myTargets) {
     const priority = target === SPREAD ? t.mySpread[actor]!.priority : t.off[actor]![target]!.priority;
-    actings.push({ side: 'mine', actor, target, priority, speed: effSpeed(t.mySpeed[actor]!, !!t.field.myTailwind) });
+    actings.push({ side: 'mine', actor, target, priority, speed: effSpeed(t.mySpeed[actor]!, !!t.field.myTailwind, t.myPar[actor]!) });
   }
   for (const [actor, target] of oppTargets) {
     const cell = t.thr[actor]![target]!;
-    actings.push({ side: 'opp', actor, target, priority: cell.priority, speed: effSpeed(t.oppSpeed[actor]!, !!t.field.theirTailwind) });
+    actings.push({ side: 'opp', actor, target, priority: cell.priority, speed: effSpeed(t.oppSpeed[actor]!, !!t.field.theirTailwind, t.oppPar[actor]!) });
   }
 
   // Priority first (higher acts first), then speed (Trick Room inverts speed).
@@ -313,18 +487,21 @@ function resolveTurn(
         // Spread move — hit every live foe with this move's (already
         // spread-reduced) damage vs each.
         const sp = t.mySpread[act.actor]!;
+        const dmg = mySpreadRoll(sp, r);
         for (let foe = 0; foe < oppHp.length; foe++) {
           if (oppHp[foe]! <= 0) continue;
-          oppHp[foe] = Math.max(0, oppHp[foe]! - (sp.dmg[foe] ?? 0));
+          apply(oppHp, foe, dmg[foe] ?? 0, oppSurv, false); // spread moves aren't multi-hit
         }
         continue;
       }
       if (oppHp[act.target]! <= 0) continue;        // target already down → fizzle
-      oppHp[act.target] = Math.max(0, oppHp[act.target]! - t.off[act.actor]![act.target]!.dmg);
+      const oc = t.off[act.actor]![act.target]!;
+      apply(oppHp, act.target, myRoll(oc, r), oppSurv, oc.multiHit);
     } else {
       if (oppHp[act.actor]! <= 0) continue;
       if (myHp[act.target]! <= 0) continue;
-      myHp[act.target] = Math.max(0, myHp[act.target]! - t.thr[act.actor]![act.target]!.dmg);
+      const tc = t.thr[act.actor]![act.target]!;
+      apply(myHp, act.target, oppRoll(tc, r), mySurv, tc.multiHit);
     }
   }
 
@@ -353,7 +530,7 @@ function refill(
     let bestDmg = -1;
     for (let i = 0; i < n; i++) {
       if (hp[i]! <= 0 || onField.has(i)) continue;
-      const total = liveFoes.reduce((acc, j) => acc + (dmgRows[i]?.[j]?.dmg ?? 0), 0);
+      const total = liveFoes.reduce((acc, j) => acc + (dmgRows[i]?.[j]?.dmgMid ?? 0), 0);
       if (total > bestDmg) { bestDmg = total; best = i; }
     }
     if (best < 0) break;       // no bench left
@@ -372,7 +549,10 @@ function jointActions(active: number[], foeHp: number[], spreadActors?: Set<numb
   if (liveFoes.length === 0) return [];
   let combos: Array<Map<number, number>> = [new Map()];
   for (const actor of active) {
-    const options = spreadActors?.has(actor) ? [...liveFoes, SPREAD] : liveFoes;
+    // SPREAD first so that when hitting all foes ties a single-target line, the
+    // maximin keeps the spread option (it makes the chip on the off-target
+    // foe visible, and never deals less than the single-target framing).
+    const options = spreadActors?.has(actor) ? [SPREAD, ...liveFoes] : liveFoes;
     const next: Array<Map<number, number>> = [];
     for (const combo of combos) {
       for (const opt of options) {
@@ -415,7 +595,7 @@ function leafScore(s: State): number {
 // Maximin value of a state to the given depth. I maximise; opp replies worst-
 // case. `alpha` is the best value found so far at this level for the inner
 // prune.
-function value(t: Tables, s: State, depth: number, alpha: number): number {
+function value(t: Tables, s: State, depth: number, alpha: number, pass: Pass): number {
   const term = terminal(s, depth);
   if (term !== null) return term;
   if (depth === 0) return leafScore(s);
@@ -429,8 +609,8 @@ function value(t: Tables, s: State, depth: number, alpha: number): number {
     let worst = Infinity;
     const replies = oppJoints.length ? oppJoints : [new Map<number, number>()];
     for (const opp of replies) {
-      const child = resolveTurn(t, s, my, opp);
-      const v = value(t, child, depth - 1, best);
+      const child = resolveTurn(t, s, my, opp, pass);
+      const v = value(t, child, depth - 1, best, pass);
       if (v < worst) worst = v;
       if (worst <= best) break;   // this my-action can't beat best — prune
     }
@@ -447,6 +627,24 @@ function value(t: Tables, s: State, depth: number, alpha: number): number {
 export interface ActiveSlots {
   mine: [number | null, number | null];
   theirs: [number | null, number | null];
+}
+
+// Focus Sash / Sturdy survival for one of MY mons (items/abilities are known,
+// so prob is 1 or undefined).
+function mySurvival(set: PokemonSet): Survival | undefined {
+  if (set.item && /focus\s*sash/i.test(set.item)) return { prob: 1, label: 'Focus Sash' };
+  if (set.ability && toId(set.ability) === 'sturdy') return { prob: 1, label: 'Sturdy' };
+  return undefined;
+}
+// Probabilistic survival for an opponent: a confirmed Sturdy/Sash → prob 1; a
+// consumed/other known item → none; otherwise the Pikalytics usage rate of
+// Focus Sash as a prior.
+function oppSurvival(entry: OpponentEntry): Survival | undefined {
+  if (entry.itemConsumed) return undefined;
+  if (entry.ability && toId(entry.ability) === 'sturdy') return { prob: 1, label: 'Sturdy' };
+  if (entry.item) return /focus\s*sash/i.test(entry.item) ? { prob: 1, label: 'Focus Sash' } : undefined;
+  const sash = getPikalytics(entry.species)?.items?.find(i => /focus\s*sash/i.test(i.name));
+  return sash && sash.pct > 0 ? { prob: Math.min(1, sash.pct / 100), label: 'Focus Sash' } : undefined;
 }
 
 /**
@@ -468,7 +666,10 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
     const raw = match.myCurrentHp?.[idx];
     const max = maxHpFor(set);
     const hpPercent = raw == null || max <= 0 ? 100 : Math.max(0, Math.min(100, (raw / max) * 100));
-    mine.push({ set, hpPercent, active: myActive.has(idx) });
+    mine.push({
+      set, hpPercent, active: myActive.has(idx), megaActive: match.myMegaUsed?.includes(idx),
+      boosts: match.myBoosts?.[idx], status: match.myStatus?.[idx], survival: mySurvival(set),
+    });
   }
 
   const opp: SearchOppMon[] = [];
@@ -476,16 +677,36 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
     const entry = match.opponentTeam[idx];
     if (!entry) continue;
     const hpPercent = entry.fainted ? 0 : (entry.currentHpPercent ?? 100);
-    opp.push({ entry, hpPercent, active: oppActive.has(idx) });
+    opp.push({
+      entry, hpPercent, active: oppActive.has(idx), megaActive: entry.megaUsed,
+      boosts: entry.currentBoosts, status: entry.status, survival: oppSurvival(entry),
+    });
   }
 
-  return { mine, opp, field: match.field };
+  // Known opponents we haven't seen brought in yet — potential switch-ins.
+  const broughtSet = new Set<number>(match.opponentBrought ?? []);
+  const oppBench: OpponentEntry[] = [];
+  match.opponentTeam.forEach((entry, idx) => {
+    if (!broughtSet.has(idx) && entry && !entry.fainted) oppBench.push(entry);
+  });
+
+  return {
+    mine, opp, field: match.field,
+    myMegaSpent: (match.myMegaUsed?.length ?? 0) > 0,
+    oppMegaSpent: match.opponentTeam.some(o => o.megaUsed),
+    // VGC brings 4; until we've seen all 4 we can't claim a forced game win.
+    allOppRevealed: (match.opponentBrought?.length ?? 0) >= 4,
+    oppBench,
+  };
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
 // iterative driver so the (expensive) damage matrices are built only once per
 // position, not once per depth.
-function rootSearch(t: Tables, s0: State, depth: number): SearchResult {
+// Maximin over a prebuilt table for one pass. Returns the best joint (for the
+// principal variation) and its score. `plays` are filled by the caller only for
+// the displayed pass.
+function rootSearch(t: Tables, s0: State, depth: number, pass: Pass): { score: number; joint: Map<number, number> | null } {
   const myJoints = jointActions(s0.myActive, s0.oppHp, t.mySpreadActors);
   let bestJoint: Map<number, number> | null = null;
   let bestScore = -Infinity;
@@ -495,38 +716,32 @@ function rootSearch(t: Tables, s0: State, depth: number): SearchResult {
     let worst = Infinity;
     const replies = oppJoints.length ? oppJoints : [new Map<number, number>()];
     for (const opp of replies) {
-      const child = resolveTurn(t, s0, my, opp);
-      const v = value(t, child, depth - 1, bestScore);
+      const child = resolveTurn(t, s0, my, opp, pass);
+      const v = value(t, child, depth - 1, bestScore, pass);
       if (v < worst) worst = v;
       if (worst <= bestScore) break;
     }
     if (worst > bestScore) { bestScore = worst; bestJoint = my; }
   }
+  return { score: bestScore, joint: bestJoint };
+}
 
+function verdictOf(score: number): SearchResult['verdict'] {
+  return score >= WIN ? 'winning' : score <= -WIN ? 'losing'
+    : score > MATERIAL / 2 ? 'winning' : score < -MATERIAL / 2 ? 'losing' : 'even';
+}
+
+function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPlay[] {
   const plays: SearchPlay[] = [];
-  if (bestJoint) {
-    for (const [actor, target] of bestJoint) {
-      if (target === SPREAD) {
-        plays.push({
-          mySpecies: t.mySpecies[actor]!,
-          move: t.mySpread[actor]!.move,
-          targetSpecies: 'all foes',
-          spread: true,
-        });
-      } else {
-        plays.push({
-          mySpecies: t.mySpecies[actor]!,
-          move: t.off[actor]![target]!.move,
-          targetSpecies: t.oppSpecies[target]!,
-        });
-      }
+  if (!joint) return plays;
+  for (const [actor, target] of joint) {
+    if (target === SPREAD) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.mySpread[actor]!.move, targetSpecies: 'all foes', spread: true });
+    } else {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.off[actor]![target]!.move, targetSpecies: t.oppSpecies[target]! });
     }
   }
-  const verdict: SearchResult['verdict'] =
-    bestScore >= WIN ? 'winning' : bestScore <= -WIN ? 'losing'
-    : bestScore > MATERIAL / 2 ? 'winning' : bestScore < -MATERIAL / 2 ? 'losing' : 'even';
-
-  return { depth, score: bestScore, plays, verdict };
+  return plays;
 }
 
 /** A reusable search over one position: builds the (expensive) damage matrices
@@ -544,10 +759,17 @@ export function createSearch(input: SearchInput): PositionSearch {
   // candidates (mega is decided now, not for a future switch-in — a documented
   // v1 limit). Tables are built once per (myMega, oppMega) combo and reused
   // across depths.
+  // Only offer a hypothetical mega when the side hasn't already used theirs
+  // (mega is once per battle). An already-mega'd active's stats are baked into
+  // the tables via megaActive, so no extra branch is needed for it.
   const myPlans: Array<number | null> = [null];
-  s0.myActive.forEach(i => { if (myMegaForme(input.mine[i]!.set)) myPlans.push(i); });
+  if (!input.myMegaSpent) {
+    s0.myActive.forEach(i => { if (myMegaForme(input.mine[i]!.set)) myPlans.push(i); });
+  }
   const oppPlans: Array<number | null> = [null];
-  s0.oppActive.forEach(j => { if (oppMegaInfo(input.opp[j]!.entry.species)) oppPlans.push(j); });
+  if (!input.oppMegaSpent) {
+    s0.oppActive.forEach(j => { if (oppMegaInfo(input.opp[j]!.entry.species)) oppPlans.push(j); });
+  }
 
   const tables = new Map<string, Tables>();
   for (const myMega of myPlans) {
@@ -556,25 +778,160 @@ export function createSearch(input: SearchInput): PositionSearch {
     }
   }
 
+  const allOppRevealed = input.allOppRevealed ?? false;
+
+  // Scariest KNOWN bench switch-in vs my current actives. We don't search
+  // switches, but naming the biggest incoming threat makes the bench caveat
+  // concrete (e.g. "Blastoise switch-in can KO Victreebel"). Computed once.
+  let benchRisk: SearchRisk | null = null;
+  if (input.oppBench?.length && s0.myActive.length) {
+    let worst: { species: string; move: string; pct: number; myMon: string; myHp: number } | null = null;
+    for (const b of input.oppBench) {
+      for (const mi of s0.myActive) {
+        const m = input.mine[mi]!;
+        const thr = predictThreat({ opponent: b, defender: m.set, field: input.field });
+        if (thr && (!worst || thr.maxPercent > worst.pct)) {
+          worst = { species: b.species, move: thr.move, pct: thr.maxPercent, myMon: m.set.species, myHp: m.hpPercent };
+        }
+      }
+    }
+    if (worst && worst.pct >= 55) {
+      benchRisk = {
+        label: worst.pct >= worst.myHp
+          ? `${worst.species} switch-in can KO ${worst.myMon}`
+          : `${worst.species} switch-in hits ${worst.myMon} ~${Math.round(worst.pct)}%`,
+        effect: 'bench not modelled',
+        blocking: true,
+      };
+    }
+  }
+
+  // A pass's survival flags. My items are known (apply whenever present);
+  // the opponent's are uncertain — assume present worst-case (pessimistic),
+  // most-likely (expected, prob ≥ 0.5), or absent best-case (optimistic).
+  // `forceOppSurv` overrides one opp index for sensitivity toggles.
+  const buildPass = (regime: Regime, override?: { idx: number; survOpp: boolean }): Pass => ({
+    regime,
+    // My items are known → always applied. Opp survival: pessimistic assumes
+    // it's present (worst case); expected/optimistic only apply CERTAIN ones
+    // (prob ≥ 1) — uncertain Sash is surfaced as a risk, not baked into the
+    // headline verdict.
+    survMy: input.mine.map(m => (m.survival?.prob ?? 0) > 0),
+    survOpp: input.opp.map((o, j) => {
+      if (override && override.idx === j) return override.survOpp;
+      const p = o.survival?.prob ?? 0;
+      return regime === 'pessimistic' ? p > 0 : p >= 1;
+    }),
+  });
+
+  // My-max / opp-min mega maximin for one pass; returns the principal line.
+  interface Sel { score: number; joint: Map<number, number> | null; table: Tables; myMega: number | null }
+  const evalPass = (pass: Pass, depth: number): Sel => {
+    let bestVal = -Infinity;
+    let best: Sel | null = null;
+    for (const myMega of myPlans) {
+      let worstVal = Infinity;
+      let worst: Sel | null = null;
+      for (const oppMega of oppPlans) {
+        const table = tables.get(`${myMega},${oppMega}`)!;
+        const { score, joint } = rootSearch(table, s0, depth, pass);
+        if (score < worstVal) { worstVal = score; worst = { score, joint, table, myMega }; }
+      }
+      if (worstVal > bestVal) { bestVal = worstVal; best = worst; }
+    }
+    return best ?? { score: -Infinity, joint: null, table: tables.get('null,null')!, myMega: null };
+  };
+
+  const rank = (v: SearchResult['verdict']): number => (v === 'winning' ? 2 : v === 'even' ? 1 : 0);
+
   return {
     toDepth(depth: number): SearchResult {
-      let bestVal = -Infinity;
-      let bestResult: SearchResult | null = null;
-      let bestMyMega: number | null = null;
-      for (const myMega of myPlans) {
-        // Opponent replies with their worst-for-me mega choice.
-        let worstVal = Infinity;
-        let worstResult: SearchResult | null = null;
-        for (const oppMega of oppPlans) {
-          const res = rootSearch(tables.get(`${myMega},${oppMega}`)!, s0, depth);
-          if (res.score < worstVal) { worstVal = res.score; worstResult = res; }
+      const expected = evalPass(buildPass('expected'), depth);
+      const eV = verdictOf(expected.score);
+      const pess = evalPass(buildPass('pessimistic'), depth); // my low rolls, opp high + survives
+      const opt = evalPass(buildPass('optimistic'), depth);   // my high rolls, opp low, no survival
+
+      const forcedWin = pess.score >= WIN && allOppRevealed;
+      const forcedLoss = opt.score <= -WIN;
+      const forced = forcedWin || forcedLoss;
+
+      const risks: SearchRisk[] = [];
+      // We only show a numeric win-chance when EVERY blocking risk is priced.
+      // An unpriced blocking risk (the unmodelled bench, or roll dependence we
+      // can't pin to one KO) means a confident % would lie — fall back to a
+      // qualitative verdict instead.
+      let unpriced = false;
+      let winChance: number | undefined;
+
+      // The opponent's bench can still switch in — the search models neither
+      // switches nor the unbrought mons, so this is a real, unpriceable factor.
+      if (!allOppRevealed && eV !== 'losing') {
+        if (benchRisk) {
+          risks.push(benchRisk);
+        } else {
+          const unseen = Math.max(1, 4 - input.opp.length);
+          risks.push({ label: `${unseen} more foe${unseen === 1 ? '' : 's'} can switch in`, effect: 'bench not modelled', blocking: true });
         }
-        if (worstVal > bestVal) { bestVal = worstVal; bestResult = worstResult; bestMyMega = myMega; }
+        unpriced = true;
       }
-      const result = bestResult ?? rootSearch(tables.get('null,null')!, s0, depth);
-      return bestMyMega != null
-        ? { ...result, megaMon: input.mine[bestMyMega]!.set.species }
-        : result;
+
+      if (eV !== 'losing') {
+        winChance = 1;
+        // Opponent survival items — listed ONLY when they actually threaten this
+        // line (forcing the item present flips the verdict). Avoids noise like a
+        // Sash on a foe we only 2HKO anyway.
+        for (const j of s0.oppActive) {
+          const sv = input.opp[j]?.survival;
+          const p = sv?.prob ?? 0;
+          if (p <= 0 || p >= 1) continue; // certain items are baked into expected
+          const tog = evalPass(buildPass('expected', { idx: j, survOpp: true }), depth);
+          if (rank(verdictOf(tog.score)) >= rank(eV)) continue; // non-blocking → skip
+          risks.push({ label: `${input.opp[j]!.entry.species} ${sv!.label}`, prob: p, effect: 'may survive', blocking: true });
+          winChance *= 1 - p;
+        }
+        // Roll dependence: keep the expected survival assumptions, drop to worst rolls.
+        const ePass = buildPass('expected');
+        const rollSel = evalPass({ regime: 'pessimistic', survMy: ePass.survMy, survOpp: ePass.survOpp }, depth);
+        if (rank(verdictOf(rollSel.score)) < rank(eV)) {
+          // Bottleneck = the least-certain KO the line relies on this turn:
+          // P(KO at the target's HP), across single-target AND spread KOs. Uses
+          // the empirical roll distribution so it reflects the opponent's
+          // possible bulkier spreads, not just roll variance.
+          let bottleneck = 1;
+          let bottleneckTarget = '';
+          const consider = (c: Cell, h: number, who: string) => {
+            if (h <= 0 || c.dmgMid < h) return;
+            const p = rollKoProb(c, h);
+            if (p < bottleneck) { bottleneck = p; bottleneckTarget = who; }
+          };
+          for (const [actor, target] of (expected.joint ?? [])) {
+            if (target === SPREAD) {
+              const sp = expected.table.mySpread[actor]!;
+              for (let foe = 0; foe < s0.oppHp.length; foe++) {
+                consider({ dmgMin: sp.dmgMin[foe] ?? 0, dmgMid: sp.dmgMid[foe] ?? 0, dmgMax: sp.dmgMax[foe] ?? 0, move: '', priority: 0, multiHit: false, koRolls: [] }, s0.oppHp[foe] ?? 0, expected.table.oppSpecies[foe] ?? 'foe');
+              }
+            } else {
+              consider(expected.table.off[actor]![target]!, s0.oppHp[target] ?? 0, expected.table.oppSpecies[target] ?? 'foe');
+            }
+          }
+          const label = bottleneckTarget ? `KO on ${bottleneckTarget} not guaranteed` : 'damage rolls';
+          if (bottleneck < 1) { risks.push({ label, prob: 1 - bottleneck, effect: 'rolls + spread', blocking: true }); winChance *= bottleneck; }
+          else { risks.push({ label, effect: 'rolls + spread', blocking: true }); unpriced = true; }
+        }
+        winChance = unpriced ? undefined : Math.max(0, Math.min(1, winChance));
+      }
+
+      return {
+        depth,
+        score: expected.score,
+        plays: playsFromJoint(expected.table, expected.joint),
+        verdict: eV,
+        megaMon: expected.myMega != null ? input.mine[expected.myMega]!.set.species : undefined,
+        forced,
+        winChance,
+        allOppRevealed,
+        risks,
+      };
     },
   };
 }
@@ -596,7 +953,7 @@ export function searchIterative(
   onDepth?: (r: SearchResult) => void,
 ): SearchResult {
   const search = createSearch(input);
-  let last: SearchResult = { depth: 0, score: 0, plays: [], verdict: 'even' };
+  let last: SearchResult = { depth: 0, score: 0, plays: [], verdict: 'even', forced: false, allOppRevealed: input.allOppRevealed ?? false, risks: [] };
   for (let d = 1; d <= maxDepth; d++) {
     last = search.toDepth(d);
     onDepth?.(last);

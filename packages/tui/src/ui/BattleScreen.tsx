@@ -548,7 +548,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     const search = createSearch(input);
     let cancelled = false;
     let depth = 1;
-    const MAX_DEPTH = 4;
+    const MAX_DEPTH = 6;
     const BUDGET_MS = 1500;
     const start = Date.now();
     const step = () => {
@@ -557,9 +557,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (cancelled) return;
       setBestSearch(res);
       depth += 1;
-      // Keep deepening only while we're within budget and a terminal hasn't
-      // been proven (a forced win/loss won't change with more depth).
-      const decided = Math.abs(res.score) >= 100_000;
+      // Keep deepening until the outcome is genuinely FORCED (proven under
+      // worst-case rolls/items/mega). A shallow expected-pass "win" — e.g.
+      // KOing the two visible mons — is NOT a reason to stop: more mons and
+      // worse rolls can still flip it, so we keep looking.
+      const decided = res.forced;
       if (depth <= MAX_DEPTH && !decided && Date.now() - start < BUDGET_MS) {
         setTimeout(step, 0);
       }
@@ -1438,6 +1440,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         slot: s as 0 | 1,
         set: idx != null ? match.myTeam[idx] ?? null : null,
         status: idx != null ? match.myStatus?.[idx] : undefined,
+        // Already mega'd own mon → order at its mega forme's speed (matches the
+        // matchup grid, which uses the mega forme for an active mega).
+        formeOverride: idx != null && match.myMegaUsed?.includes(idx)
+          ? match.myMegaForme?.[idx]
+          : undefined,
       };
     }),
     oppActives: [0, 1].map(s => ({ slot: s as 0 | 1, entry: activeIdx.theirs[s] != null ? match.opponentTeam[activeIdx.theirs[s]!] ?? null : null })),
@@ -1582,22 +1589,39 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       <Text bold color="cyan">Battle — turn {match.turns.length + 1}{draftActions.length ? ' (composing)' : ''}</Text>
       {!match.outcome && bestSearch && bestSearch.plays.length > 0 && (() => {
         const v = bestSearch.verdict;
-        const vColor = v === 'winning' ? 'green' : v === 'losing' ? 'red' : 'yellow';
-        const decided = bestSearch.score >= 100_000 || bestSearch.score <= -100_000;
-        const vText = decided
-          ? (v === 'winning' ? 'forced win' : 'forced loss')
-          : (v === 'winning' ? 'likely win' : v === 'losing' ? 'likely loss' : 'even');
+        // "forced" only when the search PROVED it (worst-case rolls, survival
+        // items, all opp mons known). Otherwise a hedged, number-driven read.
+        const wc = bestSearch.winChance;
+        let vText: string;
+        let vColor: string;
+        if (bestSearch.forced) {
+          vText = v === 'winning' ? 'forced win' : 'forced loss';
+          vColor = v === 'winning' ? 'green' : 'red';
+        } else if (wc != null) {
+          vText = `~${Math.round(wc * 100)}% to win`;
+          vColor = wc >= 0.6 ? 'green' : wc <= 0.35 ? 'red' : 'yellow';
+        } else {
+          vText = v === 'winning' ? 'likely win' : v === 'losing' ? 'likely loss' : 'even';
+          vColor = v === 'winning' ? 'green' : v === 'losing' ? 'red' : 'yellow';
+        }
         const turns = bestSearch.depth;
         const conf = `${turns} turn${turns === 1 ? '' : 's'} ahead`;
         const plays = bestSearch.plays
           .map(p => `${p.mySpecies}→${p.move || '—'}→${p.targetSpecies}`)
           .join(' · ');
         const mega = bestSearch.megaMon ? `mega ${bestSearch.megaMon} · ` : '';
+        // Compact risk breakdown: "label NN%", joined — labels are self-explanatory.
+        const riskText = bestSearch.risks
+          .map(r => `${r.label}${r.prob != null ? ` ${Math.round(r.prob * 100)}%` : ''}`)
+          .join(' · ');
         return (
-          <Text>
-            <Text color="magenta">⌁ best play </Text><Text dimColor>({conf})</Text><Text color="magenta">: </Text>
-            {mega ? <Text color="cyan">{mega}</Text> : null}{plays}  <Text color={vColor}>— {vText}</Text>
-          </Text>
+          <>
+            <Text>
+              <Text color="magenta">⌁ best play </Text><Text dimColor>({conf})</Text><Text color="magenta">: </Text>
+              {mega ? <Text color="cyan">{mega}</Text> : null}{plays}  <Text color={vColor}>— {vText}</Text>
+            </Text>
+            {riskText ? <Text dimColor>   risks: {riskText}</Text> : null}
+          </>
         );
       })()}
       {match.outcome && (

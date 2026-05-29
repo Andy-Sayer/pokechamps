@@ -409,3 +409,25 @@ describe('Mega evolution behavior', () => {
     expect(heldStone.max).toBeLessThan(activated.max);
   });
 });
+
+describe('damageRange — multi-hit moves total per-hit damage', () => {
+  const aero: PokemonSet = {
+    species: 'Aerodactyl', level: 50, ability: 'Pressure', nature: 'Jolly',
+    evs: { ...ZERO_EVS, atk: 252, spe: 252 }, ivs: MAX_IVS, moves: ['Dual Wingbeat'],
+  };
+  const victreebel: PokemonSet = {
+    species: 'Victreebel', level: 50, ability: 'Chlorophyll', nature: 'Modest',
+    evs: { ...ZERO_EVS, hp: 252 }, ivs: MAX_IVS, moves: [],
+  };
+
+  test('Dual Wingbeat reports the 2-hit total, not a single hit', () => {
+    const r = damageRange({ attacker: aero, defender: victreebel, move: 'Dual Wingbeat', field: NEUTRAL_FIELD, attackerSide: 'theirs' });
+    expect(r.desc).toContain('(2 hits)');
+    // One hit is ~45% here; the 2-hit total must be far higher (was the bug).
+    expect(r.minPercent).toBeGreaterThan(70);
+    // And consistent with the calc's own description total.
+    const m = r.desc.match(/\((\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)%\)/);
+    expect(m).not.toBeNull();
+    expect(r.maxPercent).toBeCloseTo(parseFloat(m![2]!), 0);
+  });
+});
