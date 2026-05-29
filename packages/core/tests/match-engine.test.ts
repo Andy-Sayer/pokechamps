@@ -358,3 +358,91 @@ describe('match engine: detectOutcome (defeat path)', () => {
     expect(detectOutcome(match)).toBe('defeat');
   });
 });
+
+describe('move self-stat drops auto-apply on a hit', () => {
+  test('Overheat -2 SpA applies to the user when damage lands', () => {
+    const meganium = mon({
+      species: 'Meganium', ability: 'Overgrow', nature: 'Modest',
+      evs: { hp: 0, atk: 0, def: 0, spa: 252, spd: 4, spe: 0 },
+      moves: ['Overheat'],
+    });
+    const match = freshMatch({ myTeam: [meganium, rillaboom, flutterMane, ironHands] });
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move', move: 'Overheat',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 40, // damage landed
+      order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.myBoosts?.[0]?.spa).toBe(-2);
+  });
+
+  test('no damage logged → no self-drop applied (the move missed/failed)', () => {
+    const meganium = mon({
+      species: 'Meganium', ability: 'Overgrow', nature: 'Modest',
+      evs: { ...ZERO_EVS, spa: 252 }, moves: ['Overheat'],
+    });
+    const match = freshMatch({ myTeam: [meganium, rillaboom, flutterMane, ironHands] });
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move', move: 'Overheat',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.myBoosts?.[0]?.spa).toBeUndefined();
+  });
+});
+
+describe('drain moves heal the attacker', () => {
+  test('opp Giga Drain on my mon heals the opp by 50% of damage dealt', () => {
+    const dragger = mon({ species: 'Tangrowth', ability: 'Regenerator', moves: ['Giga Drain'] });
+    const myDef = mon({ species: 'Garchomp', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: [] });
+    const match = freshMatch({ myTeam: [myDef, sneasler, rillaboom, flutterMane] });
+    match.opponentTeam = [{ species: 'Tangrowth', knownMoves: [], currentHpPercent: 50, candidates: [dragger] } as OpponentEntry];
+    match.opponentBrought = [0];
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move', move: 'Giga Drain',
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpRaw: 100, // damage amount stored as raw HP — engine derives % from set's max
+      damageHpPercent: 20, // explicit damage %: 20% of my mon's max
+      order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [action], field: match.field },
+      activeIdx: { mine: [0, 1], theirs: [0, 1] },
+    });
+    expect(r.match.opponentTeam[0]!.currentHpPercent!).toBeGreaterThan(50); // healed
+  });
+});
+
+describe('Spicy Spray (defender) burns the attacker on a hit', () => {
+  test('a non-Fire attacker that hits a Scovillain-Mega holder is auto-burned', () => {
+    const scov = mon({ species: 'Scovillain', ability: 'Spicy Spray', item: 'Scovillainite', moves: [] });
+    const match = freshMatch({ myTeam: [scov, sneasler, rillaboom, flutterMane], oppSpecies: ['Garchomp', 'Amoonguss'] });
+    // Mark Scovillain as already mega'd so defAbility resolves to Spicy Spray.
+    match.myMegaUsed = [0]; match.myMegaForme = { 0: 'Scovillain-Mega' };
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move', move: 'Earthquake',
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0, damageHpPercent: 30, order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [action], field: match.field },
+      activeIdx: { mine: [0, 1], theirs: [0, 1] },
+    });
+    expect(r.match.opponentTeam[0]!.status).toBe('brn');
+  });
+
+  test('Fire-type attackers are immune (no auto-burn)', () => {
+    const scov = mon({ species: 'Scovillain', ability: 'Spicy Spray', item: 'Scovillainite', moves: [] });
+    const match = freshMatch({ myTeam: [scov, sneasler, rillaboom, flutterMane], oppSpecies: ['Charizard', 'Amoonguss'] });
+    match.myMegaUsed = [0]; match.myMegaForme = { 0: 'Scovillain-Mega' };
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move', move: 'Earthquake',
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0, damageHpPercent: 30, order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [action], field: match.field },
+      activeIdx: { mine: [0, 1], theirs: [0, 1] },
+    });
+    expect(r.match.opponentTeam[0]!.status).toBeUndefined();
+  });
+});

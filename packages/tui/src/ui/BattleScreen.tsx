@@ -11,7 +11,7 @@ import { inferOpponentSpeeds, applySpeedInference, actualSpeed, predictTurnOrder
 import { reviewLastTurn } from '@pokechamps/core/ai/prompts.js';
 import { isAvailable as aiAvailable } from '@pokechamps/core/ai/client.js';
 import type { Stores } from '@pokechamps/core/storage/index.js';
-import { getSpecies, isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove } from '@pokechamps/core/domain/data.js';
+import { getSpecies, getMove, toId, isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove } from '@pokechamps/core/domain/data.js';
 import { defaultOpponentSet } from '@pokechamps/core/domain/bring.js';
 import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs, hazardClearEffect, applyHazardClear } from '@pokechamps/core/domain/hazards.js';
@@ -801,6 +801,110 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         next.myLeechSeeded = { ...(next.myLeechSeeded ?? {}), [tIdx]: { seederSide: a.side, seederIndex: sIdx } };
         inferenceNotes.push(`m${tIdx + 1} seeded`);
       }
+    }
+    // Move self-stat drops (Overheat / Leaf Storm / Draco Meteor −2 SpA, Close
+    // Combat −1 Def −1 SpD, …) auto-applied to the user when the move
+    // connects. Contrary inverts. Mirror of engine.ts.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.attackerTeamIndex == null) continue;
+      if (a.damageHpPercent == null && a.damageRaw == null) continue;
+      const m = getMove(a.move) as { self?: { boosts?: BoostMap } } | undefined;
+      const boosts = m?.self?.boosts;
+      if (!boosts) continue;
+      const abil = a.side === 'mine'
+        ? next.myTeam[a.attackerTeamIndex]?.ability
+        : next.opponentTeam[a.attackerTeamIndex]?.ability;
+      const contrary = !!abil && toId(abil) === 'contrary';
+      const applied: BoostMap = {};
+      for (const [stat, delta] of Object.entries(boosts)) {
+        applied[stat as keyof BoostMap] = contrary ? -(delta as number) : (delta as number);
+      }
+      applyBoostsInto(next, a.side, a.attackerTeamIndex, applied);
+    }
+
+    // Drain moves (Giga Drain / Drain Punch / …): heal attacker by drain
+    // fraction of damage dealt. Mirror of engine.ts.
+    const maxHpOf = (side: 'mine' | 'theirs', idx: number): number => {
+      if (side === 'mine') return next.myTeam[idx] ? maxHpFor(next.myTeam[idx]!) : 0;
+      const e = next.opponentTeam[idx];
+      if (!e) return 0;
+      return e.candidates?.[0] ? maxHpFor(e.candidates[0]!) : maxHpFor(defaultOpponentSet(e, 50));
+    };
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.attackerTeamIndex == null) continue;
+      if (a.damageHpPercent == null) continue;
+      if (typeof a.target !== 'object') continue;
+      const tIdx = a.targetTeamIndex;
+      if (tIdx == null) continue;
+      const m = getMove(a.move) as { drain?: [number, number] } | undefined;
+      const drain = m?.drain;
+      if (!drain) continue;
+      const defMax = maxHpOf(a.target.side, tIdx);
+      const atkMax = maxHpOf(a.side, a.attackerTeamIndex);
+      if (!defMax || !atkMax) continue;
+      const dmgAbs = (a.damageHpPercent / 100) * defMax;
+      const healPct = (dmgAbs * drain[0] / drain[1]) / atkMax * 100;
+      if (a.side === 'mine') {
+        next.myCurrentHp = next.myCurrentHp ?? {};
+        next.myCurrentHp[a.attackerTeamIndex] = Math.min(100, (next.myCurrentHp[a.attackerTeamIndex] ?? 100) + healPct);
+      } else {
+        const o = next.opponentTeam[a.attackerTeamIndex];
+        if (o) o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + healPct);
+      }
+    }
+
+    // Spicy Spray (custom defender ability): when a damaging hit lands on the
+    // holder, the attacker is burned (Fire-immune + non-volatile-statused skip).
+    // Mirror of engine.ts.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.attackerTeamIndex == null) continue;
+      if (a.damageHpPercent == null && a.damageRaw == null) continue;
+      if (typeof a.target !== 'object') continue;
+      const tIdx = a.targetTeamIndex;
+      if (tIdx == null) continue;
+      let defAbility: string | undefined;
+      let defFormeName = '';
+      if (a.target.side === 'theirs') {
+        const o = next.opponentTeam[tIdx];
+        if (!o) continue;
+        defFormeName = o.megaUsed && o.megaForme ? o.megaForme : o.species;
+        defAbility = o.megaUsed && o.megaForme
+          ? ((getSpecies(o.megaForme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? o.ability ?? undefined)
+          : (o.ability ?? undefined);
+      } else {
+        const set = next.myTeam[tIdx];
+        if (!set) continue;
+        const megaForme = next.myMegaUsed?.includes(tIdx) ? next.myMegaForme?.[tIdx] : undefined;
+        defFormeName = megaForme ?? set.species;
+        defAbility = megaForme
+          ? ((getSpecies(megaForme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? set.ability ?? undefined)
+          : (set.ability ?? undefined);
+      }
+      if (!defAbility || toId(defAbility) !== 'spicyspray') continue;
+      const aIdx = a.attackerTeamIndex;
+      const aSide = a.side;
+      let atkFormeName = '';
+      if (aSide === 'mine') {
+        const myMega = next.myMegaUsed?.includes(aIdx) ? next.myMegaForme?.[aIdx] : undefined;
+        atkFormeName = myMega ?? next.myTeam[aIdx]?.species ?? '';
+      } else {
+        const oppEntry = next.opponentTeam[aIdx];
+        atkFormeName = (oppEntry?.megaUsed && oppEntry.megaForme) || oppEntry?.species || '';
+      }
+      const atkTypes = (getSpecies(atkFormeName) as { types?: string[] } | undefined)?.types ?? [];
+      if (atkTypes.includes('Fire')) continue;
+      if (aSide === 'mine') {
+        if (next.myStatus?.[aIdx]) continue;
+        next.myStatus = { ...(next.myStatus ?? {}), [aIdx]: 'brn' };
+      } else {
+        const o = next.opponentTeam[aIdx];
+        if (!o || o.status) continue;
+        o.status = 'brn';
+      }
+      inferenceNotes.push(`${aSide === 'mine' ? 'm' : 'o'}${aIdx + 1} burned (Spicy Spray on ${defFormeName})`);
     }
     // Item-removing moves (Knock Off / Thief / Covet / berry-eaters).
     for (const a of draftActions) {
