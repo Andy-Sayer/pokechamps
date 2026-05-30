@@ -101,6 +101,8 @@ export interface OpponentEntry {
   cursed?: boolean;          // Non-Ghost Curse: -1/4 per EOT; cleared on switch-out
   partialTrap?: number;      // turns remaining of Bind/Wrap/Fire Spin etc.: -1/8 per EOT; cleared on switch-out
   nightmare?: boolean;       // while asleep: -1/4 per EOT; cleared on switch-out
+  // Perish Song: counts down each EOT (3→2→1→0); faint at 0. Does NOT clear on switch.
+  perishCount?: number;
   // One-turn volatile set when this mon is flinched (cleared at EOT). Informational:
   // the flinched mon simply has no action in the turn. Fake Out auto-flinches on
   // first turn out; secondary flinch moves (Iron Head etc.) are user-logged.
@@ -275,6 +277,8 @@ export interface Match {
   myCursed?: Record<number, boolean>;
   myPartialTrap?: Record<number, number>; // turns remaining
   myNightmare?: Record<number, boolean>;
+  // Perish Song (my side): counts down each EOT; faint at 0. Does NOT clear on switch.
+  myPerishCount?: Record<number, number>;
   // One-turn flinch volatile (cleared at EOT). Informational — logged when user
   // observes a Fake Out or secondary flinch proc ("o1 flinch").
   myFlinched?: Record<number, boolean>;

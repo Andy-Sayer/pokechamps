@@ -313,6 +313,35 @@ export function endOfTurn(
   applyLeechSeed('theirs', activeIdx.theirs[0]);
   applyLeechSeed('theirs', activeIdx.theirs[1]);
 
+  // Perish Song: count down each EOT for every active mon; KO at 0.
+  for (const i of activeIdx.theirs) {
+    if (i == null) continue;
+    const o = next.opponentTeam[i];
+    if (!o || o.fainted || o.perishCount == null) continue;
+    o.perishCount -= 1;
+    if (o.perishCount <= 0) {
+      o.currentHpPercent = 0; o.fainted = true;
+      notes.push(`o${i + 1} fainted (Perish Song)`);
+    } else {
+      notes.push(`o${i + 1} Perish ${o.perishCount}`);
+    }
+  }
+  for (const i of activeIdx.mine) {
+    if (i == null) continue;
+    if (next.myFainted!.includes(i)) continue;
+    const count = next.myPerishCount?.[i];
+    if (count == null) continue;
+    next.myPerishCount = { ...(next.myPerishCount ?? {}) };
+    next.myPerishCount[i] = count - 1;
+    if (next.myPerishCount[i]! <= 0) {
+      next.myCurrentHp![i] = 0;
+      if (!next.myFainted!.includes(i)) next.myFainted!.push(i);
+      notes.push(`m${i + 1} fainted (Perish Song)`);
+    } else {
+      notes.push(`m${i + 1} Perish ${next.myPerishCount[i]}`);
+    }
+  }
+
   // Field conditions count down on the persistent field; clear at 0.
   const f = next.field;
   if (f.weatherTurns != null) { f.weatherTurns -= 1; if (f.weatherTurns <= 0) { notes.push(`${f.weather ?? 'weather'} ended`); f.weather = null; f.weatherTurns = undefined; } }

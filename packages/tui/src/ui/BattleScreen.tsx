@@ -1669,6 +1669,10 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.nightmare = true; }
       else { next.myNightmare = { ...(next.myNightmare ?? {}) }; next.myNightmare[teamIndex] = true; }
     }
+    if (update.perish != null) {
+      if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.perishCount = update.perish; }
+      else { next.myPerishCount = { ...(next.myPerishCount ?? {}), [teamIndex]: update.perish }; }
+    }
     if (update.flinch) {
       if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.flinched = true; }
       else { next.myFlinched = { ...(next.myFlinched ?? {}) }; next.myFlinched[teamIndex] = true; }
@@ -2220,6 +2224,15 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
                 {(match.myTaunted?.includes(teamIdx) || match.myEncoreMove?.[teamIdx] || match.myDisabledMove?.[teamIdx]) && (
                   <Text color="magenta">      {match.myTaunted?.includes(teamIdx) ? `🤬Taunt${match.myTauntTurns?.[teamIdx] ? `(${match.myTauntTurns[teamIdx]})` : ''} ` : ''}{match.myEncoreMove?.[teamIdx] ? `🔁Encore ${match.myEncoreMove[teamIdx]}${match.myEncoreTurns?.[teamIdx] ? `(${match.myEncoreTurns[teamIdx]})` : ''} ` : ''}{match.myDisabledMove?.[teamIdx] ? `🚫Disable ${match.myDisabledMove[teamIdx]}${match.myDisableTurns?.[teamIdx] ? `(${match.myDisableTurns[teamIdx]})` : ''}` : ''}</Text>
                 )}
+                {match.myPerishCount?.[teamIdx] != null && (
+                  <Text color="red">      ☠Perish {match.myPerishCount[teamIdx]}</Text>
+                )}
+                {match.mySaltCured?.[teamIdx] && (
+                  <Text color="yellow">      ⬡Salt Cure</Text>
+                )}
+                {match.myPartialTrap?.[teamIdx] ? (
+                  <Text color="yellow">      ⛓trapped({match.myPartialTrap[teamIdx]})</Text>
+                ) : null}
                 {isActive && m.moves.some(isFirstTurnMove) && !firstTurnOut(match, 'mine', teamIdx) && (
                   <Text dimColor>      {m.moves.filter(isFirstTurnMove).join('/')} spent (not first turn out)</Text>
                 )}
@@ -2684,6 +2697,9 @@ function OppRow({ stores, entry, marker, color, choiceLock }: OppRowProps) {
         {entry.taunted ? <Text color="magenta"> 🤬Taunt{entry.tauntTurns ? `(${entry.tauntTurns})` : ''}</Text> : null}
         {entry.encoreMove ? <Text color="magenta"> 🔁Encore {entry.encoreMove}{entry.encoreTurns ? `(${entry.encoreTurns})` : ''}</Text> : null}
         {entry.disabledMove ? <Text color="magenta"> 🚫Disable {entry.disabledMove}{entry.disableTurns ? `(${entry.disableTurns})` : ''}</Text> : null}
+        {entry.perishCount != null ? <Text color="red"> ☠Perish {entry.perishCount}</Text> : null}
+        {entry.saltCured ? <Text color="yellow"> ⬡Salt Cure</Text> : null}
+        {entry.partialTrap ? <Text color="yellow"> ⛓trapped({entry.partialTrap})</Text> : null}
       </Text>
       {fetching && (
         <Text dimColor>      (fetching Pikalytics…)</Text>

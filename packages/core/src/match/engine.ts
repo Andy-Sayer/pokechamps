@@ -1512,6 +1512,10 @@ function applyStateUpdateImpl(
     if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.nightmare = true; }
     else next.myNightmare![teamIndex] = true;
   }
+  if (update.perish != null) {
+    if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.perishCount = update.perish; }
+    else { next.myPerishCount = { ...(next.myPerishCount ?? {}), [teamIndex]: update.perish }; }
+  }
   if (update.flinch) {
     if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.flinched = true; }
     else { next.myFlinched = { ...(next.myFlinched ?? {}) }; next.myFlinched[teamIndex] = true; }

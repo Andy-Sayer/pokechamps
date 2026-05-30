@@ -92,6 +92,8 @@ export interface StateUpdate {
   curse?: boolean;        // o1 curse / m1 curse (Cursed target, not the user)
   partialTrap?: number;   // o1 trapped [N] — turns remaining (default 4)
   nightmare?: boolean;    // o1 nightmare / m1 nightmare
+  // Perish Song counter: "o1 perish [N]" — counts down each EOT, KO at 0.
+  perish?: number;        // default 3 if N omitted
   // One-turn flinch volatile. Clears at EOT. "o1 flinch" / "m1 flinch".
   flinch?: boolean;
 }
@@ -424,8 +426,8 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
     return { ok: true, kind: 'state', update: { side: ref.side, teamIndex: ref.teamIndex, flinch: true } };
   }
 
-  // Residual-chip volatiles: "o1 salt-cure", "m1 aqua-ring", "o2 trapped 4", etc.
-  const residualMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+(salt-?cure|aqua-?ring|ingrain|curse|cursed|nightmare|trapped?)(?:\s+(\d+))?$/i);
+  // Residual-chip volatiles: "o1 salt-cure", "m1 aqua-ring", "o2 trapped 4", "o1 perish 3", etc.
+  const residualMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+(salt-?cure|aqua-?ring|ingrain|curse|cursed|nightmare|trapped?|perish)(?:\s+(\d+))?$/i);
   if (residualMatch) {
     const ref = resolveRef(residualMatch[1]!, parseInt(residualMatch[2]!, 10), ctx);
     if (!ref) return { ok: false, error: `${residualMatch[1]}${residualMatch[2]} has no active mon` };
@@ -438,6 +440,7 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
     else if (verb === 'curse') extra.curse = true;
     else if (verb === 'trap') extra.partialTrap = arg ?? 4;
     else if (verb === 'nightmare') extra.nightmare = true;
+    else if (verb === 'perish') extra.perish = arg ?? 3;
     return { ok: true, kind: 'state', update: { side: ref.side, teamIndex: ref.teamIndex, ...extra } };
   }
 
