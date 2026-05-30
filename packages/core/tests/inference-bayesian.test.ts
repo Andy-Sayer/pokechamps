@@ -185,3 +185,23 @@ describe('scoreOffensiveSpread — extreme hit promotes the offensive nature', (
     expect(scored.every(s => s.candidate.nature === 'Adamant')).toBe(true);
   });
 });
+
+describe('scoreSpread — candidate items respect the format allow-list', () => {
+  test('every returned candidate holds a format-legal item (or no item)', async () => {
+    const { inferSpread } = await import('../src/domain/inference.js');
+    const { isLegalItem } = await import('../src/domain/data.js');
+    // A specs-Calyrex hit on Incineroar — runs the priors path (quickOnly).
+    // The format-legality filter applies to BOTH priors and the coarse-grid
+    // fallback, so this is a sufficient check on the filter wiring.
+    const cands = inferSpread({
+      defenderSpecies: 'Incineroar', defenderLevel: 50, knownDefenderMoves: [],
+      attackerSet: attacker, observation: observe(40),
+      quickOnly: true,
+    });
+    expect(cands.length).toBeGreaterThan(0);
+    for (const c of cands) {
+      if (!c.item) continue; // empty/"no item" is always allowed
+      expect(isLegalItem(c.item)).toBe(true);
+    }
+  });
+});

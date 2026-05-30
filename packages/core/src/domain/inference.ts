@@ -1,6 +1,6 @@
 import type { DamageObservation, PokemonSet, Stats } from './types.js';
 import { damageRange, observationToAbsoluteDamage } from './damage.js';
-import { getSpecies, getMove, toId } from './data.js';
+import { getSpecies, getMove, isLegalItem, toId } from './data.js';
 import { activeGimmick } from './gimmicks/index.js';
 import { getPikalytics, evFromSp } from './pikalytics.js';
 
@@ -132,12 +132,17 @@ export function scoreSpread(input: InferenceInput): ScoredCandidate[] {
     (species?.abilities ? Object.values(species.abilities) as string[] : ['']);
 
   // Item search space: the standard defensive items + any gimmick-specific
-  // variants (e.g. mega stones legal for this species).
+  // variants (e.g. mega stones legal for this species). Filter against the
+  // format's allow-list so a banned item never appears in a candidate spread —
+  // Champions in particular runs a heavily-restricted item pool, and
+  // suggesting an off-format item is just noise.
   const baseItems = input.priorItems ?? COMMON_DEFENSIVE_ITEMS.map(x => x ?? '');
   const gimmickItems = (activeGimmick().enumerateOpponentVariants?.(toId(input.defenderSpecies)) ?? [])
     .map(v => v.item)
     .filter((i): i is string => !!i);
   let items = Array.from(new Set([...baseItems, ...gimmickItems]));
+  // Keep the empty-string "no item" entry; everything else must be format-legal.
+  items = items.filter(i => !i || isLegalItem(i));
   // Item signals: exclude Safety Goggles if we've observed sand chip damage.
   if (input.sandChipObserved) {
     items = items.filter(i => i !== 'Safety Goggles');
