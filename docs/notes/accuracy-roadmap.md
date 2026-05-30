@@ -26,6 +26,22 @@ Five axes of correctness, in rough order of how often a gap *visibly* misleads t
 
 ---
 
+## Format-aware items (Champions: heavily restricted item pool)
+
+The Champions item list is heavily restricted relative to standard gen 9 — `data/format.champions.json` carries the legal allow-list. We should *know about every item* (the data layer already does) but **filter inference/predictions to the legal subset for this season**, which massively narrows the candidate item space and removes noise.
+
+| Item-side gap | Why it matters |
+|---|---|
+| **Restrict item priors + coarse-grid items to format-legal** | `inference.ts COMMON_DEFENSIVE_ITEMS` is a fixed list. Intersect with `format.champions.json`'s `items.allow` so an off-meta inference can't suggest a banned item. Same for `priorsFromPikalytics` items list. |
+| **Item permanence model** | Tag every item as `consumable` (one-shot — berries, Focus Sash, Air Balloon, Gems, White Herb, Mental Herb, Power Herb, Eject Pack/Button, Red Card, Weakness Policy, Sitrus, healing berries, pinch berries, resist berries) or `persistent` (Leftovers, Choice Band/Specs/Scarf, Life Orb, Assault Vest, Eviolite, Black Sludge, Mystic Water / Charcoal / Dragon Fang / etc., Clear Amulet, Covert Cloak, mega stones). The match already tracks `itemConsumed`; make the permanence type explicit so downstream code can reason: a mon whose item was consumed CANNOT still be holding a persistent item, and a persistent item can only be lost to Trick / Switcheroo / Knock Off / Corrosive Gas. |
+| **Acrobatics conditional BP** | 110 BP if no item is held, 55 BP otherwise. Once a consumable is gone, Acrobatics damage **doubles** — a real swing the calc must reflect. Verify `@smogon/calc` honours `itemConsumed === undefined` correctly via `defenderOpts`; if not, emulate via the gimmick `enrichCalcMove` hook setting `basePower` based on `set.item == null` at call time. |
+| **Resist berries (type-matchup berries — heavy use in this format)** | Yache (Ice), Occa (Fire), Passho (Water), Wacan (Electric), Rindo (Grass), Chople (Fighting), Kebia (Poison), Shuca (Ground), Coba (Flying), Payapa (Psychic), Tanga (Bug), Charti (Rock), Kasib (Ghost), Haban (Dragon), Colbur (Dark), Babiri (Steel), Roseli (Fairy), Chilan (Normal). On a super-effective hit of the matching type (Chilan: any Normal hit), halve the damage **once** then consume. Auto-effect in the calc when the defender holds the berry; auto-mark `itemConsumed` after. Big in this format because it converts a clean OHKO into a survival + the next turn's calc uses the no-item path. |
+| **Pinch berries (Salac/Liechi/Petaya/Ganlon/Apicot)** | At ≤25% HP, +1 to the matching stat; Custap Berry → +1 priority bracket for one move. Auto-consume + apply the boost. Affects speed inference (Salac → +1 Spe could be the confidence trigger from a "non-scarf outspeed"). |
+| **Healing berries (Sitrus / Figy/Mago/etc.)** | Sitrus heals 25% at ≤50% HP; the flavour berries heal 33% (confuse if nature dislikes them). Auto-apply at the threshold. |
+| **Lum / status berries (Pecha/Cheri/Rawst/Aspear/Chesto)** | Auto-cure the matching status. Lum cures any. |
+
+Item-permanence wiring is the foundation for the Acrobatics fix, the resist-berry effect, and the inference improvement — do it first.
+
 ## Tier 1 — Quick wins (low-medium effort, broad impact)
 
 Deterministic Bulbapedia effects we can auto-apply alongside the existing `finalizeTurn` loops in `engine.ts` + `BattleScreen.tsx`. Each is ~1 file change + dual-mirror + test.
@@ -40,6 +56,7 @@ Deterministic Bulbapedia effects we can auto-apply alongside the existing `final
 | **Other residuals** | move/ability | Aqua Ring +1/16 EOT; Ingrain +1/16; Curse −1/4 EOT (the user that used it); partial-trap chip (Bind/Wrap/Fire Spin: 1/8 over 4-5 turns); Salt Cure (1/8, 1/4 vs Water/Steel); Nightmare. |
 | **Regenerator on switch-out** | ability | Common in Champions (Tangrowth-like). Heal +1/3 on switch-out via the existing switch-out cleanup hooks. |
 | **On-hit chip abilities** | defender ability | Rough Skin / Iron Barbs / Aftermath (KO only) — deterministic; mirror Spicy Spray. |
+| **Flinch state (especially important in this league)** | move flags + secondary | One-turn volatile that skips the flinched mon's action if it hasn't moved yet. Fake Out auto-flinches on first turn out (already tracked via `firstTurnOut`). Secondary-flinch moves (Iron Head / Air Slash / Rock Slide / Zen Headbutt / Bite / Dark Pulse / Heart Stamp / Stomp / Headbutt / Hyper Fang / Twister / Astonish / Snore / Needle Arm) can flinch on a hit (10–30% chance). When the user logs the flinch (via a state line or by leaving the flinched mon's action out of the turn), set the volatile + skip-action; clear at EOT. Flinch chance is the headline input for the **Hail Mary** outs analysis (below). |
 | **Liquid Ooze** | defender ability | Reverses drain — attacker loses HP instead. Plumb into the drain block. |
 | **Bad Dreams, Dry Skin, Solar Power, Rain Dish, Ice Body, Snow Cloak (defensive)** | abilities | EOT chip/heal under matching weather/state. |
 | **Bag/permanent items mod**: Heavy-Duty Boots already in hazards; verify Air Balloon, Eject Pack, Red Card, Weakness Policy auto-effects | items | Each one-off but cumulatively important. |
@@ -54,6 +71,7 @@ Deterministic Bulbapedia effects we can auto-apply alongside the existing `final
 | **Substitute mechanics** | Costs 25% HP, blocks status + secondaries + boost decrements + Leech Seed application; transparent to damage but a substitute mon's HP/status reads differ. Visible state, not just calc. |
 | **Magic Bounce / Magic Coat** | Reflects status moves — Will-O-Wisp/T-Wave/Toxic bounce back. Affects Spicy Spray's burn-back chain too. |
 | **Magic Guard** | Blocks all indirect damage (status chip, hazards, Leech Seed, recoil, life orb). Common ability — a big residual filter. |
+| **Perish Song + trap abilities (a real win con in this league)** | Perish Song puts a 3-turn countdown on **every mon on the field**; at 0 they faint. Trap abilities — **Shadow Tag** (Gengar-Mega in this format), Arena Trap (Ground-grounded), Magnet Pull (Steel) — prevent the foe from switching out. The Perish + Shadow Tag pair is a deterministic KO if not broken (Ghost-types ignore Shadow Tag; Levitate/Flying ignore Arena Trap; non-Steel ignore Magnet Pull). Track per-mon perish counter on a side-wide volatile; in the search, mark trapped foes as unswitchable; in the recommender, flag "trapped + perish 1 → forced KO". |
 | **Joint nature/item/EV inference** | Currently sequential: defensive scoreSpread → offensive scoreOffensiveSpread → speed commit. A joint solve would reduce conflicts (e.g., offensive nature change invalidating defensive observations). Higher accuracy at moderate cost. |
 | **Ability inference from observations** | Today we mostly take the Pikalytics top ability; only Sturdy/Spicy Spray etc. get reasoned about implicitly. Could narrow: e.g., a fast turn-1 reveals not-Truant, observed neutral damage rules out Levitate vs Ground, paralysis-immune-on-hit reveals not Limber, Hydration in rain clears status etc. |
 | **Multi-hit variable-range** | @smogon/calc averages at 3 hits (or 5 with Skill Link). Distributional per-hit-count would tighten KO odds for Bullet Seed / Rock Blast / Triple Axel / Icicle Spear / Population Bomb. |
@@ -65,10 +83,37 @@ Deterministic Bulbapedia effects we can auto-apply alongside the existing `final
 
 Each of these is its own multi-commit project and changes the **lookahead search's action space**, not just turn-tracking.
 
-1. **Non-damaging actions in the search** — speed control (Tailwind / Trick Room / Icy Wind / Thunder Wave); Protect / redirection (Follow Me / Rage Powder); setup (Swords Dance etc.). Per the earlier user prio: speed-control + Protect/redirection first. Requires state evolution across simulated turns (boost stages, decrementing field counters, status) and dynamic-speed re-sort after each action.
+1. **Non-damaging actions in the search — Protect first** (the user has called this out as especially important in the league). Then speed control (Tailwind / Trick Room / Icy Wind / Thunder Wave) and redirection (Follow Me / Rage Powder). Protect adds: +4 priority, blocks all moves that turn against the user, **consecutive-use fail rate** rises sharply (1/3 the 2nd turn in a row, 1/9 the 3rd, etc.). Modelling it in the search lets the recommender reason "they Protect into the OHKO, I waste my best move." Then setup (Swords Dance etc.). Requires state evolution across simulated turns (boost stages, decrementing field counters, status, protect cooldown) and dynamic-speed re-sort after each action.
 2. **Opponent switch modeling** — add a "switch to bench mon" action to the maximin; include benched mons in the search state; model switch-in damage (Intimidate, hazards, Stealth Rock chip). Today the bench is only an *informational* risk; this would let the search actually consider their pivots.
 3. **HP-triggered decision points** in the simulated tree — Salac speed boost at low HP, berry heal at <50%, Sash threshold, Multiscale at full HP — so the search picks the right line through them.
 4. **Strategic refill heuristic** — current refill brings in the highest-damage benched mon; could pick by survivability vs the line's likely incoming damage.
+
+## "Hail Mary" — surface the dice rolls when everything else is a loss
+
+When the expected verdict is **losing** but the position **isn't `forced` loss**, there's something the opponent has to roll right to actually close it out — and you're guaranteed to lose if you *don't* play for that miss. Today the recommender shows "likely loss N%" and stops; what the user wants is the explicit *out*: "your only shot is the crit / the miss / the flinch — here's how unlikely."
+
+A new analysis layer that runs only when `verdict === 'losing' && !forced`:
+
+1. **Enumerate the discrete dice events** that could turn this position around inside the search horizon. Bounded set, all priceable:
+   - **Crit** on the lethal KO I need (1/24 vanilla, 1/8 for high-crit moves — Stone Edge, Air Slash, Drill Run, Slash, Razor Leaf, Cross Chop; ×2 with Scope Lens; halved by Battle Armor / Shell Armor).
+   - **Opponent's KO misses** (move accuracy < 100 — Stone Edge 80%, Hydro Pump 80%, Focus Blast 70%, Will-O-Wisp 85%; also Sand-Veil/Snow-Cloak weather chance).
+   - **Opponent flinches** from my flinch move (Rock Slide 30%, Iron Head 30%, etc. — see Tier 1 flinch state).
+   - **Opponent loses a turn to status** (paralysis full-para 25%, sleep, freeze; my Spicy Spray attacker gets burned, halving subsequent physical damage).
+   - **High roll on my hit** (the line was already priced via the empirical roll distribution; the "out" form is the chance the line *does* close given a top-end roll).
+   - **Low roll on opponent's hit** (the analogous defender-side roll).
+   - **Berry / Focus Sash on my mon** triggers in time (already partly modeled).
+
+2. **For each candidate out**, simulate the position with that event resolved in my favour and check whether the verdict flips to non-loss. Each probability is real-sourced (calc crit chance, move accuracy, flinch %, damage envelope).
+
+3. **Pick the best line** — the play whose conditional success probability (multiplied across required events) is the highest — and surface it in the verdict line and the risks panel:
+
+   > `⌁ best play (3 ahead): Sableye→Foul Play→Aerodactyl — only out: ~8% (crit on Aerodactyl + Rock Slide low roll)`
+
+4. **If the best out is below a sanity floor** (e.g. 0.5%), label it `~lost — no realistic out` rather than implying false hope.
+
+Mechanically this is the **mirror of the forced-win/winChance machinery** I already built: instead of asking "what risks block my win?", ask "what gifts unlock it?" Reuse the regime passes (optimistic-for-me pass) plus the empirical roll distribution + accuracy/flinch data.
+
+This is what the user means by "sometimes you have to roll the dice." The recommender shouldn't shrug — it should name the dice.
 
 ## Tier 4 — Edge cases (often deliberately skipped)
 
@@ -96,12 +141,14 @@ Output: a `docs/notes/champions-custom-data.md` listing every custom entry, its 
 
 ## Sequencing recommendation
 
-1. **Tier 1 quick wins** (one PR each, dual-mirror + tests). Stop at any time — each commit independently raises accuracy.
-2. **Format-custom audit** (one focused PR). Produces a punch-list.
-3. **Tier 2 medium work**, driven by the audit's findings + Substitute / Magic Bounce / Magic Guard.
-4. **Tier 3 search expansion** — staged: speed-control + Protect first, then opponent switching, then HP-triggered points. Each is a multi-week effort.
+1. **Item permanence + format-legal item filter** (foundation — unlocks Acrobatics, resist berries, narrows inference) — one PR. Then the rest of the **format-aware items** block (resist berries, pinch berries, Sitrus, Lum, Toxic/Flame Orb). Highest impact for the day-to-day match because every game touches items.
+2. **Tier 1 quick wins** (status moves, setup self-boosts, recoil, flinch state, Regenerator, on-hit chip abilities, Liquid Ooze, residual moves). One PR each, dual-mirror + tests. Stop at any time — each commit independently raises accuracy.
+3. **Hail Mary outs analysis** — small build relative to its visibility win. Reuses the existing regime passes + empirical roll distribution; surfaces the dice you're rolling when verdict is losing-but-not-forced. The user has explicitly asked for this and the framework exists.
+4. **Format-custom audit** (one focused PR). The mega survey caught Spicy Spray + Mega Sol; the non-mega audit + items + moves diff is overdue. Produces a punch-list.
+5. **Tier 2 medium work**, driven by the audit's findings + Substitute / Magic Bounce / Magic Guard / Perish-Song + trap abilities. Perish + Shadow Tag specifically is a deterministic win-con in the league.
+6. **Tier 3 search expansion** — staged: **Protect first** (the user has called this out as the most important search-side gap in the league), then speed control, then opponent switching, then HP-triggered decision points. Each is a multi-week effort.
 
-Probabilistic secondaries (Tier 4 line 1) stay deliberately not-auto-applied.
+Probabilistic secondaries (Tier 4 line 1) stay deliberately not-auto-applied — except their **probabilities feed the Hail Mary analysis**, which is the right place for "10% flinch" to surface.
 
 ## How to keep accuracy improving over time
 
