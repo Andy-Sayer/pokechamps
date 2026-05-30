@@ -1,6 +1,6 @@
 import type { Match, FieldState, OpponentEntry, PokemonSet } from './types.js';
 import { maxHpFor } from './damage.js';
-import { getSpecies } from './data.js';
+import { getSpecies, toId } from './data.js';
 import { defaultOpponentSet } from './bring.js';
 
 // Returns a fresh Match with end-of-turn effects applied to the four actives:
@@ -45,6 +45,20 @@ export function endOfTurn(
     // Weather chip
     const wChip = weatherChipPct(field.weather, types);
     if (wChip > 0) { o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - wChip); notes.push(`o${idx + 1} -${wChip.toFixed(0)}% (${field.weather})`); }
+    // Weather-ability heals/chips — only when ability is known.
+    if (o.ability) {
+      const oppAbilId = toId(o.ability);
+      const wAbilEffect = weatherAbilityEffect(field.weather, oppAbilId);
+      if (wAbilEffect !== 0) {
+        if (wAbilEffect > 0) {
+          o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) + wAbilEffect);
+          notes.push(`o${idx + 1} +${wAbilEffect.toFixed(0)}% (${o.ability})`);
+        } else {
+          o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) + wAbilEffect);
+          notes.push(`o${idx + 1} ${wAbilEffect.toFixed(0)}% (${o.ability})`);
+        }
+      }
+    }
     // Status tick
     const statusChip = statusChipPct(o.status, o.toxCounter ?? 0);
     if (statusChip > 0) {
@@ -58,11 +72,53 @@ export function endOfTurn(
       if (c <= 0) { o.status = undefined; o.sleepCounter = undefined; notes.push(`o${idx + 1} woke up`); }
       else o.sleepCounter = c;
     }
+    // Toxic Orb / Flame Orb on opp side: only fire when the item is KNOWN
+    // (revealed via inference). Otherwise we'd commit to a guess and corrupt
+    // downstream prediction. Existing `itemConsumed` doesn't apply (orbs are
+    // persistent), but a Trick/Knock Off-flavoured swap could have removed
+    // it — respect that.
+    if (!o.itemConsumed) {
+      const oppOrbStatus = orbStatusFor(o.item, o.species, o.status ?? undefined);
+      if (oppOrbStatus) {
+        o.status = oppOrbStatus;
+        if (oppOrbStatus === 'tox') o.toxCounter = 1;
+        notes.push(`o${idx + 1} ${oppOrbStatus} (${o.item})`);
+      }
+    }
+    // Residual-chip volatiles.
+    if (o.saltCured) {
+      const chip = oppSaltCureChip(o.species, types);
+      o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - chip);
+      notes.push(`o${idx + 1} -${chip.toFixed(0)}% (Salt Cure)`);
+    }
+    if (o.aquaRing) {
+      o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) + 100 / 16);
+      notes.push(`o${idx + 1} +6% (Aqua Ring)`);
+    }
+    if (o.ingrain) {
+      o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) + 100 / 16);
+      notes.push(`o${idx + 1} +6% (Ingrain)`);
+    }
+    if (o.cursed) {
+      o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - 100 / 4);
+      notes.push(`o${idx + 1} -25% (Curse)`);
+    }
+    if (o.partialTrap != null && o.partialTrap > 0) {
+      o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - 100 / 8);
+      notes.push(`o${idx + 1} -12% (trapped)`);
+      o.partialTrap -= 1;
+      if (o.partialTrap <= 0) { o.partialTrap = undefined; notes.push(`o${idx + 1} escaped`); }
+    }
+    if (o.nightmare && o.status === 'slp') {
+      o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - 100 / 4);
+      notes.push(`o${idx + 1} -25% (Nightmare)`);
+    }
     if ((o.currentHpPercent ?? 100) === 0) o.fainted = true;
     // Move-restricting volatiles count down; clear at 0.
     if (o.tauntTurns != null) { o.tauntTurns -= 1; if (o.tauntTurns <= 0) { o.taunted = undefined; o.tauntTurns = undefined; notes.push(`o${idx + 1} Taunt ended`); } }
     if (o.encoreTurns != null) { o.encoreTurns -= 1; if (o.encoreTurns <= 0) { o.encoreMove = undefined; o.encoreTurns = undefined; notes.push(`o${idx + 1} Encore ended`); } }
     if (o.disableTurns != null) { o.disableTurns -= 1; if (o.disableTurns <= 0) { o.disabledMove = undefined; o.disableTurns = undefined; notes.push(`o${idx + 1} Disable ended`); } }
+    o.flinched = undefined; // one-turn volatile
   };
 
   const applyToMine = (idx: number | null) => {
@@ -73,6 +129,18 @@ export function endOfTurn(
     const types = (getSpecies(set.species) as any)?.types as string[] | undefined;
     const wChip = weatherChipPct(field.weather, types);
     if (wChip > 0) { next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - wChip); notes.push(`m${idx + 1} -${wChip.toFixed(0)}% (${field.weather})`); }
+    // Weather-ability heals/chips: Rain Dish, Dry Skin, Ice Body, Solar Power.
+    const myAbilId = set.ability ? toId(set.ability) : '';
+    const wAbilEffect = weatherAbilityEffect(field.weather, myAbilId);
+    if (wAbilEffect !== 0) {
+      if (wAbilEffect > 0) {
+        next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) + wAbilEffect);
+        notes.push(`m${idx + 1} +${wAbilEffect.toFixed(0)}% (${set.ability})`);
+      } else {
+        next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) + wAbilEffect);
+        notes.push(`m${idx + 1} ${wAbilEffect.toFixed(0)}% (${set.ability})`);
+      }
+    }
     const statusChip = statusChipPct(next.myStatus?.[idx], next.myToxCounter?.[idx] ?? 0);
     if (statusChip > 0) {
       next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - statusChip);
@@ -93,17 +161,87 @@ export function endOfTurn(
         notes.push(`m${idx + 1} +${healPct.toFixed(0)}% (${set.item})`);
       }
     }
+    // Toxic Orb / Flame Orb — apply the orb's status at EOT to the holder if
+    // they have no existing non-volatile status. Type immunities respected
+    // (no brn on Fire types; no tox on Poison/Steel types). Item is NOT
+    // consumed (orbs are persistent). The chip from this status starts ticking
+    // on the NEXT EOT — the status was applied AFTER this turn's status chip.
+    const heldOrbStatus = orbStatusFor(set.item, set.species, next.myStatus?.[idx]);
+    if (heldOrbStatus) {
+      next.myStatus![idx] = heldOrbStatus;
+      if (heldOrbStatus === 'tox') next.myToxCounter![idx] = 1;
+      notes.push(`m${idx + 1} ${heldOrbStatus} (${set.item})`);
+    }
+    // Residual-chip volatiles.
+    if (next.mySaltCured?.[idx]) {
+      const myTypes = types;
+      const chip = mySaltCureChip(set.species, myTypes);
+      next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - chip);
+      notes.push(`m${idx + 1} -${chip.toFixed(0)}% (Salt Cure)`);
+    }
+    if (next.myAquaRing?.[idx]) {
+      next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) + 100 / 16);
+      notes.push(`m${idx + 1} +6% (Aqua Ring)`);
+    }
+    if (next.myIngrain?.[idx]) {
+      next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) + 100 / 16);
+      notes.push(`m${idx + 1} +6% (Ingrain)`);
+    }
+    if (next.myCursed?.[idx]) {
+      next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - 100 / 4);
+      notes.push(`m${idx + 1} -25% (Curse)`);
+    }
+    if (next.myPartialTrap?.[idx] != null && next.myPartialTrap[idx]! > 0) {
+      next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - 100 / 8);
+      notes.push(`m${idx + 1} -12% (trapped)`);
+      next.myPartialTrap![idx] = next.myPartialTrap[idx]! - 1;
+      if (next.myPartialTrap[idx]! <= 0) { delete next.myPartialTrap![idx]; notes.push(`m${idx + 1} escaped`); }
+    }
+    if (next.myNightmare?.[idx] && next.myStatus?.[idx] === 'slp') {
+      next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - 100 / 4);
+      notes.push(`m${idx + 1} -25% (Nightmare)`);
+    }
     if ((next.myCurrentHp![idx] ?? 100) === 0 && !next.myFainted!.includes(idx)) next.myFainted!.push(idx);
     // My-side volatiles count down; clear at 0.
     if (next.myTauntTurns![idx] != null) { const t = next.myTauntTurns![idx]! - 1; if (t <= 0) { next.myTaunted = next.myTaunted!.filter(i => i !== idx); delete next.myTauntTurns![idx]; notes.push(`m${idx + 1} Taunt ended`); } else next.myTauntTurns![idx] = t; }
     if (next.myEncoreTurns![idx] != null) { const t = next.myEncoreTurns![idx]! - 1; if (t <= 0) { delete next.myEncoreMove![idx]; delete next.myEncoreTurns![idx]; notes.push(`m${idx + 1} Encore ended`); } else next.myEncoreTurns![idx] = t; }
     if (next.myDisableTurns![idx] != null) { const t = next.myDisableTurns![idx]! - 1; if (t <= 0) { delete next.myDisabledMove![idx]; delete next.myDisableTurns![idx]; notes.push(`m${idx + 1} Disable ended`); } else next.myDisableTurns![idx] = t; }
+    if (next.myFlinched) delete next.myFlinched[idx]; // one-turn volatile
   };
 
   applyToMine(activeIdx.mine[0]);
   applyToMine(activeIdx.mine[1]);
   applyToOpp(activeIdx.theirs[0]);
   applyToOpp(activeIdx.theirs[1]);
+
+  // Bad Dreams: sleeping mons on the opposing side lose 1/8 HP per EOT while
+  // an active with Bad Dreams is on the field. Only fire for opp ability when known.
+  const myBadDreams = activeIdx.mine.some(i => i != null && toId(next.myTeam[i!]?.ability ?? '') === 'baddreams');
+  const oppBadDreams = activeIdx.theirs.some(i =>
+    i != null && next.opponentTeam[i!]?.ability && toId(next.opponentTeam[i!]!.ability!) === 'baddreams',
+  );
+  if (myBadDreams) {
+    for (const i of activeIdx.theirs) {
+      if (i == null) continue;
+      const o = next.opponentTeam[i];
+      if (!o || o.fainted || o.status !== 'slp') continue;
+      const chip = 100 / 8;
+      o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - chip);
+      notes.push(`o${i + 1} -${chip.toFixed(0)}% (Bad Dreams)`);
+      if (o.currentHpPercent === 0) o.fainted = true;
+    }
+  }
+  if (oppBadDreams) {
+    for (const i of activeIdx.mine) {
+      if (i == null) continue;
+      if (next.myFainted!.includes(i)) continue;
+      if (next.myStatus?.[i] !== 'slp') continue;
+      const chip = 100 / 8;
+      next.myCurrentHp![i] = clampHp((next.myCurrentHp![i] ?? 100) - chip);
+      notes.push(`m${i + 1} -${chip.toFixed(0)}% (Bad Dreams)`);
+      if ((next.myCurrentHp![i] ?? 100) === 0 && !next.myFainted!.includes(i)) next.myFainted!.push(i);
+    }
+  }
 
   // Leech Seed residual: drain 1/8 of the target's max HP, heal the seeder by
   // the same ABSOLUTE HP (converted to the seeder's % of max). If the seeder
@@ -202,5 +340,54 @@ function statusChipPct(status: OpponentEntry['status'] | undefined, toxCounter: 
   return 0;
 }
 
+// Returns the non-volatile status a Toxic/Flame Orb would inflict at EOT, or
+// null if the holder is immune (type immunity or already statused).
+function orbStatusFor(
+  item: string | null | undefined,
+  species: string,
+  currentStatus: string | undefined | null,
+): 'tox' | 'brn' | null {
+  if (!item || (currentStatus != null && currentStatus !== '')) return null;
+  const types = ((getSpecies(species) as { types?: string[] } | undefined)?.types) ?? [];
+  if (item === 'Toxic Orb') {
+    if (types.some(t => t === 'Poison' || t === 'Steel')) return null;
+    return 'tox';
+  }
+  if (item === 'Flame Orb') {
+    if (types.includes('Fire')) return null;
+    return 'brn';
+  }
+  return null;
+}
+
+// EOT HP delta (positive=heal, negative=chip) from weather-triggered abilities.
+// Rain Dish: +1/16 in rain; Dry Skin: +1/8 in rain, -1/8 in sun;
+// Ice Body: +1/16 in hail or snow; Solar Power: -1/8 in sun.
+// Returns 0 when the ability has no effect under the current weather.
+function weatherAbilityEffect(weather: FieldState['weather'], abilId: string): number {
+  if (!weather) return 0;
+  const isRain = weather === 'Rain' || weather === 'Heavy Rain';
+  const isSun = weather === 'Sun' || weather === 'Harsh Sunshine';
+  const isHailSnow = weather === 'Hail' || weather === 'Snow';
+  if (abilId === 'raindish') return isRain ? 100 / 16 : 0;
+  if (abilId === 'dryskin') {
+    if (isRain) return 100 / 8;
+    if (isSun) return -(100 / 8);
+    return 0;
+  }
+  if (abilId === 'icebody') return isHailSnow ? 100 / 16 : 0;
+  if (abilId === 'solarpower') return isSun ? -(100 / 8) : 0;
+  return 0;
+}
+
+// Salt Cure chip: 1/8 normally, 1/4 for Water or Steel types.
+function saltCureChip(species: string, types: string[] | undefined): number {
+  const t = types ?? ((getSpecies(species) as { types?: string[] } | undefined)?.types ?? []);
+  return t.some(tt => tt === 'Water' || tt === 'Steel') ? 100 / 4 : 100 / 8;
+}
+// Per-side aliases used in applyToOpp / applyToMine.
+function oppSaltCureChip(species: string, types: string[] | undefined) { return saltCureChip(species, types); }
+function mySaltCureChip(species: string, types: string[] | undefined) { return saltCureChip(species, types); }
+
 // Re-exports for tests
-export { weatherChipPct, statusChipPct };
+export { weatherChipPct, statusChipPct, orbStatusFor, weatherAbilityEffect, saltCureChip };

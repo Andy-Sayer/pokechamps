@@ -446,3 +446,444 @@ describe('Spicy Spray (defender) burns the attacker on a hit', () => {
     expect(r.match.opponentTeam[0]!.status).toBeUndefined();
   });
 });
+
+describe('HP-threshold item auto-triggers (Sitrus, pinch berries)', () => {
+  test('Sitrus on my mon auto-heals 25% when a hit drops it below 50%', () => {
+    const sitrusMon = mon({
+      species: 'Rillaboom', item: 'Sitrus Berry', ability: 'Grassy Surge',
+      nature: 'Adamant', evs: { hp: 252, atk: 252, def: 0, spa: 0, spd: 4, spe: 0 },
+      moves: ['Grassy Glide'],
+    });
+    const match = freshMatch({ myTeam: [sitrusMon, sneasler, rillaboom, flutterMane] });
+    // Seed mine[0] at 80% HP, then take a hit that lands me at 30%.
+    match.myCurrentHp = { 0: 80 };
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Earthquake', target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 30, order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [action], field: match.field },
+      activeIdx: { mine: [0, 1], theirs: [0, 1] },
+    });
+    // Crossed 50% → Sitrus fires → +25% → final 55%.
+    expect(r.match.myCurrentHp?.[0]).toBe(55);
+    expect(r.match.myItemConsumed?.[0]).toBe('Sitrus Berry');
+    // Inference still sees the actual hit damage, not the post-heal residual.
+    expect(action.damageHpPercent).toBe(50);
+  });
+
+  test('Sitrus does NOT auto-heal when HP stays above 50%', () => {
+    const sitrusMon = mon({
+      species: 'Rillaboom', item: 'Sitrus Berry', moves: [],
+    });
+    const match = freshMatch({ myTeam: [sitrusMon, sneasler, rillaboom, flutterMane] });
+    match.myCurrentHp = { 0: 90 };
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Bullet Punch', target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 60, order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [action], field: match.field },
+      activeIdx: { mine: [0, 1], theirs: [0, 1] },
+    });
+    expect(r.match.myCurrentHp?.[0]).toBe(60);
+    expect(r.match.myItemConsumed?.[0]).toBeUndefined();
+  });
+
+  test('Sitrus is not double-consumed when already consumed', () => {
+    const sitrusMon = mon({
+      species: 'Rillaboom', item: 'Sitrus Berry', moves: [],
+    });
+    const match = freshMatch({ myTeam: [sitrusMon, sneasler, rillaboom, flutterMane] });
+    match.myCurrentHp = { 0: 70 };
+    match.myItemConsumed = { 0: 'Sitrus Berry' }; // already gone
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Earthquake', target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 30, order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [action], field: match.field },
+      activeIdx: { mine: [0, 1], theirs: [0, 1] },
+    });
+    // No re-heal — Sitrus already gone.
+    expect(r.match.myCurrentHp?.[0]).toBe(30);
+  });
+
+  test('Salac Berry on my mon auto-applies +1 Spe at <=25% HP', () => {
+    const salacMon = mon({
+      species: 'Sneasler', item: 'Salac Berry', ability: 'Unburden',
+      nature: 'Jolly', evs: { hp: 4, atk: 252, def: 0, spa: 0, spd: 0, spe: 252 },
+      moves: ['Close Combat'],
+    });
+    const match = freshMatch({ myTeam: [salacMon, rillaboom, ironHands, flutterMane] });
+    match.myCurrentHp = { 0: 50 };
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Earthquake', target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 20, order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [action], field: match.field },
+      activeIdx: { mine: [0, 1], theirs: [0, 1] },
+    });
+    expect(r.match.myCurrentHp?.[0]).toBe(20);
+    expect(r.match.myBoosts?.[0]?.spe).toBe(1);
+    expect(r.match.myItemConsumed?.[0]).toBe('Salac Berry');
+  });
+
+  test('No trigger on a KO (HP hits 0 — berries do not save)', () => {
+    const sitrusMon = mon({
+      species: 'Rillaboom', item: 'Sitrus Berry', moves: [],
+    });
+    const match = freshMatch({ myTeam: [sitrusMon, sneasler, rillaboom, flutterMane] });
+    match.myCurrentHp = { 0: 80 };
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Earthquake', target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 0, order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [action], field: match.field },
+      activeIdx: { mine: [0, 1], theirs: [0, 1] },
+    });
+    expect(r.match.myCurrentHp?.[0]).toBe(0);
+    expect(r.match.myItemConsumed?.[0]).toBeUndefined();
+  });
+
+  test('Opp-side: item NOT auto-triggered (opp items are guesses)', () => {
+    const match = freshMatch();
+    // Pretend the opp at index 0 has a known Sitrus from inference.
+    match.opponentTeam[0]!.item = 'Sitrus Berry';
+    match.opponentTeam[0]!.currentHpPercent = 80;
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Close Combat', target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 30, order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [action], field: match.field },
+      activeIdx: { mine: [0, 1], theirs: [0, 1] },
+    });
+    // HP stays at 30 — we do not auto-fire opp Sitrus (manual `o1 sitrus` line
+    // remains the user's override).
+    expect(r.match.opponentTeam[0]!.currentHpPercent).toBe(30);
+    expect(r.match.opponentTeam[0]!.itemConsumed).toBeUndefined();
+  });
+});
+
+describe('Status berries auto-cure on status application (my side)', () => {
+  test('user-logged Lum Berry cures any status (par) — no status, item consumed', () => {
+    const lumMon = mon({
+      species: 'Rillaboom', item: 'Lum Berry', ability: 'Grassy Surge',
+      moves: ['Grassy Glide'],
+    });
+    const match = freshMatch({ myTeam: [lumMon, sneasler, ironHands, flutterMane] });
+    const update: StateUpdate = { side: 'mine', teamIndex: 0, status: 'par' };
+    const r = applyStateUpdate({ match, update, activeIdx: startActive });
+    expect(r.match.myStatus?.[0]).toBeUndefined();
+    expect(r.match.myItemConsumed?.[0]).toBe('Lum Berry');
+  });
+
+  test('Rawst cures brn but Cheri does not (state-line path)', () => {
+    const rawstMon = mon({ species: 'Rillaboom', item: 'Rawst Berry', moves: [] });
+    const m1 = freshMatch({ myTeam: [rawstMon, sneasler, ironHands, flutterMane] });
+    const r1 = applyStateUpdate({ match: m1, update: { side: 'mine', teamIndex: 0, status: 'brn' }, activeIdx: startActive });
+    expect(r1.match.myStatus?.[0]).toBeUndefined();
+    expect(r1.match.myItemConsumed?.[0]).toBe('Rawst Berry');
+
+    const cheriMon = mon({ species: 'Rillaboom', item: 'Cheri Berry', moves: [] });
+    const m2 = freshMatch({ myTeam: [cheriMon, sneasler, ironHands, flutterMane] });
+    const r2 = applyStateUpdate({ match: m2, update: { side: 'mine', teamIndex: 0, status: 'brn' }, activeIdx: startActive });
+    // Cheri only cures par — burn lands normally.
+    expect(r2.match.myStatus?.[0]).toBe('brn');
+    expect(r2.match.myItemConsumed?.[0]).toBeUndefined();
+  });
+
+  test('no berry → status applies normally', () => {
+    const noBerry = mon({
+      species: 'Rillaboom', item: 'Leftovers', ability: 'Grassy Surge',
+      moves: ['Grassy Glide'],
+    });
+    const match = freshMatch({ myTeam: [noBerry, sneasler, ironHands, flutterMane] });
+    const update: StateUpdate = { side: 'mine', teamIndex: 0, status: 'par' };
+    const r = applyStateUpdate({ match, update, activeIdx: startActive });
+    expect(r.match.myStatus?.[0]).toBe('par');
+    expect(r.match.myItemConsumed?.[0]).toBeUndefined();
+  });
+
+  test('Pecha cures Toxic Spikes psn on switch-in', () => {
+    const pechaMon = mon({
+      species: 'Rillaboom', item: 'Pecha Berry', ability: 'Grassy Surge',
+      moves: ['Grassy Glide'],
+    });
+    // freshMatch defaults mine to Sneasler at index 0; put the Pecha Rillaboom
+    // at index 4 (benched) so bringIntoSlot can pull it in cleanly.
+    const match = freshMatch({ myTeam: [sneasler, rillaboom, ironHands, flutterMane, pechaMon] });
+    // Seed my side with 1 layer of Toxic Spikes.
+    match.field = { ...NEUTRAL_FIELD, myHazards: { stealthRock: false, spikes: 0, toxicSpikes: 1, stickyWeb: false } };
+    // Switch the Pecha Rillaboom in via the state line.
+    const update: StateUpdate = { side: 'mine', teamIndex: 4, bringIntoSlot: 0 };
+    const r = applyStateUpdate({ match, update, activeIdx: startActive });
+    expect(r.match.myStatus?.[4]).toBeUndefined();
+    expect(r.match.myItemConsumed?.[4]).toBe('Pecha Berry');
+  });
+});
+
+describe('Status moves auto-apply status', () => {
+  test('Will-O-Wisp burns opp target', () => {
+    // Use Garchomp (Dragon/Ground) — not Fire-type, so burn lands.
+    const match = freshMatch({ oppSpecies: ['Garchomp', 'Amoonguss', 'Incineroar', 'Talonflame'] });
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Will-O-Wisp',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.opponentTeam[0]!.status).toBe('brn');
+  });
+
+  test('Will-O-Wisp does NOT burn Fire-type opp', () => {
+    // Incineroar is Fire/Dark — immune to burn.
+    const match = freshMatch({ oppSpecies: ['Incineroar', 'Amoonguss', 'Garchomp', 'Talonflame'] });
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Will-O-Wisp',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.opponentTeam[0]!.status).toBeUndefined();
+  });
+
+  test('Thunder Wave paralyzes opp target', () => {
+    const match = freshMatch({ oppSpecies: ['Amoonguss', 'Garchomp', 'Talonflame', 'Incineroar'] });
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Thunder Wave',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.opponentTeam[0]!.status).toBe('par');
+  });
+
+  test('Spore puts my mon to sleep with 2-turn counter', () => {
+    // Opp Amoonguss uses Spore on my Sneasler.
+    const match = freshMatch();
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 1, kind: 'move',
+      move: 'Spore',
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.myStatus?.[0]).toBe('slp');
+    // Counter initialised to 3, decremented to 2 by EOT that same turn.
+    expect(r.match.mySleepCounter?.[0]).toBe(2);
+  });
+
+  test('Spore does NOT sleep Grass-type target', () => {
+    // My Rillaboom (Grass) is immune to powder.
+    const match = freshMatch();
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Spore',
+      target: { side: 'mine', slot: 1 }, targetTeamIndex: 1, order: 1,
+    };
+    // Rillaboom is at index 1 (Grass type).
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.myStatus?.[1]).toBeUndefined();
+  });
+
+  test('Toxic badly poisons opp and sets toxCounter=1', () => {
+    const match = freshMatch({ oppSpecies: ['Garchomp', 'Amoonguss', 'Incineroar', 'Talonflame'] });
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Toxic',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.opponentTeam[0]!.status).toBe('tox');
+    // Counter initialised to 1, incremented to 2 by EOT that same turn.
+    expect(r.match.opponentTeam[0]!.toxCounter).toBe(2);
+  });
+
+  test('status move does not overwrite existing status', () => {
+    const match = freshMatch();
+    match.opponentTeam[0]!.status = 'brn';
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Toxic',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.opponentTeam[0]!.status).toBe('brn'); // unchanged
+  });
+});
+
+describe('Setup self-boost moves auto-apply stat boosts', () => {
+  test('Swords Dance raises my mon atk by +2', () => {
+    const match = freshMatch();
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Swords Dance', order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.myBoosts?.[0]?.atk).toBe(2);
+  });
+
+  test('Dragon Dance raises opp atk+1 and spe+1', () => {
+    const match = freshMatch();
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Dragon Dance', order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    const boosts = r.match.opponentTeam[0]!.currentBoosts ?? {};
+    expect(boosts.atk).toBe(1);
+    expect(boosts.spe).toBe(1);
+  });
+
+  test('boosts stack across turns', () => {
+    const match = freshMatch();
+    const sdAction: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Swords Dance', order: 1,
+    };
+    const r1 = finalizeTurn({ match, turn: { actions: [sdAction], field: match.field }, activeIdx: startActive });
+    const r2 = finalizeTurn({ match: r1.match, turn: { actions: [sdAction], field: match.field }, activeIdx: startActive });
+    expect(r2.match.myBoosts?.[0]?.atk).toBe(4);
+  });
+});
+
+describe('Recoil moves damage the attacker', () => {
+  test('Brave Bird (33% recoil) reduces my HP after a logged hit', () => {
+    // Rillaboom (idx 1) uses Brave Bird for 50% damage on opp[0] (Incineroar).
+    // Incineroar is estimated at ~300 HP. Rillaboom similar. Recoil ≈ 50%*33%/100 *
+    // defMax / atkMax ≈ ~16% but we can't pin exact values so just check direction.
+    const match = freshMatch();
+    match.myCurrentHp = { 0: 100, 1: 100 };
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 1, attackerTeamIndex: 1, kind: 'move',
+      move: 'Brave Bird',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0,
+      damageHpPercent: 50, // logged as 50% of opp max HP
+      order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    // Rillaboom (attacker, idx 1) should have taken recoil — HP strictly < 100.
+    expect(r.match.myCurrentHp![1]).toBeLessThan(100);
+  });
+
+  test('Rock Head ability blocks recoil', () => {
+    const rockHeadRilla = { ...rillaboom, ability: 'Rock Head' };
+    const match = freshMatch({ myTeam: [sneasler, rockHeadRilla, ironHands, flutterMane] });
+    match.myCurrentHp = { 0: 100, 1: 100 };
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 1, attackerTeamIndex: 1, kind: 'move',
+      move: 'Brave Bird',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0,
+      damageHpPercent: 50, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.myCurrentHp![1]).toBe(100); // no recoil
+  });
+});
+
+describe('On-hit chip abilities (Rough Skin / Iron Barbs)', () => {
+  test('contact move on Iron Barbs holder chips the attacker 12.5%', () => {
+    // My Sneasler holds Iron Barbs; opp Incineroar uses a contact move on it.
+    // This is theirs→mine so inference doesn't run (inference only fires for mine→theirs).
+    const ironBarbs = mon({ species: 'Sneasler', ability: 'Iron Barbs', moves: ['Fake Out'] });
+    const match = freshMatch({ myTeam: [ironBarbs, rillaboom, ironHands, flutterMane] });
+    match.myCurrentHp = { 0: 100, 1: 100 };
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Close Combat', // contact move
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 60, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    // Opp Incineroar (attacker, opp idx 0) took 12.5% chip.
+    expect(r.match.opponentTeam[0]!.currentHpPercent).toBeCloseTo(100 - 12.5, 0);
+  });
+
+  test('non-contact move does NOT trigger Iron Barbs', () => {
+    const ironBarbs = mon({ species: 'Sneasler', ability: 'Iron Barbs', moves: ['Fake Out'] });
+    const match = freshMatch({ myTeam: [ironBarbs, rillaboom, ironHands, flutterMane] });
+    match.myCurrentHp = { 0: 100, 1: 100 };
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Flamethrower', // not contact
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 60, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    // Opp attacker took no chip.
+    expect(r.match.opponentTeam[0]!.currentHpPercent).toBeUndefined(); // never modified
+  });
+});
+
+describe('Regenerator heals +1/3 on switch-out', () => {
+  test('my Regenerator mon recovers when switched out via a switch action', () => {
+    const regenMon = mon({ species: 'Rillaboom', ability: 'Regenerator', moves: ['Grassy Glide'] });
+    const match = freshMatch({ myTeam: [sneasler, regenMon, ironHands, flutterMane] });
+    match.myCurrentHp = { 0: 100, 1: 50 }; // Rillaboom at 50%
+    // Switch action: Rillaboom (outgoing at slot 1) → Iron Hands (idx 2) coming in.
+    const action: MoveAction = {
+      kind: 'switch', side: 'mine', attackerSlot: 1, targetTeamIndex: 2,
+    } as any;
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    // Rillaboom (idx 1) should have recovered 1/3 of max HP ≈ +33.3%.
+    expect(r.match.myCurrentHp![1]).toBeCloseTo(50 + 100 / 3, 0);
+  });
+
+  test('non-Regenerator mon is not healed on switch-out', () => {
+    const match = freshMatch();
+    match.myCurrentHp = { 0: 100, 1: 50 };
+    const action: MoveAction = {
+      kind: 'switch', side: 'mine', attackerSlot: 1, targetTeamIndex: 2,
+    } as any;
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.myCurrentHp![1]).toBe(50); // unchanged (Rillaboom has Grassy Surge, not Regen)
+  });
+});
+
+describe('Liquid Ooze reverses drain healing', () => {
+  test('drain move damages the attacker instead of healing when defender has Liquid Ooze', () => {
+    // Use opp→mine direction (opp attacks my Tentacruel) to avoid mine→theirs inference.
+    const tentacruel = mon({ species: 'Tentacruel', ability: 'Liquid Ooze', moves: ['Scald'] });
+    const match = freshMatch({ myTeam: [tentacruel, sneasler, ironHands, flutterMane] });
+    // Opp Incineroar at 80% uses Drain Punch on my Tentacruel.
+    match.opponentTeam[0]!.currentHpPercent = 80;
+    const action: MoveAction = {
+      kind: 'move', side: 'theirs',
+      attackerSlot: 0, attackerTeamIndex: 0,
+      move: 'Drain Punch',
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      damageHpPercent: 30,
+      order: 1,
+    } as any;
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    // Drain Punch drains 50% of damage. With Liquid Ooze the attacker (Incineroar) loses HP
+    // instead of gaining it — exact amount depends on HP ratio, just confirm direction.
+    expect(r.match.opponentTeam[0]!.currentHpPercent).toBeLessThan(80);
+  });
+
+  test('drain heals normally when defender does NOT have Liquid Ooze', () => {
+    // Opp uses Drain Punch on my Sneasler (no Liquid Ooze).
+    const match = freshMatch();
+    match.opponentTeam[0]!.currentHpPercent = 60;
+    const action: MoveAction = {
+      kind: 'move', side: 'theirs',
+      attackerSlot: 0, attackerTeamIndex: 0,
+      move: 'Drain Punch',
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      damageHpPercent: 30,
+      order: 1,
+    } as any;
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    // Opp gains HP (exact % depends on HP ratio between Sneasler and Incineroar).
+    expect(r.match.opponentTeam[0]!.currentHpPercent).toBeGreaterThan(60);
+  });
+});

@@ -85,6 +85,15 @@ export interface StateUpdate {
   volatileTurns?: number;
   fainted?: boolean;
   bringIntoSlot?: 0 | 1;
+  // Residual-chip volatiles.
+  saltCure?: boolean;     // o1 salt-cure / m1 salt-cure
+  aquaRing?: boolean;     // o1 aqua-ring / m1 aqua-ring
+  ingrain?: boolean;      // o1 ingrain / m1 ingrain
+  curse?: boolean;        // o1 curse / m1 curse (Cursed target, not the user)
+  partialTrap?: number;   // o1 trapped [N] — turns remaining (default 4)
+  nightmare?: boolean;    // o1 nightmare / m1 nightmare
+  // One-turn flinch volatile. Clears at EOT. "o1 flinch" / "m1 flinch".
+  flinch?: boolean;
 }
 
 export type ParseResult =
@@ -407,6 +416,31 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
     return { ok: true, kind: 'state', update: { side, teamIndex, fainted: true, hpPercent: 0 } };
   }
 
+  // "o1 flinch" / "o1 flinched" — one-turn flinch volatile (cleared at EOT).
+  const flinchMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+flinch(?:ed)?$/i);
+  if (flinchMatch) {
+    const ref = resolveRef(flinchMatch[1]!, parseInt(flinchMatch[2]!, 10), ctx);
+    if (!ref) return { ok: false, error: `${flinchMatch[1]}${flinchMatch[2]} has no active mon` };
+    return { ok: true, kind: 'state', update: { side: ref.side, teamIndex: ref.teamIndex, flinch: true } };
+  }
+
+  // Residual-chip volatiles: "o1 salt-cure", "m1 aqua-ring", "o2 trapped 4", etc.
+  const residualMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+(salt-?cure|aqua-?ring|ingrain|curse|cursed|nightmare|trapped?)(?:\s+(\d+))?$/i);
+  if (residualMatch) {
+    const ref = resolveRef(residualMatch[1]!, parseInt(residualMatch[2]!, 10), ctx);
+    if (!ref) return { ok: false, error: `${residualMatch[1]}${residualMatch[2]} has no active mon` };
+    const verb = residualMatch[3]!.toLowerCase().replace('-', '').replace('cursed', 'curse').replace('trapped', 'trap');
+    const arg = residualMatch[4] ? parseInt(residualMatch[4], 10) : undefined;
+    const extra: Partial<StateUpdate> = {};
+    if (verb === 'saltcure') extra.saltCure = true;
+    else if (verb === 'aquaring') extra.aquaRing = true;
+    else if (verb === 'ingrain') extra.ingrain = true;
+    else if (verb === 'curse') extra.curse = true;
+    else if (verb === 'trap') extra.partialTrap = arg ?? 4;
+    else if (verb === 'nightmare') extra.nightmare = true;
+    return { ok: true, kind: 'state', update: { side: ref.side, teamIndex: ref.teamIndex, ...extra } };
+  }
+
   // "o3 in o1" — bring teamIndex on left into the active slot on right.
   const inMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+in\s+([mo])([12])$/i);
   if (inMatch) {
@@ -622,6 +656,17 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
       if (m) { sash = true; dmgTok = m[1]; }
     }
   }
+  // Trailing `(berry)` in the damage slot: a resist berry was consumed on this hit.
+  // Strip the flag so the rest parses as a normal damage value.
+  let berry = false;
+  if (dmgTok) {
+    const t = dmgTok.trim();
+    if (/^\(berry\)$/i.test(t)) { berry = true; dmgTok = undefined; }
+    else {
+      const m = t.match(/^(.*\S)\s+\(berry\)$/i);
+      if (m) { berry = true; dmgTok = m[1]; }
+    }
+  }
   const dmg = parseDamage(dmgTok, damageTargetSide);
   if (sash) {
     if (damageTargetSide === 'mine') {
@@ -659,6 +704,7 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
       critical: actor.crit || undefined,
       quickClaw: actor.quickClaw || undefined,
       sash: sash || undefined,
+      berry: berry || undefined,
       ...dmg,
     }],
   };

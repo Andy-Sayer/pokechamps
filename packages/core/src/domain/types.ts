@@ -94,6 +94,17 @@ export interface OpponentEntry {
   // heal the right mon — and skip the heal if the seeder has since switched
   // out or fainted (the drain still applies to the target either way).
   leechSeeded?: { seederSide: 'mine' | 'theirs'; seederIndex: number };
+  // Residual-chip volatiles (each cleared on switch-out unless noted).
+  saltCured?: boolean;       // Garganacl's Salt Cure: -1/8 per EOT (-1/4 Water/Steel); persists through switch
+  aquaRing?: boolean;        // +1/16 HP per EOT; persists through switch in Gen 6+
+  ingrain?: boolean;         // +1/16 HP per EOT; also prevents switching
+  cursed?: boolean;          // Non-Ghost Curse: -1/4 per EOT; cleared on switch-out
+  partialTrap?: number;      // turns remaining of Bind/Wrap/Fire Spin etc.: -1/8 per EOT; cleared on switch-out
+  nightmare?: boolean;       // while asleep: -1/4 per EOT; cleared on switch-out
+  // One-turn volatile set when this mon is flinched (cleared at EOT). Informational:
+  // the flinched mon simply has no action in the turn. Fake Out auto-flinches on
+  // first turn out; secondary flinch moves (Iron Head etc.) are user-logged.
+  flinched?: boolean;
 }
 
 export interface HazardState {
@@ -183,6 +194,10 @@ export interface MoveAction {
   //  - survived with HP to spare → Sash did NOT proc: damage is the move's true
   //    output (inference runs), and we record the item as a held Focus Sash.
   sash?: boolean;
+  // Set when the damage slot carried a trailing `(berry)`, e.g.
+  // `m1 > Sucker Punch > o1 > 80 (berry)`. finalizeTurn derives the resist berry
+  // from the move's type via resistBerryForType and marks it as learned+consumed.
+  berry?: boolean;
   notes?: string;
 }
 
@@ -253,6 +268,16 @@ export interface Match {
   myDisableTurns?: Record<number, number>;
   // myTeam index → Leech Seed seeder identity (parallel to OpponentEntry.leechSeeded).
   myLeechSeeded?: Record<number, { seederSide: 'mine' | 'theirs'; seederIndex: number }>;
+  // Residual-chip volatiles (my side), keyed by team index.
+  mySaltCured?: Record<number, boolean>;
+  myAquaRing?: Record<number, boolean>;
+  myIngrain?: Record<number, boolean>;
+  myCursed?: Record<number, boolean>;
+  myPartialTrap?: Record<number, number>; // turns remaining
+  myNightmare?: Record<number, boolean>;
+  // One-turn flinch volatile (cleared at EOT). Informational — logged when user
+  // observes a Fake Out or secondary flinch proc ("o1 flinch").
+  myFlinched?: Record<number, boolean>;
   // myTeam index → charging-move state. Parallel to OpponentEntry.charging.
   // Set when a mine-side charge move logged with no damage; cleared when
   // the same mon's next damaging action lands.

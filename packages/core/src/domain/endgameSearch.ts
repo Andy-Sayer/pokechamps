@@ -104,6 +104,27 @@ export interface SearchRisk {
   blocking: boolean;
 }
 
+/** A single lucky event that could flip a losing position. */
+export interface HailMaryOut {
+  /** Human label, e.g. "Aerodactyl KO needs top roll" */
+  label: string;
+  /** Probability (0..1) this event fires. */
+  prob: number;
+}
+
+/** Analysis surfaced only when verdict === 'losing' && !forced && a winning
+ *  path exists under optimistic conditions. */
+export interface HailMary {
+  /** The optimal play under the optimistic regime — what to do to chase the out. */
+  plays: SearchPlay[];
+  /** Lucky events required for the optimistic line to close. */
+  outs: HailMaryOut[];
+  /** Approximate combined probability all outs fire simultaneously. */
+  combined: number;
+  /** True when combined < 0.005 — no realistic path to win. */
+  noRealisticOut: boolean;
+}
+
 export interface SearchResult {
   /** How many plies deep this result was computed to. */
   depth: number;
@@ -125,6 +146,9 @@ export interface SearchResult {
   allOppRevealed: boolean;
   /** Named uncertainties (survival items, swing rolls, unrevealed bench). */
   risks: SearchRisk[];
+  /** Dice-roll outs analysis — only present when verdict === 'losing' && !forced
+   *  and the optimistic regime finds a winning path. */
+  hailMary?: HailMary;
 }
 
 // ---------------------------------------------------------------------------
@@ -921,6 +945,62 @@ export function createSearch(input: SearchInput): PositionSearch {
         winChance = unpriced ? undefined : Math.max(0, Math.min(1, winChance));
       }
 
+      // Hail Mary: when losing but the optimistic regime finds a winning path,
+      // surface the specific dice rolls needed. This is the mirror of the
+      // winning-side sensitivity analysis above.
+      let hailMary: HailMary | undefined;
+      if (eV === 'losing' && !forcedLoss) {
+        if (opt.score >= WIN) {
+          // There IS a winning path under best-case conditions. Find which
+          // root-turn KOs in the opt play require a high roll to land.
+          const hmOuts: HailMaryOut[] = [];
+          let hmCombined = 1;
+          for (const [actor, target] of (opt.joint ?? [])) {
+            if (target === SPREAD) {
+              const sp = opt.table.mySpread[actor];
+              if (!sp) continue;
+              for (let foe = 0; foe < s0.oppHp.length; foe++) {
+                const h = s0.oppHp[foe] ?? 0;
+                if (h <= 0) continue;
+                const dMid = sp.dmgMid[foe] ?? 0;
+                const dMax = sp.dmgMax[foe] ?? 0;
+                if (dMax < h || dMid >= h) continue; // can't KO or already guaranteed
+                // Uniform envelope estimate (no koRolls for spread moves).
+                const p = dMax > dMid ? (dMax - h) / (dMax - dMid) : 0;
+                if (p <= 0) continue;
+                hmOuts.push({ label: `${opt.table.oppSpecies[foe] ?? 'foe'} KO needs top roll`, prob: p });
+                hmCombined *= p;
+              }
+            } else {
+              const c = opt.table.off[actor]?.[target];
+              if (!c) continue;
+              const h = s0.oppHp[target] ?? 0;
+              if (h <= 0 || c.dmgMax < h || c.dmgMid >= h) continue;
+              const p = rollKoProb(c, h);
+              if (p <= 0 || p >= 1) continue;
+              hmOuts.push({ label: `${opt.table.oppSpecies[target] ?? 'foe'} KO needs top roll`, prob: p });
+              hmCombined *= p;
+            }
+          }
+          // If no roll-based outs at the root turn, the win comes from later
+          // plies or from opp rolling low — add a generic unpriced caveat.
+          if (!hmOuts.length) {
+            hmOuts.push({ label: 'opp needs to roll low', prob: 0.5 });
+            hmCombined = 0.5;
+          }
+          const combined = Math.max(0, Math.min(1, hmCombined));
+          hailMary = {
+            plays: playsFromJoint(opt.table, opt.joint),
+            outs: hmOuts,
+            combined,
+            noRealisticOut: combined < 0.005,
+          };
+        } else {
+          // Even optimistic conditions don't find a win — no realistic path.
+          hailMary = { plays: [], outs: [], combined: 0, noRealisticOut: true };
+        }
+      }
+
       return {
         depth,
         score: expected.score,
@@ -931,6 +1011,7 @@ export function createSearch(input: SearchInput): PositionSearch {
         winChance,
         allOppRevealed,
         risks,
+        hailMary,
       };
     },
   };

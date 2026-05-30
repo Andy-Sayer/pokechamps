@@ -363,3 +363,92 @@ describe('state-aware: live boosts + status', () => {
     expect(searchToDepth(par, 2).verdict).toBe('losing');
   });
 });
+
+describe('hailMary outs analysis', () => {
+  const sneasler = mon({
+    species: 'Sneasler', ability: 'Poison Touch', nature: 'Jolly',
+    evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Close Combat'],
+  });
+  const incinFast = mon({
+    species: 'Incineroar', nature: 'Jolly',
+    evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Flare Blitz'],
+  });
+  const incinEntry = (): SearchInput['opp'][number] => ({
+    entry: { species: 'Incineroar', knownMoves: ['Flare Blitz'], candidates: [incinFast] },
+    hpPercent: 1, active: true,
+  });
+
+  test('hailMary is undefined when verdict is winning', () => {
+    const r = searchToDepth({
+      mine: [{ set: flutter, hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(incin), hpPercent: 35, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 2);
+    expect(r.verdict).toBe('winning');
+    expect(r.hailMary).toBeUndefined();
+  });
+
+  test('hailMary undefined when forced loss (optimistic still loses)', () => {
+    // Paralyzed Sneasler at 1% HP vs fast Incineroar at 1% HP: opp goes first,
+    // any hit KOs at 1% HP even at min roll → forced loss, no hailMary.
+    const r = searchToDepth({
+      mine: [{ set: sneasler, hpPercent: 1, active: true, status: 'par' }],
+      opp: [incinEntry()],
+      field: { ...NEUTRAL_FIELD },
+    }, 2);
+    expect(r.verdict).toBe('losing');
+    expect(r.forced).toBe(true);
+    expect(r.hailMary).toBeUndefined();
+  });
+
+  test('hailMary structural invariants: combined ∈ [0,1], noRealisticOut ↔ < 0.5%', () => {
+    // A losing position (20% HP vs two full-health foes). May or may not be
+    // forced — the invariant holds either way.
+    const input: SearchInput = {
+      mine: [{ set: flutter, hpPercent: 20, active: true }],
+      opp: [
+        { entry: oppOf(garchomp), hpPercent: 100, active: true },
+        { entry: oppOf(incin), hpPercent: 100, active: true },
+      ],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    };
+    const r = searchToDepth(input, 2);
+    expect(r.verdict).toBe('losing');
+    if (r.forced) {
+      // Forced loss → no hailMary.
+      expect(r.hailMary).toBeUndefined();
+    } else {
+      // Non-forced loss → hailMary is always set.
+      expect(r.hailMary).toBeDefined();
+      const hm = r.hailMary!;
+      expect(hm.combined).toBeGreaterThanOrEqual(0);
+      expect(hm.combined).toBeLessThanOrEqual(1);
+      expect(hm.noRealisticOut).toBe(hm.combined < 0.005);
+      for (const out of hm.outs) {
+        expect(out.prob).toBeGreaterThan(0);
+        expect(out.prob).toBeLessThanOrEqual(1);
+        expect(typeof out.label).toBe('string');
+      }
+    }
+  });
+
+  test('hailMary.plays has valid plays when defined', () => {
+    const input: SearchInput = {
+      mine: [{ set: flutter, hpPercent: 20, active: true }],
+      opp: [
+        { entry: oppOf(garchomp), hpPercent: 100, active: true },
+        { entry: oppOf(incin), hpPercent: 100, active: true },
+      ],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    };
+    const r = searchToDepth(input, 2);
+    if (r.hailMary) {
+      expect(r.hailMary.plays.length).toBeLessThanOrEqual(2); // at most MAX_ACTIVE active mons
+      for (const p of r.hailMary.plays) {
+        expect(p.mySpecies).toBeTruthy();
+        expect(p.move).toBeTruthy();
+        expect(p.targetSpecies).toBeTruthy();
+      }
+    }
+  });
+});

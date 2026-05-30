@@ -42,6 +42,10 @@ import {
   type BoostMap,
 } from '../domain/abilities.js';
 import { sashProcced } from '../domain/itemSignals.js';
+import { hpItemTriggerFor } from '../domain/hpItemTriggers.js';
+import { statusBerryFor } from '../domain/statusBerries.js';
+import { resistBerryForType } from '../domain/resistBerries.js';
+import { effectiveness, speciesTypes } from '../domain/typechart.js';
 import { EFFECT_DURATIONS } from '../domain/durations.js';
 import { isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, getSpecies, getMove, toId } from '../domain/data.js';
 import type { StateUpdate, HazardUpdate } from '../domain/turnparser.js';
@@ -94,15 +98,13 @@ function applyHazardOnSwitchInto(
   }
   if (effect.statusApplied) {
     if (side === 'mine') {
-      match.myStatus = { ...(match.myStatus ?? {}), [teamIndex]: effect.statusApplied };
-      if (effect.statusApplied === 'tox') {
+      if (tryApplyMyStatus(match, teamIndex, effect.statusApplied) && effect.statusApplied === 'tox') {
         match.myToxCounter = { ...(match.myToxCounter ?? {}), [teamIndex]: 1 };
       }
     } else {
       const o = match.opponentTeam[teamIndex];
-      if (o) {
-        o.status = effect.statusApplied;
-        if (effect.statusApplied === 'tox') o.toxCounter = 1;
+      if (o && tryApplyOppStatus(o, effect.statusApplied) && effect.statusApplied === 'tox') {
+        o.toxCounter = 1;
       }
     }
   }
@@ -141,8 +143,12 @@ function clearMyVolatiles(match: Match, idx: number): void {
   if (match.myTauntTurns) delete match.myTauntTurns[idx];
   if (match.myEncoreTurns) delete match.myEncoreTurns[idx];
   if (match.myDisableTurns) delete match.myDisableTurns[idx];
-  // Leech Seed clears when the seeded mon switches out.
   if (match.myLeechSeeded) delete match.myLeechSeeded[idx];
+  // Clears on switch-out: Curse, partial trap, Nightmare.
+  if (match.myCursed) delete match.myCursed[idx];
+  if (match.myPartialTrap) delete match.myPartialTrap[idx];
+  if (match.myNightmare) delete match.myNightmare[idx];
+  // Persists through switch: Salt Cure, Aqua Ring, Ingrain — not cleared here.
 }
 
 // Clear opp move-restricting volatiles + their counters (switch-out / cure).
@@ -150,6 +156,65 @@ function clearOppVolatiles(o: OpponentEntry): void {
   o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined;
   o.tauntTurns = undefined; o.encoreTurns = undefined; o.disableTurns = undefined;
   o.leechSeeded = undefined;
+  // Clears on switch-out: Curse, partial trap, Nightmare.
+  o.cursed = undefined; o.partialTrap = undefined; o.nightmare = undefined;
+  // Persists: saltCured, aquaRing, ingrain — not cleared here.
+}
+
+// Try to apply a non-volatile status to my mon, intercepted by a held status
+// berry (Lum / Cheri / Chesto / Pecha / Rawst / Aspear). Returns true when
+// the status WAS applied (caller should also set tox/sleep counters); returns
+// false when the berry caught it (item marked consumed, status not set).
+function tryApplyMyStatus(
+  match: Match,
+  teamIndex: number,
+  status: NonNullable<import('../domain/types.js').ActivePokemonState['status']>,
+): boolean {
+  const consumed = match.myItemConsumed?.[teamIndex];
+  const held = consumed ? undefined : match.myTeam[teamIndex]?.item;
+  const cure = statusBerryFor(held, status);
+  if (cure) {
+    match.myItemConsumed = { ...(match.myItemConsumed ?? {}), [teamIndex]: cure.consumed };
+    return false;
+  }
+  match.myStatus = { ...(match.myStatus ?? {}), [teamIndex]: status };
+  return true;
+}
+
+// Opp-side mirror — only safe to call when the opp item is KNOWN (revealed
+// via inference or explicit observation). Caller decides whether to invoke.
+function tryApplyOppStatus(
+  o: OpponentEntry,
+  status: NonNullable<import('../domain/types.js').ActivePokemonState['status']>,
+): boolean {
+  if (o.itemConsumed || !o.item) {
+    o.status = status;
+    return true;
+  }
+  const cure = statusBerryFor(o.item, status);
+  if (cure) {
+    o.itemConsumed = cure.consumed;
+    return false;
+  }
+  o.status = status;
+  return true;
+}
+
+// Type-based immunity for a status move: returns true when the target's types
+// make the status land as a no-op regardless of accuracy/ability.
+// brn → Fire; par → Electric (only when !ignoreImmunity i.e. Thunder Wave);
+// psn/tox → Poison or Steel; powder moves (Sleep Powder/Spore) → Grass.
+function isStatusMoveImmune(
+  status: string,
+  ignoreImmunity: boolean,
+  isPowder: boolean,
+  targetTypes: string[],
+): boolean {
+  if (status === 'brn') return targetTypes.includes('Fire');
+  if (status === 'par' && !ignoreImmunity) return targetTypes.includes('Electric');
+  if (status === 'psn' || status === 'tox') return targetTypes.some(t => t === 'Poison' || t === 'Steel');
+  if (status === 'slp' && isPowder) return targetTypes.includes('Grass');
+  return false;
 }
 
 // Merge a boost map into a side's active-slot boosts, clamped to [-6, +6].
@@ -389,6 +454,12 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     myEncoreTurns: { ...(match.myEncoreTurns ?? {}) },
     myDisableTurns: { ...(match.myDisableTurns ?? {}) },
     myLeechSeeded: { ...(match.myLeechSeeded ?? {}) },
+    mySaltCured: { ...(match.mySaltCured ?? {}) },
+    myAquaRing: { ...(match.myAquaRing ?? {}) },
+    myIngrain: { ...(match.myIngrain ?? {}) },
+    myCursed: { ...(match.myCursed ?? {}) },
+    myPartialTrap: { ...(match.myPartialTrap ?? {}) },
+    myNightmare: { ...(match.myNightmare ?? {}) },
   };
 
   // Walk damaging actions in order, deriving each action's damageHpPercent
@@ -423,7 +494,52 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     }
     if (newPct == null) continue;
 
+    // Record the raw hit damage BEFORE any auto-trigger heal so inference
+    // sees the actual move output, not the post-Sitrus residual.
     a.damageHpPercent = Math.max(0, prevPct - newPct);
+
+    // HP-threshold item auto-trigger (Sitrus, pinch berries). My-side only:
+    // opp items are usually unknown and auto-firing a guess would silently
+    // corrupt downstream inference. Held item is the set's item unless
+    // already marked consumed earlier in the match.
+    if (tSide === 'mine' && newPct > 0) {
+      const consumed = next.myItemConsumed?.[tIdx];
+      const held = consumed ? undefined : next.myTeam[tIdx]?.item;
+      const trig = hpItemTriggerFor(held, prevPct, newPct);
+      if (trig) {
+        if (trig.healPercent != null) {
+          newPct = Math.min(100, newPct + trig.healPercent);
+        }
+        if (trig.boost) {
+          applyBoostsTo(next, 'mine', tIdx, { [trig.boost.stat]: trig.boost.amount });
+        }
+        next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: trig.consumed };
+      }
+    }
+
+    // Resist berry auto-consume (my side): item is always known.
+    // Fires even if the mon fainted — the berry reduced the hit, so it's spent.
+    if (tSide === 'mine') {
+      const consumed = next.myItemConsumed?.[tIdx];
+      const held = consumed ? undefined : next.myTeam[tIdx]?.item;
+      if (held) {
+        const moveDex = getMove(a.move) as { type?: string } | undefined;
+        if (moveDex?.type) {
+          const heldId = toId(held);
+          const berryForType = resistBerryForType(moveDex.type);
+          // Chilan halves any Normal hit (even neutral) — check first.
+          if (heldId === 'chilanberry' && moveDex.type === 'Normal') {
+            next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: held };
+          } else if (berryForType && heldId === toId(berryForType)) {
+            const defTypes = speciesTypes(next.myTeam[tIdx]!.species);
+            if (effectiveness(moveDex.type, defTypes) > 1) {
+              next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: held };
+            }
+          }
+        }
+      }
+    }
+
     if (tSide === 'theirs') oppHpSoFar.set(tIdx, newPct);
     else myHpSoFar.set(tIdx, newPct);
   }
@@ -444,6 +560,32 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
   // Collected throughout the rest of finalize — mega resolution errors,
   // damage-inference candidates produced, etc.
   const inferenceNotes: string[] = [];
+
+  // Resist berry auto-consume on opp side when item is KNOWN (set explicitly
+  // by the user — never inferred from candidates). Opp conservatism: only
+  // auto-fire when the item is certain, to avoid corrupting inference.
+  for (const a of sortedActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (typeof a.target !== 'object' || a.target.side !== 'theirs') continue;
+    const tIdx = a.targetTeamIndex;
+    if (tIdx == null) continue;
+    const o = next.opponentTeam[tIdx];
+    if (!o || o.itemConsumed || !o.item) continue;
+    const moveDex = getMove(a.move) as { type?: string } | undefined;
+    if (!moveDex?.type) continue;
+    const held = o.item;
+    const heldId = toId(held);
+    const berryForType = resistBerryForType(moveDex.type);
+    // Chilan halves any Normal hit (even neutral) — check first.
+    if (heldId === 'chilanberry' && moveDex.type === 'Normal') {
+      o.itemConsumed = held;
+    } else if (berryForType && heldId === toId(berryForType)) {
+      const defTypes = speciesTypes(o.species);
+      if (effectiveness(moveDex.type, defTypes) > 1) {
+        o.itemConsumed = held;
+      }
+    }
+  }
 
   // Update knownMoves on every opp that acted this turn (skipping mega and
   // switch actions which don't have a real move name).
@@ -609,12 +751,114 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     if (!defMax || !atkMax) continue;
     const dmgAbs = (a.damageHpPercent / 100) * defMax;
     const healPct = (dmgAbs * drain[0] / drain[1]) / atkMax * 100;
+    // Liquid Ooze: drain deals damage to the attacker instead of healing.
+    let defAbilForDrain: string | undefined;
+    if (a.target.side === 'theirs') {
+      const o = next.opponentTeam[tIdx];
+      defAbilForDrain = o?.megaUsed && o.megaForme
+        ? ((getSpecies(o.megaForme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? o.ability ?? undefined)
+        : (o?.ability ?? undefined);
+    } else {
+      const set = next.myTeam[tIdx];
+      const megaForme = next.myMegaUsed?.includes(tIdx) ? next.myMegaForme?.[tIdx] : undefined;
+      defAbilForDrain = megaForme
+        ? ((getSpecies(megaForme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? set?.ability ?? undefined)
+        : set?.ability;
+    }
+    const liquidOoze = defAbilForDrain && toId(defAbilForDrain) === 'liquidooze';
     if (a.side === 'mine') {
       next.myCurrentHp = next.myCurrentHp ?? {};
-      next.myCurrentHp[a.attackerTeamIndex] = Math.min(100, (next.myCurrentHp[a.attackerTeamIndex] ?? 100) + healPct);
+      if (liquidOoze) {
+        next.myCurrentHp[a.attackerTeamIndex] = Math.max(0, (next.myCurrentHp[a.attackerTeamIndex] ?? 100) - healPct);
+      } else {
+        next.myCurrentHp[a.attackerTeamIndex] = Math.min(100, (next.myCurrentHp[a.attackerTeamIndex] ?? 100) + healPct);
+      }
     } else {
       const o = next.opponentTeam[a.attackerTeamIndex];
-      if (o) o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + healPct);
+      if (o) {
+        if (liquidOoze) {
+          o.currentHpPercent = Math.max(0, (o.currentHpPercent ?? 100) - healPct);
+        } else {
+          o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + healPct);
+        }
+      }
+    }
+  }
+
+  // Recoil damage for the attacker (Brave Bird, Wood Hammer, Head Smash, etc.).
+  // move.recoil = [n, d] → n/d of damage dealt; mindBlownRecoil → 50% of max HP.
+  // Rock Head ability blocks standard recoil (but not mindBlown/steelBeam). Mirror in BattleScreen.tsx.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (a.attackerTeamIndex == null) continue;
+    if (typeof a.target !== 'object') continue;
+    const tIdx = a.targetTeamIndex;
+    if (tIdx == null) continue;
+    const rm = getMove(a.move) as { recoil?: [number, number]; mindBlownRecoil?: boolean } | undefined;
+    const hasRecoil = rm?.recoil || rm?.mindBlownRecoil;
+    if (!hasRecoil) continue;
+    const atkAbil = a.side === 'mine'
+      ? next.myTeam[a.attackerTeamIndex]?.ability
+      : next.opponentTeam[a.attackerTeamIndex]?.ability;
+    const atkMax = maxHpOf(a.side, a.attackerTeamIndex);
+    if (!atkMax) continue;
+    let recoilPct: number;
+    if (rm?.mindBlownRecoil) {
+      recoilPct = 50; // 50% of user's max HP
+    } else {
+      if (a.damageHpPercent == null) continue; // recoil requires damage to have landed
+      const rockHead = !!atkAbil && toId(atkAbil) === 'rockhead';
+      if (rockHead) continue;
+      const defMax = maxHpOf(a.target.side, tIdx);
+      if (!defMax) continue;
+      const [n, d] = rm!.recoil!;
+      const dmgAbs = (a.damageHpPercent / 100) * defMax;
+      recoilPct = (dmgAbs * n / d) / atkMax * 100;
+    }
+    if (a.side === 'mine') {
+      next.myCurrentHp = next.myCurrentHp ?? {};
+      const before = next.myCurrentHp[a.attackerTeamIndex] ?? 100;
+      next.myCurrentHp[a.attackerTeamIndex] = Math.max(0, before - recoilPct);
+    } else {
+      const o = next.opponentTeam[a.attackerTeamIndex];
+      if (o) o.currentHpPercent = Math.max(0, (o.currentHpPercent ?? 100) - recoilPct);
+    }
+  }
+
+  // Rough Skin / Iron Barbs: contact move hits → attacker loses 1/8 of their max HP.
+  // Only fires when the defender's ability is known (opp conservatism). Mirror in BattleScreen.tsx.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (a.attackerTeamIndex == null) continue;
+    if (a.damageHpPercent == null) continue;
+    if (typeof a.target !== 'object') continue;
+    const tIdx = a.targetTeamIndex;
+    if (tIdx == null) continue;
+    const mv = getMove(a.move) as { flags?: Record<string, number> } | undefined;
+    if (!mv?.flags?.contact) continue;
+    let defAbil: string | undefined;
+    if (a.target.side === 'theirs') {
+      const o = next.opponentTeam[tIdx];
+      defAbil = o?.megaUsed && o.megaForme
+        ? ((getSpecies(o.megaForme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? o.ability ?? undefined)
+        : (o?.ability ?? undefined);
+    } else {
+      const set = next.myTeam[tIdx];
+      const megaForme = next.myMegaUsed?.includes(tIdx) ? next.myMegaForme?.[tIdx] : undefined;
+      defAbil = megaForme
+        ? ((getSpecies(megaForme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? set?.ability ?? undefined)
+        : set?.ability;
+    }
+    if (!defAbil) continue;
+    const dId = toId(defAbil);
+    if (dId !== 'roughskin' && dId !== 'ironbarbs') continue;
+    const chip = 100 / 8; // 12.5% of attacker's max HP
+    if (a.side === 'mine') {
+      next.myCurrentHp = next.myCurrentHp ?? {};
+      next.myCurrentHp[a.attackerTeamIndex] = Math.max(0, (next.myCurrentHp[a.attackerTeamIndex] ?? 100) - chip);
+    } else {
+      const o = next.opponentTeam[a.attackerTeamIndex];
+      if (o) o.currentHpPercent = Math.max(0, (o.currentHpPercent ?? 100) - chip);
     }
   }
 
@@ -661,15 +905,74 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     }
     const atkTypes = (getSpecies(atkFormeName) as { types?: string[] } | undefined)?.types ?? [];
     if (atkTypes.includes('Fire')) continue;
+    let applied: boolean;
     if (aSide === 'mine') {
       if (next.myStatus?.[aIdx]) continue;
-      next.myStatus = { ...(next.myStatus ?? {}), [aIdx]: 'brn' };
+      applied = tryApplyMyStatus(next, aIdx, 'brn');
     } else {
       const o = next.opponentTeam[aIdx];
       if (!o || o.status) continue;
-      o.status = 'brn';
+      applied = tryApplyOppStatus(o, 'brn');
     }
-    inferenceNotes.push(`${aSide === 'mine' ? 'm' : 'o'}${aIdx + 1} burned (Spicy Spray on ${defFormeName})`);
+    const ref = `${aSide === 'mine' ? 'm' : 'o'}${aIdx + 1}`;
+    inferenceNotes.push(applied
+      ? `${ref} burned (Spicy Spray on ${defFormeName})`
+      : `${ref} Rawst/Lum Berry cured the Spicy Spray burn`);
+  }
+
+  // Status-category moves auto-apply their status to the target. Only fires for
+  // moves with category=Status and a top-level `status` field; secondary
+  // effects on damaging moves (Nuzzle's 100% par) are Tier-4 probabilistic.
+  // Type immunities respected: brn→Fire; par→Electric unless ignoreImmunity;
+  // psn/tox→Poison+Steel; powder→Grass. Mirror in BattleScreen.tsx.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (a.attackerTeamIndex == null) continue;
+    const sm = getMove(a.move) as { category?: string; status?: string; flags?: Record<string, number>; ignoreImmunity?: boolean } | undefined;
+    if (!sm?.status || sm.category !== 'Status') continue;
+    if (typeof a.target !== 'object') continue;
+    const tIdx = a.targetTeamIndex;
+    if (tIdx == null) continue;
+    const tSide = a.target.side;
+    const tTypes: string[] = tSide === 'mine'
+      ? ((getSpecies(next.myTeam[tIdx]?.species ?? '') as { types?: string[] } | undefined)?.types ?? [])
+      : ((getSpecies(next.opponentTeam[tIdx]?.species ?? '') as { types?: string[] } | undefined)?.types ?? []);
+    if (isStatusMoveImmune(sm.status, !!sm.ignoreImmunity, !!(sm.flags?.powder), tTypes)) continue;
+    const st = sm.status as NonNullable<import('../domain/types.js').ActivePokemonState['status']>;
+    if (tSide === 'mine') {
+      if (next.myStatus?.[tIdx]) continue; // already non-volatile statused
+      if (tryApplyMyStatus(next, tIdx, st)) {
+        if (st === 'tox') next.myToxCounter = { ...(next.myToxCounter ?? {}), [tIdx]: 1 };
+        if (st === 'slp') next.mySleepCounter = { ...(next.mySleepCounter ?? {}), [tIdx]: 3 };
+      }
+    } else {
+      const o = next.opponentTeam[tIdx];
+      if (!o || o.status) continue; // already non-volatile statused
+      if (tryApplyOppStatus(o, st)) {
+        if (st === 'tox') o.toxCounter = 1;
+        if (st === 'slp') o.sleepCounter = 3;
+      }
+    }
+  }
+
+  // Setup self-boost moves (Swords Dance, Nasty Plot, Calm Mind, Dragon Dance,
+  // Bulk Up, Quiver Dance, Shell Smash, etc.). Category=Status with a top-level
+  // `boosts` field and target=self. Contrary inverts the deltas.
+  // Mirror in BattleScreen.tsx.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (a.attackerTeamIndex == null) continue;
+    const bm = getMove(a.move) as { category?: string; boosts?: BoostMap; target?: string } | undefined;
+    if (!bm?.boosts || bm.category !== 'Status' || bm.target !== 'self') continue;
+    const abil = a.side === 'mine'
+      ? next.myTeam[a.attackerTeamIndex]?.ability
+      : next.opponentTeam[a.attackerTeamIndex]?.ability;
+    const contrary = !!abil && toId(abil) === 'contrary';
+    const applied: BoostMap = {};
+    for (const [stat, delta] of Object.entries(bm.boosts)) {
+      applied[stat as keyof BoostMap] = contrary ? -(delta as number) : (delta as number);
+    }
+    applyBoostsTo(next, a.side, a.attackerTeamIndex, applied);
   }
 
   // Item-removing moves (Knock Off / Thief / Covet / berry-eaters). Mark the
@@ -731,6 +1034,26 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     } else if (procced) {
       next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: 'Focus Sash' };
       next.myFainted = (next.myFainted ?? []).filter(i => i !== tIdx);
+    }
+  }
+
+  // `(berry)` suffix: resist berry consumed. Derive berry name from move type and
+  // record as learned+consumed for opp, or consumed for mine.
+  for (const a of draftActions) {
+    if (!a.berry) continue;
+    if (typeof a.target !== 'object') continue;
+    const tIdx = a.targetTeamIndex;
+    if (tIdx == null) continue;
+    const moveDex = getMove(a.move) as { type?: string } | undefined;
+    const berryName = moveDex?.type ? resistBerryForType(moveDex.type) : undefined;
+    if (!berryName) continue;
+    if (a.target.side === 'theirs') {
+      const o = next.opponentTeam[tIdx];
+      if (!o) continue;
+      if (!o.item) o.item = berryName;
+      o.itemConsumed = berryName;
+    } else {
+      next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: berryName };
     }
   }
 
@@ -863,12 +1186,21 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     if (a.kind !== 'switch' || a.targetTeamIndex == null) continue;
     if (a.side === 'mine') {
       const outgoing = nextActive.mine[a.attackerSlot];
-      if (outgoing != null) { delete next.myBoosts[outgoing]; clearMyVolatiles(next, outgoing); }
+      if (outgoing != null) {
+        if (toId(next.myTeam[outgoing]?.ability ?? '') === 'regenerator') {
+          next.myCurrentHp = next.myCurrentHp ?? {};
+          next.myCurrentHp[outgoing] = Math.min(100, (next.myCurrentHp[outgoing] ?? 100) + 100 / 3);
+        }
+        delete next.myBoosts[outgoing]; clearMyVolatiles(next, outgoing);
+      }
       nextActive.mine[a.attackerSlot] = a.targetTeamIndex;
     } else {
       const outgoing = nextActive.theirs[a.attackerSlot];
       if (outgoing != null && next.opponentTeam[outgoing]) {
         const o = { ...next.opponentTeam[outgoing], currentBoosts: {} };
+        if (o.ability && toId(o.ability) === 'regenerator') {
+          o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + 100 / 3);
+        }
         clearOppVolatiles(o);
         next.opponentTeam[outgoing] = o;
       }
@@ -960,6 +1292,13 @@ function applyStateUpdateImpl(
     myEncoreTurns: { ...(match.myEncoreTurns ?? {}) },
     myDisableTurns: { ...(match.myDisableTurns ?? {}) },
     myLeechSeeded: { ...(match.myLeechSeeded ?? {}) },
+    mySaltCured: { ...(match.mySaltCured ?? {}) },
+    myAquaRing: { ...(match.myAquaRing ?? {}) },
+    myIngrain: { ...(match.myIngrain ?? {}) },
+    myCursed: { ...(match.myCursed ?? {}) },
+    myPartialTrap: { ...(match.myPartialTrap ?? {}) },
+    myNightmare: { ...(match.myNightmare ?? {}) },
+    myFlinched: { ...(match.myFlinched ?? {}) },
   };
   const nextActive: ActiveIdx = {
     mine: [activeIdx.mine[0], activeIdx.mine[1]],
@@ -1104,15 +1443,15 @@ function applyStateUpdateImpl(
   if (update.status) {
     if (side === 'theirs') {
       const o = next.opponentTeam[teamIndex];
-      if (o) {
-        o.status = update.status;
+      if (o && tryApplyOppStatus(o, update.status)) {
         if (update.status === 'tox') o.toxCounter = 1;
         if (update.status === 'slp') o.sleepCounter = 2;
       }
     } else {
-      next.myStatus![teamIndex] = update.status;
-      if (update.status === 'tox') next.myToxCounter![teamIndex] = 1;
-      if (update.status === 'slp') next.mySleepCounter![teamIndex] = 2;
+      if (tryApplyMyStatus(next, teamIndex, update.status)) {
+        if (update.status === 'tox') next.myToxCounter![teamIndex] = 1;
+        if (update.status === 'slp') next.mySleepCounter![teamIndex] = 2;
+      }
     }
   }
   if (update.cureStatus) {
@@ -1141,6 +1480,36 @@ function applyStateUpdateImpl(
       if (update.disableMove != null) { next.myDisabledMove![teamIndex] = update.disableMove; next.myDisableTurns![teamIndex] = update.volatileTurns ?? EFFECT_DURATIONS.disable; }
     }
   }
+  // Residual-chip volatiles.
+  if (update.saltCure) {
+    if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.saltCured = true; }
+    else next.mySaltCured![teamIndex] = true;
+  }
+  if (update.aquaRing) {
+    if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.aquaRing = true; }
+    else next.myAquaRing![teamIndex] = true;
+  }
+  if (update.ingrain) {
+    if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.ingrain = true; }
+    else next.myIngrain![teamIndex] = true;
+  }
+  if (update.curse) {
+    if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.cursed = true; }
+    else next.myCursed![teamIndex] = true;
+  }
+  if (update.partialTrap != null) {
+    if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.partialTrap = update.partialTrap; }
+    else next.myPartialTrap![teamIndex] = update.partialTrap;
+  }
+  if (update.nightmare) {
+    if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.nightmare = true; }
+    else next.myNightmare![teamIndex] = true;
+  }
+  if (update.flinch) {
+    if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.flinched = true; }
+    else { next.myFlinched = { ...(next.myFlinched ?? {}) }; next.myFlinched[teamIndex] = true; }
+  }
+
   if (update.fainted) {
     if (side === 'theirs') {
       const o = next.opponentTeam[teamIndex];
@@ -1157,13 +1526,24 @@ function applyStateUpdateImpl(
   if (update.bringIntoSlot != null) {
     if (side === 'mine') {
       const outgoing = nextActive.mine[update.bringIntoSlot];
-      if (outgoing != null) { delete next.myBoosts![outgoing]; clearMyVolatiles(next, outgoing); }
+      if (outgoing != null) {
+        if (toId(next.myTeam[outgoing]?.ability ?? '') === 'regenerator') {
+          next.myCurrentHp = next.myCurrentHp ?? {};
+          next.myCurrentHp[outgoing] = Math.min(100, (next.myCurrentHp[outgoing] ?? 100) + 100 / 3);
+        }
+        delete next.myBoosts![outgoing]; clearMyVolatiles(next, outgoing);
+      }
       nextActive.mine[update.bringIntoSlot] = teamIndex;
     } else {
       const outgoing = nextActive.theirs[update.bringIntoSlot];
       if (outgoing != null) {
         const o = next.opponentTeam[outgoing];
-        if (o) { o.currentBoosts = {}; clearOppVolatiles(o); }
+        if (o) {
+          if (o.ability && toId(o.ability) === 'regenerator') {
+            o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + 100 / 3);
+          }
+          o.currentBoosts = {}; clearOppVolatiles(o);
+        }
       }
       nextActive.theirs[update.bringIntoSlot] = teamIndex;
       const brought = new Set(next.opponentBrought ?? []);

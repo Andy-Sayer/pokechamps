@@ -18,6 +18,10 @@ import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyp
 import { fieldMoveEffect, applyFieldMove } from '@pokechamps/core/domain/fieldMoves.js';
 import { EFFECT_DURATIONS } from '@pokechamps/core/domain/durations.js';
 import { detectChoiceLock, sashProcced, firstTurnOut, isFirstTurnMove, type ChoiceLock } from '@pokechamps/core/domain/itemSignals.js';
+import { hpItemTriggerFor } from '@pokechamps/core/domain/hpItemTriggers.js';
+import { statusBerryFor } from '@pokechamps/core/domain/statusBerries.js';
+import { resistBerryForType } from '@pokechamps/core/domain/resistBerries.js';
+import { effectiveness, speciesTypes } from '@pokechamps/core/domain/typechart.js';
 import { switchInAbilityEffect, intimidateReaction, certainAbility, resolveDownloadBoost, type BoostMap } from '@pokechamps/core/domain/abilities.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
 import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict, type MatchupCell, type Confidence } from '@pokechamps/core/domain/predictions.js';
@@ -119,15 +123,13 @@ function applyHazardOnSwitchInto(match: Match, side: 'mine' | 'theirs', teamInde
   }
   if (effect.statusApplied) {
     if (side === 'mine') {
-      match.myStatus = { ...(match.myStatus ?? {}), [teamIndex]: effect.statusApplied };
-      if (effect.statusApplied === 'tox') {
+      if (tryApplyMyStatusInto(match, teamIndex, effect.statusApplied) && effect.statusApplied === 'tox') {
         match.myToxCounter = { ...(match.myToxCounter ?? {}), [teamIndex]: 1 };
       }
     } else {
       const o = match.opponentTeam[teamIndex];
-      if (o) {
-        o.status = effect.statusApplied;
-        if (effect.statusApplied === 'tox') o.toxCounter = 1;
+      if (o && tryApplyOppStatusInto(o, effect.statusApplied) && effect.statusApplied === 'tox') {
+        o.toxCounter = 1;
       }
     }
   }
@@ -157,6 +159,52 @@ function applyHazardOnSwitchInto(match: Match, side: 'mine' | 'theirs', teamInde
       match.field = { ...match.field, theirHazards: { ...match.field.theirHazards, toxicSpikes: 0 } };
     }
   }
+}
+
+// Status-berry interception on my side. Returns true if status was applied
+// (caller still owns tox/sleep counter setup); false if the berry caught it.
+function tryApplyMyStatusInto(
+  match: Match,
+  teamIndex: number,
+  status: NonNullable<import('@pokechamps/core/domain/types.js').ActivePokemonState['status']>,
+): boolean {
+  const consumed = match.myItemConsumed?.[teamIndex];
+  const held = consumed ? undefined : match.myTeam[teamIndex]?.item;
+  const cure = statusBerryFor(held, status);
+  if (cure) {
+    match.myItemConsumed = { ...(match.myItemConsumed ?? {}), [teamIndex]: cure.consumed };
+    return false;
+  }
+  match.myStatus = { ...(match.myStatus ?? {}), [teamIndex]: status };
+  return true;
+}
+
+// Opp-side mirror. Only catches when opp's item is known (else we set status
+// directly — auto-firing a guess would silently corrupt downstream inference).
+function tryApplyOppStatusInto(
+  o: OpponentEntry,
+  status: NonNullable<import('@pokechamps/core/domain/types.js').ActivePokemonState['status']>,
+): boolean {
+  if (o.itemConsumed || !o.item) {
+    o.status = status;
+    return true;
+  }
+  const cure = statusBerryFor(o.item, status);
+  if (cure) {
+    o.itemConsumed = cure.consumed;
+    return false;
+  }
+  o.status = status;
+  return true;
+}
+
+// Type-based immunity for a status move. Mirrors isStatusMoveImmune in engine.ts.
+function isStatusMoveImmune(status: string, ignoreImmunity: boolean, isPowder: boolean, targetTypes: string[]): boolean {
+  if (status === 'brn') return targetTypes.includes('Fire');
+  if (status === 'par' && !ignoreImmunity) return targetTypes.includes('Electric');
+  if (status === 'psn' || status === 'tox') return targetTypes.some(t => t === 'Poison' || t === 'Steel');
+  if (status === 'slp' && isPowder) return targetTypes.includes('Grass');
+  return false;
 }
 
 // Merge a boost map into a side's active boosts, clamped to [-6, +6].
@@ -673,8 +721,50 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (newPct == null) continue;
 
       // Record the computed damageHpPercent so the inference pass below uses
-      // the correct value (independent of how the user typed it).
+      // the correct value (independent of how the user typed it). Captured
+      // BEFORE any auto-trigger heal so inference sees the actual hit, not
+      // the post-Sitrus residual.
       a.damageHpPercent = Math.max(0, prevPct - newPct);
+
+      // HP-threshold item auto-trigger (Sitrus, pinch berries). My-side only:
+      // opp items are usually unknown and auto-firing a guess would silently
+      // corrupt downstream inference. Mirror of the engine.ts path.
+      if (tSide === 'mine' && newPct > 0) {
+        const consumed = next.myItemConsumed?.[tIdx];
+        const held = consumed ? undefined : next.myTeam[tIdx]?.item;
+        const trig = hpItemTriggerFor(held, prevPct, newPct);
+        if (trig) {
+          if (trig.healPercent != null) {
+            newPct = Math.min(100, newPct + trig.healPercent);
+          }
+          if (trig.boost) {
+            applyBoostsInto(next, 'mine', tIdx, { [trig.boost.stat]: trig.boost.amount });
+          }
+          next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: trig.consumed };
+        }
+      }
+
+      // Resist berry auto-consume (my side). Mirror of engine.ts.
+      if (tSide === 'mine') {
+        const consumed2 = next.myItemConsumed?.[tIdx];
+        const held2 = consumed2 ? undefined : next.myTeam[tIdx]?.item;
+        if (held2) {
+          const moveDex2 = getMove(a.move) as { type?: string } | undefined;
+          if (moveDex2?.type) {
+            const heldId2 = toId(held2);
+            const berryForType2 = resistBerryForType(moveDex2.type);
+            if (heldId2 === 'chilanberry' && moveDex2.type === 'Normal') {
+              next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: held2 };
+            } else if (berryForType2 && heldId2 === toId(berryForType2)) {
+              const defTypes2 = speciesTypes(next.myTeam[tIdx]!.species);
+              if (effectiveness(moveDex2.type, defTypes2) > 1) {
+                next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: held2 };
+              }
+            }
+          }
+        }
+      }
+
       if (tSide === 'theirs') oppHpSoFar.set(tIdx, newPct);
       else myHpSoFar.set(tIdx, newPct);
     }
@@ -690,6 +780,29 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     for (const [idx, hp] of myHpSoFar) {
       next.myCurrentHp![idx] = hp;
       if (hp === 0 && !next.myFainted!.includes(idx)) next.myFainted!.push(idx);
+    }
+
+    // Resist berry auto-consume on opp side when item is KNOWN. Mirror of engine.ts.
+    for (const a of sortedActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (typeof a.target !== 'object' || a.target.side !== 'theirs') continue;
+      const tIdx = a.targetTeamIndex;
+      if (tIdx == null) continue;
+      const o = next.opponentTeam[tIdx];
+      if (!o || o.itemConsumed || !o.item) continue;
+      const moveDex = getMove(a.move) as { type?: string } | undefined;
+      if (!moveDex?.type) continue;
+      const held = o.item;
+      const heldId = toId(held);
+      const berryForType = resistBerryForType(moveDex.type);
+      if (heldId === 'chilanberry' && moveDex.type === 'Normal') {
+        o.itemConsumed = held;
+      } else if (berryForType && heldId === toId(berryForType)) {
+        const defTypes = speciesTypes(o.species);
+        if (effectiveness(moveDex.type, defTypes) > 1) {
+          o.itemConsumed = held;
+        }
+      }
     }
 
     // Update each opp's knownMoves with anything they did this turn.
@@ -846,12 +959,114 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (!defMax || !atkMax) continue;
       const dmgAbs = (a.damageHpPercent / 100) * defMax;
       const healPct = (dmgAbs * drain[0] / drain[1]) / atkMax * 100;
+      // Liquid Ooze: drain deals damage to the attacker instead of healing.
+      let defAbilForDrain: string | undefined;
+      if (a.target.side === 'theirs') {
+        const o = next.opponentTeam[tIdx];
+        defAbilForDrain = o?.megaUsed && o.megaForme
+          ? ((getSpecies(o.megaForme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? o.ability ?? undefined)
+          : (o?.ability ?? undefined);
+      } else {
+        const set = next.myTeam[tIdx];
+        const megaForme = next.myMegaUsed?.includes(tIdx) ? next.myMegaForme?.[tIdx] : undefined;
+        defAbilForDrain = megaForme
+          ? ((getSpecies(megaForme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? set?.ability ?? undefined)
+          : set?.ability;
+      }
+      const liquidOoze = defAbilForDrain && toId(defAbilForDrain) === 'liquidooze';
       if (a.side === 'mine') {
         next.myCurrentHp = next.myCurrentHp ?? {};
-        next.myCurrentHp[a.attackerTeamIndex] = Math.min(100, (next.myCurrentHp[a.attackerTeamIndex] ?? 100) + healPct);
+        if (liquidOoze) {
+          next.myCurrentHp[a.attackerTeamIndex] = Math.max(0, (next.myCurrentHp[a.attackerTeamIndex] ?? 100) - healPct);
+        } else {
+          next.myCurrentHp[a.attackerTeamIndex] = Math.min(100, (next.myCurrentHp[a.attackerTeamIndex] ?? 100) + healPct);
+        }
       } else {
         const o = next.opponentTeam[a.attackerTeamIndex];
-        if (o) o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + healPct);
+        if (o) {
+          if (liquidOoze) {
+            o.currentHpPercent = Math.max(0, (o.currentHpPercent ?? 100) - healPct);
+          } else {
+            o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + healPct);
+          }
+        }
+      }
+    }
+
+    // Recoil damage for the attacker. Mirror of engine.ts recoil loop.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.attackerTeamIndex == null) continue;
+      if (typeof a.target !== 'object') continue;
+      const tIdx = a.targetTeamIndex;
+      if (tIdx == null) continue;
+      const rm = getMove(a.move) as { recoil?: [number, number]; mindBlownRecoil?: boolean } | undefined;
+      const hasRecoil = rm?.recoil || rm?.mindBlownRecoil;
+      if (!hasRecoil) continue;
+      const atkAbil = a.side === 'mine'
+        ? next.myTeam[a.attackerTeamIndex]?.ability
+        : next.opponentTeam[a.attackerTeamIndex]?.ability;
+      const atkMax = maxHpOf(a.side, a.attackerTeamIndex);
+      if (!atkMax) continue;
+      let recoilPct: number;
+      if (rm?.mindBlownRecoil) {
+        recoilPct = 50;
+      } else {
+        if (a.damageHpPercent == null) continue;
+        const rockHead = !!atkAbil && toId(atkAbil) === 'rockhead';
+        if (rockHead) continue;
+        const defMax = maxHpOf(a.target.side, tIdx);
+        if (!defMax) continue;
+        const [n, d] = rm!.recoil!;
+        const dmgAbs = (a.damageHpPercent / 100) * defMax;
+        recoilPct = (dmgAbs * n / d) / atkMax * 100;
+      }
+      if (a.side === 'mine') {
+        next.myCurrentHp = next.myCurrentHp ?? {};
+        const before = next.myCurrentHp[a.attackerTeamIndex] ?? 100;
+        next.myCurrentHp[a.attackerTeamIndex] = Math.max(0, before - recoilPct);
+      } else {
+        const o = next.opponentTeam[a.attackerTeamIndex];
+        if (o) o.currentHpPercent = Math.max(0, (o.currentHpPercent ?? 100) - recoilPct);
+      }
+    }
+
+    // Rough Skin / Iron Barbs: contact move → attacker loses 1/8 max HP.
+    // Mirror of engine.ts rough-skin loop.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.attackerTeamIndex == null) continue;
+      if (a.damageHpPercent == null) continue;
+      if (typeof a.target !== 'object') continue;
+      const tIdx = a.targetTeamIndex;
+      if (tIdx == null) continue;
+      const mv = getMove(a.move) as { flags?: Record<string, number> } | undefined;
+      if (!mv?.flags?.contact) continue;
+      let defAbil: string | undefined;
+      if (a.target.side === 'theirs') {
+        const o = next.opponentTeam[tIdx];
+        defAbil = o?.megaUsed && o.megaForme
+          ? ((getSpecies(o.megaForme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? o.ability ?? undefined)
+          : (o?.ability ?? undefined);
+      } else {
+        const set = next.myTeam[tIdx];
+        const megaForme = next.myMegaUsed?.includes(tIdx) ? next.myMegaForme?.[tIdx] : undefined;
+        defAbil = megaForme
+          ? ((getSpecies(megaForme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? set?.ability ?? undefined)
+          : set?.ability;
+      }
+      if (!defAbil) continue;
+      const dId = toId(defAbil);
+      if (dId !== 'roughskin' && dId !== 'ironbarbs') continue;
+      const atkMax = maxHpOf(a.side, a.attackerTeamIndex);
+      if (!atkMax) continue;
+      const chip = 100 / 8;
+      if (a.side === 'mine') {
+        next.myCurrentHp = next.myCurrentHp ?? {};
+        next.myCurrentHp[a.attackerTeamIndex] = Math.max(0, (next.myCurrentHp[a.attackerTeamIndex] ?? 100) - chip);
+      } else {
+        const o = next.opponentTeam[a.attackerTeamIndex];
+        if (o) o.currentHpPercent = Math.max(0, (o.currentHpPercent ?? 100) - chip);
       }
     }
 
@@ -896,15 +1111,67 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       }
       const atkTypes = (getSpecies(atkFormeName) as { types?: string[] } | undefined)?.types ?? [];
       if (atkTypes.includes('Fire')) continue;
+      let applied: boolean;
       if (aSide === 'mine') {
         if (next.myStatus?.[aIdx]) continue;
-        next.myStatus = { ...(next.myStatus ?? {}), [aIdx]: 'brn' };
+        applied = tryApplyMyStatusInto(next, aIdx, 'brn');
       } else {
         const o = next.opponentTeam[aIdx];
         if (!o || o.status) continue;
-        o.status = 'brn';
+        applied = tryApplyOppStatusInto(o, 'brn');
       }
-      inferenceNotes.push(`${aSide === 'mine' ? 'm' : 'o'}${aIdx + 1} burned (Spicy Spray on ${defFormeName})`);
+      const ref = `${aSide === 'mine' ? 'm' : 'o'}${aIdx + 1}`;
+      inferenceNotes.push(applied
+        ? `${ref} burned (Spicy Spray on ${defFormeName})`
+        : `${ref} Rawst/Lum Berry cured the Spicy Spray burn`);
+    }
+    // Status-category moves auto-apply their status to the target.
+    // Mirror of engine.ts status-moves loop.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.attackerTeamIndex == null) continue;
+      const sm = getMove(a.move) as { category?: string; status?: string; flags?: Record<string, number>; ignoreImmunity?: boolean } | undefined;
+      if (!sm?.status || sm.category !== 'Status') continue;
+      if (typeof a.target !== 'object') continue;
+      const tIdx = a.targetTeamIndex;
+      if (tIdx == null) continue;
+      const tSide = a.target.side;
+      const tTypes: string[] = tSide === 'mine'
+        ? ((getSpecies(next.myTeam[tIdx]?.species ?? '') as { types?: string[] } | undefined)?.types ?? [])
+        : ((getSpecies(next.opponentTeam[tIdx]?.species ?? '') as { types?: string[] } | undefined)?.types ?? []);
+      if (isStatusMoveImmune(sm.status, !!sm.ignoreImmunity, !!(sm.flags?.powder), tTypes)) continue;
+      const st = sm.status as NonNullable<import('@pokechamps/core/domain/types.js').ActivePokemonState['status']>;
+      if (tSide === 'mine') {
+        if (next.myStatus?.[tIdx]) continue; // already non-volatile statused
+        if (tryApplyMyStatusInto(next, tIdx, st)) {
+          if (st === 'tox') next.myToxCounter = { ...(next.myToxCounter ?? {}), [tIdx]: 1 };
+          if (st === 'slp') next.mySleepCounter = { ...(next.mySleepCounter ?? {}), [tIdx]: 3 };
+        }
+      } else {
+        const o = next.opponentTeam[tIdx];
+        if (!o || o.status) continue; // already non-volatile statused
+        if (tryApplyOppStatusInto(o, st)) {
+          if (st === 'tox') o.toxCounter = 1;
+          if (st === 'slp') o.sleepCounter = 3;
+        }
+      }
+    }
+    // Setup self-boost moves (Swords Dance, Nasty Plot, etc.).
+    // Mirror of engine.ts setup-boosts loop.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.attackerTeamIndex == null) continue;
+      const bm = getMove(a.move) as { category?: string; boosts?: BoostMap; target?: string } | undefined;
+      if (!bm?.boosts || bm.category !== 'Status' || bm.target !== 'self') continue;
+      const abil = a.side === 'mine'
+        ? next.myTeam[a.attackerTeamIndex]?.ability
+        : next.opponentTeam[a.attackerTeamIndex]?.ability;
+      const contrary = !!abil && toId(abil) === 'contrary';
+      const applied: BoostMap = {};
+      for (const [stat, delta] of Object.entries(bm.boosts)) {
+        applied[stat as keyof BoostMap] = contrary ? -(delta as number) : (delta as number);
+      }
+      applyBoostsInto(next, a.side, a.attackerTeamIndex, applied);
     }
     // Item-removing moves (Knock Off / Thief / Covet / berry-eaters).
     for (const a of draftActions) {
@@ -955,6 +1222,25 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       } else if (procced) {
         next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: 'Focus Sash' };
         next.myFainted = (next.myFainted ?? []).filter(i => i !== tIdx);
+      }
+    }
+    // `(berry)` suffix: resist berry consumed. Derive berry name from move type and
+    // record as learned+consumed for opp, or consumed for mine.
+    for (const a of draftActions) {
+      if (!a.berry) continue;
+      if (typeof a.target !== 'object') continue;
+      const tIdx2 = a.targetTeamIndex;
+      if (tIdx2 == null) continue;
+      const moveDex2 = getMove(a.move) as { type?: string } | undefined;
+      const berryName2 = moveDex2?.type ? resistBerryForType(moveDex2.type) : undefined;
+      if (!berryName2) continue;
+      if (a.target.side === 'theirs') {
+        const o2 = next.opponentTeam[tIdx2];
+        if (!o2) continue;
+        if (!o2.item) o2.item = berryName2;
+        o2.itemConsumed = berryName2;
+      } else {
+        next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx2]: berryName2 };
       }
     }
     for (const a of draftActions) {
@@ -1067,12 +1353,20 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (a.kind !== 'switch' || a.targetTeamIndex == null) continue;
       if (a.side === 'mine') {
         const outgoing = nextActive.mine[a.attackerSlot];
-        if (outgoing != null) { delete next.myBoosts[outgoing]; next.myTaunted = (next.myTaunted ?? []).filter(i => i !== outgoing); if (next.myEncoreMove) delete next.myEncoreMove[outgoing]; if (next.myDisabledMove) delete next.myDisabledMove[outgoing]; if (next.myTauntTurns) delete next.myTauntTurns[outgoing]; if (next.myEncoreTurns) delete next.myEncoreTurns[outgoing]; if (next.myDisableTurns) delete next.myDisableTurns[outgoing]; if (next.myLeechSeeded) delete next.myLeechSeeded[outgoing]; }
+        if (outgoing != null) {
+          if (toId(next.myTeam[outgoing]?.ability ?? '') === 'regenerator') {
+            next.myCurrentHp = next.myCurrentHp ?? {};
+            next.myCurrentHp[outgoing] = Math.min(100, (next.myCurrentHp[outgoing] ?? 100) + 100 / 3);
+          }
+          delete next.myBoosts[outgoing]; next.myTaunted = (next.myTaunted ?? []).filter(i => i !== outgoing); if (next.myEncoreMove) delete next.myEncoreMove[outgoing]; if (next.myDisabledMove) delete next.myDisabledMove[outgoing]; if (next.myTauntTurns) delete next.myTauntTurns[outgoing]; if (next.myEncoreTurns) delete next.myEncoreTurns[outgoing]; if (next.myDisableTurns) delete next.myDisableTurns[outgoing]; if (next.myLeechSeeded) delete next.myLeechSeeded[outgoing]; if (next.myCursed) delete next.myCursed[outgoing]; if (next.myPartialTrap) delete next.myPartialTrap[outgoing]; if (next.myNightmare) delete next.myNightmare[outgoing];
+        }
         nextActive.mine[a.attackerSlot] = a.targetTeamIndex;
       } else {
         const outgoing = nextActive.theirs[a.attackerSlot];
         if (outgoing != null && next.opponentTeam[outgoing]) {
-          next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {}, taunted: undefined, encoreMove: undefined, disabledMove: undefined, tauntTurns: undefined, encoreTurns: undefined, disableTurns: undefined, leechSeeded: undefined };
+          const regen = next.opponentTeam[outgoing]!.ability && toId(next.opponentTeam[outgoing]!.ability!) === 'regenerator';
+          const regenHp = regen ? Math.min(100, (next.opponentTeam[outgoing]!.currentHpPercent ?? 100) + 100 / 3) : undefined;
+          next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {}, taunted: undefined, encoreMove: undefined, disabledMove: undefined, tauntTurns: undefined, encoreTurns: undefined, disableTurns: undefined, leechSeeded: undefined, cursed: undefined, partialTrap: undefined, nightmare: undefined, ...(regenHp != null ? { currentHpPercent: regenHp } : {}) };
         }
         nextActive.theirs[a.attackerSlot] = a.targetTeamIndex;
       }
@@ -1302,17 +1596,17 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     if (update.status) {
       if (side === 'theirs') {
         const o = next.opponentTeam[teamIndex];
-        if (o) {
-          o.status = update.status;
+        if (o && tryApplyOppStatusInto(o, update.status)) {
           if (update.status === 'tox') o.toxCounter = 1;
           // Sleep is 1-3 turns; default to 2 (mean). Caller can override
           // later if they observe an early wake or full duration.
           if (update.status === 'slp') o.sleepCounter = 2;
         }
       } else {
-        next.myStatus![teamIndex] = update.status;
-        if (update.status === 'tox') next.myToxCounter![teamIndex] = 1;
-        if (update.status === 'slp') next.mySleepCounter![teamIndex] = 2;
+        if (tryApplyMyStatusInto(next, teamIndex, update.status)) {
+          if (update.status === 'tox') next.myToxCounter![teamIndex] = 1;
+          if (update.status === 'slp') next.mySleepCounter![teamIndex] = 2;
+        }
       }
     }
     if (update.cureStatus) {
@@ -1343,6 +1637,36 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         if (update.disableMove != null) { next.myDisabledMove![teamIndex] = update.disableMove; next.myDisableTurns![teamIndex] = update.volatileTurns ?? EFFECT_DURATIONS.disable; }
       }
     }
+    // Residual-chip volatiles.
+    if (update.saltCure) {
+      if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.saltCured = true; }
+      else { next.mySaltCured = { ...(next.mySaltCured ?? {}) }; next.mySaltCured[teamIndex] = true; }
+    }
+    if (update.aquaRing) {
+      if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.aquaRing = true; }
+      else { next.myAquaRing = { ...(next.myAquaRing ?? {}) }; next.myAquaRing[teamIndex] = true; }
+    }
+    if (update.ingrain) {
+      if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.ingrain = true; }
+      else { next.myIngrain = { ...(next.myIngrain ?? {}) }; next.myIngrain[teamIndex] = true; }
+    }
+    if (update.curse) {
+      if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.cursed = true; }
+      else { next.myCursed = { ...(next.myCursed ?? {}) }; next.myCursed[teamIndex] = true; }
+    }
+    if (update.partialTrap != null) {
+      if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.partialTrap = update.partialTrap; }
+      else { next.myPartialTrap = { ...(next.myPartialTrap ?? {}) }; next.myPartialTrap[teamIndex] = update.partialTrap; }
+    }
+    if (update.nightmare) {
+      if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.nightmare = true; }
+      else { next.myNightmare = { ...(next.myNightmare ?? {}) }; next.myNightmare[teamIndex] = true; }
+    }
+    if (update.flinch) {
+      if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.flinched = true; }
+      else { next.myFlinched = { ...(next.myFlinched ?? {}) }; next.myFlinched[teamIndex] = true; }
+    }
+
     if (update.fainted) {
       if (side === 'theirs') {
         const o = next.opponentTeam[teamIndex];
@@ -1362,13 +1686,24 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       // typically none for a first appearance.
       if (side === 'mine') {
         const outgoing = nextActive.mine[update.bringIntoSlot];
-        if (outgoing != null) { delete next.myBoosts![outgoing]; next.myTaunted = (next.myTaunted ?? []).filter(i => i !== outgoing); if (next.myEncoreMove) delete next.myEncoreMove[outgoing]; if (next.myDisabledMove) delete next.myDisabledMove[outgoing]; if (next.myTauntTurns) delete next.myTauntTurns[outgoing]; if (next.myEncoreTurns) delete next.myEncoreTurns[outgoing]; if (next.myDisableTurns) delete next.myDisableTurns[outgoing]; }
+        if (outgoing != null) {
+          if (toId(next.myTeam[outgoing]?.ability ?? '') === 'regenerator') {
+            next.myCurrentHp = next.myCurrentHp ?? {};
+            next.myCurrentHp[outgoing] = Math.min(100, (next.myCurrentHp[outgoing] ?? 100) + 100 / 3);
+          }
+          delete next.myBoosts![outgoing]; next.myTaunted = (next.myTaunted ?? []).filter(i => i !== outgoing); if (next.myEncoreMove) delete next.myEncoreMove[outgoing]; if (next.myDisabledMove) delete next.myDisabledMove[outgoing]; if (next.myTauntTurns) delete next.myTauntTurns[outgoing]; if (next.myEncoreTurns) delete next.myEncoreTurns[outgoing]; if (next.myDisableTurns) delete next.myDisableTurns[outgoing]; if (next.myLeechSeeded) delete next.myLeechSeeded[outgoing]; if (next.myCursed) delete next.myCursed[outgoing]; if (next.myPartialTrap) delete next.myPartialTrap[outgoing]; if (next.myNightmare) delete next.myNightmare[outgoing];
+        }
         nextActive.mine[update.bringIntoSlot] = teamIndex;
       } else {
         const outgoing = nextActive.theirs[update.bringIntoSlot];
         if (outgoing != null) {
           const o = next.opponentTeam[outgoing];
-          if (o) { o.currentBoosts = {}; o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined; o.tauntTurns = undefined; o.encoreTurns = undefined; o.disableTurns = undefined; }
+          if (o) {
+            if (o.ability && toId(o.ability) === 'regenerator') {
+              o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + 100 / 3);
+            }
+            o.currentBoosts = {}; o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined; o.tauntTurns = undefined; o.encoreTurns = undefined; o.disableTurns = undefined; o.leechSeeded = undefined; o.cursed = undefined; o.partialTrap = undefined; o.nightmare = undefined;
+          }
         }
         nextActive.theirs[update.bringIntoSlot] = teamIndex;
         const brought = new Set(next.opponentBrought ?? []);
@@ -1793,6 +2128,17 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         const riskText = bestSearch.risks
           .map(r => `${r.label}${r.prob != null ? ` ${Math.round(r.prob * 100)}%` : ''}`)
           .join(' · ');
+        // Hail Mary: dice rolls needed when verdict is losing but a win is possible.
+        const hm = bestSearch.hailMary;
+        let hmLine: string | null = null;
+        if (hm) {
+          if (hm.noRealisticOut) {
+            hmLine = '~lost — no realistic out';
+          } else {
+            const outText = hm.outs.map(o => `${o.label} (${Math.round(o.prob * 100)}%)`).join(' + ');
+            hmLine = `only out: ~${Math.round(hm.combined * 100)}% — ${outText}`;
+          }
+        }
         return (
           <>
             <Text>
@@ -1800,6 +2146,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
               {mega ? <Text color="cyan">{mega}</Text> : null}{plays}  <Text color={vColor}>— {vText}</Text>
             </Text>
             {riskText ? <Text dimColor>   risks: {riskText}</Text> : null}
+            {hmLine ? <Text dimColor>   {hmLine}</Text> : null}
           </>
         );
       })()}
