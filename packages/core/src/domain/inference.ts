@@ -1,8 +1,9 @@
 import type { DamageObservation, PokemonSet, Stats } from './types.js';
 import { damageRange, observationToAbsoluteDamage } from './damage.js';
-import { getSpecies, toId } from './data.js';
+import { getSpecies, getMove, isLegalItem, toId } from './data.js';
 import { activeGimmick } from './gimmicks/index.js';
 import { getPikalytics, evFromSp } from './pikalytics.js';
+import { resistBerriesForSpecies } from './resistBerries.js';
 
 // The inverse problem: given an observed damage event, find which (EVs, nature,
 // item, ability) combinations of the defender are consistent with what we saw.
@@ -132,12 +133,21 @@ export function scoreSpread(input: InferenceInput): ScoredCandidate[] {
     (species?.abilities ? Object.values(species.abilities) as string[] : ['']);
 
   // Item search space: the standard defensive items + any gimmick-specific
-  // variants (e.g. mega stones legal for this species).
+  // variants (e.g. mega stones legal for this species). Filter against the
+  // format's allow-list so a banned item never appears in a candidate spread —
+  // Champions in particular runs a heavily-restricted item pool, and
+  // suggesting an off-format item is just noise.
   const baseItems = input.priorItems ?? COMMON_DEFENSIVE_ITEMS.map(x => x ?? '');
   const gimmickItems = (activeGimmick().enumerateOpponentVariants?.(toId(input.defenderSpecies)) ?? [])
     .map(v => v.item)
     .filter((i): i is string => !!i);
-  let items = Array.from(new Set([...baseItems, ...gimmickItems]));
+  // Type-matchup resist berries (Yache / Occa / Haban / …): only the ones
+  // matching this species' super-effective weaknesses. The calc handles the
+  // 0.5x reduction natively when the berry is passed as the held item.
+  const berryItems = input.priorItems ? [] : resistBerriesForSpecies(speciesName);
+  let items = Array.from(new Set([...baseItems, ...gimmickItems, ...berryItems]));
+  // Keep the empty-string "no item" entry; everything else must be format-legal.
+  items = items.filter(i => !i || isLegalItem(i));
   // Item signals: exclude Safety Goggles if we've observed sand chip damage.
   if (input.sandChipObserved) {
     items = items.filter(i => i !== 'Safety Goggles');
@@ -208,6 +218,84 @@ export function scoreSpread(input: InferenceInput): ScoredCandidate[] {
   return scoredFallback
     .sort((a, b) => b.likelihood - a.likelihood)
     .slice(0, HYBRID_FALLBACK_K);
+}
+
+// Offensive inference. The defensive solver (scoreSpread) only ever varies
+// HP/Def/SpD; the opponent's Atk/SpA are otherwise left at the Pikalytics prior
+// (or 0). When the OPPONENT lands a damaging move on one of MY known mons we can
+// run the mirror problem: hold my mon fixed (known) and find which of the
+// opponent's offensive-stat (Atk for physical, SpA for special) investments
+// reproduce the observed damage. Each existing candidate keeps its inferred
+// bulk/nature/item; we assign the offensive-stat buckets consistent with the
+// hit (and drop a candidate whose nature/item can't reach the damage at all —
+// e.g. a -Atk nature ruled out by a big physical hit). Returns the refined
+// candidate set; a no-op (returns the input) for moves whose damage doesn't
+// scale with the attacker's offensive stat.
+export function scoreOffensiveSpread(input: {
+  attackerSpecies: string;
+  attackerLevel: number;
+  startingCandidates: SpreadCandidate[];
+  attackerMoves: string[];
+  move: string;
+  defenderSet: PokemonSet;       // my known mon (the target)
+  observation: DamageObservation;
+}): ScoredCandidate[] {
+  const m = getMove(input.move) as {
+    category?: string; damage?: unknown; overrideOffensiveStat?: unknown; overrideOffensivePokemon?: unknown;
+  } | undefined;
+  const passthrough = (): ScoredCandidate[] =>
+    input.startingCandidates.map(c => ({ candidate: c, within: true, likelihood: 0 }));
+  // Only standard Physical/Special moves whose damage scales with the user's
+  // Atk/SpA. Skip status, fixed-damage (Seismic Toss…), Body Press (uses Def),
+  // and Foul Play (uses the target's Atk).
+  if (!m || (m.category !== 'Physical' && m.category !== 'Special')) return passthrough();
+  if (m.damage || m.overrideOffensiveStat || m.overrideOffensivePokemon === 'target') return passthrough();
+  const stat: keyof Stats = m.category === 'Physical' ? 'atk' : 'spa';
+
+  const obs = observationToAbsoluteDamage(input.observation, input.defenderSet);
+  // For each candidate, sweep the offensive-stat buckets that fit the budget and
+  // keep the ones whose forward damage range contains the observed value.
+  const solve = (cands: SpreadCandidate[]): ScoredCandidate[] => {
+    const out: ScoredCandidate[] = [];
+    for (const c of cands) {
+      const otherTotal = (Object.values(c.evs) as number[]).reduce((a, b) => a + b, 0) - c.evs[stat];
+      for (const ev of COARSE_EVS) {
+        if (otherTotal + ev > 508) break; // budget; COARSE_EVS ascends so the rest also fail
+        const cand: SpreadCandidate = { ...c, evs: { ...c.evs, [stat]: ev } };
+        const attacker = fullSet(input.attackerSpecies, cand, input.attackerLevel, input.attackerMoves);
+        let predicted;
+        try {
+          predicted = damageRange({
+            attacker,
+            defender: input.defenderSet,
+            move: input.move,
+            field: input.observation.field,
+            attackerSide: 'theirs',
+            attackerOpts: { gimmickActive: input.observation.attackerGimmickActive, boosts: input.observation.attackerBoosts as any },
+            defenderOpts: { gimmickActive: input.observation.defenderGimmickActive, boosts: input.observation.defenderBoosts as any },
+            helpingHand: input.observation.helpingHand,
+            critical: input.observation.critical,
+          });
+        } catch { continue; }
+        if (predicted.max >= obs.lo && predicted.min <= obs.hi) {
+          out.push({ candidate: cand, within: true, likelihood: candidateLikelihood(predicted.rolls, obs.lo, obs.hi) });
+        }
+      }
+    }
+    return out.sort((a, b) => b.likelihood - a.likelihood);
+  };
+
+  let result = solve(input.startingCandidates);
+  if (!result.length) {
+    // Confidence trigger: no current-nature spread can explain the hit even at
+    // max investment → it's an extreme hit that forces the boosting nature. Only
+    // here do we override the inherited nature (Adamant for physical, Modest for
+    // special) — natures otherwise stay loose.
+    const boost = stat === 'atk' ? 'Adamant' : 'Modest';
+    const promoted = input.startingCandidates.filter(c => c.nature !== boost).map(c => ({ ...c, nature: boost }));
+    if (promoted.length) result = solve(promoted);
+  }
+  return result.length ? result : passthrough(); // still nothing → keep prior belief
 }
 
 // Build candidates from Pikalytics' top items × top abilities × the single top

@@ -69,7 +69,13 @@ export function pikalyticsAvailable(): boolean {
 export function mergeEntry(speciesName: string, entry: PikalyticsEntry): void {
   const data = load();
   if (data) {
-    data.pokemon[speciesName] = entry;
+    // The on-the-fly fetcher passes rank/usage 0 (it has no index ranking), so
+    // preserve any KNOWN rank/usage — otherwise re-scouting a top mon (e.g.
+    // Sneasler) would clobber its ranking to 0.
+    const prev = data.pokemon[speciesName];
+    data.pokemon[speciesName] = prev
+      ? { ...entry, rank: prev.rank || entry.rank, usage: prev.usage || entry.usage }
+      : entry;
   } else {
     // No cache file yet — seed an in-memory one so subsequent gets work.
     cache = {

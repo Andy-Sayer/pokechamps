@@ -16,6 +16,20 @@ function mon(partial: Partial<PokemonSet> & { species: string }): PokemonSet {
   };
 }
 
+describe('effectiveSpeedRange honors an already-mega-evolved forme', () => {
+  test('a mega-used entry uses the mega forme base speed, not the base species', () => {
+    const base: OpponentEntry = { species: 'Aerodactyl', knownMoves: [] };
+    const mega: OpponentEntry = { species: 'Aerodactyl', knownMoves: [], megaUsed: true, megaForme: 'Aerodactyl-Mega' };
+    const rBase = effectiveSpeedRange(base);
+    const rMega = effectiveSpeedRange(mega);
+    expect(rBase).not.toBeNull();
+    expect(rMega).not.toBeNull();
+    // Mega Aerodactyl (base Spe 150) outruns base Aerodactyl (130) at every EV.
+    expect(rMega!.max).toBeGreaterThan(rBase!.max);
+    expect(rMega!.min).toBeGreaterThan(rBase!.min);
+  });
+});
+
 function act(partial: Partial<MoveAction> & { side: 'mine' | 'theirs'; attackerTeamIndex: number; move: string; order: number }): MoveAction {
   return {
     attackerSlot: 0,
@@ -24,11 +38,19 @@ function act(partial: Partial<MoveAction> & { side: 'mine' | 'theirs'; attackerT
   };
 }
 
-function turn(actions: MoveAction[], opts: { trickRoom?: boolean } = {}): Turn {
+function turn(
+  actions: MoveAction[],
+  opts: { trickRoom?: boolean; myTailwind?: boolean; theirTailwind?: boolean } = {},
+): Turn {
   return {
     index: 0,
     actions,
-    field: { ...NEUTRAL_FIELD, trickRoom: !!opts.trickRoom },
+    field: {
+      ...NEUTRAL_FIELD,
+      trickRoom: !!opts.trickRoom,
+      myTailwind: !!opts.myTailwind,
+      theirTailwind: !!opts.theirTailwind,
+    },
   };
 }
 
@@ -143,14 +165,20 @@ describe('inferOpponentSpeeds', () => {
     const match = makeMatch(
       [mySlow],
       ['Sneasler'],
-      [turn([
-        // In TR, the slower mon moves first. My slow Torkoal moved first =>
-        // it "outsped" the opp in TR => opp's actual speed > mine in TR terms,
-        // which means opp speed > mySpd in raw stat terms (still: my slower
-        // mon went first => opp must be faster than me in raw stat).
-        act({ side: 'mine',   attackerTeamIndex: 0, move: 'Heat Wave', order: 1 }),
-        act({ side: 'theirs', attackerTeamIndex: 0, move: 'Close Combat', order: 2 }),
-      ], { trickRoom: true })],
+      [
+        // Prior turn sets Trick Room, so TR is ALREADY active at the start of
+        // the turn we observe. TR is priority −7 → it resolves last, so it
+        // never inverts the turn it is set on, only subsequent turns.
+        turn([act({ side: 'theirs', attackerTeamIndex: 0, move: 'Trick Room', order: 1 })], { trickRoom: true }),
+        turn([
+          // In TR, the slower mon moves first. My slow Torkoal moved first =>
+          // it "outsped" the opp in TR => opp's actual speed > mine in TR terms,
+          // which means opp speed > mySpd in raw stat terms (still: my slower
+          // mon went first => opp must be faster than me in raw stat).
+          act({ side: 'mine',   attackerTeamIndex: 0, move: 'Heat Wave', order: 1 }),
+          act({ side: 'theirs', attackerTeamIndex: 0, move: 'Close Combat', order: 2 }),
+        ], { trickRoom: true }),
+      ],
     );
     const inf = inferOpponentSpeeds(match, match.myTeam);
     // TR inverts: my-mon-first now means opp speed >= mySpd + 1, not <=.
@@ -422,16 +450,102 @@ describe('inferOpponentSpeeds', () => {
     const match = makeMatch(
       [myAny],
       ['Absol', 'Abomasnow'],
-      [turn([
-        act({ side: 'theirs', attackerTeamIndex: 1, move: 'Tackle', order: 1 }), // Abomasnow first under TR → slower
-        act({ side: 'theirs', attackerTeamIndex: 0, move: 'Tackle', order: 2 }), // Absol second → faster
-      ], { trickRoom: true })],
+      [
+        // Prior turn establishes TR as active at the start of the observed turn.
+        turn([act({ side: 'theirs', attackerTeamIndex: 0, move: 'Trick Room', order: 1 })], { trickRoom: true }),
+        turn([
+          act({ side: 'theirs', attackerTeamIndex: 1, move: 'Tackle', order: 1 }), // Abomasnow first under TR → slower
+          act({ side: 'theirs', attackerTeamIndex: 0, move: 'Tackle', order: 2 }), // Absol second → faster
+        ], { trickRoom: true }),
+      ],
     );
     const inf = inferOpponentSpeeds(match, match.myTeam);
     // Abomasnow is slower → it gets a CEILING.
     expect(inf[1]!.speedCeiling).toBeDefined();
     // Absol is faster → it gets a FLOOR.
     expect(inf[0]!.speedFloor).toBeDefined();
+  });
+
+  test('Tailwind loosens the opp ceiling (~2x my speed, not my raw speed)', () => {
+    const mySlow = mon({ species: 'Torkoal', nature: 'Quiet', evs: { ...ZERO_EVS } });
+    const mySpd = actualSpeed(mySlow);
+    const match = makeMatch(
+      [mySlow],
+      ['Sneasler'],
+      [
+        // My Tailwind is already up at the start of the observed turn.
+        turn([], { myTailwind: true }),
+        turn([
+          act({ side: 'mine',   attackerTeamIndex: 0, move: 'Heat Wave',    order: 1 }),
+          act({ side: 'theirs', attackerTeamIndex: 0, move: 'Close Combat', order: 2 }),
+        ], { myTailwind: true }),
+      ],
+    );
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    // My effective speed was 2*mySpd, so the opp ceiling is 2*mySpd-1 — looser
+    // than the no-tailwind mySpd-1 bound.
+    expect(inf[0]!.speedCeiling).toBe(2 * mySpd - 1);
+    expect(inf[0]!.speedCeiling!).toBeGreaterThan(mySpd - 1);
+  });
+
+  test('dynamic speed: a Tailwind set earlier the SAME turn doubles a later teammate (Whimsicott)', () => {
+    const whimsicott = mon({ species: 'Whimsicott', ability: 'Prankster', nature: 'Timid', evs: { ...ZERO_EVS, spe: 252 } });
+    const mySlow = mon({ species: 'Torkoal', nature: 'Quiet', evs: { ...ZERO_EVS } });
+    const slowSpd = actualSpeed(mySlow);
+    const match = makeMatch(
+      [whimsicott, mySlow],
+      ['Sneasler'],
+      [turn([
+        // Prankster Tailwind → +1 bracket: resolves before the 0-bracket moves
+        // and never pairs with them. It sets MY side's Tailwind, so my slow
+        // Torkoal — acting later the SAME turn — moves at 2x speed.
+        act({ side: 'mine',   attackerTeamIndex: 0, move: 'Tailwind',     order: 1 }),
+        act({ side: 'mine',   attackerTeamIndex: 1, move: 'Tackle',       order: 2 }),
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'Close Combat', order: 3 }),
+      ])],
+    );
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    // Torkoal (idx 1) moved before opp in the 0 bracket at doubled speed.
+    expect(inf[0]!.speedCeiling).toBe(2 * slowSpd - 1);
+  });
+
+  test('Trick Room set THIS turn does not invert the same turn (−7 resolves last)', () => {
+    const myFast = mon({ species: 'Sneasler', nature: 'Jolly', evs: { ...ZERO_EVS, spe: 252 } });
+    const mySpd = actualSpeed(myFast);
+    // Post-turn snapshot has TR on, but it was set THIS turn (no prior turn) so
+    // the turn-start state has no TR → the observed order is NOT inverted.
+    const match = makeMatch(
+      [myFast],
+      ['Torkoal'],
+      [turn([
+        act({ side: 'mine',   attackerTeamIndex: 0, move: 'Close Combat', order: 1 }),
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'Tackle',       order: 2 }),
+      ], { trickRoom: true })],
+    );
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    // My fast mon first → opp CEILING (not the inverted FLOOR).
+    expect(inf[0]!.speedCeiling).toBe(mySpd - 1);
+    expect(inf[0]!.speedFloor).toBeUndefined();
+  });
+
+  test('my mega this turn is inferred at the mega forme speed', () => {
+    const pinsir = mon({ species: 'Pinsir', nature: 'Jolly', item: 'Pinsirite', evs: { ...ZERO_EVS, spe: 252 } });
+    const baseSpd = actualSpeed(pinsir);
+    const megaSpd = actualSpeed(pinsir, 'Pinsir-Mega');
+    expect(megaSpd).toBeGreaterThan(baseSpd); // sanity: Mega Pinsir is faster
+    const match = makeMatch(
+      [pinsir],
+      ['Torkoal'],
+      [turn([
+        act({ side: 'mine',   attackerTeamIndex: 0, move: 'Close Combat', order: 1, mega: true }),
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'Tackle',       order: 2 }),
+      ])],
+    );
+    match.myMegaForme = { 0: 'Pinsir-Mega' };
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    // Mega'd before attacking → opp ceiling uses the mega forme speed.
+    expect(inf[0]!.speedCeiling).toBe(megaSpd - 1);
+    expect(inf[0]!.speedCeiling!).toBeGreaterThan(baseSpd - 1);
   });
 });
 
@@ -625,5 +739,29 @@ describe('applySpeedInference: candidate filter', () => {
     expect(opp.speedFloor).toBe(100);
     expect(opp.speedCeiling).toBe(200);
     expect(opp.scarfSuspected).toBe(true);
+  });
+});
+
+describe('applySpeedInference: proven-non-scarf floor commits +Speed nature/EVs', () => {
+  const set = (p: Partial<PokemonSet> & { species: string }): PokemonSet => ({
+    level: 50, nature: 'Adamant', evs: { ...ZERO_EVS }, ivs: MAX_IVS, moves: [], ...p,
+  });
+  test('promotes a flexible spread to Jolly and drops the over-bulky one', () => {
+    const adaMax = actualSpeed(set({ species: 'Garchomp', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252, spe: 252 } }));
+    const jolMax = actualSpeed(set({ species: 'Garchomp', nature: 'Jolly', evs: { ...ZERO_EVS, spe: 252 } }));
+    const floor = Math.floor((adaMax + jolMax) / 2); // requires +Speed, but reachable
+    expect(floor).toBeGreaterThan(adaMax);
+    expect(floor).toBeLessThanOrEqual(jolMax);
+
+    const flexible = set({ species: 'Garchomp', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 } }); // room for Spe
+    const bulky = set({ species: 'Garchomp', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, def: 252 } }); // no Spe budget
+    // Two distinct damaging moves seen ⇒ not Choice-locked ⇒ scarf ruled out.
+    const opp: OpponentEntry = { species: 'Garchomp', knownMoves: ['Earthquake', 'Dragon Claw'], candidates: [flexible, bulky] };
+    applySpeedInference([opp], [{ speedFloor: floor }]);
+
+    expect(opp.candidates).toHaveLength(1);            // over-bulky spread dropped
+    expect(opp.candidates![0]!.nature).toBe('Jolly');  // committed +Speed nature
+    expect(opp.candidates![0]!.evs.spe).toBeGreaterThan(0);
+    expect(actualSpeed(opp.candidates![0]!)).toBeGreaterThanOrEqual(floor);
   });
 });

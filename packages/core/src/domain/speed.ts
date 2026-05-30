@@ -1,6 +1,8 @@
-import type { Match, MoveAction, PokemonSet, OpponentEntry, Turn } from './types.js';
+import type { Match, MoveAction, PokemonSet, OpponentEntry, Turn, FieldState } from './types.js';
+import { NEUTRAL_FIELD } from './types.js';
 import { getMove, getSpecies, getNature } from './data.js';
 import { getPikalytics, evFromSp } from './pikalytics.js';
+import { fieldMoveEffect } from './fieldMoves.js';
 
 // Speed stat at L50, 31 IVs — matches PoChamps' fixed-level/IV model and the
 // numerical equivalence with @smogon/calc (see project-pochamps-ev-scale).
@@ -23,6 +25,15 @@ export function actualSpeed(set: PokemonSet, formeOverride?: string): number {
 function movePriority(name: string): number {
   const m = getMove(name) as any;
   return typeof m?.priority === 'number' ? m.priority : 0;
+}
+
+// The species whose base stats are in effect for an opponent NOW: the post-mega
+// forme once it has mega-evolved (megaUsed), else the base species. Stat/speed
+// derivations key off this so an already-mega'd mon uses its mega base stats
+// even when inference hasn't produced candidates. applyMegaAction sets
+// megaUsed + megaForme.
+function activeOppSpecies(entry: OpponentEntry): string {
+  return entry.megaUsed && entry.megaForme ? entry.megaForme : entry.species;
 }
 
 // Per-action context for priority resolution. Optional fields default to "no
@@ -184,9 +195,45 @@ export function inferOpponentSpeeds(match: Match, myTeam: PokemonSet[]): SpeedIn
     return { attackerAbility: entry?.ability ?? null, attackerHpPercent: hp };
   };
 
-  for (const turn of match.turns) {
-    const trickRoom = !!turn.field?.trickRoom;
+  // Earliest turn index at which each of my mons mega-evolved. Mega persists,
+  // so from that turn on the mon moves at its mega forme's speed. We reconstruct
+  // this from the action log (a `mega` flag or standalone mega action) so an
+  // ordering observed on/after the mega turn is solved against the right speed.
+  const myMegaTurn = new Map<number, number>();
+  match.turns.forEach((t, ti) => {
+    for (const a of t.actions) {
+      if (a.side !== 'mine' || a.attackerTeamIndex == null) continue;
+      if ((a.kind === 'mega' || a.mega) && !myMegaTurn.has(a.attackerTeamIndex)) {
+        myMegaTurn.set(a.attackerTeamIndex, ti);
+      }
+    }
+  });
+  const myFormeAt = (idx: number, ti: number): string | undefined => {
+    const mt = myMegaTurn.get(idx);
+    return mt != null && ti >= mt ? match.myMegaForme?.[idx] : undefined;
+  };
+
+  for (let ti = 0; ti < match.turns.length; ti++) {
+    const turn = match.turns[ti]!;
+    // Field at the START of this turn = the previous turn's post-turn snapshot
+    // (NEUTRAL on turn 0). Trick Room uses the START state: TR is priority −7,
+    // so it resolves LAST and never reorders the turn it is set on.
+    const startField: FieldState = ti > 0 ? match.turns[ti - 1]!.field : NEUTRAL_FIELD;
+    const trickRoom = !!startField.trickRoom;
     const actions = orderedActions(turn);
+    // Gen 9 dynamic speed: a Tailwind set earlier in the turn doubles its
+    // side's speed for actions resolving AFTER it, same turn. Tailwind sets the
+    // USER's side, so a side's Tailwind is active at ordered-position `p` iff it
+    // was up at turn start OR a setter on that side resolved before `p`.
+    const twActive = (side: MoveAction['side'], p: number): boolean => {
+      const start = side === 'mine' ? !!startField.myTailwind : !!startField.theirTailwind;
+      if (start) return true;
+      for (let q = 0; q < p; q++) {
+        const a = actions[q]!;
+        if (a.side === side && fieldMoveEffect(a.move)?.tailwind) return true;
+      }
+      return false;
+    };
     for (let i = 0; i < actions.length; i++) {
       for (let j = i + 1; j < actions.length; j++) {
         const a = actions[i]!;
@@ -202,21 +249,32 @@ export function inferOpponentSpeeds(match: Match, myTeam: PokemonSet[]): SpeedIn
           const aMine = a.side === 'mine';
           const myAction = aMine ? a : b;
           const oppAction = aMine ? b : a;
+          const myPos = aMine ? i : j;        // ordered position of my action
+          const oppPos = aMine ? j : i;
           const myFirst = aMine ? true : false; // a is at index i, b at j>i
 
-          const mySet = myTeam[myAction.attackerTeamIndex ?? -1];
+          const myIdx = myAction.attackerTeamIndex ?? -1;
+          const mySet = myTeam[myIdx];
           const oppIdx = oppAction.attackerTeamIndex;
           if (!mySet || oppIdx == null) continue;
-          const mySpd = actualSpeed(mySet);
+
+          // My EFFECTIVE speed when my action resolved: mega forme (if mega'd by
+          // this turn) × Tailwind in effect at my action's position. Divide out
+          // the opponent's own Tailwind so the bound is on their RAW Spe stat.
+          // Paralysis is intentionally NOT modelled here — there is no per-turn
+          // status history, and applying current status retroactively would
+          // corrupt otherwise-clean turns.
+          const myEff = actualSpeed(mySet, myFormeAt(myIdx, ti)) * (twActive('mine', myPos) ? 2 : 1);
+          const oppFactor = twActive('theirs', oppPos) ? 2 : 1;
+          const x = myEff / oppFactor;
           const inversion = trickRoom ? !myFirst : myFirst;
 
           if (inversion) {
-            // My mon was "faster in turn order" given the field, so opp must
-            // be strictly slower: opp <= my - 1.
-            tightenMax(oppIdx, mySpd - 1);
+            // My effective speed was the higher one → opp raw < x.
+            tightenMax(oppIdx, Math.ceil(x) - 1);
           } else {
-            // Opp moved first in their bracket: opp >= my + 1.
-            tightenMin(oppIdx, mySpd + 1);
+            // Opp's effective speed was the higher one → opp raw > x.
+            tightenMin(oppIdx, Math.floor(x) + 1);
           }
           continue;
         }
@@ -249,8 +307,8 @@ export function inferOpponentSpeeds(match: Match, myTeam: PokemonSet[]): SpeedIn
     const entry = match.opponentTeam[k]!;
     const inf = out[k]!;
     if (inf.speedFloor == null) continue;
-    const expected = expectedSpeed(entry.species);
-    const env = bareEnvelope(entry.species);
+    const expected = expectedSpeed(activeOppSpecies(entry));
+    const env = bareEnvelope(activeOppSpecies(entry));
     if (expected == null || env == null) continue;
     const floor = inf.speedFloor;
     let chance: number;
@@ -314,7 +372,7 @@ function candidateRange(entry: OpponentEntry): { min: number; max: number } | nu
   let max = -Infinity;
   for (const c of entry.candidates) {
     const synth: PokemonSet = {
-      species: entry.species,
+      species: activeOppSpecies(entry),
       level: c.level ?? 50,
       nature: c.nature,
       evs: c.evs,
@@ -350,7 +408,7 @@ export function effectiveSpeedRange(entry: OpponentEntry): EffectiveSpeed | null
   // derived from the other opp's bare envelope); we want the user-visible
   // range to be at least as tight as any single source.
   const cand = candidateRange(entry);
-  const env = bareEnvelope(entry.species);
+  const env = bareEnvelope(activeOppSpecies(entry));
 
   let min: number | null = null;
   let max: number | null = null;
@@ -390,7 +448,7 @@ export function effectiveSpeedRange(entry: OpponentEntry): EffectiveSpeed | null
 //   3. Pikalytics expected speed (as a midpoint hint; widens to envelope edges)
 //   4. Bare 0-252 envelope from base Spe alone
 export function predictTurnOrder(args: {
-  myActives: Array<{ slot: 0 | 1; set: PokemonSet | null; status?: string }>;
+  myActives: Array<{ slot: 0 | 1; set: PokemonSet | null; status?: string; formeOverride?: string }>;
   oppActives: Array<{ slot: 0 | 1; entry: OpponentEntry | null }>;
   field: { trickRoom?: boolean; myTailwind?: boolean; theirTailwind?: boolean };
 }): TurnOrderEntry[] {
@@ -401,7 +459,9 @@ export function predictTurnOrder(args: {
     if (!a.set) continue;
     const tw = args.field.myTailwind ? 2 : 1;
     const par = a.status === 'par';
-    const raw = actualSpeed(a.set);
+    // formeOverride carries the post-mega forme for an already-mega'd own mon
+    // so its turn-order speed matches the matchup grid.
+    const raw = actualSpeed(a.set, a.formeOverride);
     const v = finalize(raw, tw, par);
     rows.push({
       label: `m${a.slot + 1}`,
@@ -444,18 +504,63 @@ export function predictTurnOrder(args: {
   return rows;
 }
 
+// Choice Scarf is ruled out when we KNOW the item isn't a scarf, or the mon has
+// been seen using 2+ distinct damaging moves (so it can't be Choice-locked at
+// all). Only then can a high speed floor be attributed to a +Speed nature /
+// investment rather than a scarf.
+function scarfRuledOut(e: OpponentEntry): boolean {
+  if (e.itemConsumed) return true; // scarves aren't consumed
+  if (e.item) return !/choice\s*scarf/i.test(e.item);
+  const damaging = new Set(
+    (e.knownMoves ?? []).filter(m => {
+      const cat = (getMove(m) as { category?: string } | undefined)?.category;
+      return cat && cat !== 'Status';
+    }),
+  );
+  return damaging.size >= 2;
+}
+
+// +Speed nature that preserves the offense the mon actually uses: Timid (−Atk)
+// if it has a known special move, else Jolly (−SpA).
+function plusSpeedNature(e: OpponentEntry): string {
+  const hasSpecial = (e.knownMoves ?? []).some(m => (getMove(m) as { category?: string } | undefined)?.category === 'Special');
+  return hasSpecial ? 'Timid' : 'Jolly';
+}
+
+// Raise a candidate to reach `floor`: keep it if it already does, else assign
+// the minimal Spe EV under its current nature, else (scarf ruled out) promote to
+// a +Speed nature. Returns null if even a +Speed-natured, budget-limited spread
+// can't reach the floor — i.e. an over-bulky spread proven too slow to be real.
+function fitToFloor(c: PokemonSet, floor: number, e: OpponentEntry): PokemonSet | null {
+  if (actualSpeed(c) >= floor) return c;
+  const otherTotal = (Object.values(c.evs) as number[]).reduce((a, b) => a + b, 0) - c.evs.spe;
+  const tryNature = (nature: string): PokemonSet | null => {
+    for (let ev = 0; ev <= 252; ev += 4) {
+      if (otherTotal + ev > 508) break;
+      const cand: PokemonSet = { ...c, nature, evs: { ...c.evs, spe: ev } };
+      if (actualSpeed(cand) >= floor) return cand;
+    }
+    return null;
+  };
+  const sameNature = tryNature(c.nature);
+  if (sameNature) return sameNature;
+  const ps = plusSpeedNature(e);
+  return ps !== c.nature ? tryNature(ps) : null;
+}
+
 // Merge an inference result into the opponent entries (mutating). Returns
 // the same array for fluent use.
 //
-// Side effect that callers rely on: when a speed bound tightens, we also
-// prune `entry.candidates` to spreads whose actualSpeed satisfies the bound.
-// This is how speed observations propagate into damage predictions — a
-// "must have ≥ X speed" rule drops candidates whose SP went elsewhere, so
-// the surviving candidates have less budget for other stats too. (Nature is
-// honored because actualSpeed applies the multiplier.)
+// Two candidate effects from a speed bound:
+//   - Default: prune spreads whose actualSpeed violates the bound (a "must have
+//     ≥ X speed" rule drops spreads whose SP went elsewhere).
+//   - Confidence commit: when Choice Scarf is RULED OUT, a floor must be met by
+//     stat — so we assign the minimal Spe EV (and, only if required, a +Speed
+//     nature) to each candidate, which also shrinks their bulk budget and drops
+//     spreads too bulky to also be that fast.
 //
-// Defensive: if the filter would empty the candidate list, we keep the
-// original — better a wider belief than a contradiction from a mistyped log.
+// Defensive: never empty the candidate list — keep the prior belief if every
+// spread would be removed (guards against a contradictory mistyped log).
 export function applySpeedInference(
   opponentTeam: OpponentEntry[],
   inferences: SpeedInference[],
@@ -468,7 +573,16 @@ export function applySpeedInference(
     e.scarfSuspected = s.scarfSuspected;
     e.scarfChance = s.scarfChance;
 
-    if (e.candidates?.length && (s.speedFloor != null || s.speedCeiling != null)) {
+    if (!e.candidates?.length) continue;
+
+    if (s.speedFloor != null && scarfRuledOut(e)) {
+      // Confidence commit: a proven-non-scarf floor is real speed investment.
+      let fitted = e.candidates
+        .map(c => fitToFloor(c, s.speedFloor!, e))
+        .filter((c): c is PokemonSet => c != null);
+      if (s.speedCeiling != null) fitted = fitted.filter(c => actualSpeed(c) <= s.speedCeiling!);
+      if (fitted.length > 0) e.candidates = fitted;
+    } else if (s.speedFloor != null || s.speedCeiling != null) {
       const filtered = e.candidates.filter(c => {
         const spd = actualSpeed(c);
         if (s.speedFloor != null && spd < s.speedFloor) return false;

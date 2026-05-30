@@ -27,6 +27,10 @@ export interface MatchupCell {
    *  if the target attacks this turn). A short caveat the UI surfaces so the
    *  number isn't read as guaranteed. */
   conditional?: string;
+  /** Every damage roll (% of defender max) for the chosen move, pooled across
+   *  ALL surviving candidate spreads. Lets callers compute an exact KO chance
+   *  that already folds in spread (bulk) uncertainty as well as roll variance. */
+  percentRolls?: number[];
 }
 
 // Confidence in the prediction: no inference yet → low (it's a Pikalytics /
@@ -219,6 +223,7 @@ export function predictOffense(args: {
     likelyMaxPercent: likely?.max,
     confidence: confidenceFor(!!args.opponent.candidates?.length, minPercent, maxPercent),
     conditional: isAttackConditionalMove(chosenMove) ? 'only if target attacks' : undefined,
+    percentRolls: allRolls,
   };
 }
 
@@ -409,6 +414,7 @@ export function predictThreat(args: {
     likelyMaxPercent: likely?.max,
     confidence: confidenceFor(!!args.opponent.candidates?.length, minPercent, maxPercent),
     conditional: isAttackConditionalMove(chosenMove) ? 'only if you attack' : undefined,
+    percentRolls: allRolls,
   };
 }
 

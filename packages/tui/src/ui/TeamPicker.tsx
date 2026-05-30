@@ -1,10 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import SelectInput from 'ink-select-input';
+import TextInput from 'ink-text-input';
 import type { PokemonSet } from '@pokechamps/core/domain/types.js';
 import type { Stores, SavedTeam } from '@pokechamps/core/storage/index.js';
 import { formatShowdownTeamSP } from '@pokechamps/core/domain/showdown.js';
 import { ExportPanel } from './ExportPanel.js';
+
+// Mirrors saveTeam's filename sanitisation so the picker can predict the saved
+// name (collision checks, no-op detection) without a round-trip.
+const sanitizeName = (s: string) => s.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
 
 export interface TeamPickerProps {
   stores: Stores;
@@ -42,6 +47,20 @@ export function TeamPicker({ stores, onPick, onCreateNew, onEdit, onClone, onCan
   // When set: render an ExportPanel overlay for the named team instead of
   // the picker. Esc clears.
   const [exportFor, setExportFor] = useState<{ name: string; text: string } | null>(null);
+  // Overlay mode for the destructive/edit-name actions; `error` surfaces a
+  // collision message under the rename field.
+  const [mode, setMode] = useState<'rename' | 'delete' | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  // Reload the list after a mutation; optionally focus a specific team.
+  const reload = (selectName?: string) => {
+    stores.teams.list().then(list => {
+      setTeams(list);
+      setPreview(selectName ?? list[0]?.name ?? null);
+      if (list.length === 0) onCreateNew();
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -54,18 +73,50 @@ export function TeamPicker({ stores, onPick, onCreateNew, onEdit, onClone, onCan
     return () => { cancelled = true; };
   }, [stores]);
 
+  const current = (): SavedTeam | undefined => teams?.find(t => t.name === preview);
+
+  const submitRename = async (raw: string) => {
+    const t = current();
+    if (!t) { setMode(null); return; }
+    const safe = sanitizeName(raw);
+    if (!safe || safe === t.name) { setMode(null); setError(null); return; } // no change
+    if (teams!.some(x => x.name === safe)) { setError(`"${safe}" already exists`); return; }
+    await stores.teams.save(safe, t.team);  // write under the new name…
+    await stores.teams.delete(t.name);      // …then drop the old file
+    setMode(null); setError(null);
+    reload(safe);
+  };
+
+  const confirmDelete = async () => {
+    const t = current();
+    if (!t) { setMode(null); return; }
+    await stores.teams.delete(t.name);
+    setMode(null);
+    reload();
+  };
+
   // `e` edit, `k` clone (k for kopy — c is taken by /custom-bring style
-  // commands), `x` show Showdown export.
+  // commands), `x` show Showdown export, `r` rename, `d` delete.
   useInput((input, key) => {
-    if (key.escape && exportFor) { setExportFor(null); return; }
+    if (key.escape) {
+      if (exportFor) setExportFor(null);
+      else if (mode) { setMode(null); setError(null); }
+      return;
+    }
+    if (mode === 'delete') {
+      if (input === 'y' || key.return) void confirmDelete();
+      else if (input === 'n') setMode(null);
+      return;
+    }
+    if (exportFor || mode) return; // rename: TextInput owns input; export: read-only
     if (!preview || !teams) return;
     const t = teams.find(t => t.name === preview);
     if (!t) return;
     if (input === 'e') onEdit(t.team, t.name);
-    if (input === 'k') onClone(t.team, suggestCopyName(t.name, teams.map(x => x.name)));
-    if (input === 'x') {
-      setExportFor({ name: t.name, text: formatShowdownTeamSP(t.team) });
-    }
+    else if (input === 'k') onClone(t.team, suggestCopyName(t.name, teams.map(x => x.name)));
+    else if (input === 'x') setExportFor({ name: t.name, text: formatShowdownTeamSP(t.team) });
+    else if (input === 'r') { setRenameValue(t.name); setError(null); setMode('rename'); }
+    else if (input === 'd') { setError(null); setMode('delete'); }
   });
 
   if (teams === null) {
@@ -92,12 +143,12 @@ export function TeamPicker({ stores, onPick, onCreateNew, onEdit, onClone, onCan
   return (
     <Box flexDirection="column" padding={1}>
       <Text bold color="cyan">Pick your team</Text>
-      <Text dimColor>Enter to pick · <Text color="white">e</Text> edit · <Text color="white">k</Text> clone · <Text color="white">x</Text> show Showdown export · ESC to cancel</Text>
+      <Text dimColor>Enter to pick · <Text color="white">e</Text> edit · <Text color="white">k</Text> clone · <Text color="white">r</Text> rename · <Text color="white">d</Text> delete · <Text color="white">x</Text> export · ESC to cancel</Text>
       <Box marginTop={1} flexDirection="row">
         <Box width={30} marginRight={2} flexDirection="column">
           <SelectInput
             items={items}
-            isFocused={!exportFor}
+            isFocused={!exportFor && !mode}
             onHighlight={item => {
               const v = item.value as string;
               if (v.startsWith('__')) setPreview(null);
@@ -130,6 +181,17 @@ export function TeamPicker({ stores, onPick, onCreateNew, onEdit, onClone, onCan
           )}
         </Box>
       </Box>
+      {mode === 'rename' && preview && (
+        <Box marginTop={1} flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
+          <Text>Rename <Text bold>{preview}</Text> to: <TextInput value={renameValue} onChange={setRenameValue} onSubmit={submitRename} /></Text>
+          {error ? <Text color="red">{error}</Text> : <Text dimColor>Enter to confirm · Esc to cancel</Text>}
+        </Box>
+      )}
+      {mode === 'delete' && preview && (
+        <Box marginTop={1} flexDirection="column" borderStyle="round" borderColor="red" paddingX={1}>
+          <Text>Delete team <Text bold color="red">{preview}</Text>? <Text dimColor>(y / n)</Text></Text>
+        </Box>
+      )}
       {exportFor && (
         <ExportPanel
           title={`Showdown export — ${exportFor.name}`}

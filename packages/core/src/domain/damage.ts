@@ -96,6 +96,15 @@ export function damageRange(args: {
 }): DamageRange {
   const atk = toCalcPokemon(args.attacker, args.attackerOpts);
   const def = toCalcPokemon(args.defender, args.defenderOpts);
+  // Mega Sol (custom Champions ability): the holder's moves are used as if
+  // Sunny Day is active. @smogon/calc has no logic for this ability name, so
+  // emulate the weather for the attacker's calc (Fire ×1.5, Water ×0.5) when no
+  // real weather is set. `atk.ability` is the RESOLVED ability — the mega
+  // gimmick already swapped in the forme's ability above.
+  const effField: FieldState =
+    (atk as unknown as { ability?: string }).ability === 'Mega Sol' && !args.field.weather
+      ? { ...args.field, weather: 'Sun' }
+      : args.field;
   const moveOpts: Record<string, unknown> = { isCrit: args.critical };
   // Spread modifier: in doubles, moves targeting both foes (allAdjacentFoes)
   // or all adjacent (allAdjacent — both foes + ally) take a 0.75x damage
@@ -114,12 +123,19 @@ export function damageRange(args: {
     opts: moveOpts,
   });
   const move = new CalcMove(GEN, args.move, moveOpts as any);
-  const field = toCalcField(args.field, args.attackerSide, args.helpingHand);
+  const field = toCalcField(effField, args.attackerSide, args.helpingHand);
   const result = calculate(GEN, atk, def, move, field);
   const dmg = result.damage;
-  const rolls: number[] = Array.isArray(dmg)
+  const rawRolls: number[] = Array.isArray(dmg)
     ? (Array.isArray(dmg[0]) ? (dmg as number[][]).flat() : (dmg as number[]))
     : [dmg as number];
+  // Multi-hit moves (Dual Wingbeat, Bullet Seed, Rock Blast, Population Bomb…):
+  // @smogon/calc returns PER-HIT rolls, so a single roll undercounts the move by
+  // its hit count. kochance()/desc() are already total-based; only the raw rolls
+  // need scaling. `move.hits` is the calc-resolved hit count (e.g. 2; 3 for the
+  // 2-5 moves; 5 with Skill Link).
+  const hits = Math.max(1, ((move as unknown as { hits?: number }).hits) ?? 1);
+  const rolls = hits > 1 ? rawRolls.map(r => r * hits) : rawRolls;
   const min = rolls.length ? Math.min(...rolls) : 0;
   const max = rolls.length ? Math.max(...rolls) : 0;
   const maxHP = def.maxHP();

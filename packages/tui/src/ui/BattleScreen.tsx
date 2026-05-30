@@ -4,14 +4,14 @@ import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
 import type { Match, FieldState, DamageObservation, MoveAction, OpponentEntry, PokemonSet } from '@pokechamps/core/domain/types.js';
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
-import { scoreSpread, mostLikely } from '@pokechamps/core/domain/inference.js';
+import { scoreSpread, scoreOffensiveSpread, mostLikely } from '@pokechamps/core/domain/inference.js';
 import { maxHpFor } from '@pokechamps/core/domain/damage.js';
 import { endOfTurn } from '@pokechamps/core/domain/endOfTurn.js';
 import { inferOpponentSpeeds, applySpeedInference, actualSpeed, predictTurnOrder, effectiveSpeedRange } from '@pokechamps/core/domain/speed.js';
 import { reviewLastTurn } from '@pokechamps/core/ai/prompts.js';
 import { isAvailable as aiAvailable } from '@pokechamps/core/ai/client.js';
 import type { Stores } from '@pokechamps/core/storage/index.js';
-import { getSpecies, isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove } from '@pokechamps/core/domain/data.js';
+import { getSpecies, getMove, toId, isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove } from '@pokechamps/core/domain/data.js';
 import { defaultOpponentSet } from '@pokechamps/core/domain/bring.js';
 import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs, hazardClearEffect, applyHazardClear } from '@pokechamps/core/domain/hazards.js';
@@ -32,6 +32,7 @@ import { applyMegaAction } from '@pokechamps/core/domain/megaResolve.js';
 import { getMegaOptions } from '@pokechamps/core/domain/gimmicks/mega.js';
 import { solveEndgame } from '@pokechamps/core/domain/endgame.js';
 import type { EndgamePosition } from '@pokechamps/core/domain/endgame.js';
+import { createSearch, searchInputFromMatch, type SearchResult } from '@pokechamps/core/domain/endgameSearch.js';
 
 export interface BattleScreenProps {
   stores: Stores;
@@ -521,6 +522,60 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   }, [initial.id, stores]);
 
   const field: FieldState = match.field ?? NEUTRAL_FIELD;
+
+  // Always-on background lookahead. Whenever the position changes, restart
+  // iterative deepening (depth 1, 2, …) on a cooperative schedule — one depth
+  // per macrotask so Ink stays responsive — and publish the improving best
+  // play. Cancels on the next position change or unmount. See
+  // docs/notes/endgame-search-plan.md.
+  const [bestSearch, setBestSearch] = useState<SearchResult | null>(null);
+  // A cheap signature of everything the search depends on, so the effect only
+  // re-runs when the board actually changes (not on every keystroke render).
+  const posSig = useMemo(() => JSON.stringify([
+    match.bring, match.opponentBrought, match.myCurrentHp, match.myFainted, match.myBoosts, match.myStatus,
+    // Include inferred state — candidate count/spread + speed bounds + status —
+    // so the search also re-runs when a damage/speed observation narrows the
+    // belief without changing raw HP.
+    match.opponentTeam.map(o => [
+      o.species, o.currentHpPercent, o.fainted, o.status, o.speedFloor, o.speedCeiling,
+      o.candidates?.length,
+      o.candidates?.[0] && [o.candidates[0].evs.hp, o.candidates[0].evs.atk, o.candidates[0].evs.def, o.candidates[0].evs.spa, o.candidates[0].evs.spd, o.candidates[0].nature, o.candidates[0].item],
+    ]),
+    activeIdx, field.weather, field.terrain, field.trickRoom, field.myTailwind, field.theirTailwind,
+    match.outcome,
+  ]), [match, activeIdx, field]);
+  useEffect(() => {
+    if (match.outcome) { setBestSearch(null); return; }
+    const input = searchInputFromMatch(match, activeIdx);
+    const liveMine = input.mine.filter(m => m.hpPercent > 0).length;
+    const liveOpp = input.opp.filter(o => o.hpPercent > 0).length;
+    if (liveMine === 0 || liveOpp === 0) { setBestSearch(null); return; }
+
+    // Build the damage matrices once; deepen against them.
+    const search = createSearch(input);
+    let cancelled = false;
+    let depth = 1;
+    const MAX_DEPTH = 6;
+    const BUDGET_MS = 1500;
+    const start = Date.now();
+    const step = () => {
+      if (cancelled || depth > MAX_DEPTH) return;
+      const res = search.toDepth(depth);
+      if (cancelled) return;
+      setBestSearch(res);
+      depth += 1;
+      // Keep deepening until the outcome is genuinely FORCED (proven under
+      // worst-case rolls/items/mega). A shallow expected-pass "win" — e.g.
+      // KOing the two visible mons — is NOT a reason to stop: more mons and
+      // worse rolls can still flip it, so we keep looking.
+      const decided = res.forced;
+      if (depth <= MAX_DEPTH && !decided && Date.now() - start < BUDGET_MS) {
+        setTimeout(step, 0);
+      }
+    };
+    const handle = setTimeout(step, 0);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [posSig]); // eslint-disable-line react-hooks/exhaustive-deps
   const bringTeam = match.bring.map(i => match.myTeam[i]!);
   // Grows over the match — starts as the 2 leads, each opp switch may add
   // a new index up to a cap of 4 distinct mons.
@@ -577,6 +632,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       myTaunted: [...(match.myTaunted ?? [])],
       myTauntTurns: { ...(match.myTauntTurns ?? {}) },
       myEncoreTurns: { ...(match.myEncoreTurns ?? {}) },
+      myLeechSeeded: { ...(match.myLeechSeeded ?? {}) },
       myDisableTurns: { ...(match.myDisableTurns ?? {}) },
     };
 
@@ -717,6 +773,139 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       next.field = applyFieldMove(next.field ?? NEUTRAL_FIELD, a.side, fm, setterItem);
       inferenceNotes.push(`${a.move} set field state`);
     }
+    // Leech Seed: set the volatile on a foe target. Fails on Grass-types
+    // (immune) and on already-seeded targets. Mirror of engine.ts. Cleared on
+    // switch-out, drained + heals at EOT in endOfTurn.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.move !== 'Leech Seed') continue;
+      if (typeof a.target !== 'object') continue;
+      const tIdx = a.targetTeamIndex;
+      const sIdx = a.attackerTeamIndex;
+      if (tIdx == null || sIdx == null) continue;
+      if (a.target.side === 'theirs') {
+        const o = next.opponentTeam[tIdx];
+        if (!o || o.leechSeeded) continue;
+        const formeName = o.megaUsed && o.megaForme ? o.megaForme : o.species;
+        const types = (getSpecies(formeName) as { types?: string[] } | undefined)?.types;
+        if (types?.includes('Grass')) continue;
+        o.leechSeeded = { seederSide: a.side, seederIndex: sIdx };
+        inferenceNotes.push(`o${tIdx + 1} seeded`);
+      } else {
+        const set = next.myTeam[tIdx];
+        if (!set) continue;
+        if (next.myLeechSeeded?.[tIdx]) continue;
+        const formeName = next.myMegaUsed?.includes(tIdx) && next.myMegaForme?.[tIdx] ? next.myMegaForme[tIdx] : set.species;
+        const types = (getSpecies(formeName) as { types?: string[] } | undefined)?.types;
+        if (types?.includes('Grass')) continue;
+        next.myLeechSeeded = { ...(next.myLeechSeeded ?? {}), [tIdx]: { seederSide: a.side, seederIndex: sIdx } };
+        inferenceNotes.push(`m${tIdx + 1} seeded`);
+      }
+    }
+    // Move self-stat drops (Overheat / Leaf Storm / Draco Meteor −2 SpA, Close
+    // Combat −1 Def −1 SpD, …) auto-applied to the user when the move
+    // connects. Contrary inverts. Mirror of engine.ts.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.attackerTeamIndex == null) continue;
+      if (a.damageHpPercent == null && a.damageRaw == null) continue;
+      const m = getMove(a.move) as { self?: { boosts?: BoostMap } } | undefined;
+      const boosts = m?.self?.boosts;
+      if (!boosts) continue;
+      const abil = a.side === 'mine'
+        ? next.myTeam[a.attackerTeamIndex]?.ability
+        : next.opponentTeam[a.attackerTeamIndex]?.ability;
+      const contrary = !!abil && toId(abil) === 'contrary';
+      const applied: BoostMap = {};
+      for (const [stat, delta] of Object.entries(boosts)) {
+        applied[stat as keyof BoostMap] = contrary ? -(delta as number) : (delta as number);
+      }
+      applyBoostsInto(next, a.side, a.attackerTeamIndex, applied);
+    }
+
+    // Drain moves (Giga Drain / Drain Punch / …): heal attacker by drain
+    // fraction of damage dealt. Mirror of engine.ts.
+    const maxHpOf = (side: 'mine' | 'theirs', idx: number): number => {
+      if (side === 'mine') return next.myTeam[idx] ? maxHpFor(next.myTeam[idx]!) : 0;
+      const e = next.opponentTeam[idx];
+      if (!e) return 0;
+      return e.candidates?.[0] ? maxHpFor(e.candidates[0]!) : maxHpFor(defaultOpponentSet(e, 50));
+    };
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.attackerTeamIndex == null) continue;
+      if (a.damageHpPercent == null) continue;
+      if (typeof a.target !== 'object') continue;
+      const tIdx = a.targetTeamIndex;
+      if (tIdx == null) continue;
+      const m = getMove(a.move) as { drain?: [number, number] } | undefined;
+      const drain = m?.drain;
+      if (!drain) continue;
+      const defMax = maxHpOf(a.target.side, tIdx);
+      const atkMax = maxHpOf(a.side, a.attackerTeamIndex);
+      if (!defMax || !atkMax) continue;
+      const dmgAbs = (a.damageHpPercent / 100) * defMax;
+      const healPct = (dmgAbs * drain[0] / drain[1]) / atkMax * 100;
+      if (a.side === 'mine') {
+        next.myCurrentHp = next.myCurrentHp ?? {};
+        next.myCurrentHp[a.attackerTeamIndex] = Math.min(100, (next.myCurrentHp[a.attackerTeamIndex] ?? 100) + healPct);
+      } else {
+        const o = next.opponentTeam[a.attackerTeamIndex];
+        if (o) o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + healPct);
+      }
+    }
+
+    // Spicy Spray (custom defender ability): when a damaging hit lands on the
+    // holder, the attacker is burned (Fire-immune + non-volatile-statused skip).
+    // Mirror of engine.ts.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.attackerTeamIndex == null) continue;
+      if (a.damageHpPercent == null && a.damageRaw == null) continue;
+      if (typeof a.target !== 'object') continue;
+      const tIdx = a.targetTeamIndex;
+      if (tIdx == null) continue;
+      let defAbility: string | undefined;
+      let defFormeName = '';
+      if (a.target.side === 'theirs') {
+        const o = next.opponentTeam[tIdx];
+        if (!o) continue;
+        defFormeName = o.megaUsed && o.megaForme ? o.megaForme : o.species;
+        defAbility = o.megaUsed && o.megaForme
+          ? ((getSpecies(o.megaForme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? o.ability ?? undefined)
+          : (o.ability ?? undefined);
+      } else {
+        const set = next.myTeam[tIdx];
+        if (!set) continue;
+        const megaForme = next.myMegaUsed?.includes(tIdx) ? next.myMegaForme?.[tIdx] : undefined;
+        defFormeName = megaForme ?? set.species;
+        defAbility = megaForme
+          ? ((getSpecies(megaForme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? set.ability ?? undefined)
+          : (set.ability ?? undefined);
+      }
+      if (!defAbility || toId(defAbility) !== 'spicyspray') continue;
+      const aIdx = a.attackerTeamIndex;
+      const aSide = a.side;
+      let atkFormeName = '';
+      if (aSide === 'mine') {
+        const myMega = next.myMegaUsed?.includes(aIdx) ? next.myMegaForme?.[aIdx] : undefined;
+        atkFormeName = myMega ?? next.myTeam[aIdx]?.species ?? '';
+      } else {
+        const oppEntry = next.opponentTeam[aIdx];
+        atkFormeName = (oppEntry?.megaUsed && oppEntry.megaForme) || oppEntry?.species || '';
+      }
+      const atkTypes = (getSpecies(atkFormeName) as { types?: string[] } | undefined)?.types ?? [];
+      if (atkTypes.includes('Fire')) continue;
+      if (aSide === 'mine') {
+        if (next.myStatus?.[aIdx]) continue;
+        next.myStatus = { ...(next.myStatus ?? {}), [aIdx]: 'brn' };
+      } else {
+        const o = next.opponentTeam[aIdx];
+        if (!o || o.status) continue;
+        o.status = 'brn';
+      }
+      inferenceNotes.push(`${aSide === 'mine' ? 'm' : 'o'}${aIdx + 1} burned (Spicy Spray on ${defFormeName})`);
+    }
     // Item-removing moves (Knock Off / Thief / Covet / berry-eaters).
     for (const a of draftActions) {
       if (a.kind === 'switch' || a.kind === 'mega') continue;
@@ -824,6 +1013,44 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       }
     }
 
+    // Offensive inference: opp landed a damaging move on one of my known mons →
+    // narrow their Atk/SpA (the defensive solver never touches those). Mirror of
+    // engine.ts. Chains onto the candidates we already have.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.side !== 'theirs') continue;
+      if (sashProcced(a)) continue;
+      if (a.damageHpPercent == null && a.damageRaw == null) continue;
+      if (typeof a.target !== 'object' || a.target.side !== 'mine') continue;
+      const oppIdx = a.attackerTeamIndex;
+      const myIdx = a.targetTeamIndex;
+      if (oppIdx == null || myIdx == null) continue;
+      const opp = next.opponentTeam[oppIdx];
+      const defenderSet = next.myTeam[myIdx];
+      if (!opp?.candidates?.length || !defenderSet) continue;
+      const attackerSpecies = opp.megaUsed && opp.megaForme ? opp.megaForme : opp.species;
+      const obs: DamageObservation = {
+        attackerSide: 'theirs', attackerSpecies, defenderSide: 'mine', defenderSpecies: defenderSet.species,
+        move: a.move, field,
+        damageHpPercent: a.damageHpPercent, damageRaw: a.damageRaw,
+        defenderGimmickActive: next.myMegaUsed?.includes(myIdx),
+        critical: a.critical,
+      };
+      try {
+        const scored = scoreOffensiveSpread({
+          attackerSpecies, attackerLevel: defenderSet.level,
+          startingCandidates: opp.candidates.map(c => ({ evs: c.evs, nature: c.nature, item: c.item, ability: c.ability })),
+          attackerMoves: opp.knownMoves, move: a.move, defenderSet, observation: obs,
+        });
+        const candidateSets = scored.map(s => ({
+          species: opp.candidates![0]!.species, level: defenderSet.level,
+          item: s.candidate.item, ability: s.candidate.ability, nature: s.candidate.nature,
+          evs: s.candidate.evs, ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 }, moves: opp.knownMoves,
+        }));
+        next.opponentTeam[oppIdx] = { ...next.opponentTeam[oppIdx]!, candidates: candidateSets, candidateLikelihoods: scored.map(s => s.likelihood) };
+      } catch { /* keep prior belief */ }
+    }
+
     // Speed inference uses the whole match history. Apply to opp team.
     const speeds = inferOpponentSpeeds(next, next.myTeam);
     applySpeedInference(next.opponentTeam, speeds);
@@ -840,12 +1067,12 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (a.kind !== 'switch' || a.targetTeamIndex == null) continue;
       if (a.side === 'mine') {
         const outgoing = nextActive.mine[a.attackerSlot];
-        if (outgoing != null) { delete next.myBoosts[outgoing]; next.myTaunted = (next.myTaunted ?? []).filter(i => i !== outgoing); if (next.myEncoreMove) delete next.myEncoreMove[outgoing]; if (next.myDisabledMove) delete next.myDisabledMove[outgoing]; if (next.myTauntTurns) delete next.myTauntTurns[outgoing]; if (next.myEncoreTurns) delete next.myEncoreTurns[outgoing]; if (next.myDisableTurns) delete next.myDisableTurns[outgoing]; }
+        if (outgoing != null) { delete next.myBoosts[outgoing]; next.myTaunted = (next.myTaunted ?? []).filter(i => i !== outgoing); if (next.myEncoreMove) delete next.myEncoreMove[outgoing]; if (next.myDisabledMove) delete next.myDisabledMove[outgoing]; if (next.myTauntTurns) delete next.myTauntTurns[outgoing]; if (next.myEncoreTurns) delete next.myEncoreTurns[outgoing]; if (next.myDisableTurns) delete next.myDisableTurns[outgoing]; if (next.myLeechSeeded) delete next.myLeechSeeded[outgoing]; }
         nextActive.mine[a.attackerSlot] = a.targetTeamIndex;
       } else {
         const outgoing = nextActive.theirs[a.attackerSlot];
         if (outgoing != null && next.opponentTeam[outgoing]) {
-          next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {}, taunted: undefined, encoreMove: undefined, disabledMove: undefined, tauntTurns: undefined, encoreTurns: undefined, disableTurns: undefined };
+          next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {}, taunted: undefined, encoreMove: undefined, disabledMove: undefined, tauntTurns: undefined, encoreTurns: undefined, disableTurns: undefined, leechSeeded: undefined };
         }
         nextActive.theirs[a.attackerSlot] = a.targetTeamIndex;
       }
@@ -1392,6 +1619,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         slot: s as 0 | 1,
         set: idx != null ? match.myTeam[idx] ?? null : null,
         status: idx != null ? match.myStatus?.[idx] : undefined,
+        // Already mega'd own mon → order at its mega forme's speed (matches the
+        // matchup grid, which uses the mega forme for an active mega).
+        formeOverride: idx != null && match.myMegaUsed?.includes(idx)
+          ? match.myMegaForme?.[idx]
+          : undefined,
       };
     }),
     oppActives: [0, 1].map(s => ({ slot: s as 0 | 1, entry: activeIdx.theirs[s] != null ? match.opponentTeam[activeIdx.theirs[s]!] ?? null : null })),
@@ -1534,6 +1766,43 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   return (
     <Box flexDirection="column" padding={1}>
       <Text bold color="cyan">Battle — turn {match.turns.length + 1}{draftActions.length ? ' (composing)' : ''}</Text>
+      {!match.outcome && bestSearch && bestSearch.plays.length > 0 && (() => {
+        const v = bestSearch.verdict;
+        // "forced" only when the search PROVED it (worst-case rolls, survival
+        // items, all opp mons known). Otherwise a hedged, number-driven read.
+        const wc = bestSearch.winChance;
+        let vText: string;
+        let vColor: string;
+        if (bestSearch.forced) {
+          vText = v === 'winning' ? 'forced win' : 'forced loss';
+          vColor = v === 'winning' ? 'green' : 'red';
+        } else if (wc != null) {
+          vText = `~${Math.round(wc * 100)}% to win`;
+          vColor = wc >= 0.6 ? 'green' : wc <= 0.35 ? 'red' : 'yellow';
+        } else {
+          vText = v === 'winning' ? 'likely win' : v === 'losing' ? 'likely loss' : 'even';
+          vColor = v === 'winning' ? 'green' : v === 'losing' ? 'red' : 'yellow';
+        }
+        const turns = bestSearch.depth;
+        const conf = `${turns} turn${turns === 1 ? '' : 's'} ahead`;
+        const plays = bestSearch.plays
+          .map(p => `${p.mySpecies}→${p.move || '—'}→${p.targetSpecies}`)
+          .join(' · ');
+        const mega = bestSearch.megaMon ? `mega ${bestSearch.megaMon} · ` : '';
+        // Compact risk breakdown: "label NN%", joined — labels are self-explanatory.
+        const riskText = bestSearch.risks
+          .map(r => `${r.label}${r.prob != null ? ` ${Math.round(r.prob * 100)}%` : ''}`)
+          .join(' · ');
+        return (
+          <>
+            <Text>
+              <Text color="magenta">⌁ best play </Text><Text dimColor>({conf})</Text><Text color="magenta">: </Text>
+              {mega ? <Text color="cyan">{mega}</Text> : null}{plays}  <Text color={vColor}>— {vText}</Text>
+            </Text>
+            {riskText ? <Text dimColor>   risks: {riskText}</Text> : null}
+          </>
+        );
+      })()}
       {match.outcome && (
         <Box flexDirection="column" borderStyle="double" borderColor={match.outcome === 'victory' ? 'green' : match.outcome === 'defeat' ? 'red' : 'yellow'} paddingX={2} marginY={1}>
           <Text bold color={match.outcome === 'victory' ? 'green' : match.outcome === 'defeat' ? 'red' : 'yellow'}>

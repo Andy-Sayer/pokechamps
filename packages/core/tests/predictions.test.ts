@@ -177,3 +177,20 @@ describe('speedVerdict', () => {
     expect(speedVerdict({ mySet: fast, opp, field: { ...NEUTRAL_FIELD, trickRoom: true } })).toBe('slower');
   });
 });
+
+describe('percentRolls — spread + roll distribution for KO odds', () => {
+  const flutter = mon({
+    species: 'Flutter Mane', ability: 'Protosynthesis', nature: 'Timid',
+    evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Moonblast'],
+  });
+
+  test('is populated and pools rolls across candidate spreads', () => {
+    const bulky = mon({ species: 'Garchomp', nature: 'Jolly', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: [] });
+    const frail = mon({ species: 'Garchomp', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: [] });
+    const opp: OpponentEntry = { species: 'Garchomp', knownMoves: [], candidates: [bulky, frail] };
+    const off = predictOffense({ attacker: flutter, opponent: opp, field: NEUTRAL_FIELD });
+    // Rolls pooled across BOTH spreads (16 each) → distribution spans bulk uncertainty.
+    expect(off!.percentRolls!.length).toBeGreaterThan(16);
+    expect(Math.min(...off!.percentRolls!)).toBeLessThan(Math.max(...off!.percentRolls!));
+  });
+});

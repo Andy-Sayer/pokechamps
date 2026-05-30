@@ -1,8 +1,10 @@
 # PokeChamps roadmap
 
+> **See also:** [`accuracy-roadmap.md`](accuracy-roadmap.md) — a focused, tiered punch-list of damage/state/inference/search fidelity gaps and the order to close them. Maintained alongside this strategic doc.
+
 ## Context
 
-**Last updated 2026-05-24.** 492 tests across 4 workspaces, all green.
+**Last updated 2026-05-29.** 594 tests across 4 workspaces, all green.
 A root `vitest.config.ts`
 (`test.projects`) now aggregates every workspace's own config, so both
 `npm test` and a bare `npx vitest run` from the repo root pass —
@@ -313,8 +315,11 @@ Beyond that:
 
 - **Switch-in advice when current matchup is bad.** Computed today
   (BringPicker matchup grid) but not surfaced mid-battle.
-- **Multi-turn lookahead.** "If I do X, opp likely does Y, then end-
-  state Z." Lightweight search over reasonable opp move choices.
+- ~~**Multi-turn lookahead.**~~ ✅ Shipped as an **always-on background
+  search** (`endgameSearch.ts` + `BattleScreen` cooperative scheduler):
+  iterative-deepening maximin over move-pairs with turn-order awareness,
+  updating a "⌁ best play (depth N)" line live. Plan +
+  scope/limits in `docs/notes/endgame-search-plan.md`.
 - **Endgame solver.** Down to 2 mons each — enumerate possibilities and
   surface the best play. Bounded enough to compute live.
 - **Counter teaming from match history.** "You're 0-3 vs this opp's
@@ -510,7 +515,8 @@ plays matches live + finds bugs by doing so:
     Wait for Champions to actually rotate to Tera before spending the
     effort.
 14. **A.4 — Dynamax + Z-Move gimmicks.** Champions hasn't enabled them.
-15. **C.2 — Multi-turn lookahead.** Wants Bayesian inference done first.
+15. ~~**C.2 — Multi-turn lookahead.**~~ ✅ Shipped — always-on background
+    iterative-deepening search (see pillar C + `endgame-search-plan.md`).
 16. **G — Match share links + per-opp tracking.** `/match/:id/public`
     read-only URL; cross-match opp history (ELO trend, common brings).
     Natural follow-ons now the server is deployable.

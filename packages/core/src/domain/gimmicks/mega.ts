@@ -131,6 +131,20 @@ export const megaGimmick: Gimmick = {
     return inner.get(toId(set.species)) ?? null;
   },
 
+  // On mega evolution the ability becomes the mega forme's ability. A team set
+  // carries the BASE forme's ability, so once the mon is actually mega'd we
+  // override it for the calc — otherwise damage-affecting mega abilities (Tough
+  // Claws, Aerilate, Mega Launcher, Pixilate, Adaptability, Filter, Thick Fat,
+  // Multiscale, …) and the format's custom ones are silently dropped from both
+  // offensive and defensive calculations.
+  enrichCalcPokemon({ set, active, opts }) {
+    if (!active || !set.item) return;
+    const forme = megaFormeByItem.get(toId(set.item))?.get(toId(set.species));
+    if (!forme) return;
+    const ability = ((dex.species.get(forme) as any)?.abilities as Record<string, string> | undefined)?.['0'];
+    if (ability) opts.ability = ability;
+  },
+
   enumerateOpponentVariants(speciesId) {
     const sid = toId(speciesId);
     const stones = stonesBySpecies.get(sid) ?? [];

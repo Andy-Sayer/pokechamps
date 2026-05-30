@@ -111,3 +111,97 @@ describe('Item signals: sandChipObserved', () => {
     }
   });
 });
+
+describe('scoreOffensiveSpread — infer opponent Atk/SpA from their hit on a known mon', () => {
+  const mkMon = (p: Partial<PokemonSet> & { species: string }): PokemonSet => ({
+    level: 50, nature: 'Hardy', evs: { ...ZERO_EVS }, ivs: MAX_IVS, moves: [], ...p,
+  });
+  // My known defender.
+  const myIncin = mkMon({ species: 'Incineroar', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 4 } });
+
+  test('a max-Atk physical hit forces high inferred Atk and prunes the 0-Atk reading', async () => {
+    const { scoreOffensiveSpread } = await import('../src/domain/inference.js');
+    const { damageRange } = await import('../src/domain/damage.js');
+    // Reference damage from an actual 252-Atk Adamant Garchomp Earthquake.
+    const ref = damageRange({
+      attacker: mkMon({ species: 'Garchomp', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Earthquake'] }),
+      defender: myIncin, move: 'Earthquake', field: NEUTRAL_FIELD, attackerSide: 'theirs',
+    });
+    const observedPct = (ref.minPercent + ref.maxPercent) / 2;
+    const scored = scoreOffensiveSpread({
+      attackerSpecies: 'Garchomp', attackerLevel: 50,
+      startingCandidates: [{ evs: { ...ZERO_EVS }, nature: 'Adamant' }],
+      attackerMoves: ['Earthquake'], move: 'Earthquake', defenderSet: myIncin,
+      observation: {
+        attackerSide: 'theirs', attackerSpecies: 'Garchomp', defenderSide: 'mine',
+        defenderSpecies: 'Incineroar', move: 'Earthquake', field: NEUTRAL_FIELD, damageHpPercent: observedPct,
+      },
+    });
+    expect(scored.length).toBeGreaterThan(0);
+    // 0-Atk cannot explain a max-Atk hit → every surviving candidate invests Atk.
+    expect(scored.every(s => s.candidate.evs.atk > 0)).toBe(true);
+    expect(Math.max(...scored.map(s => s.candidate.evs.atk))).toBeGreaterThanOrEqual(196);
+  });
+
+  test('passes through unchanged for moves whose damage ignores the user offense (Foul Play)', async () => {
+    const { scoreOffensiveSpread } = await import('../src/domain/inference.js');
+    const start: SpreadCandidate[] = [{ evs: { ...ZERO_EVS }, nature: 'Adamant' }];
+    const scored = scoreOffensiveSpread({
+      attackerSpecies: 'Grimmsnarl', attackerLevel: 50, startingCandidates: start,
+      attackerMoves: ['Foul Play'], move: 'Foul Play', defenderSet: myIncin,
+      observation: {
+        attackerSide: 'theirs', attackerSpecies: 'Grimmsnarl', defenderSide: 'mine',
+        defenderSpecies: 'Incineroar', move: 'Foul Play', field: NEUTRAL_FIELD, damageHpPercent: 40,
+      },
+    });
+    expect(scored.map(s => s.candidate)).toEqual(start);
+  });
+});
+
+describe('scoreOffensiveSpread — extreme hit promotes the offensive nature', () => {
+  const mk = (p: Partial<PokemonSet> & { species: string }): PokemonSet => ({
+    level: 50, nature: 'Hardy', evs: { ...ZERO_EVS }, ivs: MAX_IVS, moves: [], ...p,
+  });
+  const myIncin = mk({ species: 'Incineroar', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 4 } });
+
+  test('a hit no neutral nature can produce commits to +Atk (Adamant)', async () => {
+    const { scoreOffensiveSpread } = await import('../src/domain/inference.js');
+    const { damageRange } = await import('../src/domain/damage.js');
+    // Top roll of a max-Atk Adamant Earthquake — unreachable by a neutral nature.
+    const ref = damageRange({
+      attacker: mk({ species: 'Garchomp', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Earthquake'] }),
+      defender: myIncin, move: 'Earthquake', field: NEUTRAL_FIELD, attackerSide: 'theirs',
+    });
+    const scored = scoreOffensiveSpread({
+      attackerSpecies: 'Garchomp', attackerLevel: 50,
+      startingCandidates: [{ evs: { ...ZERO_EVS }, nature: 'Hardy' }], // neutral only
+      attackerMoves: ['Earthquake'], move: 'Earthquake', defenderSet: myIncin,
+      observation: {
+        attackerSide: 'theirs', attackerSpecies: 'Garchomp', defenderSide: 'mine',
+        defenderSpecies: 'Incineroar', move: 'Earthquake', field: NEUTRAL_FIELD, damageHpPercent: ref.maxPercent,
+      },
+    });
+    expect(scored.length).toBeGreaterThan(0);
+    expect(scored.every(s => s.candidate.nature === 'Adamant')).toBe(true);
+  });
+});
+
+describe('scoreSpread — candidate items respect the format allow-list', () => {
+  test('every returned candidate holds a format-legal item (or no item)', async () => {
+    const { inferSpread } = await import('../src/domain/inference.js');
+    const { isLegalItem } = await import('../src/domain/data.js');
+    // A specs-Calyrex hit on Incineroar — runs the priors path (quickOnly).
+    // The format-legality filter applies to BOTH priors and the coarse-grid
+    // fallback, so this is a sufficient check on the filter wiring.
+    const cands = inferSpread({
+      defenderSpecies: 'Incineroar', defenderLevel: 50, knownDefenderMoves: [],
+      attackerSet: attacker, observation: observe(40),
+      quickOnly: true,
+    });
+    expect(cands.length).toBeGreaterThan(0);
+    for (const c of cands) {
+      if (!c.item) continue; // empty/"no item" is always allowed
+      expect(isLegalItem(c.item)).toBe(true);
+    }
+  });
+});

@@ -20,7 +20,7 @@ import type {
   Turn,
 } from '../domain/types.js';
 import { NEUTRAL_FIELD } from '../domain/types.js';
-import { scoreSpread } from '../domain/inference.js';
+import { scoreSpread, scoreOffensiveSpread } from '../domain/inference.js';
 import { maxHpFor } from '../domain/damage.js';
 import { endOfTurn } from '../domain/endOfTurn.js';
 import { inferOpponentSpeeds, applySpeedInference } from '../domain/speed.js';
@@ -32,6 +32,7 @@ import {
   applyHazardClear,
 } from '../domain/hazards.js';
 import { fieldMoveEffect, applyFieldMove } from '../domain/fieldMoves.js';
+import { defaultOpponentSet } from '../domain/bring.js';
 import { applyMegaAction } from '../domain/megaResolve.js';
 import {
   switchInAbilityEffect,
@@ -42,7 +43,7 @@ import {
 } from '../domain/abilities.js';
 import { sashProcced } from '../domain/itemSignals.js';
 import { EFFECT_DURATIONS } from '../domain/durations.js';
-import { isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, getSpecies } from '../domain/data.js';
+import { isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, getSpecies, getMove, toId } from '../domain/data.js';
 import type { StateUpdate, HazardUpdate } from '../domain/turnparser.js';
 
 export type ActiveIdx = {
@@ -140,12 +141,15 @@ function clearMyVolatiles(match: Match, idx: number): void {
   if (match.myTauntTurns) delete match.myTauntTurns[idx];
   if (match.myEncoreTurns) delete match.myEncoreTurns[idx];
   if (match.myDisableTurns) delete match.myDisableTurns[idx];
+  // Leech Seed clears when the seeded mon switches out.
+  if (match.myLeechSeeded) delete match.myLeechSeeded[idx];
 }
 
 // Clear opp move-restricting volatiles + their counters (switch-out / cure).
 function clearOppVolatiles(o: OpponentEntry): void {
   o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined;
   o.tauntTurns = undefined; o.encoreTurns = undefined; o.disableTurns = undefined;
+  o.leechSeeded = undefined;
 }
 
 // Merge a boost map into a side's active-slot boosts, clamped to [-6, +6].
@@ -384,6 +388,7 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     myTauntTurns: { ...(match.myTauntTurns ?? {}) },
     myEncoreTurns: { ...(match.myEncoreTurns ?? {}) },
     myDisableTurns: { ...(match.myDisableTurns ?? {}) },
+    myLeechSeeded: { ...(match.myLeechSeeded ?? {}) },
   };
 
   // Walk damaging actions in order, deriving each action's damageHpPercent
@@ -528,6 +533,145 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     inferenceNotes.push(`${a.move} set field state`);
   }
 
+  // Leech Seed: set the volatile on a foe target. Fails on Grass-types
+  // (immune) and on already-seeded targets. Cleared on switch-out by
+  // clearMy/OppVolatiles, drained + heals at EOT in endOfTurn.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (a.move !== 'Leech Seed') continue;
+    if (typeof a.target !== 'object') continue;
+    const tIdx = a.targetTeamIndex;
+    const sIdx = a.attackerTeamIndex;
+    if (tIdx == null || sIdx == null) continue;
+    if (a.target.side === 'theirs') {
+      const o = next.opponentTeam[tIdx];
+      if (!o || o.leechSeeded) continue;
+      const formeName = o.megaUsed && o.megaForme ? o.megaForme : o.species;
+      const types = (getSpecies(formeName) as { types?: string[] } | undefined)?.types;
+      if (types?.includes('Grass')) continue;
+      o.leechSeeded = { seederSide: a.side, seederIndex: sIdx };
+      inferenceNotes.push(`o${tIdx + 1} seeded`);
+    } else {
+      const set = next.myTeam[tIdx];
+      if (!set) continue;
+      if (next.myLeechSeeded?.[tIdx]) continue;
+      const formeName = next.myMegaUsed?.includes(tIdx) && next.myMegaForme?.[tIdx] ? next.myMegaForme[tIdx] : set.species;
+      const types = (getSpecies(formeName) as { types?: string[] } | undefined)?.types;
+      if (types?.includes('Grass')) continue;
+      next.myLeechSeeded = { ...(next.myLeechSeeded ?? {}), [tIdx]: { seederSide: a.side, seederIndex: sIdx } };
+      inferenceNotes.push(`m${tIdx + 1} seeded`);
+    }
+  }
+
+  // Move self-stat drops (Overheat / Leaf Storm / Draco Meteor −2 SpA, Close
+  // Combat −1 Def −1 SpD, Hammer Arm −1 Spe, …). Auto-apply once the move
+  // connects (damage logged); Contrary inverts the boost. Mirror in
+  // BattleScreen.tsx.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (a.attackerTeamIndex == null) continue;
+    if (a.damageHpPercent == null && a.damageRaw == null) continue; // missed → no self-drop
+    const m = getMove(a.move) as { self?: { boosts?: BoostMap } } | undefined;
+    const boosts = m?.self?.boosts;
+    if (!boosts) continue;
+    const abil = a.side === 'mine'
+      ? next.myTeam[a.attackerTeamIndex]?.ability
+      : next.opponentTeam[a.attackerTeamIndex]?.ability;
+    const contrary = !!abil && toId(abil) === 'contrary';
+    const applied: BoostMap = {};
+    for (const [stat, delta] of Object.entries(boosts)) {
+      applied[stat as keyof BoostMap] = contrary ? -(delta as number) : (delta as number);
+    }
+    applyBoostsTo(next, a.side, a.attackerTeamIndex, applied);
+  }
+
+  // Drain moves (Giga Drain, Drain Punch, Leech Life, …): heal the attacker by
+  // drain[0]/drain[1] of damage dealt (absolute HP → attacker's %). Mirror in
+  // BattleScreen.tsx.
+  const maxHpOf = (side: 'mine' | 'theirs', idx: number): number => {
+    if (side === 'mine') return next.myTeam[idx] ? maxHpFor(next.myTeam[idx]!) : 0;
+    const e = next.opponentTeam[idx];
+    if (!e) return 0;
+    return e.candidates?.[0] ? maxHpFor(e.candidates[0]!) : maxHpFor(defaultOpponentSet(e, 50));
+  };
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (a.attackerTeamIndex == null) continue;
+    if (a.damageHpPercent == null) continue;
+    if (typeof a.target !== 'object') continue;
+    const tIdx = a.targetTeamIndex;
+    if (tIdx == null) continue;
+    const m = getMove(a.move) as { drain?: [number, number] } | undefined;
+    const drain = m?.drain;
+    if (!drain) continue;
+    const defMax = maxHpOf(a.target.side, tIdx);
+    const atkMax = maxHpOf(a.side, a.attackerTeamIndex);
+    if (!defMax || !atkMax) continue;
+    const dmgAbs = (a.damageHpPercent / 100) * defMax;
+    const healPct = (dmgAbs * drain[0] / drain[1]) / atkMax * 100;
+    if (a.side === 'mine') {
+      next.myCurrentHp = next.myCurrentHp ?? {};
+      next.myCurrentHp[a.attackerTeamIndex] = Math.min(100, (next.myCurrentHp[a.attackerTeamIndex] ?? 100) + healPct);
+    } else {
+      const o = next.opponentTeam[a.attackerTeamIndex];
+      if (o) o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + healPct);
+    }
+  }
+
+  // Spicy Spray (Champions custom defender ability): when a damaging hit lands
+  // on its holder, the attacker is burned. Skip Fire-types (burn-immune) and
+  // attackers already non-volatile-statused. Effective ability honors mega.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (a.attackerTeamIndex == null) continue;
+    if (a.damageHpPercent == null && a.damageRaw == null) continue;
+    if (typeof a.target !== 'object') continue;
+    const tIdx = a.targetTeamIndex;
+    if (tIdx == null) continue;
+    // Resolve defender's effective ability (mega forme's if mega'd).
+    let defAbility: string | undefined;
+    let defFormeName = '';
+    if (a.target.side === 'theirs') {
+      const o = next.opponentTeam[tIdx];
+      if (!o) continue;
+      defFormeName = o.megaUsed && o.megaForme ? o.megaForme : o.species;
+      defAbility = o.megaUsed && o.megaForme
+        ? ((getSpecies(o.megaForme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? o.ability ?? undefined)
+        : (o.ability ?? undefined);
+    } else {
+      const set = next.myTeam[tIdx];
+      if (!set) continue;
+      const megaForme = next.myMegaUsed?.includes(tIdx) ? next.myMegaForme?.[tIdx] : undefined;
+      defFormeName = megaForme ?? set.species;
+      defAbility = megaForme
+        ? ((getSpecies(megaForme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? set.ability ?? undefined)
+        : (set.ability ?? undefined);
+    }
+    if (!defAbility || toId(defAbility) !== 'spicyspray') continue;
+    // Attacker burn — skip Fire-types and if already statused.
+    const aIdx = a.attackerTeamIndex;
+    const aSide = a.side;
+    let atkFormeName = '';
+    if (aSide === 'mine') {
+      const myMega = next.myMegaUsed?.includes(aIdx) ? next.myMegaForme?.[aIdx] : undefined;
+      atkFormeName = myMega ?? next.myTeam[aIdx]?.species ?? '';
+    } else {
+      const oppEntry = next.opponentTeam[aIdx];
+      atkFormeName = (oppEntry?.megaUsed && oppEntry.megaForme) || oppEntry?.species || '';
+    }
+    const atkTypes = (getSpecies(atkFormeName) as { types?: string[] } | undefined)?.types ?? [];
+    if (atkTypes.includes('Fire')) continue;
+    if (aSide === 'mine') {
+      if (next.myStatus?.[aIdx]) continue;
+      next.myStatus = { ...(next.myStatus ?? {}), [aIdx]: 'brn' };
+    } else {
+      const o = next.opponentTeam[aIdx];
+      if (!o || o.status) continue;
+      o.status = 'brn';
+    }
+    inferenceNotes.push(`${aSide === 'mine' ? 'm' : 'o'}${aIdx + 1} burned (Spicy Spray on ${defFormeName})`);
+  }
+
   // Item-removing moves (Knock Off / Thief / Covet / berry-eaters). Mark the
   // target's item gone so the damage calc stops applying it. We don't always
   // know the opp's item — itemConsumed just needs to be truthy for the calc to
@@ -645,6 +789,46 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     } catch {
       inferenceNotes.push(`${opp.species}: inference failed`);
     }
+  }
+
+  // Offensive inference: when an opponent lands a damaging move on one of MY
+  // known mons, narrow their Atk/SpA investment (the defensive solver never
+  // touches those, so threats were otherwise computed from prior/zero offense).
+  // Chains onto the candidates we already have.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (a.side !== 'theirs') continue;
+    if (sashProcced(a)) continue;
+    if (a.damageHpPercent == null && a.damageRaw == null) continue;
+    if (typeof a.target !== 'object' || a.target.side !== 'mine') continue;
+    const oppIdx = a.attackerTeamIndex;
+    const myIdx = a.targetTeamIndex;
+    if (oppIdx == null || myIdx == null) continue;
+    const opp = next.opponentTeam[oppIdx];
+    const defenderSet = next.myTeam[myIdx];
+    if (!opp?.candidates?.length || !defenderSet) continue;
+    // Use the opp's active forme (mega if they've mega'd) for the calc.
+    const attackerSpecies = opp.megaUsed && opp.megaForme ? opp.megaForme : opp.species;
+    const obs: DamageObservation = {
+      attackerSide: 'theirs', attackerSpecies, defenderSide: 'mine', defenderSpecies: defenderSet.species,
+      move: a.move, field,
+      damageHpPercent: a.damageHpPercent, damageRaw: a.damageRaw,
+      defenderGimmickActive: next.myMegaUsed?.includes(myIdx),
+      critical: a.critical,
+    };
+    try {
+      const scored = scoreOffensiveSpread({
+        attackerSpecies, attackerLevel: defenderSet.level,
+        startingCandidates: opp.candidates.map(c => ({ evs: c.evs, nature: c.nature, item: c.item, ability: c.ability })),
+        attackerMoves: opp.knownMoves, move: a.move, defenderSet, observation: obs,
+      });
+      const candidateSets: PokemonSet[] = scored.map(s => ({
+        species: opp.candidates![0]!.species, level: defenderSet.level,
+        item: s.candidate.item, ability: s.candidate.ability, nature: s.candidate.nature,
+        evs: s.candidate.evs, ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 }, moves: opp.knownMoves,
+      }));
+      next.opponentTeam[oppIdx] = { ...next.opponentTeam[oppIdx]!, candidates: candidateSets, candidateLikelihoods: scored.map(s => s.likelihood) };
+    } catch { /* keep prior belief */ }
   }
 
   // Tag pivot-follow switches. A pivot move (U-turn etc.) executes, then
@@ -775,6 +959,7 @@ function applyStateUpdateImpl(
     myTauntTurns: { ...(match.myTauntTurns ?? {}) },
     myEncoreTurns: { ...(match.myEncoreTurns ?? {}) },
     myDisableTurns: { ...(match.myDisableTurns ?? {}) },
+    myLeechSeeded: { ...(match.myLeechSeeded ?? {}) },
   };
   const nextActive: ActiveIdx = {
     mine: [activeIdx.mine[0], activeIdx.mine[1]],

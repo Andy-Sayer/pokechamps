@@ -2,6 +2,8 @@ node_modules/
 dist/
 matches/
 data/exports/
+# Saved teams are personal/local — created at runtime, not shipped with the repo.
+data/my-teams/
 *.tsbuildinfo
 
 # Server runtime sqlite data (native dev) — Docker uses a named volume

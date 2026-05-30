@@ -6,8 +6,12 @@ import { getSpecies, getMove } from './data.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const typesPath = join(__dirname, '..', '..', '..', '..', 'data', 'types.json');
 
-// damageTaken encoding (Showdown): 0=neutral, 1=resist (.5x), 2=weak (2x), 3=immune (0x)
-const MULT: Record<number, number> = { 0: 1, 1: 0.5, 2: 2, 3: 0 };
+// damageTaken encoding (Showdown's @pkmn/dex dump): 0=neutral, 1=WEAK (2×),
+// 2=RESIST (0.5×), 3=IMMUNE (0×). Verified against data/types.json (Fire's
+// damageTaken.Bug = 2 — Fire resists Bug; Ground's damageTaken.Ice = 1 — Ground
+// is weak to Ice). The original comment + mapping here had 1 and 2 swapped,
+// which inverted Stealth Rock chip and the bring-scoring matchup axes.
+const MULT: Record<number, number> = { 0: 1, 1: 2, 2: 0.5, 3: 0 };
 
 type TypeEntry = { damageTaken?: Record<string, number> };
 const TYPES: Record<string, TypeEntry> = existsSync(typesPath)
