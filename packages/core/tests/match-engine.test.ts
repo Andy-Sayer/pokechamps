@@ -631,3 +631,127 @@ describe('Status berries auto-cure on status application (my side)', () => {
     expect(r.match.myItemConsumed?.[4]).toBe('Pecha Berry');
   });
 });
+
+describe('Status moves auto-apply status', () => {
+  test('Will-O-Wisp burns opp target', () => {
+    // Use Garchomp (Dragon/Ground) — not Fire-type, so burn lands.
+    const match = freshMatch({ oppSpecies: ['Garchomp', 'Amoonguss', 'Incineroar', 'Talonflame'] });
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Will-O-Wisp',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.opponentTeam[0]!.status).toBe('brn');
+  });
+
+  test('Will-O-Wisp does NOT burn Fire-type opp', () => {
+    // Incineroar is Fire/Dark — immune to burn.
+    const match = freshMatch({ oppSpecies: ['Incineroar', 'Amoonguss', 'Garchomp', 'Talonflame'] });
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Will-O-Wisp',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.opponentTeam[0]!.status).toBeUndefined();
+  });
+
+  test('Thunder Wave paralyzes opp target', () => {
+    const match = freshMatch({ oppSpecies: ['Amoonguss', 'Garchomp', 'Talonflame', 'Incineroar'] });
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Thunder Wave',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.opponentTeam[0]!.status).toBe('par');
+  });
+
+  test('Spore puts my mon to sleep with 2-turn counter', () => {
+    // Opp Amoonguss uses Spore on my Sneasler.
+    const match = freshMatch();
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 1, kind: 'move',
+      move: 'Spore',
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.myStatus?.[0]).toBe('slp');
+    // Counter initialised to 3, decremented to 2 by EOT that same turn.
+    expect(r.match.mySleepCounter?.[0]).toBe(2);
+  });
+
+  test('Spore does NOT sleep Grass-type target', () => {
+    // My Rillaboom (Grass) is immune to powder.
+    const match = freshMatch();
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Spore',
+      target: { side: 'mine', slot: 1 }, targetTeamIndex: 1, order: 1,
+    };
+    // Rillaboom is at index 1 (Grass type).
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.myStatus?.[1]).toBeUndefined();
+  });
+
+  test('Toxic badly poisons opp and sets toxCounter=1', () => {
+    const match = freshMatch({ oppSpecies: ['Garchomp', 'Amoonguss', 'Incineroar', 'Talonflame'] });
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Toxic',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.opponentTeam[0]!.status).toBe('tox');
+    // Counter initialised to 1, incremented to 2 by EOT that same turn.
+    expect(r.match.opponentTeam[0]!.toxCounter).toBe(2);
+  });
+
+  test('status move does not overwrite existing status', () => {
+    const match = freshMatch();
+    match.opponentTeam[0]!.status = 'brn';
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Toxic',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.opponentTeam[0]!.status).toBe('brn'); // unchanged
+  });
+});
+
+describe('Setup self-boost moves auto-apply stat boosts', () => {
+  test('Swords Dance raises my mon atk by +2', () => {
+    const match = freshMatch();
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Swords Dance', order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.myBoosts?.[0]?.atk).toBe(2);
+  });
+
+  test('Dragon Dance raises opp atk+1 and spe+1', () => {
+    const match = freshMatch();
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Dragon Dance', order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    const boosts = r.match.opponentTeam[0]!.currentBoosts ?? {};
+    expect(boosts.atk).toBe(1);
+    expect(boosts.spe).toBe(1);
+  });
+
+  test('boosts stack across turns', () => {
+    const match = freshMatch();
+    const sdAction: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Swords Dance', order: 1,
+    };
+    const r1 = finalizeTurn({ match, turn: { actions: [sdAction], field: match.field }, activeIdx: startActive });
+    const r2 = finalizeTurn({ match: r1.match, turn: { actions: [sdAction], field: match.field }, activeIdx: startActive });
+    expect(r2.match.myBoosts?.[0]?.atk).toBe(4);
+  });
+});

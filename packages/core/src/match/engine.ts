@@ -191,6 +191,23 @@ function tryApplyOppStatus(
   return true;
 }
 
+// Type-based immunity for a status move: returns true when the target's types
+// make the status land as a no-op regardless of accuracy/ability.
+// brn → Fire; par → Electric (only when !ignoreImmunity i.e. Thunder Wave);
+// psn/tox → Poison or Steel; powder moves (Sleep Powder/Spore) → Grass.
+function isStatusMoveImmune(
+  status: string,
+  ignoreImmunity: boolean,
+  isPowder: boolean,
+  targetTypes: string[],
+): boolean {
+  if (status === 'brn') return targetTypes.includes('Fire');
+  if (status === 'par' && !ignoreImmunity) return targetTypes.includes('Electric');
+  if (status === 'psn' || status === 'tox') return targetTypes.some(t => t === 'Poison' || t === 'Steel');
+  if (status === 'slp' && isPowder) return targetTypes.includes('Grass');
+  return false;
+}
+
 // Merge a boost map into a side's active-slot boosts, clamped to [-6, +6].
 // Mirrors the inline boost logic in applyHazardOnSwitchInto / applyStateUpdate.
 function applyBoostsTo(
@@ -735,6 +752,61 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     inferenceNotes.push(applied
       ? `${ref} burned (Spicy Spray on ${defFormeName})`
       : `${ref} Rawst/Lum Berry cured the Spicy Spray burn`);
+  }
+
+  // Status-category moves auto-apply their status to the target. Only fires for
+  // moves with category=Status and a top-level `status` field; secondary
+  // effects on damaging moves (Nuzzle's 100% par) are Tier-4 probabilistic.
+  // Type immunities respected: brn→Fire; par→Electric unless ignoreImmunity;
+  // psn/tox→Poison+Steel; powder→Grass. Mirror in BattleScreen.tsx.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (a.attackerTeamIndex == null) continue;
+    const sm = getMove(a.move) as { category?: string; status?: string; flags?: Record<string, number>; ignoreImmunity?: boolean } | undefined;
+    if (!sm?.status || sm.category !== 'Status') continue;
+    if (typeof a.target !== 'object') continue;
+    const tIdx = a.targetTeamIndex;
+    if (tIdx == null) continue;
+    const tSide = a.target.side;
+    const tTypes: string[] = tSide === 'mine'
+      ? ((getSpecies(next.myTeam[tIdx]?.species ?? '') as { types?: string[] } | undefined)?.types ?? [])
+      : ((getSpecies(next.opponentTeam[tIdx]?.species ?? '') as { types?: string[] } | undefined)?.types ?? []);
+    if (isStatusMoveImmune(sm.status, !!sm.ignoreImmunity, !!(sm.flags?.powder), tTypes)) continue;
+    const st = sm.status as NonNullable<import('../domain/types.js').ActivePokemonState['status']>;
+    if (tSide === 'mine') {
+      if (next.myStatus?.[tIdx]) continue; // already non-volatile statused
+      if (tryApplyMyStatus(next, tIdx, st)) {
+        if (st === 'tox') next.myToxCounter = { ...(next.myToxCounter ?? {}), [tIdx]: 1 };
+        if (st === 'slp') next.mySleepCounter = { ...(next.mySleepCounter ?? {}), [tIdx]: 3 };
+      }
+    } else {
+      const o = next.opponentTeam[tIdx];
+      if (!o || o.status) continue; // already non-volatile statused
+      if (tryApplyOppStatus(o, st)) {
+        if (st === 'tox') o.toxCounter = 1;
+        if (st === 'slp') o.sleepCounter = 3;
+      }
+    }
+  }
+
+  // Setup self-boost moves (Swords Dance, Nasty Plot, Calm Mind, Dragon Dance,
+  // Bulk Up, Quiver Dance, Shell Smash, etc.). Category=Status with a top-level
+  // `boosts` field and target=self. Contrary inverts the deltas.
+  // Mirror in BattleScreen.tsx.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (a.attackerTeamIndex == null) continue;
+    const bm = getMove(a.move) as { category?: string; boosts?: BoostMap; target?: string } | undefined;
+    if (!bm?.boosts || bm.category !== 'Status' || bm.target !== 'self') continue;
+    const abil = a.side === 'mine'
+      ? next.myTeam[a.attackerTeamIndex]?.ability
+      : next.opponentTeam[a.attackerTeamIndex]?.ability;
+    const contrary = !!abil && toId(abil) === 'contrary';
+    const applied: BoostMap = {};
+    for (const [stat, delta] of Object.entries(bm.boosts)) {
+      applied[stat as keyof BoostMap] = contrary ? -(delta as number) : (delta as number);
+    }
+    applyBoostsTo(next, a.side, a.attackerTeamIndex, applied);
   }
 
   // Item-removing moves (Knock Off / Thief / Covet / berry-eaters). Mark the
