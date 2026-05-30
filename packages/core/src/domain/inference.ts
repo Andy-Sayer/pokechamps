@@ -3,6 +3,7 @@ import { damageRange, observationToAbsoluteDamage } from './damage.js';
 import { getSpecies, getMove, isLegalItem, toId } from './data.js';
 import { activeGimmick } from './gimmicks/index.js';
 import { getPikalytics, evFromSp } from './pikalytics.js';
+import { resistBerriesForSpecies } from './resistBerries.js';
 
 // The inverse problem: given an observed damage event, find which (EVs, nature,
 // item, ability) combinations of the defender are consistent with what we saw.
@@ -140,7 +141,11 @@ export function scoreSpread(input: InferenceInput): ScoredCandidate[] {
   const gimmickItems = (activeGimmick().enumerateOpponentVariants?.(toId(input.defenderSpecies)) ?? [])
     .map(v => v.item)
     .filter((i): i is string => !!i);
-  let items = Array.from(new Set([...baseItems, ...gimmickItems]));
+  // Type-matchup resist berries (Yache / Occa / Haban / …): only the ones
+  // matching this species' super-effective weaknesses. The calc handles the
+  // 0.5x reduction natively when the berry is passed as the held item.
+  const berryItems = input.priorItems ? [] : resistBerriesForSpecies(speciesName);
+  let items = Array.from(new Set([...baseItems, ...gimmickItems, ...berryItems]));
   // Keep the empty-string "no item" entry; everything else must be format-legal.
   items = items.filter(i => !i || isLegalItem(i));
   // Item signals: exclude Safety Goggles if we've observed sand chip damage.

@@ -314,9 +314,9 @@ describe('match engine: applyStateUpdate', () => {
       match, update, activeIdx: { mine: [0, 1], theirs: [0, 1] },
     });
     expect(result.activeIdx.mine[0]).toBe(2);
-    // Iron Hands is Fighting/Electric — Rock is super-effective vs Fighting
-    // (2x), so 25% chip on entry.
-    expect(result.match.myCurrentHp?.[2]).toBeCloseTo(75, 5);
+    // Iron Hands is Fighting/Electric — Fighting RESISTS Rock (0.5×) and
+    // Electric is neutral, so Stealth Rock chip is 12.5 × 0.5 = 6.25% on entry.
+    expect(result.match.myCurrentHp?.[2]).toBeCloseTo(93.75, 5);
   });
 });
 
