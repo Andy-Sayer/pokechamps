@@ -755,3 +755,37 @@ describe('Setup self-boost moves auto-apply stat boosts', () => {
     expect(r2.match.myBoosts?.[0]?.atk).toBe(4);
   });
 });
+
+describe('Recoil moves damage the attacker', () => {
+  test('Brave Bird (33% recoil) reduces my HP after a logged hit', () => {
+    // Rillaboom (idx 1) uses Brave Bird for 50% damage on opp[0] (Incineroar).
+    // Incineroar is estimated at ~300 HP. Rillaboom similar. Recoil ≈ 50%*33%/100 *
+    // defMax / atkMax ≈ ~16% but we can't pin exact values so just check direction.
+    const match = freshMatch();
+    match.myCurrentHp = { 0: 100, 1: 100 };
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 1, attackerTeamIndex: 1, kind: 'move',
+      move: 'Brave Bird',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0,
+      damageHpPercent: 50, // logged as 50% of opp max HP
+      order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    // Rillaboom (attacker, idx 1) should have taken recoil — HP strictly < 100.
+    expect(r.match.myCurrentHp![1]).toBeLessThan(100);
+  });
+
+  test('Rock Head ability blocks recoil', () => {
+    const rockHeadRilla = { ...rillaboom, ability: 'Rock Head' };
+    const match = freshMatch({ myTeam: [sneasler, rockHeadRilla, ironHands, flutterMane] });
+    match.myCurrentHp = { 0: 100, 1: 100 };
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 1, attackerTeamIndex: 1, kind: 'move',
+      move: 'Brave Bird',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0,
+      damageHpPercent: 50, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.myCurrentHp![1]).toBe(100); // no recoil
+  });
+});

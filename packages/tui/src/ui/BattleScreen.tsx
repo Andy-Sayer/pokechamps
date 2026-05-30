@@ -922,6 +922,44 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       }
     }
 
+    // Recoil damage for the attacker. Mirror of engine.ts recoil loop.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.attackerTeamIndex == null) continue;
+      if (typeof a.target !== 'object') continue;
+      const tIdx = a.targetTeamIndex;
+      if (tIdx == null) continue;
+      const rm = getMove(a.move) as { recoil?: [number, number]; mindBlownRecoil?: boolean } | undefined;
+      const hasRecoil = rm?.recoil || rm?.mindBlownRecoil;
+      if (!hasRecoil) continue;
+      const atkAbil = a.side === 'mine'
+        ? next.myTeam[a.attackerTeamIndex]?.ability
+        : next.opponentTeam[a.attackerTeamIndex]?.ability;
+      const atkMax = maxHpOf(a.side, a.attackerTeamIndex);
+      if (!atkMax) continue;
+      let recoilPct: number;
+      if (rm?.mindBlownRecoil) {
+        recoilPct = 50;
+      } else {
+        if (a.damageHpPercent == null) continue;
+        const rockHead = !!atkAbil && toId(atkAbil) === 'rockhead';
+        if (rockHead) continue;
+        const defMax = maxHpOf(a.target.side, tIdx);
+        if (!defMax) continue;
+        const [n, d] = rm!.recoil!;
+        const dmgAbs = (a.damageHpPercent / 100) * defMax;
+        recoilPct = (dmgAbs * n / d) / atkMax * 100;
+      }
+      if (a.side === 'mine') {
+        next.myCurrentHp = next.myCurrentHp ?? {};
+        const before = next.myCurrentHp[a.attackerTeamIndex] ?? 100;
+        next.myCurrentHp[a.attackerTeamIndex] = Math.max(0, before - recoilPct);
+      } else {
+        const o = next.opponentTeam[a.attackerTeamIndex];
+        if (o) o.currentHpPercent = Math.max(0, (o.currentHpPercent ?? 100) - recoilPct);
+      }
+    }
+
     // Spicy Spray (custom defender ability): when a damaging hit lands on the
     // holder, the attacker is burned (Fire-immune + non-volatile-statused skip).
     // Mirror of engine.ts.
