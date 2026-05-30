@@ -169,3 +169,35 @@ describe('weatherAbilityEffect', () => {
     expect(out.opponentTeam[0]!.currentHpPercent).toBe(80);
   });
 });
+
+describe('Bad Dreams chips sleeping foes', () => {
+  test('my Bad Dreams holder chips sleeping opp each EOT', () => {
+    const darkrai = mon({ species: 'Incineroar', ability: 'Bad Dreams' }); // use Incineroar as proxy
+    const m = freshMatch([darkrai], ['Amoonguss']);
+    m.opponentTeam[0]!.currentHpPercent = 80;
+    m.opponentTeam[0]!.status = 'slp';
+    m.opponentTeam[0]!.sleepCounter = 3;
+    const { match: out, notes } = endOfTurn(m, m.field, { mine: [0, null], theirs: [0, null] });
+    expect(out.opponentTeam[0]!.currentHpPercent).toBeCloseTo(80 - 100 / 8, 1);
+    expect(notes.some(n => n.includes('Bad Dreams'))).toBe(true);
+  });
+
+  test('Bad Dreams does not chip a non-sleeping opp', () => {
+    const darkrai = mon({ species: 'Incineroar', ability: 'Bad Dreams' });
+    const m = freshMatch([darkrai], ['Amoonguss']);
+    m.opponentTeam[0]!.currentHpPercent = 80;
+    // No status
+    const { match: out } = endOfTurn(m, m.field, { mine: [0, null], theirs: [0, null] });
+    expect(out.opponentTeam[0]!.currentHpPercent).toBe(80);
+  });
+
+  test('opp Bad Dreams chips my sleeping mon when opp ability known', () => {
+    const m = freshMatch([mon({ species: 'Amoonguss' })], ['Incineroar']);
+    m.opponentTeam[0]!.ability = 'Bad Dreams';
+    m.myCurrentHp = { 0: 80 };
+    m.myStatus = { 0: 'slp' };
+    m.mySleepCounter = { 0: 3 };
+    const { match: out } = endOfTurn(m, m.field, { mine: [0, null], theirs: [0, null] });
+    expect(out.myCurrentHp![0]).toBeCloseTo(80 - 100 / 8, 1);
+  });
+});

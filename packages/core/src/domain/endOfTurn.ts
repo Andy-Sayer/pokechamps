@@ -155,6 +155,35 @@ export function endOfTurn(
   applyToOpp(activeIdx.theirs[0]);
   applyToOpp(activeIdx.theirs[1]);
 
+  // Bad Dreams: sleeping mons on the opposing side lose 1/8 HP per EOT while
+  // an active with Bad Dreams is on the field. Only fire for opp ability when known.
+  const myBadDreams = activeIdx.mine.some(i => i != null && toId(next.myTeam[i!]?.ability ?? '') === 'baddreams');
+  const oppBadDreams = activeIdx.theirs.some(i =>
+    i != null && next.opponentTeam[i!]?.ability && toId(next.opponentTeam[i!]!.ability!) === 'baddreams',
+  );
+  if (myBadDreams) {
+    for (const i of activeIdx.theirs) {
+      if (i == null) continue;
+      const o = next.opponentTeam[i];
+      if (!o || o.fainted || o.status !== 'slp') continue;
+      const chip = 100 / 8;
+      o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - chip);
+      notes.push(`o${i + 1} -${chip.toFixed(0)}% (Bad Dreams)`);
+      if (o.currentHpPercent === 0) o.fainted = true;
+    }
+  }
+  if (oppBadDreams) {
+    for (const i of activeIdx.mine) {
+      if (i == null) continue;
+      if (next.myFainted!.includes(i)) continue;
+      if (next.myStatus?.[i] !== 'slp') continue;
+      const chip = 100 / 8;
+      next.myCurrentHp![i] = clampHp((next.myCurrentHp![i] ?? 100) - chip);
+      notes.push(`m${i + 1} -${chip.toFixed(0)}% (Bad Dreams)`);
+      if ((next.myCurrentHp![i] ?? 100) === 0 && !next.myFainted!.includes(i)) next.myFainted!.push(i);
+    }
+  }
+
   // Leech Seed residual: drain 1/8 of the target's max HP, heal the seeder by
   // the same ABSOLUTE HP (converted to the seeder's % of max). If the seeder
   // has since switched out, the drain still hits but the heal is wasted.
