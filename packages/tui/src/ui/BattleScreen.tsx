@@ -902,6 +902,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         const formeName = o.megaUsed && o.megaForme ? o.megaForme : o.species;
         const types = (getSpecies(formeName) as { types?: string[] } | undefined)?.types;
         if (types?.includes('Grass')) continue;
+        const lsAbilOpp = certainAbility({ knownAbility: o.ability, species: o.species });
+        if (lsAbilOpp && toId(lsAbilOpp) === 'magicbounce') continue;
         o.leechSeeded = { seederSide: a.side, seederIndex: sIdx };
         inferenceNotes.push(`o${tIdx + 1} seeded`);
       } else {
@@ -911,6 +913,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         const formeName = next.myMegaUsed?.includes(tIdx) && next.myMegaForme?.[tIdx] ? next.myMegaForme[tIdx] : set.species;
         const types = (getSpecies(formeName) as { types?: string[] } | undefined)?.types;
         if (types?.includes('Grass')) continue;
+        if (toId(set.ability ?? '') === 'magicbounce') continue;
         next.myLeechSeeded = { ...(next.myLeechSeeded ?? {}), [tIdx]: { seederSide: a.side, seederIndex: sIdx } };
         inferenceNotes.push(`m${tIdx + 1} seeded`);
       }
@@ -1147,6 +1150,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         ? ((getSpecies(next.myTeam[tIdx]?.species ?? '') as { types?: string[] } | undefined)?.types ?? [])
         : ((getSpecies(next.opponentTeam[tIdx]?.species ?? '') as { types?: string[] } | undefined)?.types ?? []);
       if (isStatusMoveImmune(sm.status, !!sm.ignoreImmunity, !!(sm.flags?.powder), tTypes)) continue;
+      // Magic Bounce reflects status-category moves back at the user.
+      const tAbilMB = tSide === 'mine'
+        ? next.myTeam[tIdx]?.ability
+        : certainAbility({ knownAbility: next.opponentTeam[tIdx]?.ability, species: next.opponentTeam[tIdx]?.species ?? '' });
+      if (tAbilMB && toId(tAbilMB) === 'magicbounce') continue;
       const st = sm.status as NonNullable<import('@pokechamps/core/domain/types.js').ActivePokemonState['status']>;
       if (tSide === 'mine') {
         if (next.myStatus?.[tIdx]) continue; // already non-volatile statused

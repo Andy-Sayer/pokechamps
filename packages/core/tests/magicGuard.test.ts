@@ -55,6 +55,17 @@ describe('Magic Guard blocks EOT status chip', () => {
     const r = endOfTurn(m, NEUTRAL_FIELD, { mine: [0, null], theirs: [0, null] });
     expect(r.match.myCurrentHp![0]).toBeLessThan(100);
   });
+
+  test('tox chip never lands across 3 consecutive EOTs but counter keeps ramping', () => {
+    let m = freshMatch('Magic Guard', 'tox');
+    const act = { mine: [0, null] as [number | null, number | null], theirs: [0, null] as [number | null, number | null] };
+    for (let turn = 1; turn <= 3; turn++) {
+      const r = endOfTurn(m, NEUTRAL_FIELD, act);
+      expect(r.match.myCurrentHp![0]).toBe(100);
+      expect(r.match.myToxCounter![0]).toBe(turn + 1);
+      m = r.match;
+    }
+  });
 });
 
 // ─── EOT: weather chip blocked ─────────────────────────────────────────────
