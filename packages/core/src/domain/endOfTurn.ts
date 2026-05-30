@@ -58,6 +58,19 @@ export function endOfTurn(
       if (c <= 0) { o.status = undefined; o.sleepCounter = undefined; notes.push(`o${idx + 1} woke up`); }
       else o.sleepCounter = c;
     }
+    // Toxic Orb / Flame Orb on opp side: only fire when the item is KNOWN
+    // (revealed via inference). Otherwise we'd commit to a guess and corrupt
+    // downstream prediction. Existing `itemConsumed` doesn't apply (orbs are
+    // persistent), but a Trick/Knock Off-flavoured swap could have removed
+    // it — respect that.
+    if (!o.itemConsumed) {
+      const oppOrbStatus = orbStatusFor(o.item, o.species, o.status ?? undefined);
+      if (oppOrbStatus) {
+        o.status = oppOrbStatus;
+        if (oppOrbStatus === 'tox') o.toxCounter = 1;
+        notes.push(`o${idx + 1} ${oppOrbStatus} (${o.item})`);
+      }
+    }
     if ((o.currentHpPercent ?? 100) === 0) o.fainted = true;
     // Move-restricting volatiles count down; clear at 0.
     if (o.tauntTurns != null) { o.tauntTurns -= 1; if (o.tauntTurns <= 0) { o.taunted = undefined; o.tauntTurns = undefined; notes.push(`o${idx + 1} Taunt ended`); } }
@@ -92,6 +105,17 @@ export function endOfTurn(
         next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) + healPct);
         notes.push(`m${idx + 1} +${healPct.toFixed(0)}% (${set.item})`);
       }
+    }
+    // Toxic Orb / Flame Orb — apply the orb's status at EOT to the holder if
+    // they have no existing non-volatile status. Type immunities respected
+    // (no brn on Fire types; no tox on Poison/Steel types). Item is NOT
+    // consumed (orbs are persistent). The chip from this status starts ticking
+    // on the NEXT EOT — the status was applied AFTER this turn's status chip.
+    const heldOrbStatus = orbStatusFor(set.item, set.species, next.myStatus?.[idx]);
+    if (heldOrbStatus) {
+      next.myStatus![idx] = heldOrbStatus;
+      if (heldOrbStatus === 'tox') next.myToxCounter![idx] = 1;
+      notes.push(`m${idx + 1} ${heldOrbStatus} (${set.item})`);
     }
     if ((next.myCurrentHp![idx] ?? 100) === 0 && !next.myFainted!.includes(idx)) next.myFainted!.push(idx);
     // My-side volatiles count down; clear at 0.
@@ -202,5 +226,25 @@ function statusChipPct(status: OpponentEntry['status'] | undefined, toxCounter: 
   return 0;
 }
 
+// Returns the non-volatile status a Toxic/Flame Orb would inflict at EOT, or
+// null if the holder is immune (type immunity or already statused).
+function orbStatusFor(
+  item: string | null | undefined,
+  species: string,
+  currentStatus: string | undefined | null,
+): 'tox' | 'brn' | null {
+  if (!item || (currentStatus != null && currentStatus !== '')) return null;
+  const types = ((getSpecies(species) as { types?: string[] } | undefined)?.types) ?? [];
+  if (item === 'Toxic Orb') {
+    if (types.some(t => t === 'Poison' || t === 'Steel')) return null;
+    return 'tox';
+  }
+  if (item === 'Flame Orb') {
+    if (types.includes('Fire')) return null;
+    return 'brn';
+  }
+  return null;
+}
+
 // Re-exports for tests
-export { weatherChipPct, statusChipPct };
+export { weatherChipPct, statusChipPct, orbStatusFor };
