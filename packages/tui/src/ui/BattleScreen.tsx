@@ -1597,6 +1597,10 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.nightmare = true; }
       else { next.myNightmare = { ...(next.myNightmare ?? {}) }; next.myNightmare[teamIndex] = true; }
     }
+    if (update.flinch) {
+      if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.flinched = true; }
+      else { next.myFlinched = { ...(next.myFlinched ?? {}) }; next.myFlinched[teamIndex] = true; }
+    }
 
     if (update.fainted) {
       if (side === 'theirs') {

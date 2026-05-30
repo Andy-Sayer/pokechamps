@@ -92,6 +92,8 @@ export interface StateUpdate {
   curse?: boolean;        // o1 curse / m1 curse (Cursed target, not the user)
   partialTrap?: number;   // o1 trapped [N] — turns remaining (default 4)
   nightmare?: boolean;    // o1 nightmare / m1 nightmare
+  // One-turn flinch volatile. Clears at EOT. "o1 flinch" / "m1 flinch".
+  flinch?: boolean;
 }
 
 export type ParseResult =
@@ -412,6 +414,14 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
     }
     const { side, teamIndex } = ref;
     return { ok: true, kind: 'state', update: { side, teamIndex, fainted: true, hpPercent: 0 } };
+  }
+
+  // "o1 flinch" / "o1 flinched" — one-turn flinch volatile (cleared at EOT).
+  const flinchMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+flinch(?:ed)?$/i);
+  if (flinchMatch) {
+    const ref = resolveRef(flinchMatch[1]!, parseInt(flinchMatch[2]!, 10), ctx);
+    if (!ref) return { ok: false, error: `${flinchMatch[1]}${flinchMatch[2]} has no active mon` };
+    return { ok: true, kind: 'state', update: { side: ref.side, teamIndex: ref.teamIndex, flinch: true } };
   }
 
   // Residual-chip volatiles: "o1 salt-cure", "m1 aqua-ring", "o2 trapped 4", etc.

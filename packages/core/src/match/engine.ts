@@ -1227,6 +1227,7 @@ function applyStateUpdateImpl(
     myCursed: { ...(match.myCursed ?? {}) },
     myPartialTrap: { ...(match.myPartialTrap ?? {}) },
     myNightmare: { ...(match.myNightmare ?? {}) },
+    myFlinched: { ...(match.myFlinched ?? {}) },
   };
   const nextActive: ActiveIdx = {
     mine: [activeIdx.mine[0], activeIdx.mine[1]],
@@ -1432,6 +1433,10 @@ function applyStateUpdateImpl(
   if (update.nightmare) {
     if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.nightmare = true; }
     else next.myNightmare![teamIndex] = true;
+  }
+  if (update.flinch) {
+    if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.flinched = true; }
+    else { next.myFlinched = { ...(next.myFlinched ?? {}) }; next.myFlinched[teamIndex] = true; }
   }
 
   if (update.fainted) {

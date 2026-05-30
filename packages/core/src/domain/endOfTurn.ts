@@ -118,6 +118,7 @@ export function endOfTurn(
     if (o.tauntTurns != null) { o.tauntTurns -= 1; if (o.tauntTurns <= 0) { o.taunted = undefined; o.tauntTurns = undefined; notes.push(`o${idx + 1} Taunt ended`); } }
     if (o.encoreTurns != null) { o.encoreTurns -= 1; if (o.encoreTurns <= 0) { o.encoreMove = undefined; o.encoreTurns = undefined; notes.push(`o${idx + 1} Encore ended`); } }
     if (o.disableTurns != null) { o.disableTurns -= 1; if (o.disableTurns <= 0) { o.disabledMove = undefined; o.disableTurns = undefined; notes.push(`o${idx + 1} Disable ended`); } }
+    o.flinched = undefined; // one-turn volatile
   };
 
   const applyToMine = (idx: number | null) => {
@@ -205,6 +206,7 @@ export function endOfTurn(
     if (next.myTauntTurns![idx] != null) { const t = next.myTauntTurns![idx]! - 1; if (t <= 0) { next.myTaunted = next.myTaunted!.filter(i => i !== idx); delete next.myTauntTurns![idx]; notes.push(`m${idx + 1} Taunt ended`); } else next.myTauntTurns![idx] = t; }
     if (next.myEncoreTurns![idx] != null) { const t = next.myEncoreTurns![idx]! - 1; if (t <= 0) { delete next.myEncoreMove![idx]; delete next.myEncoreTurns![idx]; notes.push(`m${idx + 1} Encore ended`); } else next.myEncoreTurns![idx] = t; }
     if (next.myDisableTurns![idx] != null) { const t = next.myDisableTurns![idx]! - 1; if (t <= 0) { delete next.myDisabledMove![idx]; delete next.myDisableTurns![idx]; notes.push(`m${idx + 1} Disable ended`); } else next.myDisableTurns![idx] = t; }
+    if (next.myFlinched) delete next.myFlinched[idx]; // one-turn volatile
   };
 
   applyToMine(activeIdx.mine[0]);

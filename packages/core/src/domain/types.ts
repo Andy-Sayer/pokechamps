@@ -101,6 +101,10 @@ export interface OpponentEntry {
   cursed?: boolean;          // Non-Ghost Curse: -1/4 per EOT; cleared on switch-out
   partialTrap?: number;      // turns remaining of Bind/Wrap/Fire Spin etc.: -1/8 per EOT; cleared on switch-out
   nightmare?: boolean;       // while asleep: -1/4 per EOT; cleared on switch-out
+  // One-turn volatile set when this mon is flinched (cleared at EOT). Informational:
+  // the flinched mon simply has no action in the turn. Fake Out auto-flinches on
+  // first turn out; secondary flinch moves (Iron Head etc.) are user-logged.
+  flinched?: boolean;
 }
 
 export interface HazardState {
@@ -267,6 +271,9 @@ export interface Match {
   myCursed?: Record<number, boolean>;
   myPartialTrap?: Record<number, number>; // turns remaining
   myNightmare?: Record<number, boolean>;
+  // One-turn flinch volatile (cleared at EOT). Informational — logged when user
+  // observes a Fake Out or secondary flinch proc ("o1 flinch").
+  myFlinched?: Record<number, boolean>;
   // myTeam index → charging-move state. Parallel to OpponentEntry.charging.
   // Set when a mine-side charge move logged with no damage; cleared when
   // the same mon's next damaging action lands.
