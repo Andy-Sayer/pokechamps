@@ -20,6 +20,8 @@ import { EFFECT_DURATIONS } from '@pokechamps/core/domain/durations.js';
 import { detectChoiceLock, sashProcced, firstTurnOut, isFirstTurnMove, type ChoiceLock } from '@pokechamps/core/domain/itemSignals.js';
 import { hpItemTriggerFor } from '@pokechamps/core/domain/hpItemTriggers.js';
 import { statusBerryFor } from '@pokechamps/core/domain/statusBerries.js';
+import { resistBerryForType } from '@pokechamps/core/domain/resistBerries.js';
+import { effectiveness, speciesTypes } from '@pokechamps/core/domain/typechart.js';
 import { switchInAbilityEffect, intimidateReaction, certainAbility, resolveDownloadBoost, type BoostMap } from '@pokechamps/core/domain/abilities.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
 import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict, type MatchupCell, type Confidence } from '@pokechamps/core/domain/predictions.js';
@@ -742,6 +744,27 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         }
       }
 
+      // Resist berry auto-consume (my side). Mirror of engine.ts.
+      if (tSide === 'mine') {
+        const consumed2 = next.myItemConsumed?.[tIdx];
+        const held2 = consumed2 ? undefined : next.myTeam[tIdx]?.item;
+        if (held2) {
+          const moveDex2 = getMove(a.move) as { type?: string } | undefined;
+          if (moveDex2?.type) {
+            const heldId2 = toId(held2);
+            const berryForType2 = resistBerryForType(moveDex2.type);
+            if (heldId2 === 'chilanberry' && moveDex2.type === 'Normal') {
+              next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: held2 };
+            } else if (berryForType2 && heldId2 === toId(berryForType2)) {
+              const defTypes2 = speciesTypes(next.myTeam[tIdx]!.species);
+              if (effectiveness(moveDex2.type, defTypes2) > 1) {
+                next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: held2 };
+              }
+            }
+          }
+        }
+      }
+
       if (tSide === 'theirs') oppHpSoFar.set(tIdx, newPct);
       else myHpSoFar.set(tIdx, newPct);
     }
@@ -757,6 +780,29 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     for (const [idx, hp] of myHpSoFar) {
       next.myCurrentHp![idx] = hp;
       if (hp === 0 && !next.myFainted!.includes(idx)) next.myFainted!.push(idx);
+    }
+
+    // Resist berry auto-consume on opp side when item is KNOWN. Mirror of engine.ts.
+    for (const a of sortedActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (typeof a.target !== 'object' || a.target.side !== 'theirs') continue;
+      const tIdx = a.targetTeamIndex;
+      if (tIdx == null) continue;
+      const o = next.opponentTeam[tIdx];
+      if (!o || o.itemConsumed || !o.item) continue;
+      const moveDex = getMove(a.move) as { type?: string } | undefined;
+      if (!moveDex?.type) continue;
+      const held = o.item;
+      const heldId = toId(held);
+      const berryForType = resistBerryForType(moveDex.type);
+      if (heldId === 'chilanberry' && moveDex.type === 'Normal') {
+        o.itemConsumed = held;
+      } else if (berryForType && heldId === toId(berryForType)) {
+        const defTypes = speciesTypes(o.species);
+        if (effectiveness(moveDex.type, defTypes) > 1) {
+          o.itemConsumed = held;
+        }
+      }
     }
 
     // Update each opp's knownMoves with anything they did this turn.

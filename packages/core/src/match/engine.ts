@@ -44,6 +44,8 @@ import {
 import { sashProcced } from '../domain/itemSignals.js';
 import { hpItemTriggerFor } from '../domain/hpItemTriggers.js';
 import { statusBerryFor } from '../domain/statusBerries.js';
+import { resistBerryForType } from '../domain/resistBerries.js';
+import { effectiveness, speciesTypes } from '../domain/typechart.js';
 import { EFFECT_DURATIONS } from '../domain/durations.js';
 import { isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, getSpecies, getMove, toId } from '../domain/data.js';
 import type { StateUpdate, HazardUpdate } from '../domain/turnparser.js';
@@ -515,6 +517,29 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
       }
     }
 
+    // Resist berry auto-consume (my side): item is always known.
+    // Fires even if the mon fainted — the berry reduced the hit, so it's spent.
+    if (tSide === 'mine') {
+      const consumed = next.myItemConsumed?.[tIdx];
+      const held = consumed ? undefined : next.myTeam[tIdx]?.item;
+      if (held) {
+        const moveDex = getMove(a.move) as { type?: string } | undefined;
+        if (moveDex?.type) {
+          const heldId = toId(held);
+          const berryForType = resistBerryForType(moveDex.type);
+          // Chilan halves any Normal hit (even neutral) — check first.
+          if (heldId === 'chilanberry' && moveDex.type === 'Normal') {
+            next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: held };
+          } else if (berryForType && heldId === toId(berryForType)) {
+            const defTypes = speciesTypes(next.myTeam[tIdx]!.species);
+            if (effectiveness(moveDex.type, defTypes) > 1) {
+              next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: held };
+            }
+          }
+        }
+      }
+    }
+
     if (tSide === 'theirs') oppHpSoFar.set(tIdx, newPct);
     else myHpSoFar.set(tIdx, newPct);
   }
@@ -535,6 +560,32 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
   // Collected throughout the rest of finalize — mega resolution errors,
   // damage-inference candidates produced, etc.
   const inferenceNotes: string[] = [];
+
+  // Resist berry auto-consume on opp side when item is KNOWN (set explicitly
+  // by the user — never inferred from candidates). Opp conservatism: only
+  // auto-fire when the item is certain, to avoid corrupting inference.
+  for (const a of sortedActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (typeof a.target !== 'object' || a.target.side !== 'theirs') continue;
+    const tIdx = a.targetTeamIndex;
+    if (tIdx == null) continue;
+    const o = next.opponentTeam[tIdx];
+    if (!o || o.itemConsumed || !o.item) continue;
+    const moveDex = getMove(a.move) as { type?: string } | undefined;
+    if (!moveDex?.type) continue;
+    const held = o.item;
+    const heldId = toId(held);
+    const berryForType = resistBerryForType(moveDex.type);
+    // Chilan halves any Normal hit (even neutral) — check first.
+    if (heldId === 'chilanberry' && moveDex.type === 'Normal') {
+      o.itemConsumed = held;
+    } else if (berryForType && heldId === toId(berryForType)) {
+      const defTypes = speciesTypes(o.species);
+      if (effectiveness(moveDex.type, defTypes) > 1) {
+        o.itemConsumed = held;
+      }
+    }
+  }
 
   // Update knownMoves on every opp that acted this turn (skipping mega and
   // switch actions which don't have a real move name).
