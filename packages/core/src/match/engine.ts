@@ -736,6 +736,43 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     }
   }
 
+  // Rough Skin / Iron Barbs: contact move hits → attacker loses 1/8 of their max HP.
+  // Only fires when the defender's ability is known (opp conservatism). Mirror in BattleScreen.tsx.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (a.attackerTeamIndex == null) continue;
+    if (a.damageHpPercent == null) continue;
+    if (typeof a.target !== 'object') continue;
+    const tIdx = a.targetTeamIndex;
+    if (tIdx == null) continue;
+    const mv = getMove(a.move) as { flags?: Record<string, number> } | undefined;
+    if (!mv?.flags?.contact) continue;
+    let defAbil: string | undefined;
+    if (a.target.side === 'theirs') {
+      const o = next.opponentTeam[tIdx];
+      defAbil = o?.megaUsed && o.megaForme
+        ? ((getSpecies(o.megaForme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? o.ability ?? undefined)
+        : (o?.ability ?? undefined);
+    } else {
+      const set = next.myTeam[tIdx];
+      const megaForme = next.myMegaUsed?.includes(tIdx) ? next.myMegaForme?.[tIdx] : undefined;
+      defAbil = megaForme
+        ? ((getSpecies(megaForme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? set?.ability ?? undefined)
+        : set?.ability;
+    }
+    if (!defAbil) continue;
+    const dId = toId(defAbil);
+    if (dId !== 'roughskin' && dId !== 'ironbarbs') continue;
+    const chip = 100 / 8; // 12.5% of attacker's max HP
+    if (a.side === 'mine') {
+      next.myCurrentHp = next.myCurrentHp ?? {};
+      next.myCurrentHp[a.attackerTeamIndex] = Math.max(0, (next.myCurrentHp[a.attackerTeamIndex] ?? 100) - chip);
+    } else {
+      const o = next.opponentTeam[a.attackerTeamIndex];
+      if (o) o.currentHpPercent = Math.max(0, (o.currentHpPercent ?? 100) - chip);
+    }
+  }
+
   // Spicy Spray (Champions custom defender ability): when a damaging hit lands
   // on its holder, the attacker is burned. Skip Fire-types (burn-immune) and
   // attackers already non-volatile-statused. Effective ability honors mega.

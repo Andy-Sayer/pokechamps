@@ -789,3 +789,37 @@ describe('Recoil moves damage the attacker', () => {
     expect(r.match.myCurrentHp![1]).toBe(100); // no recoil
   });
 });
+
+describe('On-hit chip abilities (Rough Skin / Iron Barbs)', () => {
+  test('contact move on Iron Barbs holder chips the attacker 12.5%', () => {
+    // My Sneasler holds Iron Barbs; opp Incineroar uses a contact move on it.
+    // This is theirs→mine so inference doesn't run (inference only fires for mine→theirs).
+    const ironBarbs = mon({ species: 'Sneasler', ability: 'Iron Barbs', moves: ['Fake Out'] });
+    const match = freshMatch({ myTeam: [ironBarbs, rillaboom, ironHands, flutterMane] });
+    match.myCurrentHp = { 0: 100, 1: 100 };
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Close Combat', // contact move
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 60, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    // Opp Incineroar (attacker, opp idx 0) took 12.5% chip.
+    expect(r.match.opponentTeam[0]!.currentHpPercent).toBeCloseTo(100 - 12.5, 0);
+  });
+
+  test('non-contact move does NOT trigger Iron Barbs', () => {
+    const ironBarbs = mon({ species: 'Sneasler', ability: 'Iron Barbs', moves: ['Fake Out'] });
+    const match = freshMatch({ myTeam: [ironBarbs, rillaboom, ironHands, flutterMane] });
+    match.myCurrentHp = { 0: 100, 1: 100 };
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Flamethrower', // not contact
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 60, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    // Opp attacker took no chip.
+    expect(r.match.opponentTeam[0]!.currentHpPercent).toBeUndefined(); // never modified
+  });
+});
