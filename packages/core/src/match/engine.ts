@@ -803,6 +803,8 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     const atkMax = maxHpOf(a.side, a.attackerTeamIndex);
     if (!atkMax) continue;
     let recoilPct: number;
+    const magicGuard = !!atkAbil && toId(atkAbil) === 'magicguard';
+    if (magicGuard) continue;
     if (rm?.mindBlownRecoil) {
       recoilPct = 50; // 50% of user's max HP
     } else {
@@ -852,6 +854,11 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     if (!defAbil) continue;
     const dId = toId(defAbil);
     if (dId !== 'roughskin' && dId !== 'ironbarbs') continue;
+    // Magic Guard on the attacker blocks the contact chip.
+    const atkAbilRS = a.side === 'mine'
+      ? next.myTeam[a.attackerTeamIndex]?.ability
+      : next.opponentTeam[a.attackerTeamIndex]?.ability;
+    if (atkAbilRS && toId(atkAbilRS) === 'magicguard') continue;
     const chip = 100 / 8; // 12.5% of attacker's max HP
     if (a.side === 'mine') {
       next.myCurrentHp = next.myCurrentHp ?? {};

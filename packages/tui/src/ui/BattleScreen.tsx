@@ -1009,6 +1009,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       const atkMax = maxHpOf(a.side, a.attackerTeamIndex);
       if (!atkMax) continue;
       let recoilPct: number;
+      const magicGuard = !!atkAbil && toId(atkAbil) === 'magicguard';
+      if (magicGuard) continue;
       if (rm?.mindBlownRecoil) {
         recoilPct = 50;
       } else {
@@ -1058,6 +1060,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (!defAbil) continue;
       const dId = toId(defAbil);
       if (dId !== 'roughskin' && dId !== 'ironbarbs') continue;
+      // Magic Guard on the attacker blocks the contact chip.
+      const atkAbilRS2 = a.side === 'mine'
+        ? next.myTeam[a.attackerTeamIndex]?.ability
+        : next.opponentTeam[a.attackerTeamIndex]?.ability;
+      if (atkAbilRS2 && toId(atkAbilRS2) === 'magicguard') continue;
       const atkMax = maxHpOf(a.side, a.attackerTeamIndex);
       if (!atkMax) continue;
       const chip = 100 / 8;
