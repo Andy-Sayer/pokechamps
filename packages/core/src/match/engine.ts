@@ -43,6 +43,7 @@ import {
 } from '../domain/abilities.js';
 import { sashProcced } from '../domain/itemSignals.js';
 import { hpItemTriggerFor } from '../domain/hpItemTriggers.js';
+import { statusBerryFor } from '../domain/statusBerries.js';
 import { EFFECT_DURATIONS } from '../domain/durations.js';
 import { isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, getSpecies, getMove, toId } from '../domain/data.js';
 import type { StateUpdate, HazardUpdate } from '../domain/turnparser.js';
@@ -95,15 +96,13 @@ function applyHazardOnSwitchInto(
   }
   if (effect.statusApplied) {
     if (side === 'mine') {
-      match.myStatus = { ...(match.myStatus ?? {}), [teamIndex]: effect.statusApplied };
-      if (effect.statusApplied === 'tox') {
+      if (tryApplyMyStatus(match, teamIndex, effect.statusApplied) && effect.statusApplied === 'tox') {
         match.myToxCounter = { ...(match.myToxCounter ?? {}), [teamIndex]: 1 };
       }
     } else {
       const o = match.opponentTeam[teamIndex];
-      if (o) {
-        o.status = effect.statusApplied;
-        if (effect.statusApplied === 'tox') o.toxCounter = 1;
+      if (o && tryApplyOppStatus(o, effect.statusApplied) && effect.statusApplied === 'tox') {
+        o.toxCounter = 1;
       }
     }
   }
@@ -151,6 +150,45 @@ function clearOppVolatiles(o: OpponentEntry): void {
   o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined;
   o.tauntTurns = undefined; o.encoreTurns = undefined; o.disableTurns = undefined;
   o.leechSeeded = undefined;
+}
+
+// Try to apply a non-volatile status to my mon, intercepted by a held status
+// berry (Lum / Cheri / Chesto / Pecha / Rawst / Aspear). Returns true when
+// the status WAS applied (caller should also set tox/sleep counters); returns
+// false when the berry caught it (item marked consumed, status not set).
+function tryApplyMyStatus(
+  match: Match,
+  teamIndex: number,
+  status: NonNullable<import('../domain/types.js').ActivePokemonState['status']>,
+): boolean {
+  const consumed = match.myItemConsumed?.[teamIndex];
+  const held = consumed ? undefined : match.myTeam[teamIndex]?.item;
+  const cure = statusBerryFor(held, status);
+  if (cure) {
+    match.myItemConsumed = { ...(match.myItemConsumed ?? {}), [teamIndex]: cure.consumed };
+    return false;
+  }
+  match.myStatus = { ...(match.myStatus ?? {}), [teamIndex]: status };
+  return true;
+}
+
+// Opp-side mirror — only safe to call when the opp item is KNOWN (revealed
+// via inference or explicit observation). Caller decides whether to invoke.
+function tryApplyOppStatus(
+  o: OpponentEntry,
+  status: NonNullable<import('../domain/types.js').ActivePokemonState['status']>,
+): boolean {
+  if (o.itemConsumed || !o.item) {
+    o.status = status;
+    return true;
+  }
+  const cure = statusBerryFor(o.item, status);
+  if (cure) {
+    o.itemConsumed = cure.consumed;
+    return false;
+  }
+  o.status = status;
+  return true;
 }
 
 // Merge a boost map into a side's active-slot boosts, clamped to [-6, +6].
@@ -684,15 +722,19 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     }
     const atkTypes = (getSpecies(atkFormeName) as { types?: string[] } | undefined)?.types ?? [];
     if (atkTypes.includes('Fire')) continue;
+    let applied: boolean;
     if (aSide === 'mine') {
       if (next.myStatus?.[aIdx]) continue;
-      next.myStatus = { ...(next.myStatus ?? {}), [aIdx]: 'brn' };
+      applied = tryApplyMyStatus(next, aIdx, 'brn');
     } else {
       const o = next.opponentTeam[aIdx];
       if (!o || o.status) continue;
-      o.status = 'brn';
+      applied = tryApplyOppStatus(o, 'brn');
     }
-    inferenceNotes.push(`${aSide === 'mine' ? 'm' : 'o'}${aIdx + 1} burned (Spicy Spray on ${defFormeName})`);
+    const ref = `${aSide === 'mine' ? 'm' : 'o'}${aIdx + 1}`;
+    inferenceNotes.push(applied
+      ? `${ref} burned (Spicy Spray on ${defFormeName})`
+      : `${ref} Rawst/Lum Berry cured the Spicy Spray burn`);
   }
 
   // Item-removing moves (Knock Off / Thief / Covet / berry-eaters). Mark the
@@ -1127,15 +1169,15 @@ function applyStateUpdateImpl(
   if (update.status) {
     if (side === 'theirs') {
       const o = next.opponentTeam[teamIndex];
-      if (o) {
-        o.status = update.status;
+      if (o && tryApplyOppStatus(o, update.status)) {
         if (update.status === 'tox') o.toxCounter = 1;
         if (update.status === 'slp') o.sleepCounter = 2;
       }
     } else {
-      next.myStatus![teamIndex] = update.status;
-      if (update.status === 'tox') next.myToxCounter![teamIndex] = 1;
-      if (update.status === 'slp') next.mySleepCounter![teamIndex] = 2;
+      if (tryApplyMyStatus(next, teamIndex, update.status)) {
+        if (update.status === 'tox') next.myToxCounter![teamIndex] = 1;
+        if (update.status === 'slp') next.mySleepCounter![teamIndex] = 2;
+      }
     }
   }
   if (update.cureStatus) {

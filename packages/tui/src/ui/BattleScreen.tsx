@@ -19,6 +19,7 @@ import { fieldMoveEffect, applyFieldMove } from '@pokechamps/core/domain/fieldMo
 import { EFFECT_DURATIONS } from '@pokechamps/core/domain/durations.js';
 import { detectChoiceLock, sashProcced, firstTurnOut, isFirstTurnMove, type ChoiceLock } from '@pokechamps/core/domain/itemSignals.js';
 import { hpItemTriggerFor } from '@pokechamps/core/domain/hpItemTriggers.js';
+import { statusBerryFor } from '@pokechamps/core/domain/statusBerries.js';
 import { switchInAbilityEffect, intimidateReaction, certainAbility, resolveDownloadBoost, type BoostMap } from '@pokechamps/core/domain/abilities.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
 import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict, type MatchupCell, type Confidence } from '@pokechamps/core/domain/predictions.js';
@@ -120,15 +121,13 @@ function applyHazardOnSwitchInto(match: Match, side: 'mine' | 'theirs', teamInde
   }
   if (effect.statusApplied) {
     if (side === 'mine') {
-      match.myStatus = { ...(match.myStatus ?? {}), [teamIndex]: effect.statusApplied };
-      if (effect.statusApplied === 'tox') {
+      if (tryApplyMyStatusInto(match, teamIndex, effect.statusApplied) && effect.statusApplied === 'tox') {
         match.myToxCounter = { ...(match.myToxCounter ?? {}), [teamIndex]: 1 };
       }
     } else {
       const o = match.opponentTeam[teamIndex];
-      if (o) {
-        o.status = effect.statusApplied;
-        if (effect.statusApplied === 'tox') o.toxCounter = 1;
+      if (o && tryApplyOppStatusInto(o, effect.statusApplied) && effect.statusApplied === 'tox') {
+        o.toxCounter = 1;
       }
     }
   }
@@ -158,6 +157,43 @@ function applyHazardOnSwitchInto(match: Match, side: 'mine' | 'theirs', teamInde
       match.field = { ...match.field, theirHazards: { ...match.field.theirHazards, toxicSpikes: 0 } };
     }
   }
+}
+
+// Status-berry interception on my side. Returns true if status was applied
+// (caller still owns tox/sleep counter setup); false if the berry caught it.
+function tryApplyMyStatusInto(
+  match: Match,
+  teamIndex: number,
+  status: NonNullable<import('@pokechamps/core/domain/types.js').ActivePokemonState['status']>,
+): boolean {
+  const consumed = match.myItemConsumed?.[teamIndex];
+  const held = consumed ? undefined : match.myTeam[teamIndex]?.item;
+  const cure = statusBerryFor(held, status);
+  if (cure) {
+    match.myItemConsumed = { ...(match.myItemConsumed ?? {}), [teamIndex]: cure.consumed };
+    return false;
+  }
+  match.myStatus = { ...(match.myStatus ?? {}), [teamIndex]: status };
+  return true;
+}
+
+// Opp-side mirror. Only catches when opp's item is known (else we set status
+// directly — auto-firing a guess would silently corrupt downstream inference).
+function tryApplyOppStatusInto(
+  o: OpponentEntry,
+  status: NonNullable<import('@pokechamps/core/domain/types.js').ActivePokemonState['status']>,
+): boolean {
+  if (o.itemConsumed || !o.item) {
+    o.status = status;
+    return true;
+  }
+  const cure = statusBerryFor(o.item, status);
+  if (cure) {
+    o.itemConsumed = cure.consumed;
+    return false;
+  }
+  o.status = status;
+  return true;
 }
 
 // Merge a boost map into a side's active boosts, clamped to [-6, +6].
@@ -918,15 +954,19 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       }
       const atkTypes = (getSpecies(atkFormeName) as { types?: string[] } | undefined)?.types ?? [];
       if (atkTypes.includes('Fire')) continue;
+      let applied: boolean;
       if (aSide === 'mine') {
         if (next.myStatus?.[aIdx]) continue;
-        next.myStatus = { ...(next.myStatus ?? {}), [aIdx]: 'brn' };
+        applied = tryApplyMyStatusInto(next, aIdx, 'brn');
       } else {
         const o = next.opponentTeam[aIdx];
         if (!o || o.status) continue;
-        o.status = 'brn';
+        applied = tryApplyOppStatusInto(o, 'brn');
       }
-      inferenceNotes.push(`${aSide === 'mine' ? 'm' : 'o'}${aIdx + 1} burned (Spicy Spray on ${defFormeName})`);
+      const ref = `${aSide === 'mine' ? 'm' : 'o'}${aIdx + 1}`;
+      inferenceNotes.push(applied
+        ? `${ref} burned (Spicy Spray on ${defFormeName})`
+        : `${ref} Rawst/Lum Berry cured the Spicy Spray burn`);
     }
     // Item-removing moves (Knock Off / Thief / Covet / berry-eaters).
     for (const a of draftActions) {
@@ -1324,17 +1364,17 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     if (update.status) {
       if (side === 'theirs') {
         const o = next.opponentTeam[teamIndex];
-        if (o) {
-          o.status = update.status;
+        if (o && tryApplyOppStatusInto(o, update.status)) {
           if (update.status === 'tox') o.toxCounter = 1;
           // Sleep is 1-3 turns; default to 2 (mean). Caller can override
           // later if they observe an early wake or full duration.
           if (update.status === 'slp') o.sleepCounter = 2;
         }
       } else {
-        next.myStatus![teamIndex] = update.status;
-        if (update.status === 'tox') next.myToxCounter![teamIndex] = 1;
-        if (update.status === 'slp') next.mySleepCounter![teamIndex] = 2;
+        if (tryApplyMyStatusInto(next, teamIndex, update.status)) {
+          if (update.status === 'tox') next.myToxCounter![teamIndex] = 1;
+          if (update.status === 'slp') next.mySleepCounter![teamIndex] = 2;
+        }
       }
     }
     if (update.cureStatus) {

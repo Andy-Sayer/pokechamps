@@ -573,3 +573,61 @@ describe('HP-threshold item auto-triggers (Sitrus, pinch berries)', () => {
     expect(r.match.opponentTeam[0]!.itemConsumed).toBeUndefined();
   });
 });
+
+describe('Status berries auto-cure on status application (my side)', () => {
+  test('user-logged Lum Berry cures any status (par) — no status, item consumed', () => {
+    const lumMon = mon({
+      species: 'Rillaboom', item: 'Lum Berry', ability: 'Grassy Surge',
+      moves: ['Grassy Glide'],
+    });
+    const match = freshMatch({ myTeam: [lumMon, sneasler, ironHands, flutterMane] });
+    const update: StateUpdate = { side: 'mine', teamIndex: 0, status: 'par' };
+    const r = applyStateUpdate({ match, update, activeIdx: startActive });
+    expect(r.match.myStatus?.[0]).toBeUndefined();
+    expect(r.match.myItemConsumed?.[0]).toBe('Lum Berry');
+  });
+
+  test('Rawst cures brn but Cheri does not (state-line path)', () => {
+    const rawstMon = mon({ species: 'Rillaboom', item: 'Rawst Berry', moves: [] });
+    const m1 = freshMatch({ myTeam: [rawstMon, sneasler, ironHands, flutterMane] });
+    const r1 = applyStateUpdate({ match: m1, update: { side: 'mine', teamIndex: 0, status: 'brn' }, activeIdx: startActive });
+    expect(r1.match.myStatus?.[0]).toBeUndefined();
+    expect(r1.match.myItemConsumed?.[0]).toBe('Rawst Berry');
+
+    const cheriMon = mon({ species: 'Rillaboom', item: 'Cheri Berry', moves: [] });
+    const m2 = freshMatch({ myTeam: [cheriMon, sneasler, ironHands, flutterMane] });
+    const r2 = applyStateUpdate({ match: m2, update: { side: 'mine', teamIndex: 0, status: 'brn' }, activeIdx: startActive });
+    // Cheri only cures par — burn lands normally.
+    expect(r2.match.myStatus?.[0]).toBe('brn');
+    expect(r2.match.myItemConsumed?.[0]).toBeUndefined();
+  });
+
+  test('no berry → status applies normally', () => {
+    const noBerry = mon({
+      species: 'Rillaboom', item: 'Leftovers', ability: 'Grassy Surge',
+      moves: ['Grassy Glide'],
+    });
+    const match = freshMatch({ myTeam: [noBerry, sneasler, ironHands, flutterMane] });
+    const update: StateUpdate = { side: 'mine', teamIndex: 0, status: 'par' };
+    const r = applyStateUpdate({ match, update, activeIdx: startActive });
+    expect(r.match.myStatus?.[0]).toBe('par');
+    expect(r.match.myItemConsumed?.[0]).toBeUndefined();
+  });
+
+  test('Pecha cures Toxic Spikes psn on switch-in', () => {
+    const pechaMon = mon({
+      species: 'Rillaboom', item: 'Pecha Berry', ability: 'Grassy Surge',
+      moves: ['Grassy Glide'],
+    });
+    // freshMatch defaults mine to Sneasler at index 0; put the Pecha Rillaboom
+    // at index 4 (benched) so bringIntoSlot can pull it in cleanly.
+    const match = freshMatch({ myTeam: [sneasler, rillaboom, ironHands, flutterMane, pechaMon] });
+    // Seed my side with 1 layer of Toxic Spikes.
+    match.field = { ...NEUTRAL_FIELD, myHazards: { stealthRock: false, spikes: 0, toxicSpikes: 1, stickyWeb: false } };
+    // Switch the Pecha Rillaboom in via the state line.
+    const update: StateUpdate = { side: 'mine', teamIndex: 4, bringIntoSlot: 0 };
+    const r = applyStateUpdate({ match, update, activeIdx: startActive });
+    expect(r.match.myStatus?.[4]).toBeUndefined();
+    expect(r.match.myItemConsumed?.[4]).toBe('Pecha Berry');
+  });
+});
