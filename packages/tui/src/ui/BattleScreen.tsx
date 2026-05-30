@@ -2109,6 +2109,17 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         const riskText = bestSearch.risks
           .map(r => `${r.label}${r.prob != null ? ` ${Math.round(r.prob * 100)}%` : ''}`)
           .join(' · ');
+        // Hail Mary: dice rolls needed when verdict is losing but a win is possible.
+        const hm = bestSearch.hailMary;
+        let hmLine: string | null = null;
+        if (hm) {
+          if (hm.noRealisticOut) {
+            hmLine = '~lost — no realistic out';
+          } else {
+            const outText = hm.outs.map(o => `${o.label} (${Math.round(o.prob * 100)}%)`).join(' + ');
+            hmLine = `only out: ~${Math.round(hm.combined * 100)}% — ${outText}`;
+          }
+        }
         return (
           <>
             <Text>
@@ -2116,6 +2127,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
               {mega ? <Text color="cyan">{mega}</Text> : null}{plays}  <Text color={vColor}>— {vText}</Text>
             </Text>
             {riskText ? <Text dimColor>   risks: {riskText}</Text> : null}
+            {hmLine ? <Text dimColor>   {hmLine}</Text> : null}
           </>
         );
       })()}
