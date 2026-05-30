@@ -1,8 +1,10 @@
 # PokeChamps roadmap
 
+> **See also:** [`accuracy-roadmap.md`](accuracy-roadmap.md) — a focused, tiered punch-list of damage/state/inference/search fidelity gaps and the order to close them. Maintained alongside this strategic doc.
+
 ## Context
 
-**Last updated 2026-05-24.** 492 tests across 4 workspaces, all green.
+**Last updated 2026-05-29.** 594 tests across 4 workspaces, all green.
 A root `vitest.config.ts`
 (`test.projects`) now aggregates every workspace's own config, so both
 `npm test` and a bare `npx vitest run` from the repo root pass —
