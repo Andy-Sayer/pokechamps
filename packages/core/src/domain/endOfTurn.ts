@@ -1,6 +1,6 @@
 import type { Match, FieldState, OpponentEntry, PokemonSet } from './types.js';
 import { maxHpFor } from './damage.js';
-import { getSpecies } from './data.js';
+import { getSpecies, toId } from './data.js';
 import { defaultOpponentSet } from './bring.js';
 
 // Returns a fresh Match with end-of-turn effects applied to the four actives:
@@ -45,6 +45,20 @@ export function endOfTurn(
     // Weather chip
     const wChip = weatherChipPct(field.weather, types);
     if (wChip > 0) { o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - wChip); notes.push(`o${idx + 1} -${wChip.toFixed(0)}% (${field.weather})`); }
+    // Weather-ability heals/chips — only when ability is known.
+    if (o.ability) {
+      const oppAbilId = toId(o.ability);
+      const wAbilEffect = weatherAbilityEffect(field.weather, oppAbilId);
+      if (wAbilEffect !== 0) {
+        if (wAbilEffect > 0) {
+          o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) + wAbilEffect);
+          notes.push(`o${idx + 1} +${wAbilEffect.toFixed(0)}% (${o.ability})`);
+        } else {
+          o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) + wAbilEffect);
+          notes.push(`o${idx + 1} ${wAbilEffect.toFixed(0)}% (${o.ability})`);
+        }
+      }
+    }
     // Status tick
     const statusChip = statusChipPct(o.status, o.toxCounter ?? 0);
     if (statusChip > 0) {
@@ -86,6 +100,18 @@ export function endOfTurn(
     const types = (getSpecies(set.species) as any)?.types as string[] | undefined;
     const wChip = weatherChipPct(field.weather, types);
     if (wChip > 0) { next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - wChip); notes.push(`m${idx + 1} -${wChip.toFixed(0)}% (${field.weather})`); }
+    // Weather-ability heals/chips: Rain Dish, Dry Skin, Ice Body, Solar Power.
+    const myAbilId = set.ability ? toId(set.ability) : '';
+    const wAbilEffect = weatherAbilityEffect(field.weather, myAbilId);
+    if (wAbilEffect !== 0) {
+      if (wAbilEffect > 0) {
+        next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) + wAbilEffect);
+        notes.push(`m${idx + 1} +${wAbilEffect.toFixed(0)}% (${set.ability})`);
+      } else {
+        next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) + wAbilEffect);
+        notes.push(`m${idx + 1} ${wAbilEffect.toFixed(0)}% (${set.ability})`);
+      }
+    }
     const statusChip = statusChipPct(next.myStatus?.[idx], next.myToxCounter?.[idx] ?? 0);
     if (statusChip > 0) {
       next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - statusChip);
@@ -246,5 +272,25 @@ function orbStatusFor(
   return null;
 }
 
+// EOT HP delta (positive=heal, negative=chip) from weather-triggered abilities.
+// Rain Dish: +1/16 in rain; Dry Skin: +1/8 in rain, -1/8 in sun;
+// Ice Body: +1/16 in hail or snow; Solar Power: -1/8 in sun.
+// Returns 0 when the ability has no effect under the current weather.
+function weatherAbilityEffect(weather: FieldState['weather'], abilId: string): number {
+  if (!weather) return 0;
+  const isRain = weather === 'Rain' || weather === 'Heavy Rain';
+  const isSun = weather === 'Sun' || weather === 'Harsh Sunshine';
+  const isHailSnow = weather === 'Hail' || weather === 'Snow';
+  if (abilId === 'raindish') return isRain ? 100 / 16 : 0;
+  if (abilId === 'dryskin') {
+    if (isRain) return 100 / 8;
+    if (isSun) return -(100 / 8);
+    return 0;
+  }
+  if (abilId === 'icebody') return isHailSnow ? 100 / 16 : 0;
+  if (abilId === 'solarpower') return isSun ? -(100 / 8) : 0;
+  return 0;
+}
+
 // Re-exports for tests
-export { weatherChipPct, statusChipPct, orbStatusFor };
+export { weatherChipPct, statusChipPct, orbStatusFor, weatherAbilityEffect };

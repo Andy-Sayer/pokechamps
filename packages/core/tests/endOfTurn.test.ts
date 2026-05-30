@@ -1,6 +1,6 @@
 // Residual end-of-turn effects: chip and HP changes applied between turns.
 import { describe, test, expect } from 'vitest';
-import { endOfTurn, orbStatusFor } from '../src/domain/endOfTurn.js';
+import { endOfTurn, orbStatusFor, weatherAbilityEffect } from '../src/domain/endOfTurn.js';
 import type { Match, OpponentEntry, PokemonSet } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } from '../src/domain/types.js';
 
@@ -105,5 +105,67 @@ describe('orbStatusFor', () => {
     // Status stays tox, counter increments (chip from existing tox)
     expect(out.myStatus![0]).toBe('tox');
     expect(out.myToxCounter![0]).toBe(3);
+  });
+});
+
+describe('weatherAbilityEffect', () => {
+  test('Rain Dish heals 1/16 in rain', () => {
+    expect(weatherAbilityEffect('Rain', 'raindish')).toBeCloseTo(100 / 16, 5);
+  });
+  test('Rain Dish does nothing outside rain', () => {
+    expect(weatherAbilityEffect('Sun', 'raindish')).toBe(0);
+    expect(weatherAbilityEffect(null, 'raindish')).toBe(0);
+  });
+  test('Dry Skin heals 1/8 in rain', () => {
+    expect(weatherAbilityEffect('Rain', 'dryskin')).toBeCloseTo(100 / 8, 5);
+  });
+  test('Dry Skin damages 1/8 in sun', () => {
+    expect(weatherAbilityEffect('Sun', 'dryskin')).toBeCloseTo(-(100 / 8), 5);
+  });
+  test('Dry Skin and Heavy Rain / Harsh Sunshine', () => {
+    expect(weatherAbilityEffect('Heavy Rain', 'dryskin')).toBeCloseTo(100 / 8, 5);
+    expect(weatherAbilityEffect('Harsh Sunshine', 'dryskin')).toBeCloseTo(-(100 / 8), 5);
+  });
+  test('Ice Body heals 1/16 in Hail', () => {
+    expect(weatherAbilityEffect('Hail', 'icebody')).toBeCloseTo(100 / 16, 5);
+  });
+  test('Ice Body heals 1/16 in Snow', () => {
+    expect(weatherAbilityEffect('Snow', 'icebody')).toBeCloseTo(100 / 16, 5);
+  });
+  test('Ice Body does nothing in rain', () => {
+    expect(weatherAbilityEffect('Rain', 'icebody')).toBe(0);
+  });
+  test('Solar Power chips 1/8 in sun', () => {
+    expect(weatherAbilityEffect('Sun', 'solarpower')).toBeCloseTo(-(100 / 8), 5);
+  });
+  test('Solar Power does nothing in rain', () => {
+    expect(weatherAbilityEffect('Rain', 'solarpower')).toBe(0);
+  });
+
+  test('Rain Dish heals my mon in rain via endOfTurn', () => {
+    const ludicolo = mon({ species: 'Ludicolo', ability: 'Rain Dish' });
+    const m = freshMatch([ludicolo], ['Incineroar']);
+    m.myCurrentHp = { 0: 60 };
+    const rainField = { ...NEUTRAL_FIELD, weather: 'Rain' as const };
+    const { match: out } = endOfTurn(m, rainField, { mine: [0, null], theirs: [0, null] });
+    expect(out.myCurrentHp![0]).toBeGreaterThan(60);
+  });
+
+  test('Solar Power chips opp mon in sun when ability is known', () => {
+    const m = freshMatch([mon({ species: 'Scovillain' })], ['Charizard']);
+    m.opponentTeam[0]!.ability = 'Solar Power';
+    m.opponentTeam[0]!.currentHpPercent = 80;
+    const sunField = { ...NEUTRAL_FIELD, weather: 'Sun' as const };
+    const { match: out } = endOfTurn(m, sunField, { mine: [0, null], theirs: [0, null] });
+    expect(out.opponentTeam[0]!.currentHpPercent).toBeLessThan(80);
+  });
+
+  test('Solar Power does NOT chip opp mon when ability is unknown', () => {
+    const m = freshMatch([mon({ species: 'Scovillain' })], ['Charizard']);
+    m.opponentTeam[0]!.currentHpPercent = 80;
+    // No ability set on opp
+    const sunField = { ...NEUTRAL_FIELD, weather: 'Sun' as const };
+    const { match: out } = endOfTurn(m, sunField, { mine: [0, null], theirs: [0, null] });
+    expect(out.opponentTeam[0]!.currentHpPercent).toBe(80);
   });
 });
