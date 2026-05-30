@@ -1224,6 +1224,25 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         next.myFainted = (next.myFainted ?? []).filter(i => i !== tIdx);
       }
     }
+    // `(berry)` suffix: resist berry consumed. Derive berry name from move type and
+    // record as learned+consumed for opp, or consumed for mine.
+    for (const a of draftActions) {
+      if (!a.berry) continue;
+      if (typeof a.target !== 'object') continue;
+      const tIdx2 = a.targetTeamIndex;
+      if (tIdx2 == null) continue;
+      const moveDex2 = getMove(a.move) as { type?: string } | undefined;
+      const berryName2 = moveDex2?.type ? resistBerryForType(moveDex2.type) : undefined;
+      if (!berryName2) continue;
+      if (a.target.side === 'theirs') {
+        const o2 = next.opponentTeam[tIdx2];
+        if (!o2) continue;
+        if (!o2.item) o2.item = berryName2;
+        o2.itemConsumed = berryName2;
+      } else {
+        next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx2]: berryName2 };
+      }
+    }
     for (const a of draftActions) {
       if (a.kind === 'switch' || a.kind === 'mega') continue;
       if (a.side !== 'mine') continue;

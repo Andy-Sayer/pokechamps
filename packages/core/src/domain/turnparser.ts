@@ -656,6 +656,17 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
       if (m) { sash = true; dmgTok = m[1]; }
     }
   }
+  // Trailing `(berry)` in the damage slot: a resist berry was consumed on this hit.
+  // Strip the flag so the rest parses as a normal damage value.
+  let berry = false;
+  if (dmgTok) {
+    const t = dmgTok.trim();
+    if (/^\(berry\)$/i.test(t)) { berry = true; dmgTok = undefined; }
+    else {
+      const m = t.match(/^(.*\S)\s+\(berry\)$/i);
+      if (m) { berry = true; dmgTok = m[1]; }
+    }
+  }
   const dmg = parseDamage(dmgTok, damageTargetSide);
   if (sash) {
     if (damageTargetSide === 'mine') {
@@ -693,6 +704,7 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
       critical: actor.crit || undefined,
       quickClaw: actor.quickClaw || undefined,
       sash: sash || undefined,
+      berry: berry || undefined,
       ...dmg,
     }],
   };

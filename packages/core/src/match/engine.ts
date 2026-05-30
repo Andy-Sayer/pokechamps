@@ -1037,6 +1037,26 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     }
   }
 
+  // `(berry)` suffix: resist berry consumed. Derive berry name from move type and
+  // record as learned+consumed for opp, or consumed for mine.
+  for (const a of draftActions) {
+    if (!a.berry) continue;
+    if (typeof a.target !== 'object') continue;
+    const tIdx = a.targetTeamIndex;
+    if (tIdx == null) continue;
+    const moveDex = getMove(a.move) as { type?: string } | undefined;
+    const berryName = moveDex?.type ? resistBerryForType(moveDex.type) : undefined;
+    if (!berryName) continue;
+    if (a.target.side === 'theirs') {
+      const o = next.opponentTeam[tIdx];
+      if (!o) continue;
+      if (!o.item) o.item = berryName;
+      o.itemConsumed = berryName;
+    } else {
+      next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: berryName };
+    }
+  }
+
   // Damage inference for every mine→theirs damaging action.
   for (const a of draftActions) {
     if (a.kind === 'switch' || a.kind === 'mega') continue;

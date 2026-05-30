@@ -194,6 +194,10 @@ export interface MoveAction {
   //  - survived with HP to spare → Sash did NOT proc: damage is the move's true
   //    output (inference runs), and we record the item as a held Focus Sash.
   sash?: boolean;
+  // Set when the damage slot carried a trailing `(berry)`, e.g.
+  // `m1 > Sucker Punch > o1 > 80 (berry)`. finalizeTurn derives the resist berry
+  // from the move's type via resistBerryForType and marks it as learned+consumed.
+  berry?: boolean;
   notes?: string;
 }
 
