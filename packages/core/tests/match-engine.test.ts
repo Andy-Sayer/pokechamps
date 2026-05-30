@@ -823,3 +823,28 @@ describe('On-hit chip abilities (Rough Skin / Iron Barbs)', () => {
     expect(r.match.opponentTeam[0]!.currentHpPercent).toBeUndefined(); // never modified
   });
 });
+
+describe('Regenerator heals +1/3 on switch-out', () => {
+  test('my Regenerator mon recovers when switched out via a switch action', () => {
+    const regenMon = mon({ species: 'Rillaboom', ability: 'Regenerator', moves: ['Grassy Glide'] });
+    const match = freshMatch({ myTeam: [sneasler, regenMon, ironHands, flutterMane] });
+    match.myCurrentHp = { 0: 100, 1: 50 }; // Rillaboom at 50%
+    // Switch action: Rillaboom (outgoing at slot 1) → Iron Hands (idx 2) coming in.
+    const action: MoveAction = {
+      kind: 'switch', side: 'mine', attackerSlot: 1, targetTeamIndex: 2,
+    } as any;
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    // Rillaboom (idx 1) should have recovered 1/3 of max HP ≈ +33.3%.
+    expect(r.match.myCurrentHp![1]).toBeCloseTo(50 + 100 / 3, 0);
+  });
+
+  test('non-Regenerator mon is not healed on switch-out', () => {
+    const match = freshMatch();
+    match.myCurrentHp = { 0: 100, 1: 50 };
+    const action: MoveAction = {
+      kind: 'switch', side: 'mine', attackerSlot: 1, targetTeamIndex: 2,
+    } as any;
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    expect(r.match.myCurrentHp![1]).toBe(50); // unchanged (Rillaboom has Grassy Surge, not Regen)
+  });
+});

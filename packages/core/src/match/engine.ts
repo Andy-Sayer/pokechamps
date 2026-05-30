@@ -1077,12 +1077,21 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     if (a.kind !== 'switch' || a.targetTeamIndex == null) continue;
     if (a.side === 'mine') {
       const outgoing = nextActive.mine[a.attackerSlot];
-      if (outgoing != null) { delete next.myBoosts[outgoing]; clearMyVolatiles(next, outgoing); }
+      if (outgoing != null) {
+        if (toId(next.myTeam[outgoing]?.ability ?? '') === 'regenerator') {
+          next.myCurrentHp = next.myCurrentHp ?? {};
+          next.myCurrentHp[outgoing] = Math.min(100, (next.myCurrentHp[outgoing] ?? 100) + 100 / 3);
+        }
+        delete next.myBoosts[outgoing]; clearMyVolatiles(next, outgoing);
+      }
       nextActive.mine[a.attackerSlot] = a.targetTeamIndex;
     } else {
       const outgoing = nextActive.theirs[a.attackerSlot];
       if (outgoing != null && next.opponentTeam[outgoing]) {
         const o = { ...next.opponentTeam[outgoing], currentBoosts: {} };
+        if (o.ability && toId(o.ability) === 'regenerator') {
+          o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + 100 / 3);
+        }
         clearOppVolatiles(o);
         next.opponentTeam[outgoing] = o;
       }
@@ -1371,13 +1380,24 @@ function applyStateUpdateImpl(
   if (update.bringIntoSlot != null) {
     if (side === 'mine') {
       const outgoing = nextActive.mine[update.bringIntoSlot];
-      if (outgoing != null) { delete next.myBoosts![outgoing]; clearMyVolatiles(next, outgoing); }
+      if (outgoing != null) {
+        if (toId(next.myTeam[outgoing]?.ability ?? '') === 'regenerator') {
+          next.myCurrentHp = next.myCurrentHp ?? {};
+          next.myCurrentHp[outgoing] = Math.min(100, (next.myCurrentHp[outgoing] ?? 100) + 100 / 3);
+        }
+        delete next.myBoosts![outgoing]; clearMyVolatiles(next, outgoing);
+      }
       nextActive.mine[update.bringIntoSlot] = teamIndex;
     } else {
       const outgoing = nextActive.theirs[update.bringIntoSlot];
       if (outgoing != null) {
         const o = next.opponentTeam[outgoing];
-        if (o) { o.currentBoosts = {}; clearOppVolatiles(o); }
+        if (o) {
+          if (o.ability && toId(o.ability) === 'regenerator') {
+            o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + 100 / 3);
+          }
+          o.currentBoosts = {}; clearOppVolatiles(o);
+        }
       }
       nextActive.theirs[update.bringIntoSlot] = teamIndex;
       const brought = new Set(next.opponentBrought ?? []);

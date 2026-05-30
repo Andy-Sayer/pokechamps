@@ -1263,12 +1263,20 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (a.kind !== 'switch' || a.targetTeamIndex == null) continue;
       if (a.side === 'mine') {
         const outgoing = nextActive.mine[a.attackerSlot];
-        if (outgoing != null) { delete next.myBoosts[outgoing]; next.myTaunted = (next.myTaunted ?? []).filter(i => i !== outgoing); if (next.myEncoreMove) delete next.myEncoreMove[outgoing]; if (next.myDisabledMove) delete next.myDisabledMove[outgoing]; if (next.myTauntTurns) delete next.myTauntTurns[outgoing]; if (next.myEncoreTurns) delete next.myEncoreTurns[outgoing]; if (next.myDisableTurns) delete next.myDisableTurns[outgoing]; if (next.myLeechSeeded) delete next.myLeechSeeded[outgoing]; }
+        if (outgoing != null) {
+          if (toId(next.myTeam[outgoing]?.ability ?? '') === 'regenerator') {
+            next.myCurrentHp = next.myCurrentHp ?? {};
+            next.myCurrentHp[outgoing] = Math.min(100, (next.myCurrentHp[outgoing] ?? 100) + 100 / 3);
+          }
+          delete next.myBoosts[outgoing]; next.myTaunted = (next.myTaunted ?? []).filter(i => i !== outgoing); if (next.myEncoreMove) delete next.myEncoreMove[outgoing]; if (next.myDisabledMove) delete next.myDisabledMove[outgoing]; if (next.myTauntTurns) delete next.myTauntTurns[outgoing]; if (next.myEncoreTurns) delete next.myEncoreTurns[outgoing]; if (next.myDisableTurns) delete next.myDisableTurns[outgoing]; if (next.myLeechSeeded) delete next.myLeechSeeded[outgoing];
+        }
         nextActive.mine[a.attackerSlot] = a.targetTeamIndex;
       } else {
         const outgoing = nextActive.theirs[a.attackerSlot];
         if (outgoing != null && next.opponentTeam[outgoing]) {
-          next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {}, taunted: undefined, encoreMove: undefined, disabledMove: undefined, tauntTurns: undefined, encoreTurns: undefined, disableTurns: undefined, leechSeeded: undefined };
+          const regen = next.opponentTeam[outgoing]!.ability && toId(next.opponentTeam[outgoing]!.ability!) === 'regenerator';
+          const regenHp = regen ? Math.min(100, (next.opponentTeam[outgoing]!.currentHpPercent ?? 100) + 100 / 3) : undefined;
+          next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {}, taunted: undefined, encoreMove: undefined, disabledMove: undefined, tauntTurns: undefined, encoreTurns: undefined, disableTurns: undefined, leechSeeded: undefined, ...(regenHp != null ? { currentHpPercent: regenHp } : {}) };
         }
         nextActive.theirs[a.attackerSlot] = a.targetTeamIndex;
       }
@@ -1558,13 +1566,24 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       // typically none for a first appearance.
       if (side === 'mine') {
         const outgoing = nextActive.mine[update.bringIntoSlot];
-        if (outgoing != null) { delete next.myBoosts![outgoing]; next.myTaunted = (next.myTaunted ?? []).filter(i => i !== outgoing); if (next.myEncoreMove) delete next.myEncoreMove[outgoing]; if (next.myDisabledMove) delete next.myDisabledMove[outgoing]; if (next.myTauntTurns) delete next.myTauntTurns[outgoing]; if (next.myEncoreTurns) delete next.myEncoreTurns[outgoing]; if (next.myDisableTurns) delete next.myDisableTurns[outgoing]; }
+        if (outgoing != null) {
+          if (toId(next.myTeam[outgoing]?.ability ?? '') === 'regenerator') {
+            next.myCurrentHp = next.myCurrentHp ?? {};
+            next.myCurrentHp[outgoing] = Math.min(100, (next.myCurrentHp[outgoing] ?? 100) + 100 / 3);
+          }
+          delete next.myBoosts![outgoing]; next.myTaunted = (next.myTaunted ?? []).filter(i => i !== outgoing); if (next.myEncoreMove) delete next.myEncoreMove[outgoing]; if (next.myDisabledMove) delete next.myDisabledMove[outgoing]; if (next.myTauntTurns) delete next.myTauntTurns[outgoing]; if (next.myEncoreTurns) delete next.myEncoreTurns[outgoing]; if (next.myDisableTurns) delete next.myDisableTurns[outgoing];
+        }
         nextActive.mine[update.bringIntoSlot] = teamIndex;
       } else {
         const outgoing = nextActive.theirs[update.bringIntoSlot];
         if (outgoing != null) {
           const o = next.opponentTeam[outgoing];
-          if (o) { o.currentBoosts = {}; o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined; o.tauntTurns = undefined; o.encoreTurns = undefined; o.disableTurns = undefined; }
+          if (o) {
+            if (o.ability && toId(o.ability) === 'regenerator') {
+              o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + 100 / 3);
+            }
+            o.currentBoosts = {}; o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined; o.tauntTurns = undefined; o.encoreTurns = undefined; o.disableTurns = undefined;
+          }
         }
         nextActive.theirs[update.bringIntoSlot] = teamIndex;
         const brought = new Set(next.opponentBrought ?? []);
