@@ -691,6 +691,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     // opponentTeam / myCurrentHp afterwards.
     const oppHpSoFar = new Map<number, number>();
     const myHpSoFar = new Map<number, number>();
+    const oppSubHpSoFar = new Map<number, number>();
+    const mySubHpSoFar = new Map<number, number>();
+    const hitSub = new Set<import('@pokechamps/core/domain/types.js').MoveAction>();
     const sortedActions = [...draftActions].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     for (const a of sortedActions) {
       if (a.kind === 'switch' || a.kind === 'mega') continue;
@@ -698,6 +701,24 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       const tIdx = a.targetTeamIndex;
       if (tIdx == null) continue;
       const tSide = a.target.side;
+
+      // Substitute: damage routes to sub HP. Sound moves bypass.
+      const curSubHp = tSide === 'theirs'
+        ? (oppSubHpSoFar.has(tIdx) ? oppSubHpSoFar.get(tIdx)! : next.opponentTeam[tIdx]?.substitute)
+        : (mySubHpSoFar.has(tIdx) ? mySubHpSoFar.get(tIdx)! : next.myCurrentSub?.[tIdx]);
+      if (curSubHp != null) {
+        const mvFlags2 = getMove(a.move) as { flags?: Record<string, number> } | undefined;
+        if (!mvFlags2?.flags?.sound) {
+          hitSub.add(a);
+          if (a.damageHpPercent != null) {
+            const subAfter = Math.max(0, curSubHp - a.damageHpPercent);
+            if (tSide === 'theirs') oppSubHpSoFar.set(tIdx, subAfter);
+            else mySubHpSoFar.set(tIdx, subAfter);
+          }
+          continue;
+        }
+      }
+
       const prevPct = tSide === 'theirs'
         ? (oppHpSoFar.get(tIdx) ?? next.opponentTeam[tIdx]?.currentHpPercent ?? 100)
         : (myHpSoFar.get(tIdx) ?? next.myCurrentHp![tIdx] ?? 100);
@@ -780,6 +801,19 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     for (const [idx, hp] of myHpSoFar) {
       next.myCurrentHp![idx] = hp;
       if (hp === 0 && !next.myFainted!.includes(idx)) next.myFainted!.push(idx);
+    }
+
+    // Commit sub HP changes; clear broken subs.
+    for (const [idx, subHp] of oppSubHpSoFar) {
+      const o = next.opponentTeam[idx];
+      if (o) o.substitute = subHp <= 0 ? undefined : subHp;
+    }
+    if (mySubHpSoFar.size > 0) {
+      next.myCurrentSub = { ...(next.myCurrentSub ?? {}) };
+      for (const [idx, subHp] of mySubHpSoFar) {
+        if (subHp <= 0) delete next.myCurrentSub![idx];
+        else next.myCurrentSub![idx] = subHp;
+      }
     }
 
     // Resist berry auto-consume on opp side when item is KNOWN. Mirror of engine.ts.
@@ -902,6 +936,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         const formeName = o.megaUsed && o.megaForme ? o.megaForme : o.species;
         const types = (getSpecies(formeName) as { types?: string[] } | undefined)?.types;
         if (types?.includes('Grass')) continue;
+        if (o.substitute != null) continue; // Substitute blocks Leech Seed
         const lsAbilOpp = certainAbility({ knownAbility: o.ability, species: o.species });
         if (lsAbilOpp && toId(lsAbilOpp) === 'magicbounce') continue;
         o.leechSeeded = { seederSide: a.side, seederIndex: sIdx };
@@ -913,9 +948,27 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         const formeName = next.myMegaUsed?.includes(tIdx) && next.myMegaForme?.[tIdx] ? next.myMegaForme[tIdx] : set.species;
         const types = (getSpecies(formeName) as { types?: string[] } | undefined)?.types;
         if (types?.includes('Grass')) continue;
+        if (next.myCurrentSub?.[tIdx] != null) continue; // Substitute blocks Leech Seed
         if (toId(set.ability ?? '') === 'magicbounce') continue;
         next.myLeechSeeded = { ...(next.myLeechSeeded ?? {}), [tIdx]: { seederSide: a.side, seederIndex: sIdx } };
         inferenceNotes.push(`m${tIdx + 1} seeded`);
+      }
+    }
+    // Substitute: deduct 25% HP from the user; create sub at 25% HP. Mirror of engine.ts.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.move !== 'Substitute') continue;
+      if (a.attackerTeamIndex == null) continue;
+      if (a.side === 'mine') {
+        const myHp = next.myCurrentHp?.[a.attackerTeamIndex] ?? 100;
+        if (myHp <= 25) continue;
+        next.myCurrentHp = { ...(next.myCurrentHp ?? {}), [a.attackerTeamIndex]: myHp - 25 };
+        next.myCurrentSub = { ...(next.myCurrentSub ?? {}), [a.attackerTeamIndex]: 25 };
+      } else {
+        const o = next.opponentTeam[a.attackerTeamIndex];
+        if (!o || (o.currentHpPercent ?? 100) <= 25) continue;
+        o.currentHpPercent = Math.max(0, (o.currentHpPercent ?? 100) - 25);
+        o.substitute = 25;
       }
     }
     // Move self-stat drops (Overheat / Leaf Storm / Draco Meteor −2 SpA, Close
@@ -1150,6 +1203,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         ? ((getSpecies(next.myTeam[tIdx]?.species ?? '') as { types?: string[] } | undefined)?.types ?? [])
         : ((getSpecies(next.opponentTeam[tIdx]?.species ?? '') as { types?: string[] } | undefined)?.types ?? []);
       if (isStatusMoveImmune(sm.status, !!sm.ignoreImmunity, !!(sm.flags?.powder), tTypes)) continue;
+      // Substitute blocks status-category moves.
+      if (tSide === 'mine' ? next.myCurrentSub?.[tIdx] != null : next.opponentTeam[tIdx]?.substitute != null) continue;
       // Magic Bounce reflects status-category moves back at the user.
       const tAbilMB = tSide === 'mine'
         ? next.myTeam[tIdx]?.ability
@@ -1262,6 +1317,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (a.kind === 'switch' || a.kind === 'mega') continue;
       if (a.side !== 'mine') continue;
       if (sashProcced(a)) continue; // Sash-capped damage understates the move — skip inference
+      if (hitSub.has(a)) continue;
       if (a.damageHpPercent == null && a.damageRaw == null) continue;
       if (typeof a.target !== 'object' || a.target.side !== 'theirs') continue;
       const attackerSet = next.myTeam[a.attackerTeamIndex ?? -1];
@@ -1321,6 +1377,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (a.kind === 'switch' || a.kind === 'mega') continue;
       if (a.side !== 'theirs') continue;
       if (sashProcced(a)) continue;
+      if (hitSub.has(a)) continue;
       if (a.damageHpPercent == null && a.damageRaw == null) continue;
       if (typeof a.target !== 'object' || a.target.side !== 'mine') continue;
       const oppIdx = a.attackerTeamIndex;
@@ -1373,7 +1430,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             next.myCurrentHp = next.myCurrentHp ?? {};
             next.myCurrentHp[outgoing] = Math.min(100, (next.myCurrentHp[outgoing] ?? 100) + 100 / 3);
           }
-          delete next.myBoosts[outgoing]; next.myTaunted = (next.myTaunted ?? []).filter(i => i !== outgoing); if (next.myEncoreMove) delete next.myEncoreMove[outgoing]; if (next.myDisabledMove) delete next.myDisabledMove[outgoing]; if (next.myTauntTurns) delete next.myTauntTurns[outgoing]; if (next.myEncoreTurns) delete next.myEncoreTurns[outgoing]; if (next.myDisableTurns) delete next.myDisableTurns[outgoing]; if (next.myLeechSeeded) delete next.myLeechSeeded[outgoing]; if (next.myCursed) delete next.myCursed[outgoing]; if (next.myPartialTrap) delete next.myPartialTrap[outgoing]; if (next.myNightmare) delete next.myNightmare[outgoing];
+          delete next.myBoosts[outgoing]; next.myTaunted = (next.myTaunted ?? []).filter(i => i !== outgoing); if (next.myEncoreMove) delete next.myEncoreMove[outgoing]; if (next.myDisabledMove) delete next.myDisabledMove[outgoing]; if (next.myTauntTurns) delete next.myTauntTurns[outgoing]; if (next.myEncoreTurns) delete next.myEncoreTurns[outgoing]; if (next.myDisableTurns) delete next.myDisableTurns[outgoing]; if (next.myLeechSeeded) delete next.myLeechSeeded[outgoing]; if (next.myCursed) delete next.myCursed[outgoing]; if (next.myPartialTrap) delete next.myPartialTrap[outgoing]; if (next.myNightmare) delete next.myNightmare[outgoing]; if (next.myCurrentSub) delete next.myCurrentSub[outgoing];
         }
         nextActive.mine[a.attackerSlot] = a.targetTeamIndex;
       } else {
@@ -1381,7 +1438,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         if (outgoing != null && next.opponentTeam[outgoing]) {
           const regen = next.opponentTeam[outgoing]!.ability && toId(next.opponentTeam[outgoing]!.ability!) === 'regenerator';
           const regenHp = regen ? Math.min(100, (next.opponentTeam[outgoing]!.currentHpPercent ?? 100) + 100 / 3) : undefined;
-          next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {}, taunted: undefined, encoreMove: undefined, disabledMove: undefined, tauntTurns: undefined, encoreTurns: undefined, disableTurns: undefined, leechSeeded: undefined, cursed: undefined, partialTrap: undefined, nightmare: undefined, ...(regenHp != null ? { currentHpPercent: regenHp } : {}) };
+          next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {}, taunted: undefined, encoreMove: undefined, disabledMove: undefined, tauntTurns: undefined, encoreTurns: undefined, disableTurns: undefined, leechSeeded: undefined, cursed: undefined, partialTrap: undefined, nightmare: undefined, substitute: undefined, ...(regenHp != null ? { currentHpPercent: regenHp } : {}) };
         }
         nextActive.theirs[a.attackerSlot] = a.targetTeamIndex;
       }
@@ -1721,7 +1778,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             if (o.ability && toId(o.ability) === 'regenerator') {
               o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + 100 / 3);
             }
-            o.currentBoosts = {}; o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined; o.tauntTurns = undefined; o.encoreTurns = undefined; o.disableTurns = undefined; o.leechSeeded = undefined; o.cursed = undefined; o.partialTrap = undefined; o.nightmare = undefined;
+            o.currentBoosts = {}; o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined; o.tauntTurns = undefined; o.encoreTurns = undefined; o.disableTurns = undefined; o.leechSeeded = undefined; o.cursed = undefined; o.partialTrap = undefined; o.nightmare = undefined; o.substitute = undefined;
           }
         }
         nextActive.theirs[update.bringIntoSlot] = teamIndex;
@@ -2232,6 +2289,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
                 {(match.myTaunted?.includes(teamIdx) || match.myEncoreMove?.[teamIdx] || match.myDisabledMove?.[teamIdx]) && (
                   <Text color="magenta">      {match.myTaunted?.includes(teamIdx) ? `🤬Taunt${match.myTauntTurns?.[teamIdx] ? `(${match.myTauntTurns[teamIdx]})` : ''} ` : ''}{match.myEncoreMove?.[teamIdx] ? `🔁Encore ${match.myEncoreMove[teamIdx]}${match.myEncoreTurns?.[teamIdx] ? `(${match.myEncoreTurns[teamIdx]})` : ''} ` : ''}{match.myDisabledMove?.[teamIdx] ? `🚫Disable ${match.myDisabledMove[teamIdx]}${match.myDisableTurns?.[teamIdx] ? `(${match.myDisableTurns[teamIdx]})` : ''}` : ''}</Text>
                 )}
+                {match.myCurrentSub?.[teamIdx] != null && (
+                  <Text color="cyan">      [Sub {Math.round(match.myCurrentSub[teamIdx]!)}%]</Text>
+                )}
                 {match.myPerishCount?.[teamIdx] != null && (
                   <Text color="red">      ☠Perish {match.myPerishCount[teamIdx]}</Text>
                 )}
@@ -2705,6 +2765,7 @@ function OppRow({ stores, entry, marker, color, choiceLock }: OppRowProps) {
         {entry.taunted ? <Text color="magenta"> 🤬Taunt{entry.tauntTurns ? `(${entry.tauntTurns})` : ''}</Text> : null}
         {entry.encoreMove ? <Text color="magenta"> 🔁Encore {entry.encoreMove}{entry.encoreTurns ? `(${entry.encoreTurns})` : ''}</Text> : null}
         {entry.disabledMove ? <Text color="magenta"> 🚫Disable {entry.disabledMove}{entry.disableTurns ? `(${entry.disableTurns})` : ''}</Text> : null}
+        {entry.substitute != null ? <Text color="cyan"> [Sub {Math.round(entry.substitute)}%]</Text> : null}
         {entry.perishCount != null ? <Text color="red"> ☠Perish {entry.perishCount}</Text> : null}
         {entry.saltCured ? <Text color="yellow"> ⬡Salt Cure</Text> : null}
         {entry.partialTrap ? <Text color="yellow"> ⛓trapped({entry.partialTrap})</Text> : null}

@@ -144,10 +144,11 @@ function clearMyVolatiles(match: Match, idx: number): void {
   if (match.myEncoreTurns) delete match.myEncoreTurns[idx];
   if (match.myDisableTurns) delete match.myDisableTurns[idx];
   if (match.myLeechSeeded) delete match.myLeechSeeded[idx];
-  // Clears on switch-out: Curse, partial trap, Nightmare.
+  // Clears on switch-out: Curse, partial trap, Nightmare, Substitute.
   if (match.myCursed) delete match.myCursed[idx];
   if (match.myPartialTrap) delete match.myPartialTrap[idx];
   if (match.myNightmare) delete match.myNightmare[idx];
+  if (match.myCurrentSub) delete match.myCurrentSub[idx];
   // Persists through switch: Salt Cure, Aqua Ring, Ingrain — not cleared here.
 }
 
@@ -156,8 +157,8 @@ function clearOppVolatiles(o: OpponentEntry): void {
   o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined;
   o.tauntTurns = undefined; o.encoreTurns = undefined; o.disableTurns = undefined;
   o.leechSeeded = undefined;
-  // Clears on switch-out: Curse, partial trap, Nightmare.
-  o.cursed = undefined; o.partialTrap = undefined; o.nightmare = undefined;
+  // Clears on switch-out: Curse, partial trap, Nightmare, Substitute.
+  o.cursed = undefined; o.partialTrap = undefined; o.nightmare = undefined; o.substitute = undefined;
   // Persists: saltCured, aquaRing, ingrain — not cleared here.
 }
 
@@ -466,6 +467,11 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
   // from previous-vs-remaining HP (per-target running HP for multi-hit turns).
   const oppHpSoFar = new Map<number, number>();
   const myHpSoFar = new Map<number, number>();
+  // Substitute HP running maps (parallel; updated when a sub absorbs a hit).
+  const oppSubHpSoFar = new Map<number, number>();
+  const mySubHpSoFar = new Map<number, number>();
+  // Actions that were absorbed by a substitute (skip from inference + real-HP update).
+  const hitSub = new Set<MoveAction>();
   const sortedActions = [...draftActions].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   for (const a of sortedActions) {
     if (a.kind === 'switch' || a.kind === 'mega') continue;
@@ -473,6 +479,25 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     const tIdx = a.targetTeamIndex;
     if (tIdx == null) continue;
     const tSide = a.target.side;
+
+    // Substitute: damage routes to the sub HP instead of the real mon.
+    // Sound moves (flags.sound) bypass substitutes.
+    const curSubHp = tSide === 'theirs'
+      ? (oppSubHpSoFar.has(tIdx) ? oppSubHpSoFar.get(tIdx)! : next.opponentTeam[tIdx]?.substitute)
+      : (mySubHpSoFar.has(tIdx) ? mySubHpSoFar.get(tIdx)! : next.myCurrentSub?.[tIdx]);
+    if (curSubHp != null) {
+      const mvFlags = getMove(a.move) as { flags?: Record<string, number> } | undefined;
+      if (!mvFlags?.flags?.sound) {
+        hitSub.add(a);
+        if (a.damageHpPercent != null) {
+          const subAfter = Math.max(0, curSubHp - a.damageHpPercent);
+          if (tSide === 'theirs') oppSubHpSoFar.set(tIdx, subAfter);
+          else mySubHpSoFar.set(tIdx, subAfter);
+        }
+        continue; // real mon HP unchanged
+      }
+    }
+
     const prevPct = tSide === 'theirs'
       ? (oppHpSoFar.get(tIdx) ?? next.opponentTeam[tIdx]?.currentHpPercent ?? 100)
       : (myHpSoFar.get(tIdx) ?? next.myCurrentHp![tIdx] ?? 100);
@@ -555,6 +580,19 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
   for (const [idx, hp] of myHpSoFar) {
     next.myCurrentHp![idx] = hp;
     if (hp === 0 && !next.myFainted!.includes(idx)) next.myFainted!.push(idx);
+  }
+
+  // Commit substitute HP changes; clear broken subs.
+  for (const [idx, subHp] of oppSubHpSoFar) {
+    const o = next.opponentTeam[idx];
+    if (o) o.substitute = subHp <= 0 ? undefined : subHp;
+  }
+  if (mySubHpSoFar.size > 0) {
+    next.myCurrentSub = { ...(next.myCurrentSub ?? {}) };
+    for (const [idx, subHp] of mySubHpSoFar) {
+      if (subHp <= 0) delete next.myCurrentSub[idx];
+      else next.myCurrentSub[idx] = subHp;
+    }
   }
 
   // Collected throughout the rest of finalize — mega resolution errors,
@@ -691,6 +729,7 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
       const formeName = o.megaUsed && o.megaForme ? o.megaForme : o.species;
       const types = (getSpecies(formeName) as { types?: string[] } | undefined)?.types;
       if (types?.includes('Grass')) continue;
+      if (o.substitute != null) continue; // Substitute blocks Leech Seed
       const lsAbilOpp = certainAbility({ knownAbility: o.ability, species: o.species });
       if (lsAbilOpp && toId(lsAbilOpp) === 'magicbounce') continue;
       o.leechSeeded = { seederSide: a.side, seederIndex: sIdx };
@@ -702,9 +741,31 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
       const formeName = next.myMegaUsed?.includes(tIdx) && next.myMegaForme?.[tIdx] ? next.myMegaForme[tIdx] : set.species;
       const types = (getSpecies(formeName) as { types?: string[] } | undefined)?.types;
       if (types?.includes('Grass')) continue;
+      if (next.myCurrentSub?.[tIdx] != null) continue; // Substitute blocks Leech Seed
       if (toId(set.ability ?? '') === 'magicbounce') continue;
       next.myLeechSeeded = { ...(next.myLeechSeeded ?? {}), [tIdx]: { seederSide: a.side, seederIndex: sIdx } };
       inferenceNotes.push(`m${tIdx + 1} seeded`);
+    }
+  }
+
+  // Substitute: the move costs the user 25% of their max HP and creates a sub
+  // with that HP. The sub absorbs incoming damage (already handled above in the
+  // HP update loop). Substitute fails silently if the user is at ≤25% HP.
+  // Mirror in BattleScreen.tsx.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (a.move !== 'Substitute') continue;
+    if (a.attackerTeamIndex == null) continue;
+    if (a.side === 'mine') {
+      const myHp = next.myCurrentHp?.[a.attackerTeamIndex] ?? 100;
+      if (myHp <= 25) continue;
+      next.myCurrentHp = { ...(next.myCurrentHp ?? {}), [a.attackerTeamIndex]: myHp - 25 };
+      next.myCurrentSub = { ...(next.myCurrentSub ?? {}), [a.attackerTeamIndex]: 25 };
+    } else {
+      const o = next.opponentTeam[a.attackerTeamIndex];
+      if (!o || (o.currentHpPercent ?? 100) <= 25) continue;
+      o.currentHpPercent = Math.max(0, (o.currentHpPercent ?? 100) - 25);
+      o.substitute = 25;
     }
   }
 
@@ -948,6 +1009,8 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
       ? ((getSpecies(next.myTeam[tIdx]?.species ?? '') as { types?: string[] } | undefined)?.types ?? [])
       : ((getSpecies(next.opponentTeam[tIdx]?.species ?? '') as { types?: string[] } | undefined)?.types ?? []);
     if (isStatusMoveImmune(sm.status, !!sm.ignoreImmunity, !!(sm.flags?.powder), tTypes)) continue;
+    // Substitute blocks status-category moves.
+    if (tSide === 'mine' ? next.myCurrentSub?.[tIdx] != null : next.opponentTeam[tIdx]?.substitute != null) continue;
     // Magic Bounce reflects status-category moves back at the user.
     const tAbilMB = tSide === 'mine'
       ? next.myTeam[tIdx]?.ability
@@ -1077,6 +1140,7 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     if (a.kind === 'switch' || a.kind === 'mega') continue;
     if (a.side !== 'mine') continue;
     if (sashProcced(a)) continue; // Sash-capped damage understates the move — don't infer from it
+    if (hitSub.has(a)) continue; // sub absorbed the hit — real mon HP unchanged
     if (a.damageHpPercent == null && a.damageRaw == null) continue;
     if (typeof a.target !== 'object' || a.target.side !== 'theirs') continue;
     const attackerSet = next.myTeam[a.attackerTeamIndex ?? -1];
@@ -1137,6 +1201,7 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     if (a.kind === 'switch' || a.kind === 'mega') continue;
     if (a.side !== 'theirs') continue;
     if (sashProcced(a)) continue;
+    if (hitSub.has(a)) continue;
     if (a.damageHpPercent == null && a.damageRaw == null) continue;
     if (typeof a.target !== 'object' || a.target.side !== 'mine') continue;
     const oppIdx = a.attackerTeamIndex;
