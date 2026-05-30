@@ -42,6 +42,7 @@ import {
   type BoostMap,
 } from '../domain/abilities.js';
 import { sashProcced } from '../domain/itemSignals.js';
+import { hpItemTriggerFor } from '../domain/hpItemTriggers.js';
 import { EFFECT_DURATIONS } from '../domain/durations.js';
 import { isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, getSpecies, getMove, toId } from '../domain/data.js';
 import type { StateUpdate, HazardUpdate } from '../domain/turnparser.js';
@@ -423,7 +424,29 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     }
     if (newPct == null) continue;
 
+    // Record the raw hit damage BEFORE any auto-trigger heal so inference
+    // sees the actual move output, not the post-Sitrus residual.
     a.damageHpPercent = Math.max(0, prevPct - newPct);
+
+    // HP-threshold item auto-trigger (Sitrus, pinch berries). My-side only:
+    // opp items are usually unknown and auto-firing a guess would silently
+    // corrupt downstream inference. Held item is the set's item unless
+    // already marked consumed earlier in the match.
+    if (tSide === 'mine' && newPct > 0) {
+      const consumed = next.myItemConsumed?.[tIdx];
+      const held = consumed ? undefined : next.myTeam[tIdx]?.item;
+      const trig = hpItemTriggerFor(held, prevPct, newPct);
+      if (trig) {
+        if (trig.healPercent != null) {
+          newPct = Math.min(100, newPct + trig.healPercent);
+        }
+        if (trig.boost) {
+          applyBoostsTo(next, 'mine', tIdx, { [trig.boost.stat]: trig.boost.amount });
+        }
+        next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: trig.consumed };
+      }
+    }
+
     if (tSide === 'theirs') oppHpSoFar.set(tIdx, newPct);
     else myHpSoFar.set(tIdx, newPct);
   }

@@ -18,6 +18,7 @@ import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyp
 import { fieldMoveEffect, applyFieldMove } from '@pokechamps/core/domain/fieldMoves.js';
 import { EFFECT_DURATIONS } from '@pokechamps/core/domain/durations.js';
 import { detectChoiceLock, sashProcced, firstTurnOut, isFirstTurnMove, type ChoiceLock } from '@pokechamps/core/domain/itemSignals.js';
+import { hpItemTriggerFor } from '@pokechamps/core/domain/hpItemTriggers.js';
 import { switchInAbilityEffect, intimidateReaction, certainAbility, resolveDownloadBoost, type BoostMap } from '@pokechamps/core/domain/abilities.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
 import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict, type MatchupCell, type Confidence } from '@pokechamps/core/domain/predictions.js';
@@ -673,8 +674,29 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (newPct == null) continue;
 
       // Record the computed damageHpPercent so the inference pass below uses
-      // the correct value (independent of how the user typed it).
+      // the correct value (independent of how the user typed it). Captured
+      // BEFORE any auto-trigger heal so inference sees the actual hit, not
+      // the post-Sitrus residual.
       a.damageHpPercent = Math.max(0, prevPct - newPct);
+
+      // HP-threshold item auto-trigger (Sitrus, pinch berries). My-side only:
+      // opp items are usually unknown and auto-firing a guess would silently
+      // corrupt downstream inference. Mirror of the engine.ts path.
+      if (tSide === 'mine' && newPct > 0) {
+        const consumed = next.myItemConsumed?.[tIdx];
+        const held = consumed ? undefined : next.myTeam[tIdx]?.item;
+        const trig = hpItemTriggerFor(held, prevPct, newPct);
+        if (trig) {
+          if (trig.healPercent != null) {
+            newPct = Math.min(100, newPct + trig.healPercent);
+          }
+          if (trig.boost) {
+            applyBoostsInto(next, 'mine', tIdx, { [trig.boost.stat]: trig.boost.amount });
+          }
+          next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: trig.consumed };
+        }
+      }
+
       if (tSide === 'theirs') oppHpSoFar.set(tIdx, newPct);
       else myHpSoFar.set(tIdx, newPct);
     }

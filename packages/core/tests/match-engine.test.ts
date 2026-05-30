@@ -446,3 +446,130 @@ describe('Spicy Spray (defender) burns the attacker on a hit', () => {
     expect(r.match.opponentTeam[0]!.status).toBeUndefined();
   });
 });
+
+describe('HP-threshold item auto-triggers (Sitrus, pinch berries)', () => {
+  test('Sitrus on my mon auto-heals 25% when a hit drops it below 50%', () => {
+    const sitrusMon = mon({
+      species: 'Rillaboom', item: 'Sitrus Berry', ability: 'Grassy Surge',
+      nature: 'Adamant', evs: { hp: 252, atk: 252, def: 0, spa: 0, spd: 4, spe: 0 },
+      moves: ['Grassy Glide'],
+    });
+    const match = freshMatch({ myTeam: [sitrusMon, sneasler, rillaboom, flutterMane] });
+    // Seed mine[0] at 80% HP, then take a hit that lands me at 30%.
+    match.myCurrentHp = { 0: 80 };
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Earthquake', target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 30, order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [action], field: match.field },
+      activeIdx: { mine: [0, 1], theirs: [0, 1] },
+    });
+    // Crossed 50% → Sitrus fires → +25% → final 55%.
+    expect(r.match.myCurrentHp?.[0]).toBe(55);
+    expect(r.match.myItemConsumed?.[0]).toBe('Sitrus Berry');
+    // Inference still sees the actual hit damage, not the post-heal residual.
+    expect(action.damageHpPercent).toBe(50);
+  });
+
+  test('Sitrus does NOT auto-heal when HP stays above 50%', () => {
+    const sitrusMon = mon({
+      species: 'Rillaboom', item: 'Sitrus Berry', moves: [],
+    });
+    const match = freshMatch({ myTeam: [sitrusMon, sneasler, rillaboom, flutterMane] });
+    match.myCurrentHp = { 0: 90 };
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Bullet Punch', target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 60, order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [action], field: match.field },
+      activeIdx: { mine: [0, 1], theirs: [0, 1] },
+    });
+    expect(r.match.myCurrentHp?.[0]).toBe(60);
+    expect(r.match.myItemConsumed?.[0]).toBeUndefined();
+  });
+
+  test('Sitrus is not double-consumed when already consumed', () => {
+    const sitrusMon = mon({
+      species: 'Rillaboom', item: 'Sitrus Berry', moves: [],
+    });
+    const match = freshMatch({ myTeam: [sitrusMon, sneasler, rillaboom, flutterMane] });
+    match.myCurrentHp = { 0: 70 };
+    match.myItemConsumed = { 0: 'Sitrus Berry' }; // already gone
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Earthquake', target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 30, order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [action], field: match.field },
+      activeIdx: { mine: [0, 1], theirs: [0, 1] },
+    });
+    // No re-heal — Sitrus already gone.
+    expect(r.match.myCurrentHp?.[0]).toBe(30);
+  });
+
+  test('Salac Berry on my mon auto-applies +1 Spe at <=25% HP', () => {
+    const salacMon = mon({
+      species: 'Sneasler', item: 'Salac Berry', ability: 'Unburden',
+      nature: 'Jolly', evs: { hp: 4, atk: 252, def: 0, spa: 0, spd: 0, spe: 252 },
+      moves: ['Close Combat'],
+    });
+    const match = freshMatch({ myTeam: [salacMon, rillaboom, ironHands, flutterMane] });
+    match.myCurrentHp = { 0: 50 };
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Earthquake', target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 20, order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [action], field: match.field },
+      activeIdx: { mine: [0, 1], theirs: [0, 1] },
+    });
+    expect(r.match.myCurrentHp?.[0]).toBe(20);
+    expect(r.match.myBoosts?.[0]?.spe).toBe(1);
+    expect(r.match.myItemConsumed?.[0]).toBe('Salac Berry');
+  });
+
+  test('No trigger on a KO (HP hits 0 — berries do not save)', () => {
+    const sitrusMon = mon({
+      species: 'Rillaboom', item: 'Sitrus Berry', moves: [],
+    });
+    const match = freshMatch({ myTeam: [sitrusMon, sneasler, rillaboom, flutterMane] });
+    match.myCurrentHp = { 0: 80 };
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Earthquake', target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 0, order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [action], field: match.field },
+      activeIdx: { mine: [0, 1], theirs: [0, 1] },
+    });
+    expect(r.match.myCurrentHp?.[0]).toBe(0);
+    expect(r.match.myItemConsumed?.[0]).toBeUndefined();
+  });
+
+  test('Opp-side: item NOT auto-triggered (opp items are guesses)', () => {
+    const match = freshMatch();
+    // Pretend the opp at index 0 has a known Sitrus from inference.
+    match.opponentTeam[0]!.item = 'Sitrus Berry';
+    match.opponentTeam[0]!.currentHpPercent = 80;
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move',
+      move: 'Close Combat', target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 30, order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [action], field: match.field },
+      activeIdx: { mine: [0, 1], theirs: [0, 1] },
+    });
+    // HP stays at 30 — we do not auto-fire opp Sitrus (manual `o1 sitrus` line
+    // remains the user's override).
+    expect(r.match.opponentTeam[0]!.currentHpPercent).toBe(30);
+    expect(r.match.opponentTeam[0]!.itemConsumed).toBeUndefined();
+  });
+});
