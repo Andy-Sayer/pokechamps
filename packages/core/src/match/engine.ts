@@ -687,12 +687,37 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     if (!defMax || !atkMax) continue;
     const dmgAbs = (a.damageHpPercent / 100) * defMax;
     const healPct = (dmgAbs * drain[0] / drain[1]) / atkMax * 100;
+    // Liquid Ooze: drain deals damage to the attacker instead of healing.
+    let defAbilForDrain: string | undefined;
+    if (a.target.side === 'theirs') {
+      const o = next.opponentTeam[tIdx];
+      defAbilForDrain = o?.megaUsed && o.megaForme
+        ? ((getSpecies(o.megaForme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? o.ability ?? undefined)
+        : (o?.ability ?? undefined);
+    } else {
+      const set = next.myTeam[tIdx];
+      const megaForme = next.myMegaUsed?.includes(tIdx) ? next.myMegaForme?.[tIdx] : undefined;
+      defAbilForDrain = megaForme
+        ? ((getSpecies(megaForme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? set?.ability ?? undefined)
+        : set?.ability;
+    }
+    const liquidOoze = defAbilForDrain && toId(defAbilForDrain) === 'liquidooze';
     if (a.side === 'mine') {
       next.myCurrentHp = next.myCurrentHp ?? {};
-      next.myCurrentHp[a.attackerTeamIndex] = Math.min(100, (next.myCurrentHp[a.attackerTeamIndex] ?? 100) + healPct);
+      if (liquidOoze) {
+        next.myCurrentHp[a.attackerTeamIndex] = Math.max(0, (next.myCurrentHp[a.attackerTeamIndex] ?? 100) - healPct);
+      } else {
+        next.myCurrentHp[a.attackerTeamIndex] = Math.min(100, (next.myCurrentHp[a.attackerTeamIndex] ?? 100) + healPct);
+      }
     } else {
       const o = next.opponentTeam[a.attackerTeamIndex];
-      if (o) o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + healPct);
+      if (o) {
+        if (liquidOoze) {
+          o.currentHpPercent = Math.max(0, (o.currentHpPercent ?? 100) - healPct);
+        } else {
+          o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + healPct);
+        }
+      }
     }
   }
 

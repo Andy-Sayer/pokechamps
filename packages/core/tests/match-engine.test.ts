@@ -848,3 +848,42 @@ describe('Regenerator heals +1/3 on switch-out', () => {
     expect(r.match.myCurrentHp![1]).toBe(50); // unchanged (Rillaboom has Grassy Surge, not Regen)
   });
 });
+
+describe('Liquid Ooze reverses drain healing', () => {
+  test('drain move damages the attacker instead of healing when defender has Liquid Ooze', () => {
+    // Use opp→mine direction (opp attacks my Tentacruel) to avoid mine→theirs inference.
+    const tentacruel = mon({ species: 'Tentacruel', ability: 'Liquid Ooze', moves: ['Scald'] });
+    const match = freshMatch({ myTeam: [tentacruel, sneasler, ironHands, flutterMane] });
+    // Opp Incineroar at 80% uses Drain Punch on my Tentacruel.
+    match.opponentTeam[0]!.currentHpPercent = 80;
+    const action: MoveAction = {
+      kind: 'move', side: 'theirs',
+      attackerSlot: 0, attackerTeamIndex: 0,
+      move: 'Drain Punch',
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      damageHpPercent: 30,
+      order: 1,
+    } as any;
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    // Drain Punch drains 50% of damage. With Liquid Ooze the attacker (Incineroar) loses HP
+    // instead of gaining it — exact amount depends on HP ratio, just confirm direction.
+    expect(r.match.opponentTeam[0]!.currentHpPercent).toBeLessThan(80);
+  });
+
+  test('drain heals normally when defender does NOT have Liquid Ooze', () => {
+    // Opp uses Drain Punch on my Sneasler (no Liquid Ooze).
+    const match = freshMatch();
+    match.opponentTeam[0]!.currentHpPercent = 60;
+    const action: MoveAction = {
+      kind: 'move', side: 'theirs',
+      attackerSlot: 0, attackerTeamIndex: 0,
+      move: 'Drain Punch',
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0,
+      damageHpPercent: 30,
+      order: 1,
+    } as any;
+    const r = finalizeTurn({ match, turn: { actions: [action], field: match.field }, activeIdx: startActive });
+    // Opp gains HP (exact % depends on HP ratio between Sneasler and Incineroar).
+    expect(r.match.opponentTeam[0]!.currentHpPercent).toBeGreaterThan(60);
+  });
+});
