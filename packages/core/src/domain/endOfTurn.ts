@@ -85,6 +85,34 @@ export function endOfTurn(
         notes.push(`o${idx + 1} ${oppOrbStatus} (${o.item})`);
       }
     }
+    // Residual-chip volatiles.
+    if (o.saltCured) {
+      const chip = oppSaltCureChip(o.species, types);
+      o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - chip);
+      notes.push(`o${idx + 1} -${chip.toFixed(0)}% (Salt Cure)`);
+    }
+    if (o.aquaRing) {
+      o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) + 100 / 16);
+      notes.push(`o${idx + 1} +6% (Aqua Ring)`);
+    }
+    if (o.ingrain) {
+      o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) + 100 / 16);
+      notes.push(`o${idx + 1} +6% (Ingrain)`);
+    }
+    if (o.cursed) {
+      o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - 100 / 4);
+      notes.push(`o${idx + 1} -25% (Curse)`);
+    }
+    if (o.partialTrap != null && o.partialTrap > 0) {
+      o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - 100 / 8);
+      notes.push(`o${idx + 1} -12% (trapped)`);
+      o.partialTrap -= 1;
+      if (o.partialTrap <= 0) { o.partialTrap = undefined; notes.push(`o${idx + 1} escaped`); }
+    }
+    if (o.nightmare && o.status === 'slp') {
+      o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - 100 / 4);
+      notes.push(`o${idx + 1} -25% (Nightmare)`);
+    }
     if ((o.currentHpPercent ?? 100) === 0) o.fainted = true;
     // Move-restricting volatiles count down; clear at 0.
     if (o.tauntTurns != null) { o.tauntTurns -= 1; if (o.tauntTurns <= 0) { o.taunted = undefined; o.tauntTurns = undefined; notes.push(`o${idx + 1} Taunt ended`); } }
@@ -142,6 +170,35 @@ export function endOfTurn(
       next.myStatus![idx] = heldOrbStatus;
       if (heldOrbStatus === 'tox') next.myToxCounter![idx] = 1;
       notes.push(`m${idx + 1} ${heldOrbStatus} (${set.item})`);
+    }
+    // Residual-chip volatiles.
+    if (next.mySaltCured?.[idx]) {
+      const myTypes = types;
+      const chip = mySaltCureChip(set.species, myTypes);
+      next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - chip);
+      notes.push(`m${idx + 1} -${chip.toFixed(0)}% (Salt Cure)`);
+    }
+    if (next.myAquaRing?.[idx]) {
+      next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) + 100 / 16);
+      notes.push(`m${idx + 1} +6% (Aqua Ring)`);
+    }
+    if (next.myIngrain?.[idx]) {
+      next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) + 100 / 16);
+      notes.push(`m${idx + 1} +6% (Ingrain)`);
+    }
+    if (next.myCursed?.[idx]) {
+      next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - 100 / 4);
+      notes.push(`m${idx + 1} -25% (Curse)`);
+    }
+    if (next.myPartialTrap?.[idx] != null && next.myPartialTrap[idx]! > 0) {
+      next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - 100 / 8);
+      notes.push(`m${idx + 1} -12% (trapped)`);
+      next.myPartialTrap![idx] = next.myPartialTrap[idx]! - 1;
+      if (next.myPartialTrap[idx]! <= 0) { delete next.myPartialTrap![idx]; notes.push(`m${idx + 1} escaped`); }
+    }
+    if (next.myNightmare?.[idx] && next.myStatus?.[idx] === 'slp') {
+      next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - 100 / 4);
+      notes.push(`m${idx + 1} -25% (Nightmare)`);
     }
     if ((next.myCurrentHp![idx] ?? 100) === 0 && !next.myFainted!.includes(idx)) next.myFainted!.push(idx);
     // My-side volatiles count down; clear at 0.
@@ -321,5 +378,14 @@ function weatherAbilityEffect(weather: FieldState['weather'], abilId: string): n
   return 0;
 }
 
+// Salt Cure chip: 1/8 normally, 1/4 for Water or Steel types.
+function saltCureChip(species: string, types: string[] | undefined): number {
+  const t = types ?? ((getSpecies(species) as { types?: string[] } | undefined)?.types ?? []);
+  return t.some(tt => tt === 'Water' || tt === 'Steel') ? 100 / 4 : 100 / 8;
+}
+// Per-side aliases used in applyToOpp / applyToMine.
+function oppSaltCureChip(species: string, types: string[] | undefined) { return saltCureChip(species, types); }
+function mySaltCureChip(species: string, types: string[] | undefined) { return saltCureChip(species, types); }
+
 // Re-exports for tests
-export { weatherChipPct, statusChipPct, orbStatusFor, weatherAbilityEffect };
+export { weatherChipPct, statusChipPct, orbStatusFor, weatherAbilityEffect, saltCureChip };

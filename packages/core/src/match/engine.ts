@@ -141,8 +141,12 @@ function clearMyVolatiles(match: Match, idx: number): void {
   if (match.myTauntTurns) delete match.myTauntTurns[idx];
   if (match.myEncoreTurns) delete match.myEncoreTurns[idx];
   if (match.myDisableTurns) delete match.myDisableTurns[idx];
-  // Leech Seed clears when the seeded mon switches out.
   if (match.myLeechSeeded) delete match.myLeechSeeded[idx];
+  // Clears on switch-out: Curse, partial trap, Nightmare.
+  if (match.myCursed) delete match.myCursed[idx];
+  if (match.myPartialTrap) delete match.myPartialTrap[idx];
+  if (match.myNightmare) delete match.myNightmare[idx];
+  // Persists through switch: Salt Cure, Aqua Ring, Ingrain — not cleared here.
 }
 
 // Clear opp move-restricting volatiles + their counters (switch-out / cure).
@@ -150,6 +154,9 @@ function clearOppVolatiles(o: OpponentEntry): void {
   o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined;
   o.tauntTurns = undefined; o.encoreTurns = undefined; o.disableTurns = undefined;
   o.leechSeeded = undefined;
+  // Clears on switch-out: Curse, partial trap, Nightmare.
+  o.cursed = undefined; o.partialTrap = undefined; o.nightmare = undefined;
+  // Persists: saltCured, aquaRing, ingrain — not cleared here.
 }
 
 // Try to apply a non-volatile status to my mon, intercepted by a held status
@@ -445,6 +452,12 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     myEncoreTurns: { ...(match.myEncoreTurns ?? {}) },
     myDisableTurns: { ...(match.myDisableTurns ?? {}) },
     myLeechSeeded: { ...(match.myLeechSeeded ?? {}) },
+    mySaltCured: { ...(match.mySaltCured ?? {}) },
+    myAquaRing: { ...(match.myAquaRing ?? {}) },
+    myIngrain: { ...(match.myIngrain ?? {}) },
+    myCursed: { ...(match.myCursed ?? {}) },
+    myPartialTrap: { ...(match.myPartialTrap ?? {}) },
+    myNightmare: { ...(match.myNightmare ?? {}) },
   };
 
   // Walk damaging actions in order, deriving each action's damageHpPercent
@@ -1208,6 +1221,12 @@ function applyStateUpdateImpl(
     myEncoreTurns: { ...(match.myEncoreTurns ?? {}) },
     myDisableTurns: { ...(match.myDisableTurns ?? {}) },
     myLeechSeeded: { ...(match.myLeechSeeded ?? {}) },
+    mySaltCured: { ...(match.mySaltCured ?? {}) },
+    myAquaRing: { ...(match.myAquaRing ?? {}) },
+    myIngrain: { ...(match.myIngrain ?? {}) },
+    myCursed: { ...(match.myCursed ?? {}) },
+    myPartialTrap: { ...(match.myPartialTrap ?? {}) },
+    myNightmare: { ...(match.myNightmare ?? {}) },
   };
   const nextActive: ActiveIdx = {
     mine: [activeIdx.mine[0], activeIdx.mine[1]],
@@ -1389,6 +1408,32 @@ function applyStateUpdateImpl(
       if (update.disableMove != null) { next.myDisabledMove![teamIndex] = update.disableMove; next.myDisableTurns![teamIndex] = update.volatileTurns ?? EFFECT_DURATIONS.disable; }
     }
   }
+  // Residual-chip volatiles.
+  if (update.saltCure) {
+    if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.saltCured = true; }
+    else next.mySaltCured![teamIndex] = true;
+  }
+  if (update.aquaRing) {
+    if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.aquaRing = true; }
+    else next.myAquaRing![teamIndex] = true;
+  }
+  if (update.ingrain) {
+    if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.ingrain = true; }
+    else next.myIngrain![teamIndex] = true;
+  }
+  if (update.curse) {
+    if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.cursed = true; }
+    else next.myCursed![teamIndex] = true;
+  }
+  if (update.partialTrap != null) {
+    if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.partialTrap = update.partialTrap; }
+    else next.myPartialTrap![teamIndex] = update.partialTrap;
+  }
+  if (update.nightmare) {
+    if (side === 'theirs') { const o = next.opponentTeam[teamIndex]; if (o) o.nightmare = true; }
+    else next.myNightmare![teamIndex] = true;
+  }
+
   if (update.fainted) {
     if (side === 'theirs') {
       const o = next.opponentTeam[teamIndex];

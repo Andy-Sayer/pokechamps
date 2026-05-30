@@ -1,6 +1,6 @@
 // Residual end-of-turn effects: chip and HP changes applied between turns.
 import { describe, test, expect } from 'vitest';
-import { endOfTurn, orbStatusFor, weatherAbilityEffect } from '../src/domain/endOfTurn.js';
+import { endOfTurn, orbStatusFor, weatherAbilityEffect, saltCureChip } from '../src/domain/endOfTurn.js';
 import type { Match, OpponentEntry, PokemonSet } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } from '../src/domain/types.js';
 
@@ -199,5 +199,91 @@ describe('Bad Dreams chips sleeping foes', () => {
     m.mySleepCounter = { 0: 3 };
     const { match: out } = endOfTurn(m, m.field, { mine: [0, null], theirs: [0, null] });
     expect(out.myCurrentHp![0]).toBeCloseTo(80 - 100 / 8, 1);
+  });
+});
+
+describe('saltCureChip', () => {
+  test('1/8 for neutral type', () => {
+    expect(saltCureChip('Incineroar', undefined)).toBeCloseTo(100 / 8, 5);
+  });
+  test('1/4 for Water type', () => {
+    expect(saltCureChip('Vaporeon', ['Water'])).toBeCloseTo(100 / 4, 5);
+  });
+  test('1/4 for Steel type', () => {
+    expect(saltCureChip('Corviknight', ['Flying', 'Steel'])).toBeCloseTo(100 / 4, 5);
+  });
+});
+
+describe('Residual-chip volatiles via endOfTurn', () => {
+  test('Salt Cure chips 1/8 per EOT on opp neutral type', () => {
+    const m = freshMatch([mon({ species: 'Scovillain' })], ['Incineroar']);
+    m.opponentTeam[0]!.currentHpPercent = 80;
+    m.opponentTeam[0]!.saltCured = true;
+    const { match: out, notes } = endOfTurn(m, m.field, { mine: [0, null], theirs: [0, null] });
+    expect(out.opponentTeam[0]!.currentHpPercent).toBeCloseTo(80 - 100 / 8, 1);
+    expect(notes.some(n => n.includes('Salt Cure'))).toBe(true);
+  });
+
+  test('Salt Cure chips 1/4 on my Steel type', () => {
+    const corviknight = mon({ species: 'Corviknight' });
+    const m = freshMatch([corviknight], ['Garganacl']);
+    m.myCurrentHp = { 0: 80 };
+    m.mySaltCured = { 0: true };
+    const { match: out } = endOfTurn(m, m.field, { mine: [0, null], theirs: [0, null] });
+    expect(out.myCurrentHp![0]).toBeCloseTo(80 - 100 / 4, 1);
+  });
+
+  test('Partial trap chips 1/8 per EOT and decrements counter', () => {
+    const m = freshMatch([mon({ species: 'Scovillain' })], ['Torkoal']);
+    m.opponentTeam[0]!.currentHpPercent = 80;
+    m.opponentTeam[0]!.partialTrap = 3;
+    const { match: out, notes } = endOfTurn(m, m.field, { mine: [0, null], theirs: [0, null] });
+    expect(out.opponentTeam[0]!.currentHpPercent).toBeCloseTo(80 - 100 / 8, 1);
+    expect(out.opponentTeam[0]!.partialTrap).toBe(2);
+    expect(notes.some(n => n.includes('trapped'))).toBe(true);
+  });
+
+  test('Partial trap clears and logs escape when counter hits 0', () => {
+    const m = freshMatch([mon({ species: 'Scovillain' })], ['Torkoal']);
+    m.opponentTeam[0]!.currentHpPercent = 80;
+    m.opponentTeam[0]!.partialTrap = 1;
+    const { match: out, notes } = endOfTurn(m, m.field, { mine: [0, null], theirs: [0, null] });
+    expect(out.opponentTeam[0]!.partialTrap).toBeUndefined();
+    expect(notes.some(n => n.includes('escaped'))).toBe(true);
+  });
+
+  test('Curse chips 1/4 HP per EOT on the cursed mon', () => {
+    const m = freshMatch([mon({ species: 'Scovillain' })], ['Incineroar']);
+    m.opponentTeam[0]!.currentHpPercent = 80;
+    m.opponentTeam[0]!.cursed = true;
+    const { match: out, notes } = endOfTurn(m, m.field, { mine: [0, null], theirs: [0, null] });
+    expect(out.opponentTeam[0]!.currentHpPercent).toBeCloseTo(80 - 100 / 4, 1);
+    expect(notes.some(n => n.includes('Curse'))).toBe(true);
+  });
+
+  test('Nightmare chips 1/4 HP when asleep but not when awake', () => {
+    const m = freshMatch([mon({ species: 'Amoonguss' })], ['Incineroar']);
+    m.opponentTeam[0]!.currentHpPercent = 80;
+    m.opponentTeam[0]!.nightmare = true;
+    m.opponentTeam[0]!.status = 'slp';
+    m.opponentTeam[0]!.sleepCounter = 2;
+    const { match: out } = endOfTurn(m, m.field, { mine: [0, null], theirs: [0, null] });
+    // Should chip (Nightmare active while sleeping). Sleep counter ticks too.
+    expect(out.opponentTeam[0]!.currentHpPercent).toBeCloseTo(80 - 100 / 4, 1);
+
+    // Same setup but NOT sleeping: Nightmare should not chip.
+    const m2 = freshMatch([mon({ species: 'Amoonguss' })], ['Incineroar']);
+    m2.opponentTeam[0]!.currentHpPercent = 80;
+    m2.opponentTeam[0]!.nightmare = true;
+    const { match: out2 } = endOfTurn(m2, m2.field, { mine: [0, null], theirs: [0, null] });
+    expect(out2.opponentTeam[0]!.currentHpPercent).toBe(80);
+  });
+
+  test('Aqua Ring heals 1/16 per EOT', () => {
+    const m = freshMatch([mon({ species: 'Vaporeon' })], ['Incineroar']);
+    m.myCurrentHp = { 0: 60 };
+    m.myAquaRing = { 0: true };
+    const { match: out } = endOfTurn(m, m.field, { mine: [0, null], theirs: [0, null] });
+    expect(out.myCurrentHp![0]).toBeCloseTo(60 + 100 / 16, 1);
   });
 });

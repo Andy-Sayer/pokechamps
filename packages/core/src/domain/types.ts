@@ -94,6 +94,13 @@ export interface OpponentEntry {
   // heal the right mon — and skip the heal if the seeder has since switched
   // out or fainted (the drain still applies to the target either way).
   leechSeeded?: { seederSide: 'mine' | 'theirs'; seederIndex: number };
+  // Residual-chip volatiles (each cleared on switch-out unless noted).
+  saltCured?: boolean;       // Garganacl's Salt Cure: -1/8 per EOT (-1/4 Water/Steel); persists through switch
+  aquaRing?: boolean;        // +1/16 HP per EOT; persists through switch in Gen 6+
+  ingrain?: boolean;         // +1/16 HP per EOT; also prevents switching
+  cursed?: boolean;          // Non-Ghost Curse: -1/4 per EOT; cleared on switch-out
+  partialTrap?: number;      // turns remaining of Bind/Wrap/Fire Spin etc.: -1/8 per EOT; cleared on switch-out
+  nightmare?: boolean;       // while asleep: -1/4 per EOT; cleared on switch-out
 }
 
 export interface HazardState {
@@ -253,6 +260,13 @@ export interface Match {
   myDisableTurns?: Record<number, number>;
   // myTeam index → Leech Seed seeder identity (parallel to OpponentEntry.leechSeeded).
   myLeechSeeded?: Record<number, { seederSide: 'mine' | 'theirs'; seederIndex: number }>;
+  // Residual-chip volatiles (my side), keyed by team index.
+  mySaltCured?: Record<number, boolean>;
+  myAquaRing?: Record<number, boolean>;
+  myIngrain?: Record<number, boolean>;
+  myCursed?: Record<number, boolean>;
+  myPartialTrap?: Record<number, number>; // turns remaining
+  myNightmare?: Record<number, boolean>;
   // myTeam index → charging-move state. Parallel to OpponentEntry.charging.
   // Set when a mine-side charge move logged with no damage; cleared when
   // the same mon's next damaging action lands.
