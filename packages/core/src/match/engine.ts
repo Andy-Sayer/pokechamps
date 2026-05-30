@@ -757,13 +757,15 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     if (a.move !== 'Substitute') continue;
     if (a.attackerTeamIndex == null) continue;
     if (a.side === 'mine') {
+      if (next.myCurrentSub?.[a.attackerTeamIndex] != null) continue; // already subbed
       const myHp = next.myCurrentHp?.[a.attackerTeamIndex] ?? 100;
       if (myHp <= 25) continue;
       next.myCurrentHp = { ...(next.myCurrentHp ?? {}), [a.attackerTeamIndex]: myHp - 25 };
       next.myCurrentSub = { ...(next.myCurrentSub ?? {}), [a.attackerTeamIndex]: 25 };
     } else {
       const o = next.opponentTeam[a.attackerTeamIndex];
-      if (!o || (o.currentHpPercent ?? 100) <= 25) continue;
+      if (!o || o.substitute != null) continue; // already subbed
+      if ((o.currentHpPercent ?? 100) <= 25) continue;
       o.currentHpPercent = Math.max(0, (o.currentHpPercent ?? 100) - 25);
       o.substitute = 25;
     }
