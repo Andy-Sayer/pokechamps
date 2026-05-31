@@ -195,6 +195,26 @@ describe('incoming threat: contingent KO + flinch on my mons', () => {
     expect(r.risks.some(x => /Sableye can be flinched/.test(x.label) && x.prob === 0.3)).toBe(true);
   });
 
+  test('flinch is informational — it does NOT distort the headline winChance', () => {
+    // Bronzong (slow, resists Rock) guaranteed-OHKOs a frail Aerodactyl at 10%
+    // with Flash Cannon and shrugs off Rock Slide → a forced win. Aerodactyl
+    // outspeeds Bronzong and Rock Slide can flinch it, but flinch isn't in the
+    // maximin, so it must surface as a non-blocking note WITHOUT cutting winChance.
+    const bronzong = mon({ species: 'Bronzong', ability: 'Levitate', nature: 'Sassy', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Flash Cannon'] });
+    const fastAero: OpponentEntry = { species: 'Aerodactyl', knownMoves: ['Rock Slide'], candidates: [mon({ species: 'Aerodactyl', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Rock Slide'] })] };
+    const r = searchToDepth({
+      mine: [{ set: bronzong, hpPercent: 100, active: true }],
+      opp: [{ entry: fastAero, hpPercent: 10, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 1);
+    expect(r.verdict).toBe('winning');
+    expect(r.forced).toBe(true);
+    expect(r.winChance).toBe(1);                       // flinch did NOT cut it
+    const flinch = r.risks.find(x => /Bronzong can be flinched/.test(x.label));
+    expect(flinch).toBeDefined();
+    expect(flinch!.blocking).toBe(false);              // informational, not priced
+  });
+
   test('flinch risk is gated on the opponent outspeeding me', () => {
     // Paralysis halves Aerodactyl's speed below Delphox (171) but not Sableye (70):
     // Delphox now acts first → can't be flinched; Sableye still can.

@@ -1143,8 +1143,12 @@ export function createSearch(input: SearchInput): PositionSearch {
           }
           if (chance > 0) {
             const myName = expected.table.mySpecies[actor] ?? 'my mon';
-            risks.push({ label: `${myName} can be flinched`, prob: chance, effect: 'loses its turn', blocking: true });
-            winChance *= 1 - chance;
+            // Informational, NOT priced into winChance: flinch isn't in the
+            // maximin, so whether a flinch actually costs the game is unproven —
+            // only that it can happen. Surfacing the label satisfies the "warn
+            // me" need without multiplying the headline win% by an effect we
+            // can't establish (and which would compound across both my actives).
+            risks.push({ label: `${myName} can be flinched`, prob: chance, effect: 'loses its turn', blocking: false });
           }
         }
 
