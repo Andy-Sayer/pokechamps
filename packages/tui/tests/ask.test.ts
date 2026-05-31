@@ -15,10 +15,17 @@ const delphox = mon({
   evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Heat Wave', 'Psychic'],
 });
 
-function matchVs(opp: OpponentEntry): Match {
+// Psychic is immune into Dark, Will-O-Wisp is a status move — both get dropped
+// by predictOffenseAll, so this set exercises the "show the full moveset" path.
+const delphoxFull = mon({
+  species: 'Delphox', item: 'Delphoxite', ability: 'Blaze', nature: 'Timid',
+  evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Heat Wave', 'Psychic', 'Dazzling Gleam', 'Will-O-Wisp'],
+});
+
+function matchVs(opp: OpponentEntry, mine: PokemonSet = delphox): Match {
   return {
     id: 't', startedAt: '2026-05-31T00:00:00.000Z',
-    myTeam: [delphox], opponentTeam: [opp],
+    myTeam: [mine], opponentTeam: [opp],
     bring: [0], opponentBrought: [0], turns: [], field: { ...NEUTRAL_FIELD },
     active: { mine: [0, null], theirs: [0, null] },
   } as Match;
@@ -32,6 +39,16 @@ describe('runAskCommand', () => {
     expect(out).toContain('Psychic');
     expect(out).toContain('Air Slash');
     expect(out).toContain('Solar Beam');
+  });
+
+  test('lists the FULL moveset, tagging immune + status moves (not just damaging ones)', () => {
+    const out = runAskCommand('m1 vs o1', matchVs({ species: 'Absol', knownMoves: ['Night Slash'] } as OpponentEntry, delphoxFull), activeIdx, { ...NEUTRAL_FIELD });
+    // Every move on the set appears, even the ones predictOffenseAll drops.
+    for (const m of ['Heat Wave', 'Psychic', 'Dazzling Gleam', 'Will-O-Wisp']) expect(out).toContain(m);
+    // Psychic is immune into Dark → flagged as no-effect, not silently missing.
+    expect(out).toMatch(/Psychic\s+no effect here/);
+    // Will-O-Wisp is a status move → flagged as such.
+    expect(out).toMatch(/Will-O-Wisp\s+\(status move\)/);
   });
 
   test('shows a mega variant for my side when a stone is held', () => {

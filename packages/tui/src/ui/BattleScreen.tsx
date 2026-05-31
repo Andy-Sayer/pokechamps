@@ -450,7 +450,21 @@ export function runAskCommand(
   const megaNote = myCanMega ? `  (mega → ${mine.megaForme})` : '';
   const out: string[] = [`${mine.label} vs ${opp.label}${megaNote}`, `  ${speedLine}`];
   out.push('  → my moves:');
-  out.push(...(myMoves.length ? myMoves.map(c => `     ${line(c, myMegaByMove)}`) : ['     (no moveset — query a team slot like m1 for move data)']));
+  if (myMoves.length || mine.set.moves.some(Boolean)) {
+    out.push(...myMoves.map(c => `     ${line(c, myMegaByMove)}`));
+    // predictOffenseAll only returns DAMAGING, computable moves — so an immune
+    // matchup (Psychic into a Dark type) or a status move (Will-O-Wisp) silently
+    // vanishes. List them anyway, tagged, so the FULL moveset is always visible.
+    const shown = new Set(myMoves.map(c => c.move));
+    for (const m of mine.set.moves) {
+      if (!m || shown.has(m)) continue;
+      shown.add(m);
+      const cat = (getMove(m) as { category?: string } | undefined)?.category;
+      out.push(`     ${m.padEnd(14)} ${cat === 'Status' ? '(status move)' : 'no effect here (0%)'}`);
+    }
+  } else {
+    out.push('     (no moveset — query a team slot like m1 for move data)');
+  }
   out.push(`  ← ${opp.entry.megaForme ?? opp.entry.species} ${opp.entry.knownMoves.length ? 'moves' : 'likely moves'}:`);
   out.push(...(oppThreats.length ? oppThreats.map(c => `     ${line(c, oppMegaByMove)}`) : ['     (no known or expected moves)']));
   return out.join('\n');
