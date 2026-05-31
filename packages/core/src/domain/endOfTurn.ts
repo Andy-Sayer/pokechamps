@@ -2,6 +2,11 @@ import type { Match, FieldState, OpponentEntry, PokemonSet } from './types.js';
 import { maxHpFor } from './damage.js';
 import { getSpecies, toId } from './data.js';
 import { defaultOpponentSet } from './bring.js';
+import { certainAbility } from './abilities.js';
+
+function isMagicGuard(ability: string | null | undefined): boolean {
+  return toId(ability ?? '') === 'magicguard';
+}
 
 // Returns a fresh Match with end-of-turn effects applied to the four actives:
 //   - Weather chip (sandstorm/hail/snow), with type immunities
@@ -42,28 +47,29 @@ export function endOfTurn(
     const o = next.opponentTeam[idx];
     if (!o || o.fainted) return;
     const types = (getSpecies(o.species) as any)?.types as string[] | undefined;
-    // Weather chip
+    const oppHasMG = isMagicGuard(certainAbility({ knownAbility: o.ability, species: o.species }));
+    // Weather chip — blocked by Magic Guard
     const wChip = weatherChipPct(field.weather, types);
-    if (wChip > 0) { o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - wChip); notes.push(`o${idx + 1} -${wChip.toFixed(0)}% (${field.weather})`); }
-    // Weather-ability heals/chips — only when ability is known.
+    if (wChip > 0 && !oppHasMG) { o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - wChip); notes.push(`o${idx + 1} -${wChip.toFixed(0)}% (${field.weather})`); }
+    // Weather-ability heals/chips — only when ability is known. Chips blocked by Magic Guard; heals unaffected.
     if (o.ability) {
       const oppAbilId = toId(o.ability);
       const wAbilEffect = weatherAbilityEffect(field.weather, oppAbilId);
-      if (wAbilEffect !== 0) {
-        if (wAbilEffect > 0) {
-          o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) + wAbilEffect);
-          notes.push(`o${idx + 1} +${wAbilEffect.toFixed(0)}% (${o.ability})`);
-        } else {
-          o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) + wAbilEffect);
-          notes.push(`o${idx + 1} ${wAbilEffect.toFixed(0)}% (${o.ability})`);
-        }
+      if (wAbilEffect > 0) {
+        o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) + wAbilEffect);
+        notes.push(`o${idx + 1} +${wAbilEffect.toFixed(0)}% (${o.ability})`);
+      } else if (wAbilEffect < 0 && !oppHasMG) {
+        o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) + wAbilEffect);
+        notes.push(`o${idx + 1} ${wAbilEffect.toFixed(0)}% (${o.ability})`);
       }
     }
-    // Status tick
+    // Status tick — HP loss blocked by Magic Guard; counter still ramps.
     const statusChip = statusChipPct(o.status, o.toxCounter ?? 0);
     if (statusChip > 0) {
-      o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - statusChip);
-      notes.push(`o${idx + 1} -${statusChip.toFixed(0)}% (${o.status})`);
+      if (!oppHasMG) {
+        o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - statusChip);
+        notes.push(`o${idx + 1} -${statusChip.toFixed(0)}% (${o.status})`);
+      }
       if (o.status === 'tox') o.toxCounter = (o.toxCounter ?? 1) + 1;
     }
     // Sleep counter ticks down; status clears at 0.
@@ -85,31 +91,33 @@ export function endOfTurn(
         notes.push(`o${idx + 1} ${oppOrbStatus} (${o.item})`);
       }
     }
-    // Residual-chip volatiles.
-    if (o.saltCured) {
+    // Residual-chip volatiles — all blocked by Magic Guard (except healing).
+    if (o.saltCured && !oppHasMG) {
       const chip = oppSaltCureChip(o.species, types);
       o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - chip);
       notes.push(`o${idx + 1} -${chip.toFixed(0)}% (Salt Cure)`);
     }
-    if (o.aquaRing) {
+    if (o.aquaRing) { // heal — not blocked
       o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) + 100 / 16);
       notes.push(`o${idx + 1} +6% (Aqua Ring)`);
     }
-    if (o.ingrain) {
+    if (o.ingrain) { // heal — not blocked
       o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) + 100 / 16);
       notes.push(`o${idx + 1} +6% (Ingrain)`);
     }
-    if (o.cursed) {
+    if (o.cursed && !oppHasMG) {
       o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - 100 / 4);
       notes.push(`o${idx + 1} -25% (Curse)`);
     }
     if (o.partialTrap != null && o.partialTrap > 0) {
-      o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - 100 / 8);
-      notes.push(`o${idx + 1} -12% (trapped)`);
+      if (!oppHasMG) {
+        o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - 100 / 8);
+        notes.push(`o${idx + 1} -12% (trapped)`);
+      }
       o.partialTrap -= 1;
       if (o.partialTrap <= 0) { o.partialTrap = undefined; notes.push(`o${idx + 1} escaped`); }
     }
-    if (o.nightmare && o.status === 'slp') {
+    if (o.nightmare && o.status === 'slp' && !oppHasMG) {
       o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - 100 / 4);
       notes.push(`o${idx + 1} -25% (Nightmare)`);
     }
@@ -127,24 +135,25 @@ export function endOfTurn(
     const set = next.myTeam[idx];
     if (!set) return;
     const types = (getSpecies(set.species) as any)?.types as string[] | undefined;
+    const myHasMG = isMagicGuard(set.ability);
     const wChip = weatherChipPct(field.weather, types);
-    if (wChip > 0) { next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - wChip); notes.push(`m${idx + 1} -${wChip.toFixed(0)}% (${field.weather})`); }
-    // Weather-ability heals/chips: Rain Dish, Dry Skin, Ice Body, Solar Power.
+    if (wChip > 0 && !myHasMG) { next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - wChip); notes.push(`m${idx + 1} -${wChip.toFixed(0)}% (${field.weather})`); }
+    // Weather-ability heals/chips: Rain Dish, Dry Skin, Ice Body, Solar Power. Chips blocked by Magic Guard.
     const myAbilId = set.ability ? toId(set.ability) : '';
     const wAbilEffect = weatherAbilityEffect(field.weather, myAbilId);
-    if (wAbilEffect !== 0) {
-      if (wAbilEffect > 0) {
-        next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) + wAbilEffect);
-        notes.push(`m${idx + 1} +${wAbilEffect.toFixed(0)}% (${set.ability})`);
-      } else {
-        next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) + wAbilEffect);
-        notes.push(`m${idx + 1} ${wAbilEffect.toFixed(0)}% (${set.ability})`);
-      }
+    if (wAbilEffect > 0) {
+      next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) + wAbilEffect);
+      notes.push(`m${idx + 1} +${wAbilEffect.toFixed(0)}% (${set.ability})`);
+    } else if (wAbilEffect < 0 && !myHasMG) {
+      next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) + wAbilEffect);
+      notes.push(`m${idx + 1} ${wAbilEffect.toFixed(0)}% (${set.ability})`);
     }
     const statusChip = statusChipPct(next.myStatus?.[idx], next.myToxCounter?.[idx] ?? 0);
     if (statusChip > 0) {
-      next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - statusChip);
-      notes.push(`m${idx + 1} -${statusChip.toFixed(0)}% (${next.myStatus?.[idx]})`);
+      if (!myHasMG) {
+        next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - statusChip);
+        notes.push(`m${idx + 1} -${statusChip.toFixed(0)}% (${next.myStatus?.[idx]})`);
+      }
       if (next.myStatus?.[idx] === 'tox') next.myToxCounter![idx] = (next.myToxCounter![idx] ?? 1) + 1;
     }
     if (next.myStatus?.[idx] === 'slp') {
@@ -172,32 +181,33 @@ export function endOfTurn(
       if (heldOrbStatus === 'tox') next.myToxCounter![idx] = 1;
       notes.push(`m${idx + 1} ${heldOrbStatus} (${set.item})`);
     }
-    // Residual-chip volatiles.
-    if (next.mySaltCured?.[idx]) {
-      const myTypes = types;
-      const chip = mySaltCureChip(set.species, myTypes);
+    // Residual-chip volatiles — all blocked by Magic Guard (except healing).
+    if (next.mySaltCured?.[idx] && !myHasMG) {
+      const chip = mySaltCureChip(set.species, types);
       next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - chip);
       notes.push(`m${idx + 1} -${chip.toFixed(0)}% (Salt Cure)`);
     }
-    if (next.myAquaRing?.[idx]) {
+    if (next.myAquaRing?.[idx]) { // heal — not blocked
       next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) + 100 / 16);
       notes.push(`m${idx + 1} +6% (Aqua Ring)`);
     }
-    if (next.myIngrain?.[idx]) {
+    if (next.myIngrain?.[idx]) { // heal — not blocked
       next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) + 100 / 16);
       notes.push(`m${idx + 1} +6% (Ingrain)`);
     }
-    if (next.myCursed?.[idx]) {
+    if (next.myCursed?.[idx] && !myHasMG) {
       next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - 100 / 4);
       notes.push(`m${idx + 1} -25% (Curse)`);
     }
     if (next.myPartialTrap?.[idx] != null && next.myPartialTrap[idx]! > 0) {
-      next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - 100 / 8);
-      notes.push(`m${idx + 1} -12% (trapped)`);
+      if (!myHasMG) {
+        next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - 100 / 8);
+        notes.push(`m${idx + 1} -12% (trapped)`);
+      }
       next.myPartialTrap![idx] = next.myPartialTrap[idx]! - 1;
       if (next.myPartialTrap[idx]! <= 0) { delete next.myPartialTrap![idx]; notes.push(`m${idx + 1} escaped`); }
     }
-    if (next.myNightmare?.[idx] && next.myStatus?.[idx] === 'slp') {
+    if (next.myNightmare?.[idx] && next.myStatus?.[idx] === 'slp' && !myHasMG) {
       next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - 100 / 4);
       notes.push(`m${idx + 1} -25% (Nightmare)`);
     }
@@ -225,6 +235,8 @@ export function endOfTurn(
       if (i == null) continue;
       const o = next.opponentTeam[i];
       if (!o || o.fainted || o.status !== 'slp') continue;
+      const targetHasMG = isMagicGuard(certainAbility({ knownAbility: o.ability, species: o.species }));
+      if (targetHasMG) continue;
       const chip = 100 / 8;
       o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - chip);
       notes.push(`o${i + 1} -${chip.toFixed(0)}% (Bad Dreams)`);
@@ -236,6 +248,7 @@ export function endOfTurn(
       if (i == null) continue;
       if (next.myFainted!.includes(i)) continue;
       if (next.myStatus?.[i] !== 'slp') continue;
+      if (isMagicGuard(next.myTeam[i]?.ability)) continue;
       const chip = 100 / 8;
       next.myCurrentHp![i] = clampHp((next.myCurrentHp![i] ?? 100) - chip);
       notes.push(`m${i + 1} -${chip.toFixed(0)}% (Bad Dreams)`);
@@ -260,16 +273,19 @@ export function endOfTurn(
     const targetMax = maxHpForSide(side, idx);
     if (!targetMax) return;
     const drainPct = 100 / 8; // 12.5% of target max
-    // Apply drain.
+    // Apply drain — blocked by Magic Guard (no drain means no heal for seeder either).
     if (side === 'theirs') {
       const o = next.opponentTeam[idx];
       if (!o || o.fainted) return;
+      const targetHasMG = isMagicGuard(certainAbility({ knownAbility: o.ability, species: o.species }));
+      if (targetHasMG) return;
       const after = clampHp((o.currentHpPercent ?? 100) - drainPct);
       o.currentHpPercent = after;
       notes.push(`o${idx + 1} -${drainPct.toFixed(0)}% (Leech Seed)`);
       if (after === 0) o.fainted = true;
     } else {
       if (next.myFainted!.includes(idx)) return;
+      if (isMagicGuard(next.myTeam[idx]?.ability)) return;
       const after = clampHp((next.myCurrentHp![idx] ?? 100) - drainPct);
       next.myCurrentHp![idx] = after;
       notes.push(`m${idx + 1} -${drainPct.toFixed(0)}% (Leech Seed)`);
@@ -296,6 +312,35 @@ export function endOfTurn(
   applyLeechSeed('mine', activeIdx.mine[1]);
   applyLeechSeed('theirs', activeIdx.theirs[0]);
   applyLeechSeed('theirs', activeIdx.theirs[1]);
+
+  // Perish Song: count down each EOT for every active mon; KO at 0.
+  for (const i of activeIdx.theirs) {
+    if (i == null) continue;
+    const o = next.opponentTeam[i];
+    if (!o || o.fainted || o.perishCount == null) continue;
+    o.perishCount -= 1;
+    if (o.perishCount <= 0) {
+      o.currentHpPercent = 0; o.fainted = true;
+      notes.push(`o${i + 1} fainted (Perish Song)`);
+    } else {
+      notes.push(`o${i + 1} Perish ${o.perishCount}`);
+    }
+  }
+  for (const i of activeIdx.mine) {
+    if (i == null) continue;
+    if (next.myFainted!.includes(i)) continue;
+    const count = next.myPerishCount?.[i];
+    if (count == null) continue;
+    next.myPerishCount = { ...(next.myPerishCount ?? {}) };
+    next.myPerishCount[i] = count - 1;
+    if (next.myPerishCount[i]! <= 0) {
+      next.myCurrentHp![i] = 0;
+      if (!next.myFainted!.includes(i)) next.myFainted!.push(i);
+      notes.push(`m${i + 1} fainted (Perish Song)`);
+    } else {
+      notes.push(`m${i + 1} Perish ${next.myPerishCount[i]}`);
+    }
+  }
 
   // Field conditions count down on the persistent field; clear at 0.
   const f = next.field;
