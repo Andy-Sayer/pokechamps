@@ -141,15 +141,274 @@ indicator. `/endgame` stays as the on-demand detailed view.
 - **C — ✅ SHIPPED:** always-on `⌁ best play (depth N): …` line under the
   battle header, colour-coded by verdict. `/endgame` stays as the on-demand
   detailed view.
-- **Later:** alpha-beta depth gains; voluntary-switch actions; root-move min/max
-  bracketing; mixed-strategy refinement if maximin proves too pessimistic.
+- **Later:** alpha-beta depth gains; root-move min/max bracketing; mixed-strategy
+  refinement if maximin proves too pessimistic. The "make the bar maximally
+  helpful" work (explainability, break-points, voluntary switches, field actions)
+  is now its own phased roadmap below.
 
-## Non-goals (v1)
+## Non-goals (v1 — the shipped A/B/C core)
 
-Exact equilibrium play; enumerating voluntary switches; branching on damage
-rolls; mega for future switch-ins (only currently-active mons are mega
-candidates); folding flinch/secondaries into the maximin state (they surface as
-priced risks instead); modelling every secondary effect (status/weather chip
-carry through via the field state we already track, but we don't search
-status-fishing lines). Both-side spread moves and named incoming KO/flinch risks
-ARE handled — see turn model.
+Exact equilibrium play; branching on damage rolls; mega for future switch-ins
+(only currently-active mons are mega candidates); folding flinch/secondaries into
+the maximin state (they surface as priced risks instead); modelling every
+secondary effect (status/weather chip carry through via the field state we
+already track, but we don't search status-fishing lines). Both-side spread moves
+and named incoming KO/flinch risks ARE handled — see turn model.
+
+Voluntary switches and order-affecting field moves (Tailwind / Trick Room) were
+v1 non-goals but are now **shipped** (root-ply; see the roadmap below). Pivot
+moves and damage-altering status (setup/screens/burn) remain deferred.
+
+---
+
+## Roadmap — making the best-play bar maximally helpful (2026-05-31)
+
+The A/B/C core answers *what to play*. This roadmap makes the bar *trustworthy
+and more capable*: explain the opponent's winning line, surface the pivotal
+break-points, model switches + field moves, and report breadth honestly. Stays
+deterministic (no LLM — `feedback_ai_direction`); recommendations stay honest
+envelopes (`feedback_minimum_stat_points`, `project_endgame_honest_verdicts`).
+
+### ✅ Status (2026-05-31): Phases 1–3 SHIPPED
+
+All in `endgameSearch.ts` + `BattleScreen.tsx`, with focused tests in
+`endgame-search.test.ts` (48 search tests, full suite green). Decisions made
+during implementation (defaults chosen autonomously):
+
+- **Phase 1 (explainability):** `SearchResult` gains `oppLine` ("they win via:",
+  rendered when losing), `assumptions` (contingent-speed notes, no fabricated
+  probability), `explored` (scope-derived breadth: lines/ply, candidate spreads,
+  mega combos, and `actionClasses` listing the action kinds actually in the
+  tree), and `adapted` ("spread refined from observed damage" when inference has
+  speed bounds / candidate likelihoods).
+- **Phase 2 (break-points):** `SearchResult.breakpoints` — per pivotal exchange,
+  the HP cutpoint that flips the verdict, both *survive* ("if their hit stays
+  under our HP we live & KO back") and *ko* ("OHKOs unless it invested bulk")
+  directions, from pooled `percentRolls`/`candidatesConsidered`. Rendered as a
+  `watch:` line.
+- **Phase 3a (switches):** root-ply voluntary switches for BOTH sides via a
+  `SWITCH` sentinel range (`jointActions` gains `switchTargets`, root-only;
+  deeper plies stay switch-free). `resolveTurn` swaps slots before attacks and
+  **redirects a hit aimed at a switched-out mon onto its replacement** (no free
+  dodge in doubles). Doubles legality: no two actives into the same bench mon.
+  - **Unrevealed-roster (`oppBench`) switch-ins** are folded into the opp list as
+    **phantoms**, capped so total opp bodies never exceed the 4 VGC brings and
+    gated on `!allOppRevealed`. Phantoms carry damage cells but **do NOT count as
+    material until switched in** (`State.oppSeen`), so they never inflate the opp
+    force; `refill` only auto-brings already-revealed mons (a phantom enters only
+    via a deliberate switch). This is the user's "any of their known 6 until we
+    whittle to 4". `benchRisk` still names the scariest incoming threat.
+- **Phase 3b (Tailwind / Trick Room):** order flags (`trickRoom`, `myTailwind`,
+  `theirTailwind`) moved from the fixed `Tables.field` into mutable `State`;
+  `SET_TAILWIND`/`SET_TRICKROOM` actions (**this-turn-only**) flip them for the
+  NEXT ply. Opp field moves offered only from REVEALED moves (opp-conservatism).
+  - **Durations (shipped):** `FieldState` already tracks `trickRoomTurns` /
+    `*TailwindTurns`; these are threaded into `State`, tick down each ply, and
+    clear the flag at 0 — so the search can **stall an effect out** (Protect /
+    switch until the opponent's Tailwind / Trick Room expires).
+- **Leech Seed (shipped):** a `LEECH` sentinel range (foe-targeted, this-turn-
+  only cast) + the end-of-turn **drain (1/8) / heal residual** applied every ply
+  to active seeded mons (`State.mySeeded`/`oppSeeded`, healed via `Tables.*MaxHp`
+  ratio). Grass types are immune. Existing seeds are threaded from the live match
+  (`match.myLeechSeeded` / `OpponentEntry.leechSeeded`). So the search now both
+  *evaluates* positions with an active seed and can *recommend* seeding.
+
+**Terminology:** a *ply* = one searched turn; **"this-turn-only" / root-ply**
+actions (switches, field moves, Leech Seed casts) are offered for the CURRENT
+decision but not in the deeper hypothetical turns (which assume both sides
+attack), to keep the always-on budget bounded.
+
+**Targeting invariant (bug fixed):** single-target moves may only hit a foe in an
+ACTIVE slot. Benched / unrevealed mons carry damage cells for switch-in modelling
+but are NEVER attack targets (`jointActions` derives targets from `foeActive`, not
+all live foes). Regression test: "never recommends attacking a benched opponent".
+
+**Known limitations / deferred (chosen to keep verdicts correct):** switches and
+field/seed casts are this-turn-only; **pivot moves** (Volt Switch / U-turn) are
+deferred; phantom mega-evolution isn't modelled.
+
+### Remaining roadmap (reordered per user, 2026-05-31)
+
+- **Phase 4 — damage-altering field effects with DURATION + stall-out.** Screens
+  (Reflect / Light Screen / Aurora Veil — halve damage), weather (Sun/Rain/Sand/
+  Snow — boost/reduce damage AND change speed via Chlorophyll / Swift Swim /
+  Sand Rush / Slush Rush), and terrain (boost damage). All have KNOWN turn counts
+  (`FieldState.weatherTurns` etc.) the engine already tracks, so the search should
+  model **stalling them out** — e.g. *the sun is up and Venusaur-Mega's Chlorophyll
+  outspeeds; stall ~4 turns until sun ends and it no longer does.* This is the hard
+  bucket: these effects change DAMAGE (and weather changes SPEED), so they break
+  the "precompute the damage/speed matrices once" optimization. Needs either a
+  small set of per-state matrices (screens on/off, weather on/off) or an accepted
+  recompute on the rare branch. Also: setup (Swords Dance), Will-O-Wisp/Thunder
+  Wave (burn/para), and other end-of-turn residuals (burn/poison/weather chip) the
+  search still ignores.
+  - **✅ Dynamic stat boosts (setup) + Speed Boost + Baton Pass — SHIPPED
+    (2026-05-31).** `State.myBoost`/`oppBoost` track live TOTAL stages (seeded
+    from input = the level baked into the cells). Solved the matrix-rebuild problem
+    WITHOUT rebuilding: damage is scaled at use time by `boostDamageScale` =
+    `statStageMult(total)/statStageMult(baked)` (offense) × inverse (defense) —
+    **exactly 1.0 when nothing changed**, so positions without setup are
+    numerically identical to before (no regression). Actions: `SET_BOOST` (setup
+    moves — `SETUP_MOVES` table: Calm Mind / Swords Dance / Dragon Dance / Quiver
+    Dance / Shell Smash …), `BATON_BASE` sentinel (Baton Pass = a switch that
+    copies the outgoing mon's stages to the incoming mon), and EOT **Speed Boost**
+    (+1 Spe/turn for the ability holder; order-only via dynamic Spe in the speed
+    sort). This is the user's Espathra line: Protect → Speed Boost → Calm Mind →
+    Baton Pass is now representable and judged by the win/loss lookahead, not a
+    "damage = good" heuristic. Action classes: `setup` / `speedboost` / `batonpass`.
+    **Still ignored:** screens/weather/terrain (below) and per-turn status
+    residuals (burn/poison chip).
+- **Phase 5 (LAST) — GPU parallel mode.** Park until Phase 4 ships and CPU perf is
+  measured (per user: GPU comes *after* the damage-altering-status work). Batch the
+  per-spread forward-damage grid as a kernel; the maximin tree stays on CPU.
+
+The original phase descriptions below are kept as the early design record (their
+Phase 4/5 numbering predates this reorder).
+
+**Honest-breadth rule:** the breadth/assumption report is *scope-derived* — it
+never claims it "considered a switch / status move" until those actions are real
+nodes in the tree. We acknowledge the *possibility* of an opp switch as a risk
+caveat (today's `benchRisk` already does) before switches are searched; we only
+claim to have *evaluated* them once they exist.
+
+### Feasibility facts (verified during planning)
+
+- `predictOffense`/`predictThreat` already pool rolls across all candidate
+  spreads (`percentRolls`) and report `candidatesConsidered` — so "OHKO in X% of
+  plausible spreads", a "bulkiest surviving spread" scan, and **damage-threshold
+  break-point** location are all available with no new calc work.
+- `buildTables` builds `off`/`thr` cells over the **full** `input.mine`/`input.opp`
+  arrays — every mon, not just the two actives. So **revealed-but-benched** opp
+  mons (in `opponentBrought` → in `input.opp`) already have cells: switching *to*
+  them is matrix-free.
+- `searchInputFromMatch` already computes `input.oppBench` — the known-but-not-yet-
+  seen roster mons (`opponentTeam` entries not in `opponentBrought`, non-fainted).
+  `opponentTeam` holds the full 6 we entered at the bring stage, so `oppBench` is
+  the rest of the opponent's known 6. **But these are NOT in `input.opp`, so they
+  have no damage cells** — searching switches to them adds matrix cost (Phase 3a).
+  Today `oppBench` is only used to *name* the scariest switch-in (`benchRisk`).
+
+### The two opponent-switch classes
+
+Drives legality, cost, and the "whittle to 4" gate — treat separately:
+
+- **Revealed-but-benched** — was on the field, retreated. In `input.opp` → cells
+  exist → **always legal, matrix-free**.
+- **Unrevealed roster** (`oppBench`) — one of the known 6 not yet seen on the
+  field. **No cells** (needs new matrix rows/cols from the inferred/default
+  spread). Legal **only while `opponentBrought.length < 4`**: once 4 distinct mons
+  have appeared, the other 2 were never brought and can never enter. That gate is
+  "any of the 6 until we whittle down to the brought 4." Today's `oppBench` (a)
+  holds only this unrevealed set and (b) is not gated on the 4-count — both need
+  handling.
+
+**Branch-count expectation:** up to ~2 actives × {attack-each-target, spread,
+protect, switch-to-each-legal-bench, set-field} per side → **hundreds to low
+thousands of joints per ply** before depth. Expected and acceptable on the target
+hardware; motivates the GPU note (Phase 4), doesn't block the CPU build.
+
+### Phase 1 — Explainability (no tree changes; highest ROI)
+
+In `endgameSearch.ts` (`createSearch().toDepth`) + render in `BattleScreen.tsx`
+(~lines 2295–2343).
+
+- **1a. Opponent forcing line.** Thread the opp's *minimizing* joint out of the
+  min nodes (cheapest: after maximin picks my joint, replay it against the opp's
+  argmin reply and format). New `SearchResult.oppLine?: SearchPlay[]` (mirror of
+  `playsFromJoint` via the `thr`/`oppSpread` tables). Render on `verdict==='losing'`
+  as a dim `they win via: …` line; reuse in the hail-mary block.
+- **1b. Speed assumptions.** For each opp attacker the verdict assumes
+  outspeeds (or that we assume we outspeed), compare `effectiveSpeedRange(entry)`
+  (`speed.ts`) vs my `actualSpeed`; emit "Assumes Aerodactyl invested Speed to
+  outspeed Delphox" / "We outspeed Garchomp unless it ran +Speed". Extend the
+  existing `scariestIncoming` scan — no second traversal.
+- **1c. Honest breadth report.** New `SearchResult.explored: { joints, spreads,
+  megaBranches, regimes, depth, actionClasses: string[] }`. `actionClasses` lists
+  what's actually in the tree; render wording is generated from it (no "switches"
+  before Phase 3). Dim conf-chip suffix, e.g. `(3 turns ahead · 4 spreads · 600
+  joints · mega ×2)`.
+- **1d. Surface adaptation.** `posSig` already re-runs on inference narrowing; add
+  a one-shot dim `spread refined from observed damage` when the opp entry has
+  `candidates`. Display-only.
+
+### Phase 2 — Break-point / threshold analysis (headline ask)
+
+> *"establish what break points in the stat spread should look like per possible
+> move — e.g. if o1 hits us with Rock Slide and it does <100 damage we should be
+> able to faint it next turn."*
+
+For each pivotal exchange, find the **damage threshold that flips the verdict**,
+plus the spread investment behind it, stated as an observation the user can check
+against the real roll.
+
+- **2a.** New `SearchResult.breakpoints: SearchBreakpoint[]` —
+  `{ subject, move, direction: 'survive' | 'ko', thresholdHp, thenVerdict,
+  spreadNote, prob }`. *Survival* direction (the Rock Slide example): cutpoint
+  below which my mon lives → look one ply ahead to confirm I KO. *KO* direction
+  (the Garchomp bulk case): scan `entry.candidates` for the bulkiest surviving
+  spread. Locate the flip with pooled `percentRolls` (%) + `candidatesConsidered`
+  (breadth). **Do not collapse to a static "unless invested" string** — the
+  concrete HP number is the value. Extend the existing roll-bottleneck scan; don't
+  add a traversal.
+- **2b. Render.** Dim block of the top 1–2 verdict-flipping break-points, e.g.
+  `watch: Rock Slide <100 → we live & KO back; ≥100 → we're down a mon`.
+
+### Phase 3 — Action-space expansion (root-ply)
+
+- **3a. Voluntary switches (both classes).** Promote `oppBench` into the
+  searchable opp set so cells exist: extend `buildTables` to build rows/cols for
+  the gated bench mons (only when `opponentBrought.length < 4`), from their
+  inferred/default spread; revealed-benched already have cells. Add a
+  `SWITCH(targetIdx)` sentinel to `jointActions` **at the root ply only** (pass
+  `root: boolean`); deeper plies unchanged. `resolveTurn`: switcher deals no
+  damage, swaps the active index, resets that slot's boosts, resolves before
+  attacks. **Doubles legality:** no duplicate target across slots, no target equal
+  to the other active slot's occupant; **pivot moves (Volt Switch / U-turn) that
+  force a mid-turn switch are deferred.** `playsFromJoint` formats `Delphox→switch
+  →Sableye`. Add `'switch'` to `actionClasses` once landed.
+- **3b. Tailwind / Trick Room.** Move the mutable order flags (`trickRoom`,
+  `myTailwind`, `theirTailwind`) from fixed `Tables.field` into `State`; the
+  `effSpeed`/`oppOutspeeds` helpers (currently keyed off `t.field.*`) repoint at
+  state. Add `SET_TAILWIND` / `SET_TR` actions, offered only when the mon's known
+  moveset / Pikalytics pool contains it (same conservatism as `oppProtectMove`).
+
+### Phase 4 — GPU parallel mode (future / parked)
+
+User floated GPU-parallel break-point/branch math with the caveat *"we need to
+tidy everything up first."* Revisit only after Phases 1–3 ship and CPU perf is
+measured. Likely shape: batch the per-spread forward-damage grid (the
+`percentRolls` hot loop) as a GPU kernel; the maximin tree stays on CPU. Not in
+initial scope.
+
+### Phase 5 — Damage-altering status (optional / later)
+
+Setup (Swords Dance), screens, Will-O-Wisp / Thunder Wave. These invalidate the
+precompute-once matrices. Build only if budget allows: per-boost-level matrices
+(small fixed set) or accepted recompute on the rare branch. Defer; revisit after
+measuring Phase 3 perf.
+
+### Phasing discipline
+
+Scope is large — keep each phase an **independently shippable, independently
+tested diff**. Phase 1 = pure explainability, zero tree changes (safest). Phase 2
+= break-points on the *existing* tree (no new actions). Phase 3a (switches) and 3b
+(field) are separate diffs; 3a is gated behind the matrix-extension + legality
+work and is the riskiest perf-wise — land and measure before 3b.
+
+### Verification (roadmap work)
+
+- `npm run typecheck`; `npm test` green.
+- Focused endgame-search tests: (a) `oppLine` on a losing position; (b) a speed
+  assumption on a contingent-speed KO; (c) a break-point with the correct HP
+  cutpoint + flipped verdict, both directions; (d) a root switch to a
+  revealed-benched mon chosen when it strictly beats attacking; (e) a switch to an
+  unrevealed-roster mon offered while `<4 revealed` and **suppressed** once 4 are
+  revealed; (f) doubles legality (no duplicate / other-slot target); (g) breadth
+  `actionClasses` omits "switch" before Phase 3, includes it after.
+- `npx tsx packages/core/src/scripts/smoketest.ts` — damage/inference unaffected.
+- Manual (`npm start`, `npm run demo-team`): (i) losing to a faster mega → "they
+  win via:"; (ii) borderline exchange → "watch: <move> <HP> → …"; (iii) a position
+  where switching is correct → switch appears; (iv) an unrevealed-roster switch-in
+  drops from reasoning once the 4th opp mon is seen.
+- Keep `BattleScreen.tsx` read-only w.r.t. match state (search is a pure
+  consumer); mirror nothing into the dual-finalize path (`project_dual_finalize_turn`).
