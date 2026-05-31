@@ -20,7 +20,7 @@ Five axes of correctness, in rough order of how often a gap *visibly* misleads t
 
 **Inference:** offensive-EV inference (`scoreOffensiveSpread`) — Atk/SpA inferred from opp hits on my known mons, pruning natures/items that can't reach the damage; nature promotion on extreme hit; speed → EV/+Speed-nature commit when scarf is ruled out.
 
-**Search:** three damage regimes + survival items (`forced` requires worst-case rolls + Sash/Sturdy + all 4 revealed + worst opp mega); empirical KO probability (pooled across candidate spreads × rolls); concrete bench switch-in named in risks.
+**Search:** three damage regimes + survival items (`forced` requires worst-case rolls + Sash/Sturdy + all 4 revealed + worst opp mega); empirical KO probability (pooled across candidate spreads × rolls); concrete bench switch-in named in risks; both-side spread moves modelled; a contingent KO on one of my actives is named (e.g. "Aerodactyl-Mega can KO Delphox") and an outspeeding flinch move is priced as a per-mon risk.
 
 **Speed:** Gen 9 dynamic-speed inference (per-action effective speed, intra-turn Tailwind reconstruction, TR-resolves-last); already-mega'd mon at mega speed.
 

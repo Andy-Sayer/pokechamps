@@ -50,12 +50,22 @@ Reuses the existing per-turn predictors so we don't reinvent damage:
   branched on (that's exponential); the honest min/max envelope stays a
   display-time concept, not a search-time one. (Possible later: min/max
   bracketing of the *root* move only.)
-- **Spread moves (my side) — handled.** Each of my actives also gets a "spread"
-  option (the SPREAD sentinel) when its set has an `allAdjacentFoes` /
-  `allAdjacent` move; it applies that move's (already 0.75-reduced) damage to
-  *every* live foe in one action, and the recommendation shows "→ all foes".
-  Opponent spread moves are still modelled single-target (deferred — predictThreat
-  doesn't take a forced move; opp modelling is already approximate).
+- **Spread moves (both sides) — handled.** Each active (mine AND the opponent's)
+  gets a "spread" option (the SPREAD sentinel) when its move pool has an
+  `allAdjacentFoes` / `allAdjacent` move; it applies that move's (already
+  0.75-reduced) damage to *every* live foe in one action. The opponent's pool is
+  drawn from the same `knownMoves`-else-Pikalytics source `predictThreat` uses;
+  a forced-move range is obtained by synthesising a one-move entry. Without this
+  the maximin under-counted incoming damage (e.g. Rock Slide / Blizzard hitting
+  only one of my two actives) and over-stated "likely win".
+- **Incoming contingent KO + flinch risks.** When the roll-dependence pass flips
+  the verdict, the bottleneck scan now also considers a contingent KO on one of
+  *my* actives (survives the median roll, dies to the top / mega roll) and names
+  it — "Aerodactyl-Mega can KO Delphox" — instead of the old catch-all "damage
+  rolls". Separately, an outspeeding opp move with a flinch secondary surfaces a
+  per-acting-mon flinch risk priced like a survival item. Flinch is **not** in
+  the maximin (matches the roadmap: secondaries feed the outs/risk analysis, not
+  auto-applied state).
 - **KO + replacement:** when an active faints and the side has live bench, bring
   in a replacement heuristically (best 1-ply matchup vs the current foes). We do
   **not** enumerate voluntary switches as actions in v1 — that's the main
@@ -137,8 +147,9 @@ indicator. `/endgame` stays as the on-demand detailed view.
 ## Non-goals (v1)
 
 Exact equilibrium play; enumerating voluntary switches; branching on damage
-rolls; opponent-side spread moves (my side IS handled — see turn model);
-mega for future switch-ins (only currently-active mons are mega candidates);
-mega-attacker damage on *spread* moves; modelling every secondary effect
-(status/weather chip carry through via the field state we already track, but we
-don't search status-fishing lines).
+rolls; mega for future switch-ins (only currently-active mons are mega
+candidates); folding flinch/secondaries into the maximin state (they surface as
+priced risks instead); modelling every secondary effect (status/weather chip
+carry through via the field state we already track, but we don't search
+status-fishing lines). Both-side spread moves and named incoming KO/flinch risks
+ARE handled — see turn model.
