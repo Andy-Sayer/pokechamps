@@ -2145,8 +2145,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             attackerFirstTurnOut: oppFresh,
           }),
           // Dual-forme: compute the same offense + threat using post-mega
-          // stats, so the row can surface "(mega: X-Y%)" alongside the base
-          // numbers. Only built when the mon could still mega.
+          // stats, so the row can surface "⭢mega X-Y%" alongside the base
+          // numbers.
+          // offenseMega: my mega attacks the opp (only when I can still mega).
+          // threatMega: OPP mega attacks me (only when the opp can still mega).
+          // These are independent — one or both may be shown.
           offenseMega: myMegaOption ? predictOffense({
             attacker: myCalcSet, opponent: opp, field,
             attackerGimmickActive: true,
@@ -2156,17 +2159,28 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             defenderBoosts: opp.currentBoosts,
             defenderStatus: opp.status,
           }) : null,
-          threatMega: myMegaOption ? predictThreat({
-            opponent: opp, defender: myCalcSet, field,
-            attackerGimmickActive: oppActive,
-            defenderGimmickActive: true,
-            defenderCurrentHpPercent: myHp,
-            attackerBoosts: opp.currentBoosts,
-            defenderBoosts: myBoosts,
-            attackerStatus: opp.status,
-            defenderStatus: myStatus,
-            attackerFirstTurnOut: oppFresh,
-          }) : null,
+          threatMega: (() => {
+            // Opp can mega only if it hasn't used the gimmick and its species
+            // has a mega option. Build a synthetic entry with the stone attached
+            // so resolveSpecies resolves the mega forme.
+            if (opp.megaUsed) return null;
+            const oppMegaOpts = getMegaOptions(opp.species);
+            if (!oppMegaOpts.length) return null;
+            const stone = oppMegaOpts[0]!.stone;
+            const base = opp.candidates?.length ? opp.candidates : [defaultOpponentSet(opp, 50)];
+            const megaOppEntry = { ...opp, candidates: base.map(c => ({ ...c, item: stone })) };
+            return predictThreat({
+              opponent: megaOppEntry, defender: myCalcSet, field,
+              attackerGimmickActive: true,
+              defenderGimmickActive: myMegaActive,
+              defenderCurrentHpPercent: myHp,
+              attackerBoosts: opp.currentBoosts,
+              defenderBoosts: myBoosts,
+              attackerStatus: opp.status,
+              defenderStatus: myStatus,
+              attackerFirstTurnOut: oppFresh,
+            });
+          })(),
           speed: speedVerdict({ mySet, opp, field, myFormeOverride: myMegaActive ? match.myMegaForme?.[myIdx] : undefined }),
           speedMega: myMegaOption ? speedVerdict({ mySet, opp, field, myFormeOverride: myMegaOption.forme }) : null,
         };
