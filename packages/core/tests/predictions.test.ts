@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { predictOffense, predictOffenseAll, predictThreat, speedVerdict } from '../src/domain/predictions.js';
+import { predictOffense, predictOffenseAll, predictThreat, predictThreatAll, speedVerdict } from '../src/domain/predictions.js';
 import type { PokemonSet, OpponentEntry, FieldState } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, MAX_IVS, ZERO_EVS } from '../src/domain/types.js';
 
@@ -127,6 +127,39 @@ describe('predictThreat', () => {
     const r = predictThreat({ opponent: opp, defender: mySneasler, field: NEUTRAL_FIELD });
     // species unknown + no moves -> null
     expect(r).toBeNull();
+  });
+});
+
+describe('predictThreatAll', () => {
+  const mySneasler = mon({
+    species: 'Sneasler', nature: 'Jolly',
+    evs: { hp: 4, atk: 252, def: 0, spa: 0, spd: 0, spe: 252 },
+    moves: [],
+  });
+
+  test('returns one row per known move, sorted by max desc', () => {
+    const opp: OpponentEntry = { species: 'Incineroar', knownMoves: ['Knock Off', 'Flare Blitz'], candidates: [incineroar] };
+    const rows = predictThreatAll({ opponent: opp, defender: mySneasler, field: NEUTRAL_FIELD });
+    const moves = rows.map(r => r.move);
+    expect(moves).toContain('Knock Off');
+    expect(moves).toContain('Flare Blitz');
+    for (let i = 1; i < rows.length; i++) {
+      expect(rows[i - 1]!.maxPercent).toBeGreaterThanOrEqual(rows[i]!.maxPercent);
+    }
+  });
+
+  test('falls back to Pikalytics expected moves when knownMoves is empty', () => {
+    const opp: OpponentEntry = { species: 'Incineroar', knownMoves: [], candidates: [incineroar] };
+    const rows = predictThreatAll({ opponent: opp, defender: mySneasler, field: NEUTRAL_FIELD });
+    expect(rows.length).toBeGreaterThan(0);
+    // Expected Incineroar moves come from Pikalytics, not an empty list.
+    expect(rows.some(r => ['Flare Blitz', 'Knock Off', 'Fake Out', 'Parting Shot'].includes(r.move))).toBe(true);
+  });
+
+  test('an Encore lock collapses the pool to the single forced move', () => {
+    const opp: OpponentEntry = { species: 'Incineroar', knownMoves: ['Knock Off', 'Flare Blitz'], encoreMove: 'Flare Blitz', candidates: [incineroar] };
+    const rows = predictThreatAll({ opponent: opp, defender: mySneasler, field: NEUTRAL_FIELD });
+    expect(rows.map(r => r.move)).toEqual(['Flare Blitz']);
   });
 });
 

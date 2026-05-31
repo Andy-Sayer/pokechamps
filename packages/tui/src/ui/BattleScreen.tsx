@@ -24,7 +24,7 @@ import { resistBerryForType } from '@pokechamps/core/domain/resistBerries.js';
 import { effectiveness, speciesTypes } from '@pokechamps/core/domain/typechart.js';
 import { switchInAbilityEffect, intimidateReaction, certainAbility, resolveDownloadBoost, type BoostMap } from '@pokechamps/core/domain/abilities.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
-import { predictOffense, predictOffenseAll, predictThreat, speedVerdict, type SpeedVerdict, type MatchupCell, type Confidence } from '@pokechamps/core/domain/predictions.js';
+import { predictOffense, predictOffenseAll, predictThreat, predictThreatAll, speedVerdict, type SpeedVerdict, type MatchupCell, type Confidence } from '@pokechamps/core/domain/predictions.js';
 import { PikaSpinner } from './PikaSpinner.js';
 import { ExportPanel } from './ExportPanel.js';
 import { OverridePanel } from './OverridePanel.js';
@@ -364,7 +364,7 @@ function shortName(name: string, width = 12): string {
 //
 // This is read-only — no match state changes. Intentional: the user wants to
 // scout a hypothetical without rewinding or "what-iffing" the current turn.
-function runAskCommand(
+export function runAskCommand(
   args: string,
   match: Match,
   activeIdx: { mine: [number | null, number | null]; theirs: [number | null, number | null] },
@@ -382,30 +382,66 @@ function runAskCommand(
   const opp = resolveAskSide(parts[1]!.trim(), 'theirs', match, activeIdx);
   if (typeof opp === 'string') return `RHS: ${opp}`;
 
-  const off = predictOffense({
+  // Mega is a decision, not a fixed forme: when my side holds a stone and the
+  // user didn't already force +mega, show BOTH formes so they can judge whether
+  // popping mega is worth it. Same for the opponent's potential mega.
+  const myCanMega = !mine.megaActive && !!mine.megaForme;
+  const oppMegaOpts = getMegaOptions(opp.entry.species);
+  const oppCanMega = !opp.megaActive && oppMegaOpts.length > 0 && !opp.entry.megaUsed;
+
+  // All of MY moves vs this foe, base + (when available) the post-mega forme,
+  // zipped by move name so each line can show "X-Y%  ⭢mega X-Y%".
+  const myMoves = predictOffenseAll({
     attacker: mine.set, opponent: opp.entry, field,
-    attackerGimmickActive: mine.megaActive,
-    defenderGimmickActive: opp.megaActive,
+    attackerGimmickActive: mine.megaActive, defenderGimmickActive: opp.megaActive,
   });
-  const thr = predictThreat({
+  const myMegaByMove = new Map<string, MatchupCell>();
+  if (myCanMega) {
+    for (const c of predictOffenseAll({
+      attacker: mine.set, opponent: opp.entry, field,
+      attackerGimmickActive: true, defenderGimmickActive: opp.megaActive,
+    })) myMegaByMove.set(c.move, c);
+  }
+
+  // The opponent's EXPECTED moves vs me (revealed, else Pikalytics), base +
+  // (when the opp could still mega) the post-mega forme.
+  const oppThreats = predictThreatAll({
     opponent: opp.entry, defender: mine.set, field,
-    attackerGimmickActive: opp.megaActive,
-    defenderGimmickActive: mine.megaActive,
+    attackerGimmickActive: opp.megaActive, defenderGimmickActive: mine.megaActive,
   });
-  const sp = speedVerdict({
-    mySet: mine.set, opp: opp.entry, field,
-    myFormeOverride: mine.megaActive ? mine.megaForme ?? undefined : undefined,
-  });
-  const verdict = sp === 'faster' ? '✓ outspeed' : sp === 'slower' ? '✗ outsped' :
-                  sp === 'tie' ? '≈ tie' : sp === 'scarf-flag' ? '⚡ scarf risk' :
-                  '? unknown';
-  const offTxt = off
-    ? `${off.move} ${off.minPercent.toFixed(0)}-${off.maxPercent.toFixed(0)}% (${off.koChance})${off.conditional ? ` ⚠ ${off.conditional}` : ''}`
-    : 'n/a';
-  const thrTxt = thr
-    ? `${thr.move} ${thr.minPercent.toFixed(0)}-${thr.maxPercent.toFixed(0)}% (${thr.koChance})${thr.conditional ? ` ⚠ ${thr.conditional}` : ''}`
-    : 'n/a';
-  return `${mine.label} vs ${opp.label}\n  → ${offTxt}\n  ← ${thrTxt}\n  speed: ${verdict}`;
+  const oppMegaByMove = new Map<string, MatchupCell>();
+  if (oppCanMega) {
+    const stone = oppMegaOpts[0]!.stone;
+    const baseCands = opp.entry.candidates?.length ? opp.entry.candidates : [defaultOpponentSet(opp.entry, 50)];
+    const megaEntry: OpponentEntry = { ...opp.entry, candidates: baseCands.map(c => ({ ...c, item: stone })) };
+    for (const c of predictThreatAll({
+      opponent: megaEntry, defender: mine.set, field,
+      attackerGimmickActive: true, defenderGimmickActive: mine.megaActive,
+    })) oppMegaByMove.set(c.move, c);
+  }
+
+  const verdictTxt = (v: SpeedVerdict) =>
+    v === 'faster' ? '✓ outspeed' : v === 'slower' ? '✗ outsped' :
+    v === 'tie' ? '≈ tie' : v === 'scarf-flag' ? '⚡ scarf risk' : '? unknown';
+  const sp = speedVerdict({ mySet: mine.set, opp: opp.entry, field, myFormeOverride: mine.megaActive ? mine.megaForme ?? undefined : undefined });
+  const spMega = myCanMega ? speedVerdict({ mySet: mine.set, opp: opp.entry, field, myFormeOverride: mine.megaForme ?? undefined }) : null;
+  const speedLine = `speed: ${verdictTxt(sp)}${spMega ? `  · mega ${verdictTxt(spMega)}` : ''}`;
+
+  // One formatted line per move: range + KO odds, a conditional caveat, and the
+  // post-mega range when it differs.
+  const line = (c: MatchupCell, megaBy: Map<string, MatchupCell>): string => {
+    const base = `${c.move.padEnd(14)} ${c.minPercent.toFixed(0)}-${c.maxPercent.toFixed(0)}% (${c.koChance})${c.conditional ? ` ⚠ ${c.conditional}` : ''}`;
+    const m = megaBy.get(c.move);
+    return m ? `${base}  ⭢mega ${m.minPercent.toFixed(0)}-${m.maxPercent.toFixed(0)}%` : base;
+  };
+
+  const megaNote = myCanMega ? `  (mega → ${mine.megaForme})` : '';
+  const out: string[] = [`${mine.label} vs ${opp.label}${megaNote}`, `  ${speedLine}`];
+  out.push('  → my moves:');
+  out.push(...(myMoves.length ? myMoves.map(c => `     ${line(c, myMegaByMove)}`) : ['     (no moveset — query a team slot like m1 for move data)']));
+  out.push(`  ← ${opp.entry.megaForme ?? opp.entry.species} ${opp.entry.knownMoves.length ? 'moves' : 'likely moves'}:`);
+  out.push(...(oppThreats.length ? oppThreats.map(c => `     ${line(c, oppMegaByMove)}`) : ['     (no known or expected moves)']));
+  return out.join('\n');
 }
 
 interface AskSide {

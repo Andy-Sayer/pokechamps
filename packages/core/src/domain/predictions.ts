@@ -420,6 +420,75 @@ export function predictThreat(args: {
   };
 }
 
+// Like predictThreat, but reports a range for EVERY move in the opponent's
+// expected pool (knownMoves when we've seen any, else Pikalytics top moves)
+// rather than only the single worst one. Used by /ask to show what each of the
+// opponent's likely moves does to me. Sorted by max damage, strongest first.
+export function predictThreatAll(args: {
+  opponent: OpponentEntry;
+  defender: PokemonSet;
+  field: FieldState;
+  attackerGimmickActive?: boolean;
+  defenderGimmickActive?: boolean;
+  defenderCurrentHpPercent?: number;
+  attackerBoosts?: Partial<Record<string, number>>;
+  defenderBoosts?: Partial<Record<string, number>>;
+  attackerStatus?: string;
+  defenderStatus?: string;
+  critical?: boolean;
+  attackerFirstTurnOut?: boolean;
+}): MatchupCell[] {
+  let moves = args.opponent.knownMoves.length
+    ? args.opponent.knownMoves
+    : pikalyticsMoves(args.opponent.species);
+  if (args.opponent.encoreMove) moves = [args.opponent.encoreMove];
+  else if (args.opponent.disabledMove) moves = moves.filter(m => m !== args.opponent.disabledMove);
+  if (args.attackerFirstTurnOut === false) moves = moves.filter(m => !isFirstTurnMove(m));
+  if (!moves.length) return [];
+
+  const cands = defenderCandidates(args.opponent, args.defender.level);
+  if (!cands.length) return [];
+  const out: MatchupCell[] = [];
+  for (const move of moves) {
+    let minPercent = Infinity;
+    let maxPercent = -Infinity;
+    let koChance = '';
+    const allRolls: number[] = [];
+    for (const c of cands) {
+      try {
+        const r = damageRange({
+          attacker: c, defender: args.defender, move, field: args.field, attackerSide: 'theirs',
+          attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+          defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
+          critical: args.critical,
+        });
+        if (r.minPercent < minPercent) minPercent = r.minPercent;
+        if (r.maxPercent > maxPercent) { maxPercent = r.maxPercent; koChance = r.koChance; }
+        allRolls.push(...r.percentRolls);
+      } catch { /* skip — a status / uncalculable move shouldn't drop the row */ }
+    }
+    if (!Number.isFinite(minPercent)) continue; // no damaging variant of this move
+    const finalKo = args.defenderCurrentHpPercent != null && args.defenderCurrentHpPercent < 100
+      ? koVsRemaining(allRolls, args.defenderCurrentHpPercent)
+      : koChance;
+    const likely = likelyRange(args.opponent, cands, move, c => damageRange({
+      attacker: c, defender: args.defender, move, field: args.field, attackerSide: 'theirs',
+      attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+      defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
+      critical: args.critical,
+    }));
+    out.push({
+      move, minPercent, maxPercent, koChance: finalKo,
+      candidatesConsidered: cands.length,
+      likelyMinPercent: likely?.min, likelyMaxPercent: likely?.max,
+      confidence: confidenceFor(!!args.opponent.candidates?.length, minPercent, maxPercent),
+      conditional: isAttackConditionalMove(move) ? 'only if you attack' : undefined,
+    });
+  }
+  out.sort((a, b) => b.maxPercent - a.maxPercent);
+  return out;
+}
+
 // Per-pair speed comparison. Tailwind and Trick Room are applied here so the
 // UI doesn't have to. If both bounds are unknown, returns 'unknown'.
 //
