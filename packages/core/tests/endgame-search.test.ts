@@ -105,6 +105,26 @@ describe('mega modelling', () => {
     expect(r.plays[0]!.mySpecies).toBe('Delphox');
     if (r.megaMon) expect(r.megaMon).toBe('Delphox');
   });
+
+  // The opponent can only be assumed to Mega-Evolve if it could be holding the
+  // stone. Mega Absol (223 Spe) outspeeds + OHKOs Delphox; base Absol (slower)
+  // gets KO'd first. So whether the verdict is a win hinges on the item: an
+  // Absol holding Scope Lens can't mega → I win; an unknown-item Absol → I might
+  // be swept, so the worst-case mega branch keeps it a loss.
+  test('opp mega branch is gated on the item being a plausible stone', () => {
+    const myDelphox = mon({ species: 'Delphox', item: 'Delphoxite', ability: 'Blaze', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Heat Wave', 'Psychic'] });
+    const absol = (entry: Partial<OpponentEntry>): SearchInput => ({
+      mine: [{ set: myDelphox, hpPercent: 100, active: true }],
+      opp: [{ entry: { species: 'Absol', knownMoves: ['Night Slash'], candidates: [mon({ species: 'Absol', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Night Slash'] })], ...entry }, hpPercent: 45, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    // Holding Scope Lens → cannot mega → Delphox outspeeds + KOs first → win.
+    const scope = searchToDepth(absol({ item: 'Scope Lens', candidates: [mon({ species: 'Absol', item: 'Scope Lens', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Night Slash'] })] }), 2);
+    expect(scope.verdict).toBe('winning');
+    // Item unknown → worst-case Mega Absol outspeeds + OHKOs Delphox → losing.
+    const unknown = searchToDepth(absol({ item: undefined, candidates: [mon({ species: 'Absol', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Night Slash'] })] }), 2);
+    expect(unknown.verdict).toBe('losing');
+  });
 });
 
 describe('spread moves', () => {

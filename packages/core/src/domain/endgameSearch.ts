@@ -427,6 +427,23 @@ function oppMegaInfo(species: string): { forme: string; stone: string } | null {
   return opts[0] ? { forme: opts[0].forme, stone: opts[0].stone } : null;
 }
 
+// Can this opponent actually Mega-Evolve? Only if it could plausibly be holding
+// the matching stone. If we've committed a non-stone item, watched it consume an
+// item, or every inferred candidate carries a known non-stone item, a mega is
+// impossible — and assuming one anyway yields misleading verdicts (an Absol
+// holding Scope Lens can't become Mega Absol). When the item is still unknown
+// (no commit, no candidates) we keep the worst-case mega branch.
+function oppCanMega(entry: OpponentEntry): boolean {
+  const info = oppMegaInfo(entry.species);
+  if (!info) return false;
+  if (entry.itemConsumed) return false;          // consumed a (non-stone) held item
+  const stoneId = toId(info.stone);
+  if (entry.item && toId(entry.item) !== stoneId) return false; // committed non-stone item
+  const cands = entry.candidates;
+  if (cands && cands.length && cands.every(c => c.item && toId(c.item) !== stoneId)) return false;
+  return true;
+}
+
 // An opponent entry rewritten to hold its mega stone, so predict*'s
 // gimmickActive path resolves the mega forme. Falls back to a default set when
 // inference hasn't produced candidates yet.
@@ -925,7 +942,7 @@ export function createSearch(input: SearchInput): PositionSearch {
   }
   const oppPlans: Array<number | null> = [null];
   if (!input.oppMegaSpent) {
-    s0.oppActive.forEach(j => { if (oppMegaInfo(input.opp[j]!.entry.species)) oppPlans.push(j); });
+    s0.oppActive.forEach(j => { if (oppCanMega(input.opp[j]!.entry)) oppPlans.push(j); });
   }
 
   const tables = new Map<string, Tables>();
