@@ -239,18 +239,21 @@ deferred; phantom mega-evolution isn't modelled.
     each ply (so an opponent's screen can be **outlasted**), and a `SET_SCREEN`
     action (this-turn-only, best of Aurora Veil > Reflect > Light Screen) puts one
     up for 5 turns. Action class `screen`.
-  - **Remaining:** weather (Sun/Rain/Sand/
-  Snow — boost/reduce damage AND change speed via Chlorophyll / Swift Swim /
-  Sand Rush / Slush Rush), and terrain (boost damage). All have KNOWN turn counts
-  (`FieldState.weatherTurns` etc.) the engine already tracks, so the search should
-  model **stalling them out** — e.g. *the sun is up and Venusaur-Mega's Chlorophyll
-  outspeeds; stall ~4 turns until sun ends and it no longer does.* This is the hard
-  bucket: these effects change DAMAGE (and weather changes SPEED), so they break
-  the "precompute the damage/speed matrices once" optimization. Needs either a
-  small set of per-state matrices (screens on/off, weather on/off) or an accepted
-  recompute on the rare branch. Also: setup (Swords Dance), Will-O-Wisp/Thunder
-  Wave (burn/para), and other end-of-turn residuals (burn/poison/weather chip) the
-  search still ignores.
+  - **✅ Weather (Sun/Rain/Sand/Snow) — SHIPPED (2026-06-01).** Same at-use
+    scaling: cells bake the current weather; `weatherDamageFactor` scales each hit
+    by live-vs-baked (Fire/Water ×1.5/×0.5 in sun/rain; Gen-9 defensive Sand→Rock
+    SpD, Snow→Ice Def ×2/3 to the matching category). **Speed**: a weather-speed
+    ability (Chlorophyll/Swift Swim/Sand Rush/Slush Rush) gives a dynamic ×2 in the
+    matching weather — known for mine, *plausible-from-pool* for the opp (the
+    Prankster trick), so an unconfirmed Chlorophyll mon is still treated as a sun
+    outspeed. `weather`+`weatherTurns` in `State` tick down → the sun can be
+    **stalled out** (the user's example). `SET_WEATHER` action (Sunny Day/Rain
+    Dance/Sandstorm/Snowscape) + switch-in weather abilities (Drought/Drizzle/Sand
+    Stream/Snow Warning). Action class `weather`.
+  - **Remaining:** terrain (Electric/Grassy/Misty/Psychic — boost damage + minor
+    effects), and end-of-turn residuals (burn/poison/toxic/sand chip) the search
+    still ignores. (Inflicted status — Will-O-Wisp/Thunder Wave gaining burn/para
+    mid-search — also pending.)
   - **✅ Dynamic stat boosts (setup) + Speed Boost + Baton Pass — SHIPPED
     (2026-05-31).** `State.myBoost`/`oppBoost` track live TOTAL stages (seeded
     from input = the level baked into the cells). Solved the matrix-rebuild problem

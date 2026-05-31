@@ -239,6 +239,7 @@ const SET_TAILWIND = -3;  // set Tailwind (order field move; no damage)
 const SET_TRICKROOM = -4; // set/flip Trick Room (order field move; no damage)
 const SET_BOOST = -5;     // setup move (Calm Mind / Swords Dance …) — self-boost
 const SET_SCREEN = -6;    // screen move (Reflect / Light Screen / Aurora Veil)
+const SET_WEATHER = -7;   // weather move (Sunny Day / Rain Dance / …)
 // Ranged sentinel blocks that each carry an index, kept disjoint so a code is
 // unambiguous. Switches: [-19,-10] → bench idx. Leech Seed: [-29,-20] → foe idx.
 // Baton Pass: ≤ -30 → bench idx (switch that passes boosts). All ROOT-ply only.
@@ -270,11 +271,11 @@ function benchSwitchTargets(active: number[], hp: number[], n: number): number[]
 // Damage as % of target max, at three roll points so the tree can be evaluated
 // under different regimes without rebuilding the (expensive) matrix. Roll risk
 // is derived from the dmgMin..dmgMax envelope vs the target's HP at use time.
-interface Cell { dmgMin: number; dmgMid: number; dmgMax: number; move: string; priority: number; multiHit: boolean; koRolls: number[]; candidates: number; physical: boolean }
+interface Cell { dmgMin: number; dmgMid: number; dmgMax: number; move: string; priority: number; multiHit: boolean; koRolls: number[]; candidates: number; physical: boolean; type: string }
 
 /** A spread move option for one of my mons: the move plus its (already
  *  spread-reduced) damage vs each opp index, at min/mid/max rolls. */
-interface SpreadOpt { move: string; priority: number; dmgMin: number[]; dmgMid: number[]; dmgMax: number[]; physical: boolean }
+interface SpreadOpt { move: string; priority: number; dmgMin: number[]; dmgMid: number[]; dmgMax: number[]; physical: boolean; type: string }
 
 /** Live stat-stage boosts (−6..+6) per stat. */
 type BoostMap = Partial<Record<'atk' | 'def' | 'spa' | 'spd' | 'spe', number>>;
@@ -283,6 +284,9 @@ type BoostMap = Partial<Record<'atk' | 'def' | 'spa' | 'spd' | 'spe', number>>;
 // moves are physical=false but never deal damage so it's moot.
 function isPhysicalMove(move: string): boolean {
   return ((getMove(move) as { category?: string } | undefined)?.category) === 'Physical';
+}
+function moveType(move: string): string {
+  return ((getMove(move) as { type?: string } | undefined)?.type) ?? '';
 }
 
 // Which roll point each side uses. "pessimistic"/"optimistic" are from MY
@@ -373,6 +377,16 @@ interface Tables {
   // side, + the move name; null = the mon knows no screen move.
   myScreen: (ScreenSet | null)[];
   oppScreen: (ScreenSet | null)[];
+  // Weather: defender Rock/Ice flags (for Sand/Snow defensive boosts), the
+  // weather that doubles each mon's Speed (Chlorophyll etc.; known-or-plausible
+  // for the opp), the weather a SET_WEATHER move sets, and the weather an
+  // ability sets on switch-in (Drought etc.).
+  myRock: boolean[]; oppRock: boolean[];
+  myIce: boolean[]; oppIce: boolean[];
+  mySpeedWeather: (Weather | null)[]; oppSpeedWeather: (Weather | null)[];
+  myWeatherMove: ({ move: string; weather: Weather } | null)[];
+  oppWeatherMove: ({ move: string; weather: Weather } | null)[];
+  myWeatherAbility: (Weather | null)[]; oppWeatherAbility: (Weather | null)[];
   field: FieldState;
 }
 
@@ -468,7 +482,7 @@ function bestSpread(
       defenderBoosts: opp.boosts, defenderStatus: opp.status,
     })));
     const opt: SpreadOpt = {
-      move: mv, priority: movePriority(mv), physical: isPhysicalMove(mv),
+      move: mv, priority: movePriority(mv), physical: isPhysicalMove(mv), type: moveType(mv),
       dmgMin: cells.map(c => c.dmgMin),
       dmgMid: cells.map(c => c.dmgMid),
       dmgMax: cells.map(c => c.dmgMax),
@@ -506,7 +520,7 @@ function bestSpreadOpp(
       defenderBoosts: m.boosts, defenderStatus: m.status,
     })));
     const so: SpreadOpt = {
-      move: mv, priority: movePriority(mv), physical: isPhysicalMove(mv),
+      move: mv, priority: movePriority(mv), physical: isPhysicalMove(mv), type: moveType(mv),
       dmgMin: cells.map(c => c.dmgMin),
       dmgMid: cells.map(c => c.dmgMid),
       dmgMax: cells.map(c => c.dmgMax),
@@ -564,6 +578,11 @@ interface State {
   myLightScreenTurns?: number;
   theirReflectTurns?: number;
   theirLightScreenTurns?: number;
+  /** Global weather + turns remaining. Seeded from the field (= baked into the
+   *  cells); ticks down so the search can stall a weather out (e.g. sun ending
+   *  removes a Chlorophyll mon's speed). */
+  weather: Weather;
+  weatherTurns?: number;
 }
 
 // Doubles screen damage reduction (2732/4096 ≈ 0.667), matching @smogon/calc's
@@ -571,6 +590,75 @@ interface State {
 // damage of the matching category.
 const SCREEN_MULT = 2732 / 4096;
 function screenMult(up: boolean): number { return up ? SCREEN_MULT : 1; }
+
+// --- Weather ----------------------------------------------------------------
+type Weather = FieldState['weather'];           // 'Sun' | 'Rain' | 'Sand' | 'Snow' | … | null
+// Normalize primal weather to its regular form for the multiplier/speed checks.
+function normWeather(w: Weather): Weather {
+  if (w === 'Harsh Sunshine') return 'Sun';
+  if (w === 'Heavy Rain') return 'Rain';
+  return w;
+}
+// Damage factor weather applies to ONE hit: Fire/Water boost/reduce in sun/rain
+// (offensive), and the Gen-9 defensive stat boosts (Sand → Rock SpD ×1.5, Snow →
+// Ice Def ×1.5, i.e. ×2/3 to the matching incoming category). 1 in clear weather.
+function weatherDamageFactor(type: string, physical: boolean, defRock: boolean, defIce: boolean, w: Weather): number {
+  const nw = normWeather(w);
+  let f = 1;
+  if (nw === 'Sun') { if (type === 'Fire') f *= 1.5; else if (type === 'Water') f *= 0.5; }
+  else if (nw === 'Rain') { if (type === 'Water') f *= 1.5; else if (type === 'Fire') f *= 0.5; }
+  else if (nw === 'Sand') { if (defRock && !physical) f *= 2 / 3; }
+  else if (nw === 'Snow') { if (defIce && physical) f *= 2 / 3; }
+  return f;
+}
+// The weather under which an ability doubles Speed (Chlorophyll → Sun, etc.).
+function speedWeatherForAbility(ability: string | null | undefined): Weather | null {
+  switch (toId(ability ?? '')) {
+    case 'chlorophyll': return 'Sun';
+    case 'swiftswim': return 'Rain';
+    case 'sandrush': return 'Sand';
+    case 'slushrush': return 'Snow';
+    default: return null;
+  }
+}
+// The weather a move SETS (Sunny Day → Sun, …), or null.
+function weatherSetByMove(move: string): Weather | null {
+  switch (toId(move)) {
+    case 'sunnyday': return 'Sun';
+    case 'raindance': return 'Rain';
+    case 'sandstorm': return 'Sand';
+    case 'snowscape': case 'chillyreception': return 'Snow';
+    default: return null;
+  }
+}
+// The weather an ability sets on switch-in (Drought → Sun, …), or null.
+function weatherSetByAbility(ability: string | null | undefined): Weather | null {
+  switch (toId(ability ?? '')) {
+    case 'drought': case 'orichalcumpulse': return 'Sun';
+    case 'drizzle': return 'Rain';
+    case 'sandstream': return 'Sand';
+    case 'snowwarning': return 'Snow';
+    default: return null;
+  }
+}
+function findWeatherMove(moves: string[]): { move: string; weather: Weather } | null {
+  for (const m of moves) { const w = weatherSetByMove(m); if (w) return { move: m, weather: w }; }
+  return null;
+}
+function isType(species: string, t: string): boolean {
+  return ((getSpecies(species) as { types?: string[] } | undefined)?.types ?? []).includes(t);
+}
+// The weather that doubles a mon's Speed. Known ability wins; if the opp's
+// ability is unknown, fall back to a weather-speed ability the species could
+// plausibly have (worst-case: it might outspeed me in that weather).
+function plausibleSpeedWeather(ability: string | null | undefined, species: string): Weather | null {
+  const known = speedWeatherForAbility(ability);
+  if (known) return known;
+  if (ability) return null;                       // known, but not a weather-speed ability
+  const pool = (getSpecies(species) as { abilities?: Record<string, string> } | undefined)?.abilities ?? {};
+  for (const ab of Object.values(pool)) { const w = speedWeatherForAbility(ab); if (w) return w; }
+  return null;
+}
 
 // Add boost stages onto a map (clamped to ±6), returning a NEW map.
 function addBoosts(base: BoostMap, add: BoostMap): BoostMap {
@@ -597,7 +685,7 @@ interface CellOpts {
 // midpoint (the old representative value); min/max = the honest envelope edges
 // (worst/best roll across surviving candidate spreads).
 function cellFrom(c: ReturnType<typeof predictOffense>): Cell {
-  if (!c) return { dmgMin: 0, dmgMid: 0, dmgMax: 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false };
+  if (!c) return { dmgMin: 0, dmgMid: 0, dmgMax: 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '' };
   const lo = c.likelyMinPercent ?? c.minPercent;
   const hi = c.likelyMaxPercent ?? c.maxPercent;
   return {
@@ -610,6 +698,7 @@ function cellFrom(c: ReturnType<typeof predictOffense>): Cell {
     koRolls: c.percentRolls ?? [],
     candidates: c.candidatesConsidered ?? 0,
     physical: isPhysicalMove(c.move),
+    type: moveType(c.move),
   };
 }
 function cellFromOffense(attacker: PokemonSet, defender: OpponentEntry, field: FieldState, o: CellOpts = {}): Cell {
@@ -821,6 +910,16 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppSpeedBoost: opp.map(o => hasSpeedBoost(o.entry.ability)),
     myScreen: mine.map(m => findScreenMove(m.set.moves ?? [])),
     oppScreen: opp.map(o => findScreenMove(o.entry.knownMoves)),
+    myRock: mine.map(m => isType(m.set.species, 'Rock')),
+    oppRock: opp.map(o => isType(o.entry.species, 'Rock')),
+    myIce: mine.map(m => isType(m.set.species, 'Ice')),
+    oppIce: opp.map(o => isType(o.entry.species, 'Ice')),
+    mySpeedWeather: mine.map(m => speedWeatherForAbility(m.set.ability)),
+    oppSpeedWeather: opp.map(o => plausibleSpeedWeather(o.entry.ability, o.entry.species)),
+    myWeatherMove: mine.map(m => findWeatherMove(m.set.moves ?? [])),
+    oppWeatherMove: opp.map(o => findWeatherMove(o.entry.knownMoves)),
+    myWeatherAbility: mine.map(m => weatherSetByAbility(m.set.ability)),
+    oppWeatherAbility: opp.map(o => weatherSetByAbility(o.entry.ability)),
     field: input.field,
   };
 }
@@ -856,6 +955,8 @@ function initialState(input: SearchInput): State {
     myLightScreenTurns: input.field.myLightScreenTurns,
     theirReflectTurns: input.field.theirReflectTurns,
     theirLightScreenTurns: input.field.theirLightScreenTurns,
+    weather: input.field.weather ?? null,
+    weatherTurns: input.field.weatherTurns,
   };
 }
 
@@ -923,22 +1024,31 @@ function resolveTurn(
   // A hit aimed at a mon that switched out lands on its replacement instead.
   const redirect = (target: number, defSwitch: Map<number, number>) => defSwitch.get(target) ?? target;
 
-  // Effective speed including the DYNAMIC Spe stage (Speed Boost / Dragon Dance):
-  // scale the baked speed by the ratio of current vs baked Spe-stage multiplier.
-  const mySpe = (i: number) => t.mySpeed[i]! * (statStageMult(s.myBoost[i]?.spe) / statStageMult(t.myBaked[i]?.spe));
-  const oppSpe = (j: number) => t.oppSpeed[j]! * (statStageMult(s.oppBoost[j]?.spe) / statStageMult(t.oppBaked[j]?.spe));
+  // Effective speed including the DYNAMIC Spe stage (Speed Boost / Dragon Dance)
+  // AND a weather-speed ability (Chlorophyll/Swift Swim/… → ×2 in the matching
+  // weather): scale the baked speed by the Spe-stage ratio, then the weather ×2.
+  const nw = normWeather(s.weather);
+  const myWeatherSpe = (i: number) => (t.mySpeedWeather[i] && t.mySpeedWeather[i] === nw ? 2 : 1);
+  const oppWeatherSpe = (j: number) => (t.oppSpeedWeather[j] && t.oppSpeedWeather[j] === nw ? 2 : 1);
+  const mySpe = (i: number) => t.mySpeed[i]! * (statStageMult(s.myBoost[i]?.spe) / statStageMult(t.myBaked[i]?.spe)) * myWeatherSpe(i);
+  const oppSpe = (j: number) => t.oppSpeed[j]! * (statStageMult(s.oppBoost[j]?.spe) / statStageMult(t.oppBaked[j]?.spe)) * oppWeatherSpe(j);
   // Screen damage scale on the DEFENDER's side: live screen vs the one baked into
   // the cell. Reflect halves physical, Light Screen special. 1 when unchanged.
   const myScreenScale = (physical: boolean) =>           // I attack opp → opp's (their) side
     screenMult(physical ? s.theirReflect : s.theirLightScreen) / screenMult(physical ? !!t.field.theirReflect : !!t.field.theirLightScreen);
   const oppScreenScale = (physical: boolean) =>          // opp attacks me → my side
     screenMult(physical ? s.myReflect : s.myLightScreen) / screenMult(physical ? !!t.field.myReflect : !!t.field.myLightScreen);
-  // Scale a precomputed roll by the live-vs-baked boost AND screen ratios (each 1
-  // when unchanged, so positions without dynamic boosts/screens are unaffected).
-  const myDmg = (actor: number, tgt: number, raw: number, physical: boolean) =>
-    raw * boostDamageScale(s.myBoost[actor], t.myBaked[actor], s.oppBoost[tgt], t.oppBaked[tgt], physical) * myScreenScale(physical);
-  const oppDmg = (actor: number, tgt: number, raw: number, physical: boolean) =>
-    raw * boostDamageScale(s.oppBoost[actor], t.oppBaked[actor], s.myBoost[tgt], t.myBaked[tgt], physical) * oppScreenScale(physical);
+  // Weather damage scale on the DEFENDER's side: live weather factor vs baked.
+  const myWeatherScale = (type: string, physical: boolean, tgt: number) =>
+    weatherDamageFactor(type, physical, t.oppRock[tgt]!, t.oppIce[tgt]!, s.weather) / weatherDamageFactor(type, physical, t.oppRock[tgt]!, t.oppIce[tgt]!, t.field.weather);
+  const oppWeatherScale = (type: string, physical: boolean, tgt: number) =>
+    weatherDamageFactor(type, physical, t.myRock[tgt]!, t.myIce[tgt]!, s.weather) / weatherDamageFactor(type, physical, t.myRock[tgt]!, t.myIce[tgt]!, t.field.weather);
+  // Scale a precomputed roll by the live-vs-baked boost, screen AND weather ratios
+  // (each 1 when unchanged → positions without dynamic effects are unaffected).
+  const myDmg = (actor: number, tgt: number, raw: number, physical: boolean, type: string) =>
+    raw * boostDamageScale(s.myBoost[actor], t.myBaked[actor], s.oppBoost[tgt], t.oppBaked[tgt], physical) * myScreenScale(physical) * myWeatherScale(type, physical, tgt);
+  const oppDmg = (actor: number, tgt: number, raw: number, physical: boolean, type: string) =>
+    raw * boostDamageScale(s.oppBoost[actor], t.oppBaked[actor], s.myBoost[tgt], t.myBaked[tgt], physical) * oppScreenScale(physical) * oppWeatherScale(type, physical, tgt);
 
   // Build protected sets: a mon using PROTECT is immune to all damage this turn.
   const myProtected = new Set<number>();
@@ -956,9 +1066,10 @@ function resolveTurn(
     else hp[idx] = Math.max(0, after);
   };
 
-  // Switch / field / Leech Seed / setup / screen / Baton Pass deal no DIRECT damage.
+  // Switch / field / Leech Seed / setup / screen / weather / Baton Pass: no direct damage.
   const nonAttack = (target: number) =>
-    isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isFieldTarget(target) || target === SET_BOOST || target === SET_SCREEN;
+    isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isFieldTarget(target)
+    || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER;
   const actings: Acting[] = [];
   for (const [actor, target] of myTargets) {
     if (nonAttack(target)) continue;
@@ -993,7 +1104,7 @@ function resolveTurn(
         for (const foe of oppActiveNow) {
           if (oppHp[foe]! <= 0) continue;
           if (oppProtected.has(foe)) continue;       // opp protecting this turn
-          apply(oppHp, foe, myDmg(act.actor, foe, dmg[foe] ?? 0, sp.physical), oppSurv, false);
+          apply(oppHp, foe, myDmg(act.actor, foe, dmg[foe] ?? 0, sp.physical, sp.type), oppSurv, false);
         }
         continue;
       }
@@ -1001,7 +1112,7 @@ function resolveTurn(
       if (oppProtected.has(oTgt)) continue;          // target protecting → fizzle
       if (oppHp[oTgt]! <= 0) continue;               // target already down → fizzle
       const oc = t.off[act.actor]![oTgt]!;
-      apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r), oc.physical), oppSurv, oc.multiHit);
+      apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r), oc.physical, oc.type), oppSurv, oc.multiHit);
     } else {
       if (oppHp[act.actor]! <= 0) continue;
       if (act.target === PROTECT) continue;           // opp mon uses Protect
@@ -1013,7 +1124,7 @@ function resolveTurn(
         for (const me of myActiveNow) {
           if (myHp[me]! <= 0) continue;
           if (myProtected.has(me)) continue;          // my mon protecting this turn
-          apply(myHp, me, oppDmg(act.actor, me, dmg[me] ?? 0, sp.physical), mySurv, false);
+          apply(myHp, me, oppDmg(act.actor, me, dmg[me] ?? 0, sp.physical, sp.type), mySurv, false);
         }
         continue;
       }
@@ -1021,7 +1132,7 @@ function resolveTurn(
       if (myProtected.has(mTgt)) continue;            // my mon protecting → fizzle
       if (myHp[mTgt]! <= 0) continue;
       const tc = t.thr[act.actor]![mTgt]!;
-      apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r), tc.physical), mySurv, tc.multiHit);
+      apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r), tc.physical, tc.type), mySurv, tc.multiHit);
     }
   }
 
@@ -1081,6 +1192,18 @@ function resolveTurn(
     if (sc.reflect) { theirReflect = true; theirReflectTurns = 5; }
     if (sc.lightScreen) { theirLightScreen = true; theirLightScreenTurns = 5; }
   }
+
+  // Weather: tick down (stall-out), then apply this turn's setters. A switch-in
+  // weather ability (Drought etc.) fires when the mon enters; a SET_WEATHER move
+  // sets it too. Both give 5 turns; later setters win.
+  let weather = s.weather;
+  let weatherTurns = s.weatherTurns;
+  if (weather && weatherTurns != null) { weatherTurns -= 1; if (weatherTurns <= 0) { weather = null; weatherTurns = undefined; } }
+  const setWeather = (w: Weather | null) => { if (w) { weather = w; weatherTurns = 5; } };
+  for (const inB of mySwitchIn.values()) setWeather(t.myWeatherAbility[inB] ?? null);
+  for (const inB of oppSwitchIn.values()) setWeather(t.oppWeatherAbility[inB] ?? null);
+  for (const [actor, target] of myTargets) if (target === SET_WEATHER) setWeather(t.myWeatherMove[actor]?.weather ?? null);
+  for (const [actor, target] of oppTargets) if (target === SET_WEATHER) setWeather(t.oppWeatherMove[actor]?.weather ?? null);
 
   // Leech Seed. A seed is removed when the seeded mon leaves the field (switch);
   // a switched-in mon arrives unseeded. New seeds cast this turn land on the
@@ -1148,6 +1271,7 @@ function resolveTurn(
     mySeeded, oppSeeded, myBoost, oppBoost,
     myReflect, myLightScreen, theirReflect, theirLightScreen,
     myReflectTurns, myLightScreenTurns, theirReflectTurns, theirLightScreenTurns,
+    weather, weatherTurns,
   };
 }
 
@@ -1212,6 +1336,9 @@ function jointActions(
   // Screen capability (root only): a true entry → the mon can usefully set a
   // screen (knows one + it's not already fully up on its side).
   screenSet?: boolean[],
+  // Weather capability (root only): a true entry → the mon can usefully set
+  // weather (knows a weather move + it'd change the current weather).
+  weatherSet?: boolean[],
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -1226,10 +1353,11 @@ function jointActions(
     const leechCodes = (leech && leech.move[actor] != null) ? leech.foes.map(leechCode) : [];
     const canSetup = setupMove?.[actor] != null;
     const canScreen = screenSet?.[actor] === true;
+    const canWeather = weatherSet?.[actor] === true;
     const batonCodes = (baton && baton.move[actor] != null) ? baton.targets.map(batonCode) : [];
     // SPREAD first so a spread that ties a single-target line is kept. PROTECT /
-    // field / setup / screen / Leech / SWITCH / Baton last — only chosen when they
-    // strictly beat attacking.
+    // field / setup / screen / weather / Leech / SWITCH / Baton last — only chosen
+    // when they strictly beat attacking.
     const options = [
       ...(spreadActors?.has(actor) ? [SPREAD] : []),
       ...liveFoes,
@@ -1238,6 +1366,7 @@ function jointActions(
       ...(canTrickRoom ? [SET_TRICKROOM] : []),
       ...(canSetup ? [SET_BOOST] : []),
       ...(canScreen ? [SET_SCREEN] : []),
+      ...(canWeather ? [SET_WEATHER] : []),
       ...leechCodes,
       ...switchCodes,
       ...batonCodes,
@@ -1431,6 +1560,8 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
   const myBench = benchSwitchTargets(s.myActive, s.myHp, t.myN);
   // Screen is useful only if it'd add a screen not already up on my side.
   const myScreenCap = t.myScreen.map(sc => !!sc && ((sc.reflect && !s.myReflect) || (sc.lightScreen && !s.myLightScreen)));
+  // Weather is useful only if it'd CHANGE the current weather.
+  const myWeatherCap = t.myWeatherMove.map(wm => !!wm && normWeather(wm.weather) !== normWeather(s.weather));
   return jointActions(s.myActive, s.oppActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak,
     myBench,
     // Don't re-offer Tailwind when it's already up; Trick Room is always a
@@ -1439,19 +1570,22 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     { move: t.myLeechMove, foes: leechFoes },
     t.mySetupMove,
     { move: t.myBatonMove, targets: myBench },
-    myScreenCap);
+    myScreenCap,
+    myWeatherCap);
 }
 function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
   const oppBench = benchSwitchTargets(s.oppActive, s.oppHp, t.oppN);
   const oppScreenCap = t.oppScreen.map(sc => !!sc && ((sc.reflect && !s.theirReflect) || (sc.lightScreen && !s.theirLightScreen)));
+  const oppWeatherCap = t.oppWeatherMove.map(wm => !!wm && normWeather(wm.weather) !== normWeather(s.weather));
   return jointActions(s.oppActive, s.myActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak,
     oppBench,
     { tailwind: s.theirTailwind ? undefined : t.oppTailwindMove, trickRoom: t.oppTrickRoomMove },
     { move: t.oppLeechMove, foes: leechFoes },
     t.oppSetupMove,
     { move: t.oppBatonMove, targets: oppBench },
-    oppScreenCap);
+    oppScreenCap,
+    oppWeatherCap);
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -1499,6 +1633,8 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.mySetupMove[actor] ?? 'setup', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_SCREEN) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myScreen[actor]?.move ?? 'Screen', targetSpecies: t.mySpecies[actor]!, self: true });
+    } else if (target === SET_WEATHER) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myWeatherMove[actor]?.move ?? 'Weather', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myTailwindMove[actor] ?? 'Tailwind', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_TRICKROOM) {
@@ -1531,6 +1667,8 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): Search
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppSetupMove[actor] ?? 'setup', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_SCREEN) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppScreen[actor]?.move ?? 'Screen', targetSpecies: t.oppSpecies[actor]!, self: true });
+    } else if (target === SET_WEATHER) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppWeatherMove[actor]?.move ?? 'Weather', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppTailwindMove[actor] ?? 'Tailwind', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_TRICKROOM) {
@@ -1779,7 +1917,7 @@ export function createSearch(input: SearchInput): PositionSearch {
             if (target === SPREAD) {
               const sp = expected.table.mySpread[actor]!;
               for (const foe of s0.oppActive) {
-                consider({ dmgMin: sp.dmgMin[foe] ?? 0, dmgMid: sp.dmgMid[foe] ?? 0, dmgMax: sp.dmgMax[foe] ?? 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false }, s0.oppHp[foe] ?? 0, expected.table.oppSpecies[foe] ?? 'foe');
+                consider({ dmgMin: sp.dmgMin[foe] ?? 0, dmgMid: sp.dmgMid[foe] ?? 0, dmgMax: sp.dmgMax[foe] ?? 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '' }, s0.oppHp[foe] ?? 0, expected.table.oppSpecies[foe] ?? 'foe');
               }
             } else if (target >= 0) {       // skip PROTECT / SWITCH (no attack)
               consider(expected.table.off[actor]![target]!, s0.oppHp[target] ?? 0, expected.table.oppSpecies[target] ?? 'foe');
@@ -2029,6 +2167,9 @@ export function createSearch(input: SearchInput): PositionSearch {
         active.some(i => { const sc = screens[i]; return !!sc && ((sc.reflect && !refUp) || (sc.lightScreen && !lsUp)); });
       if (screenable(expected.table.myScreen, s0.myActive, s0.myReflect, s0.myLightScreen)
         || screenable(expected.table.oppScreen, s0.oppActive, s0.theirReflect, s0.theirLightScreen)) actionClasses.push('screen');
+      const weatherable = (moves: ({ weather: Weather } | null)[], active: number[]) =>
+        active.some(i => { const wm = moves[i]; return !!wm && normWeather(wm.weather) !== normWeather(s0.weather); });
+      if (weatherable(expected.table.myWeatherMove, s0.myActive) || weatherable(expected.table.oppWeatherMove, s0.oppActive)) actionClasses.push('weather');
       const explored: SearchExplored = {
         depth,
         myActions: myRootJoints.length,

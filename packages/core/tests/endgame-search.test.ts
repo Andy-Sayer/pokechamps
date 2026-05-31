@@ -1132,3 +1132,51 @@ describe('Phase 4: screens (Reflect / Light Screen / Aurora Veil)', () => {
     expect(finite).toBeGreaterThan(permanent);
   });
 });
+
+describe('Phase 4: weather (sun/rain damage + Chlorophyll-style speed)', () => {
+  // The user's headline case: under SUN, the opponent's Chlorophyll mon doubles
+  // its Speed and outspeeds + KOs me. At 1 HP each (order decides), if the sun
+  // has only 1 turn left I Protect through it; the sun expires, Chlorophyll's ×2
+  // is gone, and I outspeed + KO next turn → win. Permanent (untracked) sun →
+  // outsped forever → loss.
+  const venusaur: OpponentEntry = {
+    species: 'Venusaur', ability: 'Chlorophyll', knownMoves: ['Giga Drain'],
+    candidates: [mon({ species: 'Venusaur', ability: 'Chlorophyll', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Giga Drain'] })],
+  };
+  const garchomp = mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Earthquake', 'Protect'] });
+  const sunRace = (turns: number | undefined): SearchInput => ({
+    mine: [{ set: garchomp, hpPercent: 1, active: true }],
+    opp: [{ entry: venusaur, hpPercent: 1, active: true }],
+    field: { ...NEUTRAL_FIELD, weather: 'Sun', weatherTurns: turns }, allOppRevealed: true,
+  });
+
+  test('stalling out the sun removes a Chlorophyll outspeed (finite sun → win)', () => {
+    expect(searchToDepth(sunRace(1), 3).verdict).toBe('winning');
+    expect(searchToDepth(sunRace(undefined), 3).verdict).toBe('losing'); // permanent → outsped forever
+  });
+
+  // Weather damage: sun boosts my Fire move ×1.5. Permanent sun keeps boosting it
+  // over the horizon, so it out-damages a sun that expires after one turn. (vs a
+  // bulky wall so nothing is KO'd — isolates the chip.)
+  test('sun keeps boosting my Fire move (permanent sun > finite sun)', () => {
+    const wall: OpponentEntry = { species: 'Blissey', knownMoves: ['Pollen Puff'], candidates: [mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Pollen Puff'] })] };
+    const charizard = mon({ species: 'Charizard', ability: 'Blaze', nature: 'Modest', evs: { ...ZERO_EVS, hp: 252, spa: 252 }, moves: ['Flamethrower'] });
+    const make = (turns: number | undefined): SearchInput => ({
+      mine: [{ set: charizard, hpPercent: 100, active: true }],
+      opp: [{ entry: wall, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD, weather: 'Sun', weatherTurns: turns }, allOppRevealed: true,
+    });
+    expect(searchToDepth(make(undefined), 3).score).toBeGreaterThan(searchToDepth(make(1), 3).score);
+  });
+
+  // Setting weather is an offered action.
+  test('a weather-setting move is an offered action', () => {
+    const ninetales = mon({ species: 'Ninetales', ability: 'Flash Fire', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Sunny Day', 'Flamethrower'] });
+    const r = searchToDepth({
+      mine: [{ set: ninetales, hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(mon({ species: 'Snorlax', moves: ['Body Slam'] })), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 2);
+    expect(r.explored!.actionClasses).toContain('weather');
+  });
+});
