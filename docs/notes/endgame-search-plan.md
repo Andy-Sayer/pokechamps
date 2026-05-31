@@ -229,8 +229,17 @@ deferred; phantom mega-evolution isn't modelled.
 
 ### Remaining roadmap (reordered per user, 2026-05-31)
 
-- **Phase 4 — damage-altering field effects with DURATION + stall-out.** Screens
-  (Reflect / Light Screen / Aurora Veil — halve damage), weather (Sun/Rain/Sand/
+- **Phase 4 — damage-altering field effects with DURATION + stall-out.**
+  - **✅ Screens (Reflect / Light Screen / Aurora Veil) — SHIPPED (2026-06-01).**
+    Same at-use-scaling trick as boosts: cells bake the current screen (via
+    `@smogon/calc` `isReflect`/`isLightScreen`), and damage is scaled by
+    `screenMult(live)/screenMult(baked)` on the DEFENDER's side (Reflect→physical,
+    Light Screen→special; doubles modifier `2732/4096 ≈ 0.667`) — exactly 1.0 when
+    unchanged, no regression. Screen state + durations live in `State`, tick down
+    each ply (so an opponent's screen can be **outlasted**), and a `SET_SCREEN`
+    action (this-turn-only, best of Aurora Veil > Reflect > Light Screen) puts one
+    up for 5 turns. Action class `screen`.
+  - **Remaining:** weather (Sun/Rain/Sand/
   Snow — boost/reduce damage AND change speed via Chlorophyll / Swift Swim /
   Sand Rush / Slush Rush), and terrain (boost damage). All have KNOWN turn counts
   (`FieldState.weatherTurns` etc.) the engine already tracks, so the search should

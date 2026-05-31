@@ -1096,3 +1096,39 @@ describe('Boosts: setup, Speed Boost, Baton Pass', () => {
     expect(withBP.score).toBeGreaterThan(withoutBP.score);
   });
 });
+
+describe('Phase 4: screens (Reflect / Light Screen / Aurora Veil)', () => {
+  // No-KO stall: bulky Snorlax chips my bulky Grimmsnarl with a physical move but
+  // can't KO it, and Grimmsnarl can't KO Snorlax — so the only HP movement is
+  // damage dealt, and setting Reflect (cuts physical ~0.667×) saves HP → strictly
+  // higher value, and the action is surfaced.
+  test('setting Reflect raises value vs a physical attacker', () => {
+    const snorlax: OpponentEntry = { species: 'Snorlax', knownMoves: ['Body Slam'], candidates: [mon({ species: 'Snorlax', ability: 'Thick Fat', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, atk: 252 }, moves: ['Body Slam'] })] };
+    const make = (moves: string[]): SearchInput => ({
+      mine: [{ set: mon({ species: 'Grimmsnarl', ability: 'Prankster', nature: 'Impish', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves }), hpPercent: 100, active: true }],
+      opp: [{ entry: snorlax, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    const withReflect = searchToDepth(make(['Reflect', 'Spirit Break']), 3);
+    const withoutReflect = searchToDepth(make(['Spirit Break']), 3);
+    expect(withReflect.explored!.actionClasses).toContain('screen');
+    expect(withReflect.score).toBeGreaterThan(withoutReflect.score);
+  });
+
+  // A known-duration opponent screen can be OUTLASTED: cells bake the screen
+  // (reduced damage), but a finite Light Screen expires mid-search so my later
+  // hits land at full power → more total damage than a permanent (untracked)
+  // screen. Blissey is bulky enough that nothing is KO'd (isolates the chip).
+  test('a finite opponent screen is outlasted (more damage than a permanent one)', () => {
+    const wall: OpponentEntry = { species: 'Blissey', knownMoves: ['Pollen Puff'], candidates: [mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Pollen Puff'] })] };
+    const flutter = mon({ species: 'Flutter Mane', ability: 'Protosynthesis', nature: 'Modest', evs: { ...ZERO_EVS, hp: 252, spa: 252 }, moves: ['Moonblast'] });
+    const make = (turns: number | undefined): SearchInput => ({
+      mine: [{ set: flutter, hpPercent: 100, active: true }],
+      opp: [{ entry: wall, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD, theirLightScreen: true, theirLightScreenTurns: turns }, allOppRevealed: true,
+    });
+    const finite = searchToDepth(make(1), 3).score;     // expires next turn → later hits full power
+    const permanent = searchToDepth(make(undefined), 3).score; // untracked → assumed up all game
+    expect(finite).toBeGreaterThan(permanent);
+  });
+});

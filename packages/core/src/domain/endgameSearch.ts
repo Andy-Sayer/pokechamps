@@ -238,6 +238,7 @@ const PROTECT = -2;       // Protect/Detect/etc. on self
 const SET_TAILWIND = -3;  // set Tailwind (order field move; no damage)
 const SET_TRICKROOM = -4; // set/flip Trick Room (order field move; no damage)
 const SET_BOOST = -5;     // setup move (Calm Mind / Swords Dance …) — self-boost
+const SET_SCREEN = -6;    // screen move (Reflect / Light Screen / Aurora Veil)
 // Ranged sentinel blocks that each carry an index, kept disjoint so a code is
 // unambiguous. Switches: [-19,-10] → bench idx. Leech Seed: [-29,-20] → foe idx.
 // Baton Pass: ≤ -30 → bench idx (switch that passes boosts). All ROOT-ply only.
@@ -368,7 +369,22 @@ interface Tables {
   // Speed Boost ability (+1 Spe each EOT while active).
   mySpeedBoost: boolean[];
   oppSpeedBoost: boolean[];
+  // Screen-move capability: what a SET_SCREEN action puts up for the caster's
+  // side, + the move name; null = the mon knows no screen move.
+  myScreen: (ScreenSet | null)[];
+  oppScreen: (ScreenSet | null)[];
   field: FieldState;
+}
+
+/** What a screen move sets on the caster's side. */
+interface ScreenSet { move: string; reflect: boolean; lightScreen: boolean }
+// The best screen move a mon knows. Aurora Veil (both) > Reflect > Light Screen.
+function findScreenMove(moves: string[]): ScreenSet | null {
+  const ids = new Set(moves.map(toId));
+  if (ids.has('auroraveil')) return { move: 'Aurora Veil', reflect: true, lightScreen: true };
+  if (ids.has('reflect')) return { move: 'Reflect', reflect: true, lightScreen: false };
+  if (ids.has('lightscreen')) return { move: 'Light Screen', reflect: false, lightScreen: true };
+  return null;
 }
 
 // Self-boost effects for the setup moves we model. Drops are included where they
@@ -536,7 +552,25 @@ interface State {
    *  the ratio vs the baked level (`Tables.my/oppBaked`). */
   myBoost: BoostMap[];
   oppBoost: BoostMap[];
+  /** Screens per SIDE (Reflect halves physical, Light Screen halves special;
+   *  Aurora Veil = both). Seeded from the field (= baked into the cells); damage
+   *  scales by the current-vs-baked screen multiplier. Durations tick down each
+   *  ply so the search can stall a screen out. */
+  myReflect: boolean;
+  myLightScreen: boolean;
+  theirReflect: boolean;
+  theirLightScreen: boolean;
+  myReflectTurns?: number;
+  myLightScreenTurns?: number;
+  theirReflectTurns?: number;
+  theirLightScreenTurns?: number;
 }
+
+// Doubles screen damage reduction (2732/4096 ≈ 0.667), matching @smogon/calc's
+// gameType:'Doubles' modifier. A screen on the DEFENDER's side reduces incoming
+// damage of the matching category.
+const SCREEN_MULT = 2732 / 4096;
+function screenMult(up: boolean): number { return up ? SCREEN_MULT : 1; }
 
 // Add boost stages onto a map (clamped to ±6), returning a NEW map.
 function addBoosts(base: BoostMap, add: BoostMap): BoostMap {
@@ -785,6 +819,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppBatonMove: opp.map(o => findMoveId(o.entry.knownMoves, 'batonpass')),
     mySpeedBoost: mine.map(m => hasSpeedBoost(m.set.ability)),
     oppSpeedBoost: opp.map(o => hasSpeedBoost(o.entry.ability)),
+    myScreen: mine.map(m => findScreenMove(m.set.moves ?? [])),
+    oppScreen: opp.map(o => findScreenMove(o.entry.knownMoves)),
     field: input.field,
   };
 }
@@ -812,6 +848,14 @@ function initialState(input: SearchInput): State {
     oppSeeded: input.opp.map(o => o.seededBy ?? null),
     myBoost: input.mine.map(m => ({ ...(m.boosts as BoostMap | undefined) })),
     oppBoost: input.opp.map(o => ({ ...(o.boosts as BoostMap | undefined) })),
+    myReflect: !!input.field.myReflect,
+    myLightScreen: !!input.field.myLightScreen,
+    theirReflect: !!input.field.theirReflect,
+    theirLightScreen: !!input.field.theirLightScreen,
+    myReflectTurns: input.field.myReflectTurns,
+    myLightScreenTurns: input.field.myLightScreenTurns,
+    theirReflectTurns: input.field.theirReflectTurns,
+    theirLightScreenTurns: input.field.theirLightScreenTurns,
   };
 }
 
@@ -883,11 +927,18 @@ function resolveTurn(
   // scale the baked speed by the ratio of current vs baked Spe-stage multiplier.
   const mySpe = (i: number) => t.mySpeed[i]! * (statStageMult(s.myBoost[i]?.spe) / statStageMult(t.myBaked[i]?.spe));
   const oppSpe = (j: number) => t.oppSpeed[j]! * (statStageMult(s.oppBoost[j]?.spe) / statStageMult(t.oppBaked[j]?.spe));
-  // Scale a precomputed roll by the live-vs-baked boost ratio (1 when unchanged).
+  // Screen damage scale on the DEFENDER's side: live screen vs the one baked into
+  // the cell. Reflect halves physical, Light Screen special. 1 when unchanged.
+  const myScreenScale = (physical: boolean) =>           // I attack opp → opp's (their) side
+    screenMult(physical ? s.theirReflect : s.theirLightScreen) / screenMult(physical ? !!t.field.theirReflect : !!t.field.theirLightScreen);
+  const oppScreenScale = (physical: boolean) =>          // opp attacks me → my side
+    screenMult(physical ? s.myReflect : s.myLightScreen) / screenMult(physical ? !!t.field.myReflect : !!t.field.myLightScreen);
+  // Scale a precomputed roll by the live-vs-baked boost AND screen ratios (each 1
+  // when unchanged, so positions without dynamic boosts/screens are unaffected).
   const myDmg = (actor: number, tgt: number, raw: number, physical: boolean) =>
-    raw * boostDamageScale(s.myBoost[actor], t.myBaked[actor], s.oppBoost[tgt], t.oppBaked[tgt], physical);
+    raw * boostDamageScale(s.myBoost[actor], t.myBaked[actor], s.oppBoost[tgt], t.oppBaked[tgt], physical) * myScreenScale(physical);
   const oppDmg = (actor: number, tgt: number, raw: number, physical: boolean) =>
-    raw * boostDamageScale(s.oppBoost[actor], t.oppBaked[actor], s.myBoost[tgt], t.myBaked[tgt], physical);
+    raw * boostDamageScale(s.oppBoost[actor], t.oppBaked[actor], s.myBoost[tgt], t.myBaked[tgt], physical) * oppScreenScale(physical);
 
   // Build protected sets: a mon using PROTECT is immune to all damage this turn.
   const myProtected = new Set<number>();
@@ -905,9 +956,9 @@ function resolveTurn(
     else hp[idx] = Math.max(0, after);
   };
 
-  // Switch / field / Leech Seed / setup / Baton Pass deal no DIRECT damage.
+  // Switch / field / Leech Seed / setup / screen / Baton Pass deal no DIRECT damage.
   const nonAttack = (target: number) =>
-    isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isFieldTarget(target) || target === SET_BOOST;
+    isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isFieldTarget(target) || target === SET_BOOST || target === SET_SCREEN;
   const actings: Acting[] = [];
   for (const [actor, target] of myTargets) {
     if (nonAttack(target)) continue;
@@ -1012,6 +1063,25 @@ function resolveTurn(
     else if (target === SET_TRICKROOM) { trickRoom = !trickRoom; trickRoomTurns = trickRoom ? 5 : undefined; }
   }
 
+  // Screens: tick down (so the search can stall one out), then apply this turn's
+  // SET_SCREEN to the caster's SIDE with a fresh 5-turn count.
+  let [myReflect, myReflectTurns] = tick(s.myReflect, s.myReflectTurns);
+  let [myLightScreen, myLightScreenTurns] = tick(s.myLightScreen, s.myLightScreenTurns);
+  let [theirReflect, theirReflectTurns] = tick(s.theirReflect, s.theirReflectTurns);
+  let [theirLightScreen, theirLightScreenTurns] = tick(s.theirLightScreen, s.theirLightScreenTurns);
+  for (const [actor, target] of myTargets) {
+    if (target !== SET_SCREEN) continue;
+    const sc = t.myScreen[actor]; if (!sc) continue;
+    if (sc.reflect) { myReflect = true; myReflectTurns = 5; }
+    if (sc.lightScreen) { myLightScreen = true; myLightScreenTurns = 5; }
+  }
+  for (const [actor, target] of oppTargets) {
+    if (target !== SET_SCREEN) continue;
+    const sc = t.oppScreen[actor]; if (!sc) continue;
+    if (sc.reflect) { theirReflect = true; theirReflectTurns = 5; }
+    if (sc.lightScreen) { theirLightScreen = true; theirLightScreenTurns = 5; }
+  }
+
   // Leech Seed. A seed is removed when the seeded mon leaves the field (switch);
   // a switched-in mon arrives unseeded. New seeds cast this turn land on the
   // (post-switch) target unless it's Grass / already seeded, and drain THIS turn.
@@ -1076,6 +1146,8 @@ function resolveTurn(
     myHp, oppHp, myActive, oppActive, myProtectStreak, oppProtectStreak, oppSeen,
     trickRoom, myTailwind, theirTailwind, trickRoomTurns, myTailwindTurns, theirTailwindTurns,
     mySeeded, oppSeeded, myBoost, oppBoost,
+    myReflect, myLightScreen, theirReflect, theirLightScreen,
+    myReflectTurns, myLightScreenTurns, theirReflectTurns, theirLightScreenTurns,
   };
 }
 
@@ -1137,6 +1209,9 @@ function jointActions(
   setupMove?: (string | null)[],
   // Baton Pass (root only): per-actor capability + benched team-indices to pass to.
   baton?: { move: (string | null)[]; targets: number[] },
+  // Screen capability (root only): a true entry → the mon can usefully set a
+  // screen (knows one + it's not already fully up on its side).
+  screenSet?: boolean[],
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -1150,9 +1225,10 @@ function jointActions(
     const canTrickRoom = fieldMoves?.trickRoom?.[actor] != null;
     const leechCodes = (leech && leech.move[actor] != null) ? leech.foes.map(leechCode) : [];
     const canSetup = setupMove?.[actor] != null;
+    const canScreen = screenSet?.[actor] === true;
     const batonCodes = (baton && baton.move[actor] != null) ? baton.targets.map(batonCode) : [];
     // SPREAD first so a spread that ties a single-target line is kept. PROTECT /
-    // field / setup / Leech / SWITCH / Baton last — only chosen when they
+    // field / setup / screen / Leech / SWITCH / Baton last — only chosen when they
     // strictly beat attacking.
     const options = [
       ...(spreadActors?.has(actor) ? [SPREAD] : []),
@@ -1161,6 +1237,7 @@ function jointActions(
       ...(canTailwind ? [SET_TAILWIND] : []),
       ...(canTrickRoom ? [SET_TRICKROOM] : []),
       ...(canSetup ? [SET_BOOST] : []),
+      ...(canScreen ? [SET_SCREEN] : []),
       ...leechCodes,
       ...switchCodes,
       ...batonCodes,
@@ -1352,6 +1429,8 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
   // Foes I can still Leech Seed: on the field, alive, not Grass, not already seeded.
   const leechFoes = s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0 && !t.oppGrass[j] && s.oppSeeded[j] == null);
   const myBench = benchSwitchTargets(s.myActive, s.myHp, t.myN);
+  // Screen is useful only if it'd add a screen not already up on my side.
+  const myScreenCap = t.myScreen.map(sc => !!sc && ((sc.reflect && !s.myReflect) || (sc.lightScreen && !s.myLightScreen)));
   return jointActions(s.myActive, s.oppActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak,
     myBench,
     // Don't re-offer Tailwind when it's already up; Trick Room is always a
@@ -1359,17 +1438,20 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     { tailwind: s.myTailwind ? undefined : t.myTailwindMove, trickRoom: t.myTrickRoomMove },
     { move: t.myLeechMove, foes: leechFoes },
     t.mySetupMove,
-    { move: t.myBatonMove, targets: myBench });
+    { move: t.myBatonMove, targets: myBench },
+    myScreenCap);
 }
 function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
   const oppBench = benchSwitchTargets(s.oppActive, s.oppHp, t.oppN);
+  const oppScreenCap = t.oppScreen.map(sc => !!sc && ((sc.reflect && !s.theirReflect) || (sc.lightScreen && !s.theirLightScreen)));
   return jointActions(s.oppActive, s.myActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak,
     oppBench,
     { tailwind: s.theirTailwind ? undefined : t.oppTailwindMove, trickRoom: t.oppTrickRoomMove },
     { move: t.oppLeechMove, foes: leechFoes },
     t.oppSetupMove,
-    { move: t.oppBatonMove, targets: oppBench });
+    { move: t.oppBatonMove, targets: oppBench },
+    oppScreenCap);
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -1415,6 +1497,8 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'switch', targetSpecies: t.mySpecies[switchBenchIdx(target)]!, switch: true });
     } else if (target === SET_BOOST) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.mySetupMove[actor] ?? 'setup', targetSpecies: t.mySpecies[actor]!, self: true });
+    } else if (target === SET_SCREEN) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myScreen[actor]?.move ?? 'Screen', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myTailwindMove[actor] ?? 'Tailwind', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_TRICKROOM) {
@@ -1445,6 +1529,8 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): Search
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: 'switch', targetSpecies: t.oppSpecies[switchBenchIdx(target)]!, switch: true });
     } else if (target === SET_BOOST) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppSetupMove[actor] ?? 'setup', targetSpecies: t.oppSpecies[actor]!, self: true });
+    } else if (target === SET_SCREEN) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppScreen[actor]?.move ?? 'Screen', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppTailwindMove[actor] ?? 'Tailwind', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_TRICKROOM) {
@@ -1939,6 +2025,10 @@ export function createSearch(input: SearchInput): PositionSearch {
       const oppBenchNow = benchSwitchTargets(s0.oppActive, s0.oppHp, expected.table.oppN).length > 0;
       if ((myBenchNow && canSet(expected.table.myBatonMove, s0.myActive)) || (oppBenchNow && canSet(expected.table.oppBatonMove, s0.oppActive))) actionClasses.push('batonpass');
       if (s0.myActive.some(i => expected.table.mySpeedBoost[i]) || s0.oppActive.some(j => expected.table.oppSpeedBoost[j])) actionClasses.push('speedboost');
+      const screenable = (screens: (ScreenSet | null)[], active: number[], refUp: boolean, lsUp: boolean) =>
+        active.some(i => { const sc = screens[i]; return !!sc && ((sc.reflect && !refUp) || (sc.lightScreen && !lsUp)); });
+      if (screenable(expected.table.myScreen, s0.myActive, s0.myReflect, s0.myLightScreen)
+        || screenable(expected.table.oppScreen, s0.oppActive, s0.theirReflect, s0.theirLightScreen)) actionClasses.push('screen');
       const explored: SearchExplored = {
         depth,
         myActions: myRootJoints.length,
