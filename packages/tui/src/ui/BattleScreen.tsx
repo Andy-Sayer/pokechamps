@@ -11,7 +11,7 @@ import { inferOpponentSpeeds, applySpeedInference, actualSpeed, predictTurnOrder
 import { reviewLastTurn } from '@pokechamps/core/ai/prompts.js';
 import { isAvailable as aiAvailable } from '@pokechamps/core/ai/client.js';
 import type { Stores } from '@pokechamps/core/storage/index.js';
-import { getSpecies, getMove, toId, isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove } from '@pokechamps/core/domain/data.js';
+import { getSpecies, getMove, toId, isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, isSpreadMove, moveFlinchChance } from '@pokechamps/core/domain/data.js';
 import { defaultOpponentSet } from '@pokechamps/core/domain/bring.js';
 import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs, hazardClearEffect, applyHazardClear } from '@pokechamps/core/domain/hazards.js';
@@ -2043,10 +2043,21 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     field,
   });
 
-  const matchups = activeIdx.mine.map(myIdx => {
+  const matchups = activeIdx.mine.map((myIdx, slotPos) => {
     if (myIdx == null) return null;
     const mySet = match.myTeam[myIdx];
     if (!mySet) return null;
+    // My OTHER active slot — used to surface a spread threat's collateral
+    // (Rock Slide on m1 also chips m2). null in a 1-on-1 or when the other
+    // slot is empty/fainted.
+    const otherIdx = activeIdx.mine[1 - slotPos];
+    const otherSet = otherIdx != null ? match.myTeam[otherIdx] ?? null : null;
+    const otherCalcSet = otherSet
+      ? (match.myItemConsumed?.[otherIdx!] ? { ...otherSet, item: undefined } : otherSet)
+      : null;
+    const otherMegaActive = otherIdx != null ? (match.myMegaUsed?.includes(otherIdx) ?? false) : false;
+    const otherBoosts = otherIdx != null ? match.myBoosts?.[otherIdx] : undefined;
+    const otherStatus = otherIdx != null ? match.myStatus?.[otherIdx] : undefined;
     // For damage calcs, drop my item once it's been consumed / knocked off.
     // Keep `mySet` itself intact for mega-stone detection + speed.
     const myCalcSet = match.myItemConsumed?.[myIdx] ? { ...mySet, item: undefined } : mySet;
@@ -2090,9 +2101,41 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       rows: match.opponentTeam.map((opp, oi) => {
         const oppActive = opp.megaUsed ?? false;
         const oppFresh = firstTurnOut(match, 'theirs', oi);
+        const threat = predictThreat({
+          opponent: opp, defender: myCalcSet, field,
+          attackerGimmickActive: oppActive,
+          defenderGimmickActive: myMegaActive,
+          defenderCurrentHpPercent: myHp,
+          attackerBoosts: opp.currentBoosts,
+          defenderBoosts: myBoosts,
+          attackerStatus: opp.status,
+          defenderStatus: myStatus,
+          attackerFirstTurnOut: oppFresh,
+        });
+        // Spread collateral: when the opp's worst move vs ME is a spread move,
+        // it ALSO hits my other active. Recompute that same move against the
+        // ally so the row can show "also chips m2 X-Y%".
+        const threatSpread = threat && otherCalcSet && isSpreadMove(threat.move)
+          ? (() => {
+              const t = predictThreat({
+                opponent: { ...opp, knownMoves: [threat.move] }, defender: otherCalcSet, field,
+                attackerGimmickActive: oppActive,
+                defenderGimmickActive: otherMegaActive,
+                attackerBoosts: opp.currentBoosts,
+                defenderBoosts: otherBoosts,
+                attackerStatus: opp.status,
+                defenderStatus: otherStatus,
+                attackerFirstTurnOut: oppFresh,
+              });
+              return t ? { species: otherSet!.species, min: t.minPercent, max: t.maxPercent } : null;
+            })()
+          : null;
+        const threatFlinch = threat ? moveFlinchChance(threat.move) : 0;
         return {
           opp,
           oppIdx: oi,
+          threatSpread,
+          threatFlinch,
           offense: predictOffense({
             attacker: myCalcSet, opponent: opp, field,
             attackerGimmickActive: myMegaActive,
@@ -2133,17 +2176,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             defenderStatus: opp.status,
             critical: true,
           }) : null,
-          threat: predictThreat({
-            opponent: opp, defender: myCalcSet, field,
-            attackerGimmickActive: oppActive,
-            defenderGimmickActive: myMegaActive,
-            defenderCurrentHpPercent: myHp,
-            attackerBoosts: opp.currentBoosts,
-            defenderBoosts: myBoosts,
-            attackerStatus: opp.status,
-            defenderStatus: myStatus,
-            attackerFirstTurnOut: oppFresh,
-          }),
+          threat,
           // Dual-forme: compute the same offense + threat using post-mega
           // stats, so the row can surface "⭢mega X-Y%" alongside the base
           // numbers.
@@ -2415,6 +2448,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
                       allOffense={row.allOffense ?? null}
                       allOffenseCrit={row.allOffenseCrit ?? null}
                       threat={row.threat}
+                      threatSpread={row.threatSpread}
+                      threatFlinch={row.threatFlinch}
                       verdict={row.speed}
                       offenseMega={row.offenseMega ?? null}
                       threatMega={row.threatMega ?? null}
@@ -2836,6 +2871,11 @@ interface MatchupRowProps {
   allOffense?: MatchupCell[] | null;
   allOffenseCrit?: MatchupCell[] | null;
   threat: MatchupCell | null;
+  // When the threat move is a spread move, its (spread-reduced) damage to my
+  // OTHER active — so the row can show it hits both my mons at once.
+  threatSpread?: { species: string; min: number; max: number } | null;
+  // Flinch chance (0..1) of the threat move's secondary; 0 if it can't flinch.
+  threatFlinch?: number;
   verdict: SpeedVerdict;
   // Post-mega variants — set only when the my-side mon holds an unused mega
   // stone. Surfaced inline as "(mega: X-Y%)" / "(mega ✓)" so the user can
@@ -2846,7 +2886,7 @@ interface MatchupRowProps {
   dim: boolean;
   active: boolean;
 }
-function MatchupRow({ marker, opp, offense, offenseCrit, allOffense, allOffenseCrit, threat, verdict, offenseMega, threatMega, verdictMega, dim, active }: MatchupRowProps) {
+function MatchupRow({ marker, opp, offense, offenseCrit, allOffense, allOffenseCrit, threat, threatSpread, threatFlinch, verdict, offenseMega, threatMega, verdictMega, dim, active }: MatchupRowProps) {
   const oppLabel = shortName(opp.species, 12).padEnd(12);
   if (opp.fainted) {
     return (
@@ -2898,6 +2938,14 @@ function MatchupRow({ marker, opp, offense, offenseCrit, allOffense, allOffenseC
       ? ` ⭢mega ${threatMega.minPercent.toFixed(0)}-${threatMega.maxPercent.toFixed(0)}%`
       : ` ⭢mega ${threatMega.move} ${threatMega.minPercent.toFixed(0)}-${threatMega.maxPercent.toFixed(0)}%`
     : '';
+  // Spread collateral (this move also hits my other active) + flinch chance.
+  // Both are properties of the SAME threat move; surfaced inline so the user
+  // sees a spread move's full impact without expanding anything.
+  const thrSpreadTxt = threatSpread
+    ? ` · spread→${shortName(threatSpread.species, 8)} ${threatSpread.min.toFixed(0)}-${threatSpread.max.toFixed(0)}%`
+    : '';
+  const thrFlinchTxt = threatFlinch ? ` · ${Math.round(threatFlinch * 100)}% flinch` : '';
+  const thrSfx = `${thrSpreadTxt}${thrFlinchTxt}`;
   const glyphFor = (v: SpeedVerdict): { ch: string; color?: string } =>
     v === 'faster'     ? { ch: '✓', color: 'green' } :
     v === 'slower'     ? { ch: '✗', color: 'red' } :
@@ -2917,7 +2965,7 @@ function MatchupRow({ marker, opp, offense, offenseCrit, allOffense, allOffenseC
     return (
       <Box flexDirection="column">
         <Text dimColor={dim}>
-          {'  '}{marker} {oppLabel}{hpTag}  ← {thrTxt}{thrMegaTxt}  {dim ? glyph.ch : <Text color={glyph.color as any}>{glyph.ch}</Text>}{glyphMega ? (dim ? `/${glyphMega.ch}` : <>/<Text color={glyphMega.color as any}>{glyphMega.ch}</Text></>) : null}
+          {'  '}{marker} {oppLabel}{hpTag}  ← {thrTxt}{thrMegaTxt}{thrSfx}  {dim ? glyph.ch : <Text color={glyph.color as any}>{glyph.ch}</Text>}{glyphMega ? (dim ? `/${glyphMega.ch}` : <>/<Text color={glyphMega.color as any}>{glyphMega.ch}</Text></>) : null}
         </Text>
         {allOffense.map(m => {
           const crit = critByMove.get(m.move);
@@ -2938,13 +2986,13 @@ function MatchupRow({ marker, opp, offense, offenseCrit, allOffense, allOffenseC
   if (dim) {
     return (
       <Text dimColor>
-        {'  '}{marker} {oppLabel}{hpTag}  → {offTxt}{critTxt}{offMegaTxt}  ← {thrTxt}{thrMegaTxt}  {glyph.ch}{glyphMega ? `/${glyphMega.ch}` : ''}
+        {'  '}{marker} {oppLabel}{hpTag}  → {offTxt}{critTxt}{offMegaTxt}  ← {thrTxt}{thrMegaTxt}{thrSfx}  {glyph.ch}{glyphMega ? `/${glyphMega.ch}` : ''}
       </Text>
     );
   }
   return (
     <Text color={active ? undefined : undefined}>
-      {'  '}{marker} {oppLabel}{hpTag}  → {offTxt}{critTxt}{offMegaTxt}  ← {thrTxt}{thrMegaTxt}  <Text color={glyph.color as any}>{glyph.ch}</Text>{glyphMega ? <><Text>/</Text><Text color={glyphMega.color as any}>{glyphMega.ch}</Text></> : null}
+      {'  '}{marker} {oppLabel}{hpTag}  → {offTxt}{critTxt}{offMegaTxt}  ← {thrTxt}{thrMegaTxt}{thrSfx}  <Text color={glyph.color as any}>{glyph.ch}</Text>{glyphMega ? <><Text>/</Text><Text color={glyphMega.color as any}>{glyphMega.ch}</Text></> : null}
     </Text>
   );
 }

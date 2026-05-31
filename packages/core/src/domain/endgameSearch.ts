@@ -26,7 +26,7 @@ import type { PokemonSet, OpponentEntry, FieldState, Match } from './types.js';
 import { ZERO_EVS, MAX_IVS } from './types.js';
 import { predictOffense, predictThreat, pikalyticsMoves } from './predictions.js';
 import { actualSpeed, effectiveSpeedRange } from './speed.js';
-import { getMove, toId } from './data.js';
+import { getMove, toId, isSpreadMove, moveFlinchChance } from './data.js';
 import { getMegaOptions } from './gimmicks/mega.js';
 import { defaultOpponentSet } from './bring.js';
 import { maxHpFor } from './damage.js';
@@ -234,15 +234,6 @@ interface Tables {
   field: FieldState;
 }
 
-// Doubles spread moves hit all opposing actives. Heat Wave / Rock Slide /
-// Blizzard etc. are 'allAdjacentFoes'; Earthquake / Surf are 'allAdjacent'
-// (also hits the ally — we only model foe damage). predictOffense already
-// applies the 0.75 spread modifier to the damage value.
-function isSpreadMove(move: string): boolean {
-  const t = (getMove(move) as { target?: string } | undefined)?.target;
-  return t === 'allAdjacentFoes' || t === 'allAdjacent';
-}
-
 // Single-user protection moves (user fully blocks incoming damage for one turn).
 // Wide Guard / Quick Guard / Mat Block protect the TEAM and are not modelled here.
 const PROTECT_MOVE_IDS = new Set(['protect', 'detect', 'kingsshield', 'banefulbunker', 'spikyshield', 'obstruct', 'silktrap']);
@@ -391,18 +382,6 @@ function isMultiHit(move: string): boolean {
   return !!(getMove(move) as { multihit?: number | number[] } | undefined)?.multihit;
 }
 
-// Flinch probability (0..1) of a move's secondary effect, e.g. Rock Slide /
-// Iron Head / Air Slash 30%, Fake Out 100%. 0 if the move can't flinch. Flinch
-// only denies an action when the flincher moves FIRST — callers gate on speed.
-function flinchChance(move: string): number {
-  if (!move) return 0;
-  const m = getMove(move) as { secondary?: { chance?: number; volatileStatus?: string } | null; secondaries?: Array<{ chance?: number; volatileStatus?: string }> | null } | undefined;
-  const secs = m?.secondaries ?? (m?.secondary ? [m.secondary] : []);
-  for (const s of secs ?? []) {
-    if (s?.volatileStatus === 'flinch') return Math.max(0, Math.min(1, (s.chance ?? 0) / 100));
-  }
-  return 0;
-}
 
 // Worst-case mega-forme speed for a species at L50 (max Spe investment, +Spe
 // nature), or null if it can't mega. We don't know the opp's real EVs, so the
@@ -1159,7 +1138,7 @@ export function createSearch(input: SearchInput): PositionSearch {
               if ((s0.oppHp[oj] ?? 0) <= 0 || !oppOutspeeds(tbl, oj, actor)) continue;
               const c = tbl.thr[oj]?.[actor];
               const sp = tbl.oppSpread[oj];
-              chance = Math.max(chance, flinchChance(c?.move ?? ''), flinchChance(sp?.move ?? ''));
+              chance = Math.max(chance, moveFlinchChance(c?.move ?? ''), moveFlinchChance(sp?.move ?? ''));
             }
           }
           if (chance > 0) {

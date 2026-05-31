@@ -80,6 +80,27 @@ export function isChargeMove(name: string): boolean {
   return !!(m?.flags?.charge);
 }
 
+// True for doubles spread moves — Rock Slide / Heat Wave / Blizzard hit all
+// foes ('allAdjacentFoes'); Earthquake / Surf hit everyone adjacent including
+// the ally ('allAdjacent'). Both deal damage to BOTH opposing actives.
+export function isSpreadMove(name: string): boolean {
+  const t = (getMove(name) as { target?: string } | undefined)?.target;
+  return t === 'allAdjacentFoes' || t === 'allAdjacent';
+}
+
+// Flinch probability (0..1) of a move's secondary effect — Rock Slide / Iron
+// Head / Air Slash 30%, Fake Out 100%. 0 if the move can't flinch. Flinch only
+// denies an action when the user moves first, so callers gate on speed.
+export function moveFlinchChance(name: string): number {
+  if (!name) return 0;
+  const m = getMove(name) as { secondary?: { chance?: number; volatileStatus?: string } | null; secondaries?: Array<{ chance?: number; volatileStatus?: string }> | null } | undefined;
+  const secs = m?.secondaries ?? (m?.secondary ? [m.secondary] : []);
+  for (const s of secs ?? []) {
+    if (s?.volatileStatus === 'flinch') return Math.max(0, Math.min(1, (s.chance ?? 0) / 100));
+  }
+  return 0;
+}
+
 // True for "pivot" moves that switch the attacker out after resolving
 // (U-turn, Volt Switch, Flip Turn, Parting Shot, Teleport, Chilly
 // Reception, Baton Pass, Shed Tail). The dex marks these via the
