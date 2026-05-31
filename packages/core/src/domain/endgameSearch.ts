@@ -247,15 +247,19 @@ const SET_TERRAIN = -8;   // terrain move (Electric / Grassy / Misty / Psychic)
 const SWITCH_BASE = -10;  // switch → bench idx `SWITCH_BASE - target`
 const LEECH_BASE = -20;   // Leech Seed → foe idx `LEECH_BASE - target`
 const BATON_BASE = -30;   // Baton Pass → bench idx `BATON_BASE - target`
+const STATUS_BASE = -40;  // status move → foe idx `STATUS_BASE - target`
 function isSwitchTarget(t: number): boolean { return t <= SWITCH_BASE && t > LEECH_BASE; }
 function switchBenchIdx(t: number): number { return SWITCH_BASE - t; }
 function switchCode(benchIdx: number): number { return SWITCH_BASE - benchIdx; }
 function isLeechTarget(t: number): boolean { return t <= LEECH_BASE && t > BATON_BASE; }
 function leechFoeIdx(t: number): number { return LEECH_BASE - t; }
 function leechCode(foeIdx: number): number { return LEECH_BASE - foeIdx; }
-function isBatonTarget(t: number): boolean { return t <= BATON_BASE; }
+function isBatonTarget(t: number): boolean { return t <= BATON_BASE && t > STATUS_BASE; }
 function batonBenchIdx(t: number): number { return BATON_BASE - t; }
 function batonCode(benchIdx: number): number { return BATON_BASE - benchIdx; }
+function isStatusTarget(t: number): boolean { return t <= STATUS_BASE; }
+function statusFoeIdx(t: number): number { return STATUS_BASE - t; }
+function statusCode(foeIdx: number): number { return STATUS_BASE - foeIdx; }
 function isFieldTarget(t: number): boolean { return t === SET_TAILWIND || t === SET_TRICKROOM; }
 // Benched live team-indices a side can switch INTO (not on the field, hp > 0).
 function benchSwitchTargets(active: number[], hp: number[], n: number): number[] {
@@ -399,6 +403,10 @@ interface Tables {
   myTerrainAbility: (Terrain | null)[]; oppTerrainAbility: (Terrain | null)[];
   // End-of-turn residual info per mon (status chip, sand immunity, heals).
   myResidual: ResidualInfo[]; oppResidual: ResidualInfo[];
+  // Status-inflicting move a mon knows (Will-O-Wisp/Thunder Wave/Toxic/…), null
+  // if none. + per-mon ability (for status-immunity checks at apply time).
+  myStatusMove: (StatusMove | null)[]; oppStatusMove: (StatusMove | null)[];
+  myAbility: (string | null | undefined)[]; oppAbility: (string | null | undefined)[];
   field: FieldState;
 }
 
@@ -602,6 +610,12 @@ interface State {
    *  1 for a tox-statused mon at the root, 0 otherwise. */
   myToxicN: number[];
   oppToxicN: number[];
+  /** Live non-volatile status per mon ('brn'|'par'|'psn'|'tox'|'slp'|'' ). Seeded
+   *  from input (= baked into the cells/speeds); a status MOVE can inflict one
+   *  mid-search, which then scales the victim's damage (burn)/speed (para) and
+   *  drives the EOT residual. */
+  myStatus: string[];
+  oppStatus: string[];
 }
 
 // Doubles screen damage reduction (2732/4096 ≈ 0.667), matching @smogon/calc's
@@ -723,6 +737,37 @@ function residualInfo(species: string, ability: string | null | undefined, item:
   const sandImmune = magicGuard || ['sandveil', 'sandrush', 'sandforce', 'overcoat'].includes(ab)
     || isType(species, 'Rock') || isType(species, 'Ground') || isType(species, 'Steel');
   return { status: status ?? '', magicGuard, leftovers, sandImmune };
+}
+
+// --- Inflicted status -------------------------------------------------------
+/** A status-inflicting move + the status it applies (sleep deferred). */
+interface StatusMove { move: string; status: string }
+function findStatusMove(moves: string[]): StatusMove | null {
+  for (const m of moves) {
+    switch (toId(m)) {
+      case 'willowisp': return { move: m, status: 'brn' };
+      case 'thunderwave': return { move: m, status: 'par' };
+      case 'glare': case 'stunspore': return { move: m, status: 'par' };
+      case 'toxic': case 'toxicthread': return { move: m, status: 'tox' };
+      case 'poisonpowder': case 'poisongas': return { move: m, status: 'psn' };
+    }
+  }
+  return null;
+}
+// Can `status` (via `move`) actually land on the target? Honors type immunities,
+// the matching ability immunities, and Misty Terrain on grounded mons. We ignore
+// already-statused / substitute (checked at apply time).
+function statusLands(status: string, move: string, species: string, ability: string | null | undefined, grounded: boolean, ter: Terrain): boolean {
+  if (ter === 'Misty' && grounded) return false;        // Misty blocks status on grounded mons
+  const ab = toId(ability ?? '');
+  if (status === 'brn') return !isType(species, 'Fire') && ab !== 'waterveil' && ab !== 'waterbubble';
+  if (status === 'par') {
+    if (isType(species, 'Electric') || ab === 'limber') return false;
+    if (toId(move) === 'thunderwave' && isType(species, 'Ground')) return false; // Electric-type move misses Ground
+    return true;
+  }
+  if (status === 'psn' || status === 'tox') return !isType(species, 'Poison') && !isType(species, 'Steel') && ab !== 'immunity';
+  return false;
 }
 // The weather that doubles a mon's Speed. Known ability wins; if the opp's
 // ability is unknown, fall back to a weather-speed ability the species could
@@ -1005,6 +1050,10 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppTerrainAbility: opp.map(o => terrainSetByAbility(o.entry.ability)),
     myResidual: mine.map(m => residualInfo(m.set.species, m.set.ability, m.set.item, m.status)),
     oppResidual: opp.map(o => residualInfo(o.entry.species, o.entry.ability, o.entry.item, o.status)),
+    myStatusMove: mine.map(m => findStatusMove(m.set.moves ?? [])),
+    oppStatusMove: opp.map(o => findStatusMove(o.entry.knownMoves)),
+    myAbility: mine.map(m => m.set.ability),
+    oppAbility: opp.map(o => o.entry.ability),
     field: input.field,
   };
 }
@@ -1046,6 +1095,8 @@ function initialState(input: SearchInput): State {
     terrainTurns: input.field.terrainTurns,
     myToxicN: input.mine.map(m => (m.status === 'tox' ? 1 : 0)),
     oppToxicN: input.opp.map(o => (o.status === 'tox' ? 1 : 0)),
+    myStatus: input.mine.map(m => m.status ?? ''),
+    oppStatus: input.opp.map(o => o.status ?? ''),
   };
 }
 
@@ -1121,6 +1172,13 @@ function resolveTurn(
   const oppWeatherSpe = (j: number) => (t.oppSpeedWeather[j] && t.oppSpeedWeather[j] === nw ? 2 : 1);
   const mySpe = (i: number) => t.mySpeed[i]! * (statStageMult(s.myBoost[i]?.spe) / statStageMult(t.myBaked[i]?.spe)) * myWeatherSpe(i);
   const oppSpe = (j: number) => t.oppSpeed[j]! * (statStageMult(s.oppBoost[j]?.spe) / statStageMult(t.oppBaked[j]?.spe)) * oppWeatherSpe(j);
+  // Dynamic paralysis (a status MOVE may have inflicted it mid-search).
+  const myPar = (i: number) => s.myStatus[i] === 'par';
+  const oppPar = (j: number) => s.oppStatus[j] === 'par';
+  // Burn halves the ATTACKER's physical output: scale by live-vs-baked burn.
+  const burnMult = (status: string, physical: boolean) => (status === 'brn' && physical ? 0.5 : 1);
+  const myBurnScale = (actor: number, physical: boolean) => burnMult(s.myStatus[actor]!, physical) / burnMult(t.myResidual[actor]!.status, physical);
+  const oppBurnScale = (actor: number, physical: boolean) => burnMult(s.oppStatus[actor]!, physical) / burnMult(t.oppResidual[actor]!.status, physical);
   // Screen damage scale on the DEFENDER's side: live screen vs the one baked into
   // the cell. Reflect halves physical, Light Screen special. 1 when unchanged.
   const myScreenScale = (physical: boolean) =>           // I attack opp → opp's (their) side
@@ -1141,9 +1199,11 @@ function resolveTurn(
   // Scale a precomputed roll by the live-vs-baked boost, screen, weather AND terrain
   // ratios (each 1 when unchanged → positions without dynamic effects are unaffected).
   const myDmg = (actor: number, tgt: number, raw: number, physical: boolean, type: string, gm: boolean) =>
-    raw * boostDamageScale(s.myBoost[actor], t.myBaked[actor], s.oppBoost[tgt], t.oppBaked[tgt], physical) * myScreenScale(physical) * myWeatherScale(type, physical, tgt) * myTerrainScale(type, gm, actor, tgt);
+    raw * boostDamageScale(s.myBoost[actor], t.myBaked[actor], s.oppBoost[tgt], t.oppBaked[tgt], physical) * myScreenScale(physical) * myWeatherScale(type, physical, tgt) * myTerrainScale(type, gm, actor, tgt) * myBurnScale(actor, physical);
   const oppDmg = (actor: number, tgt: number, raw: number, physical: boolean, type: string, gm: boolean) =>
-    raw * boostDamageScale(s.oppBoost[actor], t.oppBaked[actor], s.myBoost[tgt], t.myBaked[tgt], physical) * oppScreenScale(physical) * oppWeatherScale(type, physical, tgt) * oppTerrainScale(type, gm, actor, tgt);
+    raw * boostDamageScale(s.oppBoost[actor], t.oppBaked[actor], s.myBoost[tgt], t.myBaked[tgt], physical) * oppScreenScale(physical) * oppWeatherScale(type, physical, tgt) * oppTerrainScale(type, gm, actor, tgt) * oppBurnScale(actor, physical);
+  // Psychic Terrain makes priority moves FAIL against a grounded target.
+  const psychicBlocked = (priority: number, defenderGrounded: boolean) => s.terrain === 'Psychic' && priority > 0 && defenderGrounded;
 
   // Build protected sets: a mon using PROTECT is immune to all damage this turn.
   const myProtected = new Set<number>();
@@ -1161,9 +1221,9 @@ function resolveTurn(
     else hp[idx] = Math.max(0, after);
   };
 
-  // Switch / field / Leech / setup / screen / weather / terrain / Baton: no direct damage.
+  // Switch / field / Leech / setup / screen / weather / terrain / status / Baton: no direct damage.
   const nonAttack = (target: number) =>
-    isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isFieldTarget(target)
+    isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isStatusTarget(target) || isFieldTarget(target)
     || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN;
   const actings: Acting[] = [];
   for (const [actor, target] of myTargets) {
@@ -1171,14 +1231,14 @@ function resolveTurn(
     const priority = target === SPREAD ? t.mySpread[actor]!.priority
       : target === PROTECT ? movePriority(t.myProtectMove[actor] ?? 'Protect')
       : t.off[actor]![target]!.priority;
-    actings.push({ side: 'mine', actor, target, priority, speed: effSpeed(mySpe(actor), s.myTailwind, t.myPar[actor]!) });
+    actings.push({ side: 'mine', actor, target, priority, speed: effSpeed(mySpe(actor), s.myTailwind, myPar(actor)) });
   }
   for (const [actor, target] of oppTargets) {
     if (nonAttack(target)) continue;
     const priority = target === SPREAD ? t.oppSpread[actor]!.priority
       : target === PROTECT ? movePriority(t.oppProtectMove[actor] ?? 'Protect')
       : t.thr[actor]![target]!.priority;
-    actings.push({ side: 'opp', actor, target, priority, speed: effSpeed(oppSpe(actor), s.theirTailwind, t.oppPar[actor]!) });
+    actings.push({ side: 'opp', actor, target, priority, speed: effSpeed(oppSpe(actor), s.theirTailwind, oppPar(actor)) });
   }
 
   // Priority first (higher acts first), then speed (Trick Room inverts speed).
@@ -1207,6 +1267,7 @@ function resolveTurn(
       if (oppProtected.has(oTgt)) continue;          // target protecting → fizzle
       if (oppHp[oTgt]! <= 0) continue;               // target already down → fizzle
       const oc = t.off[act.actor]![oTgt]!;
+      if (psychicBlocked(oc.priority, t.oppGrounded[oTgt]!)) continue; // Psychic Terrain blocks priority
       apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r), oc.physical, oc.type, oc.groundMove), oppSurv, oc.multiHit);
     } else {
       if (oppHp[act.actor]! <= 0) continue;
@@ -1227,6 +1288,7 @@ function resolveTurn(
       if (myProtected.has(mTgt)) continue;            // my mon protecting → fizzle
       if (myHp[mTgt]! <= 0) continue;
       const tc = t.thr[act.actor]![mTgt]!;
+      if (psychicBlocked(tc.priority, t.myGrounded[mTgt]!)) continue; // Psychic Terrain blocks priority
       apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r), tc.physical, tc.type, tc.groundMove), mySurv, tc.multiHit);
     }
   }
@@ -1358,21 +1420,46 @@ function resolveTurn(
   const oppToxicN = s.oppToxicN.slice();
   const sand = normWeather(s.weather) === 'Sand';
   const grassy = s.terrain === 'Grassy';
-  const residual = (hp: number[], idx: number, info: ResidualInfo, toxicN: number[], grounded: boolean) => {
+  const residual = (hp: number[], idx: number, info: ResidualInfo, status: string, toxicN: number[], grounded: boolean) => {
     if ((hp[idx] ?? 0) <= 0) return;
     let delta = 0;
     if (!info.magicGuard) {
-      if (info.status === 'brn') delta -= 100 / 16;
-      else if (info.status === 'psn') delta -= 100 / 8;
-      else if (info.status === 'tox') { const n = toxicN[idx] || 1; delta -= n * (100 / 16); toxicN[idx] = n + 1; }
+      if (status === 'brn') delta -= 100 / 16;
+      else if (status === 'psn') delta -= 100 / 8;
+      else if (status === 'tox') { const n = toxicN[idx] || 1; delta -= n * (100 / 16); toxicN[idx] = n + 1; }
       if (sand && !info.sandImmune) delta -= 100 / 16;
     }
     if (info.leftovers) delta += 100 / 16;             // heals ignore Magic Guard
     if (grassy && grounded) delta += 100 / 16;
     if (delta !== 0) hp[idx] = Math.max(0, Math.min(100, hp[idx]! + delta));
   };
-  for (const mi of myActiveNow) residual(myHp, mi, t.myResidual[mi]!, myToxicN, t.myGrounded[mi]!);
-  for (const oj of oppActiveNow) residual(oppHp, oj, t.oppResidual[oj]!, oppToxicN, t.oppGrounded[oj]!);
+  for (const mi of myActiveNow) residual(myHp, mi, t.myResidual[mi]!, s.myStatus[mi]!, myToxicN, t.myGrounded[mi]!);
+  for (const oj of oppActiveNow) residual(oppHp, oj, t.oppResidual[oj]!, s.oppStatus[oj]!, oppToxicN, t.oppGrounded[oj]!);
+
+  // Inflict status this turn (applies from NEXT ply, like other set-effects): a
+  // status MOVE lands on its (post-switch) target unless the target is already
+  // statused, immune by type/ability, or behind Misty Terrain.
+  const myStatus = s.myStatus.slice();
+  const oppStatus = s.oppStatus.slice();
+  // Status persists on a mon that switches out; a switch-in arrives clean.
+  for (const inn of mySwitchIn.values()) { myStatus[inn] = ''; myToxicN[inn] = 0; }
+  for (const inn of oppSwitchIn.values()) { oppStatus[inn] = ''; oppToxicN[inn] = 0; }
+  for (const [actor, target] of myTargets) {
+    if (!isStatusTarget(target)) continue;
+    const sm = t.myStatusMove[actor]; if (!sm) continue;
+    const foe = redirect(statusFoeIdx(target), oppSwitchIn);
+    if ((oppHp[foe] ?? 0) > 0 && !oppStatus[foe] && statusLands(sm.status, sm.move, t.oppSpecies[foe]!, t.oppAbility[foe], t.oppGrounded[foe]!, s.terrain)) {
+      oppStatus[foe] = sm.status; if (sm.status === 'tox') oppToxicN[foe] = 1;
+    }
+  }
+  for (const [actor, target] of oppTargets) {
+    if (!isStatusTarget(target)) continue;
+    const sm = t.oppStatusMove[actor]; if (!sm) continue;
+    const foe = redirect(statusFoeIdx(target), mySwitchIn);
+    if ((myHp[foe] ?? 0) > 0 && !myStatus[foe] && statusLands(sm.status, sm.move, t.mySpecies[foe]!, t.myAbility[foe], t.myGrounded[foe]!, s.terrain)) {
+      myStatus[foe] = sm.status; if (sm.status === 'tox') myToxicN[foe] = 1;
+    }
+  }
 
   // Boost bookkeeping. A mon that LEAVES the field clears its stages; a switch-in
   // arrives fresh — EXCEPT Baton Pass, which passes the outgoing mon's current
@@ -1399,7 +1486,7 @@ function resolveTurn(
     mySeeded, oppSeeded, myBoost, oppBoost,
     myReflect, myLightScreen, theirReflect, theirLightScreen,
     myReflectTurns, myLightScreenTurns, theirReflectTurns, theirLightScreenTurns,
-    weather, weatherTurns, terrain, terrainTurns, myToxicN, oppToxicN,
+    weather, weatherTurns, terrain, terrainTurns, myToxicN, oppToxicN, myStatus, oppStatus,
   };
 }
 
@@ -1469,6 +1556,9 @@ function jointActions(
   weatherSet?: boolean[],
   // Terrain capability (root only): same idea as weather.
   terrainSet?: boolean[],
+  // Status moves (root only): per-actor capability + the active foe indices that
+  // can still be given a status (alive, not already statused).
+  status?: { move: (StatusMove | null)[]; foes: number[] },
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -1485,6 +1575,7 @@ function jointActions(
     const canScreen = screenSet?.[actor] === true;
     const canWeather = weatherSet?.[actor] === true;
     const canTerrain = terrainSet?.[actor] === true;
+    const statusCodes = (status && status.move[actor] != null) ? status.foes.map(statusCode) : [];
     const batonCodes = (baton && baton.move[actor] != null) ? baton.targets.map(batonCode) : [];
     // SPREAD first so a spread that ties a single-target line is kept. PROTECT /
     // field / setup / screen / weather / Leech / SWITCH / Baton last — only chosen
@@ -1500,6 +1591,7 @@ function jointActions(
       ...(canWeather ? [SET_WEATHER] : []),
       ...(canTerrain ? [SET_TERRAIN] : []),
       ...leechCodes,
+      ...statusCodes,
       ...switchCodes,
       ...batonCodes,
     ];
@@ -1695,6 +1787,8 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
   // Weather is useful only if it'd CHANGE the current weather.
   const myWeatherCap = t.myWeatherMove.map(wm => !!wm && normWeather(wm.weather) !== normWeather(s.weather));
   const myTerrainCap = t.myTerrainMove.map(tm => !!tm && tm.terrain !== s.terrain);
+  // Foes I can still inflict a status on: active, alive, not already statused.
+  const myStatusFoes = s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0 && !s.oppStatus[j]);
   return jointActions(s.myActive, s.oppActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak,
     myBench,
     // Don't re-offer Tailwind when it's already up; Trick Room is always a
@@ -1705,7 +1799,8 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     { move: t.myBatonMove, targets: myBench },
     myScreenCap,
     myWeatherCap,
-    myTerrainCap);
+    myTerrainCap,
+    { move: t.myStatusMove, foes: myStatusFoes });
 }
 function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
@@ -1713,6 +1808,7 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const oppScreenCap = t.oppScreen.map(sc => !!sc && ((sc.reflect && !s.theirReflect) || (sc.lightScreen && !s.theirLightScreen)));
   const oppWeatherCap = t.oppWeatherMove.map(wm => !!wm && normWeather(wm.weather) !== normWeather(s.weather));
   const oppTerrainCap = t.oppTerrainMove.map(tm => !!tm && tm.terrain !== s.terrain);
+  const oppStatusFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !s.myStatus[j]);
   return jointActions(s.oppActive, s.myActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak,
     oppBench,
     { tailwind: s.theirTailwind ? undefined : t.oppTailwindMove, trickRoom: t.oppTrickRoomMove },
@@ -1721,7 +1817,8 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     { move: t.oppBatonMove, targets: oppBench },
     oppScreenCap,
     oppWeatherCap,
-    oppTerrainCap);
+    oppTerrainCap,
+    { move: t.oppStatusMove, foes: oppStatusFoes });
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -1759,7 +1856,9 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
   const plays: SearchPlay[] = [];
   if (!joint) return plays;
   for (const [actor, target] of joint) {
-    if (isBatonTarget(target)) {
+    if (isStatusTarget(target)) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myStatusMove[actor]?.move ?? 'status', targetSpecies: t.oppSpecies[statusFoeIdx(target)]! });
+    } else if (isBatonTarget(target)) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myBatonMove[actor] ?? 'Baton Pass', targetSpecies: t.mySpecies[batonBenchIdx(target)]!, switch: true });
     } else if (isLeechTarget(target)) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myLeechMove[actor] ?? 'Leech Seed', targetSpecies: t.oppSpecies[leechFoeIdx(target)]! });
@@ -1795,7 +1894,9 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): Search
   const plays: SearchPlay[] = [];
   if (!joint) return plays;
   for (const [actor, target] of joint) {
-    if (isBatonTarget(target)) {
+    if (isStatusTarget(target)) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppStatusMove[actor]?.move ?? 'status', targetSpecies: t.mySpecies[statusFoeIdx(target)]! });
+    } else if (isBatonTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppBatonMove[actor] ?? 'Baton Pass', targetSpecies: t.oppSpecies[batonBenchIdx(target)]!, switch: true });
     } else if (isLeechTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppLeechMove[actor] ?? 'Leech Seed', targetSpecies: t.mySpecies[leechFoeIdx(target)]! });
@@ -2313,6 +2414,10 @@ export function createSearch(input: SearchInput): PositionSearch {
       const terrainable = (moves: ({ terrain: Terrain } | null)[], active: number[]) =>
         active.some(i => { const tm = moves[i]; return !!tm && tm.terrain !== s0.terrain; });
       if (terrainable(expected.table.myTerrainMove, s0.myActive) || terrainable(expected.table.oppTerrainMove, s0.oppActive)) actionClasses.push('terrain');
+      const statusable = (moves: (StatusMove | null)[], active: number[], foeActive: number[], foeStatus: string[]) =>
+        active.some(i => moves[i] != null) && foeActive.some(j => !foeStatus[j]);
+      if (statusable(expected.table.myStatusMove, s0.myActive, s0.oppActive, s0.oppStatus)
+        || statusable(expected.table.oppStatusMove, s0.oppActive, s0.myActive, s0.myStatus)) actionClasses.push('status');
       const explored: SearchExplored = {
         depth,
         myActions: myRootJoints.length,

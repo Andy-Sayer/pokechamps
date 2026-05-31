@@ -264,10 +264,15 @@ deferred; phantom mega-evolution isn't modelled.
     (grounded), Leftovers heal 1/16. Magic Guard blocks the DAMAGE (not heals).
     Like Leech Seed, only ACTIVE mons tick. `Tables.my/oppResidual` precomputes
     status/immunity/heal eligibility.
-  - **Remaining (small):** inflicted status mid-search (Will-O-Wisp/Thunder Wave
-    GAINING burn/para — the search reads existing status but doesn't model a move
-    applying it), and Psychic-Terrain priority-block. **Phase 4 is otherwise
-    complete** — only GPU (Phase 5) remains.
+  - **✅ Inflicted status + Psychic-Terrain priority block — SHIPPED (2026-06-01).**
+    `SET_STATUS` foe-targeted action (Will-O-Wisp→brn, Thunder Wave/Glare→par,
+    Toxic→tox, Poison Powder→psn). Status is now DYNAMIC in `State` (`my/oppStatus`)
+    so a move can inflict it mid-search; burn then halves the victim's physical
+    output (scale), paralysis halves its Speed (dynamic), and it drives the EOT
+    residual. `statusLands` honors type + ability immunities and Misty Terrain.
+    Psychic Terrain makes priority moves FAIL vs a grounded target. Action class
+    `status`. (Sleep still deferred — it's a can't-act mechanic, not a scale.)
+  - **🎉 Phase 4 COMPLETE.** Only **Phase 5 (GPU)** remains.
   - **✅ Dynamic stat boosts (setup) + Speed Boost + Baton Pass — SHIPPED
     (2026-05-31).** `State.myBoost`/`oppBoost` track live TOTAL stages (seeded
     from input = the level baked into the cells). Solved the matrix-rebuild problem

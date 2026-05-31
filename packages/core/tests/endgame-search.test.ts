@@ -1257,3 +1257,46 @@ describe('Phase 4: end-of-turn residuals', () => {
     expect(searchToDepth(make('psn'), 3).score).toBe(searchToDepth(make(undefined), 3).score);
   });
 });
+
+describe('Inflicted status (Will-O-Wisp / Thunder Wave)', () => {
+  // Will-O-Wisp burns a physical attacker → its physical output halves, so a
+  // bulky Skeledirge takes much less from Earthquake over the horizon → strictly
+  // better than not having it. Also surfaces the 'status' action.
+  test('Will-O-Wisp burns a physical attacker and cuts its damage', () => {
+    const garchomp: OpponentEntry = { species: 'Garchomp', knownMoves: ['Earthquake'], candidates: [mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Earthquake'] })] };
+    const make = (moves: string[]): SearchInput => ({
+      mine: [{ set: mon({ species: 'Skeledirge', ability: 'Unaware', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves }), hpPercent: 100, active: true }],
+      opp: [{ entry: garchomp, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    const withWoW = searchToDepth(make(['Will-O-Wisp', 'Shadow Ball']), 4);
+    expect(withWoW.explored!.actionClasses).toContain('status');
+    expect(withWoW.score).toBeGreaterThan(searchToDepth(make(['Shadow Ball']), 4).score);
+  });
+
+  // Fire types can't be burned → Will-O-Wisp is a no-op vs a Fire attacker, so
+  // having it changes nothing.
+  test('Will-O-Wisp does nothing to a Fire-type foe (immunity)', () => {
+    const incinFire: OpponentEntry = { species: 'Incineroar', knownMoves: ['Knock Off'], candidates: [mon({ species: 'Incineroar', ability: 'Blaze', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Knock Off'] })] };
+    const make = (moves: string[]): SearchInput => ({
+      mine: [{ set: mon({ species: 'Sableye', ability: 'Prankster', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves }), hpPercent: 100, active: true }],
+      opp: [{ entry: incinFire, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    expect(searchToDepth(make(['Will-O-Wisp', 'Foul Play']), 3).score).toBe(searchToDepth(make(['Foul Play']), 3).score);
+  });
+
+  // Psychic Terrain makes priority moves FAIL vs a grounded target. Azumarill's
+  // Aqua Jet (priority) KOs a grounded Garchomp first on clear ground (win), but
+  // is blocked under Psychic Terrain → it deals nothing and gets KO'd (loss).
+  test('Psychic Terrain blocks a priority move vs a grounded target', () => {
+    const garchomp: OpponentEntry = { species: 'Garchomp', knownMoves: ['Earthquake'], candidates: [mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Earthquake'] })] };
+    const make = (terrain: 'Psychic' | null): SearchInput => ({
+      mine: [{ set: mon({ species: 'Azumarill', ability: 'Huge Power', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252, hp: 252 }, moves: ['Aqua Jet'] }), hpPercent: 1, active: true }],
+      opp: [{ entry: garchomp, hpPercent: 1, active: true }],
+      field: { ...NEUTRAL_FIELD, terrain }, allOppRevealed: true,
+    });
+    expect(searchToDepth(make(null), 2).verdict).toBe('winning');
+    expect(searchToDepth(make('Psychic'), 2).verdict).toBe('losing');
+  });
+});
