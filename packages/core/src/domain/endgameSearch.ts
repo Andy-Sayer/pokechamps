@@ -597,10 +597,11 @@ function resolveTurn(
       if (myHp[act.actor]! <= 0) continue;          // KO'd before acting
       if (act.target === PROTECT) continue;           // mon uses Protect — no damage dealt
       if (act.target === SPREAD) {
-        // Spread move — hit every live, unprotected foe.
+        // Spread move — hit every live, unprotected foe ON THE FIELD (s.oppActive,
+        // not the whole team: a benched mon isn't in range of a spread move).
         const sp = t.mySpread[act.actor]!;
         const dmg = mySpreadRoll(sp, r);
-        for (let foe = 0; foe < oppHp.length; foe++) {
+        for (const foe of s.oppActive) {
           if (oppHp[foe]! <= 0) continue;
           if (oppProtected.has(foe)) continue;       // opp protecting this turn
           apply(oppHp, foe, dmg[foe] ?? 0, oppSurv, false); // spread moves aren't multi-hit
@@ -615,10 +616,11 @@ function resolveTurn(
       if (oppHp[act.actor]! <= 0) continue;
       if (act.target === PROTECT) continue;           // opp mon uses Protect
       if (act.target === SPREAD) {
-        // Opp spread move — hit every live, unprotected mon of mine.
+        // Opp spread move — hit every live, unprotected mon of mine ON THE FIELD
+        // (s.myActive, not the whole team: my bench isn't in range).
         const sp = t.oppSpread[act.actor]!;
         const dmg = oppSpreadRoll(sp, r);
-        for (let me = 0; me < myHp.length; me++) {
+        for (const me of s.myActive) {
           if (myHp[me]! <= 0) continue;
           if (myProtected.has(me)) continue;          // my mon protecting this turn
           apply(myHp, me, dmg[me] ?? 0, mySurv, false); // spread moves aren't multi-hit
@@ -1096,7 +1098,7 @@ export function createSearch(input: SearchInput): PositionSearch {
           for (const [actor, target] of (expected.joint ?? [])) {
             if (target === SPREAD) {
               const sp = expected.table.mySpread[actor]!;
-              for (let foe = 0; foe < s0.oppHp.length; foe++) {
+              for (const foe of s0.oppActive) {
                 consider({ dmgMin: sp.dmgMin[foe] ?? 0, dmgMid: sp.dmgMid[foe] ?? 0, dmgMax: sp.dmgMax[foe] ?? 0, move: '', priority: 0, multiHit: false, koRolls: [] }, s0.oppHp[foe] ?? 0, expected.table.oppSpecies[foe] ?? 'foe');
               }
             } else if (target !== PROTECT) {
@@ -1169,7 +1171,7 @@ export function createSearch(input: SearchInput): PositionSearch {
             if (target === SPREAD) {
               const sp = opt.table.mySpread[actor];
               if (!sp) continue;
-              for (let foe = 0; foe < s0.oppHp.length; foe++) {
+              for (const foe of s0.oppActive) {
                 const h = s0.oppHp[foe] ?? 0;
                 if (h <= 0) continue;
                 const dMid = sp.dmgMid[foe] ?? 0;

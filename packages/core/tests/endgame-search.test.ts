@@ -159,6 +159,28 @@ describe('spread moves', () => {
     expect(r.verdict).toBe('losing');
     expect(r.score).toBeLessThanOrEqual(-100_000);
   });
+
+  // A spread move hits only the mons ON THE FIELD, never the bench. Three
+  // Sableye at 1% HP (2 active, 1 benched) vs a faster Abomasnow's Blizzard:
+  // the two actives die, but the BENCHED one is out of range and survives — so
+  // it must NOT be a full-team wipe (that was a bug where the spread loop ran
+  // over the whole team instead of the active slots).
+  test("an opp spread move does NOT reach my benched mons", () => {
+    const fragile = (): PokemonSet => mon({ species: 'Sableye', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Foul Play'] });
+    const fastAboma: OpponentEntry = { species: 'Abomasnow', knownMoves: ['Blizzard'], candidates: [mon({ species: 'Abomasnow', ability: 'Snow Warning', nature: 'Modest', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Blizzard'] })] };
+    const input: SearchInput = {
+      mine: [
+        { set: fragile(), hpPercent: 1, active: true },
+        { set: fragile(), hpPercent: 1, active: true },
+        { set: fragile(), hpPercent: 1, active: false }, // benched — out of Blizzard's range
+      ],
+      opp: [{ entry: fastAboma, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    };
+    const r = searchToDepth(input, 1);
+    // The benched Sableye survives → NOT a terminal team wipe.
+    expect(r.score).toBeGreaterThan(-100_000);
+  });
 });
 
 describe('incoming threat: contingent KO + flinch on my mons', () => {
