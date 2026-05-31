@@ -395,12 +395,14 @@ export function runAskCommand(
     attacker: mine.set, opponent: opp.entry, field,
     attackerGimmickActive: mine.megaActive, defenderGimmickActive: opp.megaActive,
   });
-  const myMegaByMove = new Map<string, MatchupCell>();
+  // My mega is deterministic (the held stone), so a single forme.
+  const myMegaByMove = new Map<string, { cell: MatchupCell; variant: string }>();
   if (myCanMega) {
+    const myVariant = getMegaOptions(mine.set.species).find(o => o.forme === mine.megaForme)?.variant ?? '';
     for (const c of predictOffenseAll({
       attacker: mine.set, opponent: opp.entry, field,
       attackerGimmickActive: true, defenderGimmickActive: opp.megaActive,
-    })) myMegaByMove.set(c.move, c);
+    })) myMegaByMove.set(c.move, { cell: c, variant: myVariant });
   }
 
   // The opponent's EXPECTED moves vs me (revealed, else Pikalytics), base +
@@ -409,15 +411,23 @@ export function runAskCommand(
     opponent: opp.entry, defender: mine.set, field,
     attackerGimmickActive: opp.megaActive, defenderGimmickActive: mine.megaActive,
   });
-  const oppMegaByMove = new Map<string, MatchupCell>();
+  // We don't know WHICH stone the opp runs. For a dual-mega species (Charizard
+  // X/Y) the formes can swing a move's damage in opposite directions, so take
+  // the WORST-case forme per move (highest damage to me) and label it — never
+  // assume the first option, which can badly understate the mega threat.
+  const oppMegaByMove = new Map<string, { cell: MatchupCell; variant: string }>();
   if (oppCanMega) {
-    const stone = oppMegaOpts[0]!.stone;
     const baseCands = opp.entry.candidates?.length ? opp.entry.candidates : [defaultOpponentSet(opp.entry, 50)];
-    const megaEntry: OpponentEntry = { ...opp.entry, candidates: baseCands.map(c => ({ ...c, item: stone })) };
-    for (const c of predictThreatAll({
-      opponent: megaEntry, defender: mine.set, field,
-      attackerGimmickActive: true, defenderGimmickActive: mine.megaActive,
-    })) oppMegaByMove.set(c.move, c);
+    for (const optn of oppMegaOpts) {
+      const megaEntry: OpponentEntry = { ...opp.entry, candidates: baseCands.map(c => ({ ...c, item: optn.stone })) };
+      for (const c of predictThreatAll({
+        opponent: megaEntry, defender: mine.set, field,
+        attackerGimmickActive: true, defenderGimmickActive: mine.megaActive,
+      })) {
+        const prev = oppMegaByMove.get(c.move);
+        if (!prev || c.maxPercent > prev.cell.maxPercent) oppMegaByMove.set(c.move, { cell: c, variant: optn.variant });
+      }
+    }
   }
 
   const verdictTxt = (v: SpeedVerdict) =>
@@ -429,10 +439,12 @@ export function runAskCommand(
 
   // One formatted line per move: range + KO odds, a conditional caveat, and the
   // post-mega range when it differs.
-  const line = (c: MatchupCell, megaBy: Map<string, MatchupCell>): string => {
+  const line = (c: MatchupCell, megaBy: Map<string, { cell: MatchupCell; variant: string }>): string => {
     const base = `${c.move.padEnd(14)} ${c.minPercent.toFixed(0)}-${c.maxPercent.toFixed(0)}% (${c.koChance})${c.conditional ? ` ⚠ ${c.conditional}` : ''}`;
     const m = megaBy.get(c.move);
-    return m ? `${base}  ⭢mega ${m.minPercent.toFixed(0)}-${m.maxPercent.toFixed(0)}%` : base;
+    if (!m) return base;
+    const tag = m.variant ? `mega-${m.variant.toUpperCase()}` : 'mega';
+    return `${base}  ⭢${tag} ${m.cell.minPercent.toFixed(0)}-${m.cell.maxPercent.toFixed(0)}%`;
   };
 
   const megaNote = myCanMega ? `  (mega → ${mine.megaForme})` : '';
