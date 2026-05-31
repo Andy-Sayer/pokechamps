@@ -25,7 +25,7 @@ type Route =
   | { kind: 'team-management' }
   | { kind: 'add-team' }
   | { kind: 'edit-team'; initialTeam?: PokemonSet[]; initialName?: string; returnTo?: 'menu' | 'team-management' | 'pick-team' }
-  | { kind: 'team-builder'; returnTo?: 'menu' | 'team-management' | 'pick-team' }
+  | { kind: 'team-builder'; initialTeam?: PokemonSet[]; initialName?: string; returnTo?: 'menu' | 'team-management' | 'pick-team' }
   | { kind: 'history' }
   | { kind: 'server' }
   // pick-team is now battle-only (entry to a new match). Team browse /
@@ -100,13 +100,14 @@ function App() {
     // Same TeamPicker, but onPick edits instead of starting a battle.
     return <TeamPicker
       stores={stores}
-      onPick={(team, name) => setRoute({ kind: 'edit-team', initialTeam: team, initialName: name })}
+      // Editing an existing team uses the INTERACTIVE builder (roster → pick a
+      // mon → edit fields incl. nature with +Atk/-SpD labels), not the paste box.
+      onPick={(team, name) => setRoute({ kind: 'team-builder', initialTeam: team, initialName: name })}
       onCreateNew={() => setRoute({ kind: 'add-team' })}
-      onEdit={(team, name) => setRoute({ kind: 'edit-team', initialTeam: team, initialName: name })}
-      // Clone routes to the same edit screen but with a fresh
-      // suggested name so saving creates a sibling team rather than
-      // overwriting.
-      onClone={(team, name) => setRoute({ kind: 'edit-team', initialTeam: team, initialName: name })}
+      onEdit={(team, name) => setRoute({ kind: 'team-builder', initialTeam: team, initialName: name })}
+      // Clone routes to the same editor but with a fresh suggested name so
+      // saving creates a sibling team rather than overwriting.
+      onClone={(team, name) => setRoute({ kind: 'team-builder', initialTeam: team, initialName: name })}
       onCancel={() => setRoute({ kind: 'team-management' })}
     />;
   }
@@ -132,7 +133,13 @@ function App() {
   }
   if (route.kind === 'team-builder') {
     const back = route.returnTo ?? 'team-management';
-    return <TeamBuilder stores={stores} onDone={() => setRoute({ kind: back })} onCancel={() => setRoute({ kind: back })} />;
+    return <TeamBuilder
+      stores={stores}
+      initialTeam={route.initialTeam}
+      initialName={route.initialName}
+      onDone={() => setRoute({ kind: back })}
+      onCancel={() => setRoute({ kind: back })}
+    />;
   }
   if (route.kind === 'pick-team') {
     return <TeamPicker
@@ -142,8 +149,8 @@ function App() {
       // after so the user can immediately start the match they were trying
       // to start.
       onCreateNew={() => setRoute({ kind: 'edit-team', returnTo: 'pick-team' })}
-      onEdit={(team, name) => setRoute({ kind: 'edit-team', initialTeam: team, initialName: name, returnTo: 'pick-team' })}
-      onClone={(team, name) => setRoute({ kind: 'edit-team', initialTeam: team, initialName: name, returnTo: 'pick-team' })}
+      onEdit={(team, name) => setRoute({ kind: 'team-builder', initialTeam: team, initialName: name, returnTo: 'pick-team' })}
+      onClone={(team, name) => setRoute({ kind: 'team-builder', initialTeam: team, initialName: name, returnTo: 'pick-team' })}
       onCancel={() => setRoute({ kind: 'menu' })}
     />;
   }

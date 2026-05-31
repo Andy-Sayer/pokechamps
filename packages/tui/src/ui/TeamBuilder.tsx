@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
@@ -7,13 +7,17 @@ import { MAX_IVS } from '@pokechamps/core/domain/types.js';
 import {
   searchLegalSpecies, getSpecies, getItem, getNature, getLearnset, loadFormat, toId,
 } from '@pokechamps/core/domain/data.js';
-import { evFromSp } from '@pokechamps/core/domain/pikalytics.js';
+import { evFromSp, spFromEv } from '@pokechamps/core/domain/pikalytics.js';
 import type { Stores } from '@pokechamps/core/storage/index.js';
 
 export interface TeamBuilderProps {
   stores: Stores;
   onDone: (team: PokemonSet[], name: string) => void;
   onCancel: () => void;
+  /** Edit an EXISTING team interactively (roster overview → pick a mon → edit
+   *  its fields). Omit for a fresh 6-mon build. */
+  initialTeam?: PokemonSet[];
+  initialName?: string;
 }
 
 const TEAM_SIZE = 6;
@@ -45,6 +49,20 @@ const emptyDraft = (): Draft => ({
   sp: [0, 0, 0, 0, 0, 0],
   moves: [],
 });
+
+function draftFromSet(s: PokemonSet): Draft {
+  return {
+    species: s.species,
+    ability: s.ability,
+    item: s.item || undefined,
+    nature: s.nature || 'Hardy',
+    sp: [
+      spFromEv(s.evs.hp), spFromEv(s.evs.atk), spFromEv(s.evs.def),
+      spFromEv(s.evs.spa), spFromEv(s.evs.spd), spFromEv(s.evs.spe),
+    ],
+    moves: (s.moves ?? []).slice(0, 4),
+  };
+}
 
 function draftToPokemonSet(d: Draft): PokemonSet {
   const evs: Stats = {
@@ -90,8 +108,11 @@ function natureItems(): Array<{ label: string; value: string }> {
   });
 }
 
-export function TeamBuilder({ stores, onDone, onCancel }: TeamBuilderProps) {
-  const [team, setTeam] = useState<PokemonSet[]>([]);
+export function TeamBuilder({ stores, onDone, onCancel, initialTeam, initialName }: TeamBuilderProps) {
+  // Edit mode: we were handed an existing team to modify. Start on the roster
+  // overview rather than the linear "add 6 mons" flow.
+  const editMode = !!(initialTeam && initialTeam.length);
+  const [team, setTeam] = useState<PokemonSet[]>(initialTeam ? [...initialTeam] : []);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [step, setStep] = useState<Step>('species');
   const [input, setInput] = useState('');
@@ -101,8 +122,11 @@ export function TeamBuilder({ stores, onDone, onCancel }: TeamBuilderProps) {
   // type a multi-digit value (e.g. "3" then "2" → 32). Cleared by any
   // non-digit action (arrow move, +/-, backspace, Enter, field change).
   const [spreadBuffer, setSpreadBuffer] = useState('');
-  const [phase, setPhase] = useState<'building' | 'naming'>('building');
-  const [teamName, setTeamName] = useState('my-team');
+  const [phase, setPhase] = useState<'building' | 'naming' | 'roster'>(editMode ? 'roster' : 'building');
+  // When set, committing the in-progress mon REPLACES this roster slot (and
+  // returns to the roster) instead of appending.
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [teamName, setTeamName] = useState(initialName ?? 'my-team');
   const [message, setMessage] = useState('');
   // bump on field commit so TextInput remounts with cursor at end
   const [inputKey, setInputKey] = useState(0);
@@ -112,13 +136,15 @@ export function TeamBuilder({ stores, onDone, onCancel }: TeamBuilderProps) {
   // in Champions Reg M-A). When on, the same species or item can't appear
   // twice across the 6-mon team.
   const fmt = useMemo(loadFormat, []);
+  // Exclude the mon currently being edited so its OWN species/item don't read
+  // as "already taken" when re-committing unchanged.
   const takenSpeciesIds = useMemo(
-    () => fmt.speciesClause ? new Set(team.map(m => toId(m.species))) : new Set<string>(),
-    [team, fmt.speciesClause],
+    () => fmt.speciesClause ? new Set(team.filter((_, i) => i !== editingIndex).map(m => toId(m.species))) : new Set<string>(),
+    [team, fmt.speciesClause, editingIndex],
   );
   const takenItemIds = useMemo(
-    () => fmt.itemClause ? new Set(team.map(m => m.item).filter(Boolean).map(i => toId(i!))) : new Set<string>(),
-    [team, fmt.itemClause],
+    () => fmt.itemClause ? new Set(team.filter((_, i) => i !== editingIndex).map(m => m.item).filter(Boolean).map(i => toId(i!))) : new Set<string>(),
+    [team, fmt.itemClause, editingIndex],
   );
 
   // ---------------- per-step suggestion pool ----------------
@@ -137,7 +163,10 @@ export function TeamBuilder({ stores, onDone, onCancel }: TeamBuilderProps) {
     if (step.startsWith('move')) {
       if (!draft.species) return [];
       const q = input.toLowerCase();
-      const taken = new Set(draft.moves);
+      const moveIdx = parseInt(step.slice(4), 10);
+      // Exclude moves in the OTHER slots (no dupes), but keep THIS slot's current
+      // move so it shows as the top match and Enter can keep it.
+      const taken = new Set(draft.moves.filter((_, i) => i !== moveIdx));
       const learnset = getLearnset(draft.species).filter(m => !taken.has(m));
       if (!q) return learnset.slice(0, 8);
       const prefix: string[] = [];
@@ -155,6 +184,23 @@ export function TeamBuilder({ stores, onDone, onCancel }: TeamBuilderProps) {
 
   // Reset cursors when the active step changes.
   useMemo(() => { setHighlight(0); }, [suggestions.length, step]);
+
+  // Pre-fill the text input with the CURRENT field value when entering a text
+  // step, so editing an existing mon shows what's there and "Enter" KEEPS it
+  // (type to change). Fresh builds have empty draft fields → empty input, the
+  // original behaviour. SelectInput steps (ability/nature) default via
+  // `initialIndex` below instead.
+  useEffect(() => {
+    if (phase !== 'building') return;
+    if (step === 'species') setInput(draft.species ?? '');
+    else if (step === 'item') setInput(draft.item ?? '');
+    else if (step.startsWith('move')) setInput(draft.moves[parseInt(step.slice(4), 10)] ?? '');
+    else return;
+    setInputKey(k => k + 1);
+    // Intentionally keyed on step/phase only: re-prefill on step entry, not on
+    // every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, phase]);
 
   // ---------------- step transitions ----------------
   const commitField = (value: string) => {
@@ -201,7 +247,20 @@ export function TeamBuilder({ stores, onDone, onCancel }: TeamBuilderProps) {
   };
 
   const commitMon = (final: Draft) => {
-    const next = [...team, draftToPokemonSet(final)];
+    const set = draftToPokemonSet(final);
+    // Edit mode: replace the edited slot (or append a new one) and return to the
+    // roster overview — never auto-advance to the next mon.
+    if (editMode) {
+      setTeam(t => editingIndex != null ? t.map((m, i) => (i === editingIndex ? set : m)) : [...t, set]);
+      setMessage(editingIndex != null ? `Updated ${final.species}.` : `Added ${final.species}.`);
+      setEditingIndex(null);
+      setDraft(emptyDraft);
+      setSpreadCursor(0);
+      setStep('species');
+      setPhase('roster');
+      return;
+    }
+    const next = [...team, set];
     setTeam(next);
     setMessage(`Added ${final.species} (${next.length}/${TEAM_SIZE}).`);
     if (next.length >= TEAM_SIZE) {
@@ -214,10 +273,33 @@ export function TeamBuilder({ stores, onDone, onCancel }: TeamBuilderProps) {
     }
   };
 
+  // Roster actions (edit mode).
+  const startEdit = (idx: number) => {
+    setEditingIndex(idx);
+    setDraft(draftFromSet(team[idx]!));
+    setInput('');
+    setMessage('');
+    setSpreadCursor(0);
+    setStep('species');
+    setPhase('building');
+    setInputKey(k => k + 1);
+  };
+  const startAdd = () => {
+    setEditingIndex(null);
+    setDraft(emptyDraft());
+    setInput('');
+    setMessage('');
+    setSpreadCursor(0);
+    setStep('species');
+    setPhase('building');
+    setInputKey(k => k + 1);
+  };
+  const goSave = () => { setPhase('naming'); setInput(teamName); setInputKey(k => k + 1); };
+
   // ---------------- input handling ----------------
   useInput((ch, key) => {
-    // Naming phase uses its own input — let it run.
-    if (phase === 'naming') return;
+    // Naming + roster phases use their own SelectInput/TextInput — let them run.
+    if (phase === 'naming' || phase === 'roster') return;
 
     // Spread step uses arrows/+/- for direct manipulation, plus digit keys
     // for typing a value directly (e.g. "3" → 3, then "2" → 32).
@@ -316,7 +398,12 @@ export function TeamBuilder({ stores, onDone, onCancel }: TeamBuilderProps) {
         move2: 'move1',
         move3: 'move2',
       };
-      if (step === 'species') { onCancel(); return; }
+      if (step === 'species') {
+        // Edit mode: bail back to the roster; fresh build: cancel out entirely.
+        if (editMode) { setEditingIndex(null); setDraft(emptyDraft()); setPhase('roster'); }
+        else onCancel();
+        return;
+      }
       setStep(prev[step]);
       setInput('');
       setInputKey(k => k + 1);
@@ -343,7 +430,7 @@ export function TeamBuilder({ stores, onDone, onCancel }: TeamBuilderProps) {
 
   return (
     <Box flexDirection="column" padding={1}>
-      <Text bold color="cyan">Team Builder</Text>
+      <Text bold color="cyan">{editMode ? 'Team Editor' : 'Team Builder'}</Text>
       <Text dimColor>Enter commits · Esc backs out a step · Tab autocompletes</Text>
 
       <Box flexDirection="row" marginTop={1}>
@@ -360,7 +447,23 @@ export function TeamBuilder({ stores, onDone, onCancel }: TeamBuilderProps) {
 
         {/* Right: active step */}
         <Box flexDirection="column" flexGrow={1}>
-          {phase === 'naming' ? (
+          {phase === 'roster' ? (
+            <StepBlock label="Edit team" hint="↑/↓ pick · Enter · choose a Pokémon to edit, add one, or save">
+              <SelectInput
+                isFocused
+                items={[
+                  ...team.map((m, i) => ({ label: `Edit ${i + 1}. ${m.species} — ${m.nature}${m.item ? ` @ ${m.item}` : ''}`, value: `edit:${i}` })),
+                  ...(team.length < TEAM_SIZE ? [{ label: '+ Add a Pokémon', value: 'add' }] : []),
+                  { label: '✓ Save & exit', value: 'save' },
+                ]}
+                onSelect={item => {
+                  if (item.value === 'add') startAdd();
+                  else if (item.value === 'save') goSave();
+                  else startEdit(parseInt(item.value.split(':')[1]!, 10));
+                }}
+              />
+            </StepBlock>
+          ) : phase === 'naming' ? (
             <Box flexDirection="column">
               <Text bold>Save team as:</Text>
               <Box>
@@ -395,6 +498,7 @@ export function TeamBuilder({ stores, onDone, onCancel }: TeamBuilderProps) {
                 <SelectInput
                   items={abilityItems}
                   isFocused
+                  initialIndex={Math.max(0, abilityItems.findIndex(a => a.value === draft.ability))}
                   onSelect={item => {
                     setDraft(d => ({ ...d, ability: item.value as string }));
                     setStep('item');
@@ -412,6 +516,7 @@ export function TeamBuilder({ stores, onDone, onCancel }: TeamBuilderProps) {
               <SelectInput
                 items={natureSelect}
                 isFocused
+                initialIndex={Math.max(0, natureSelect.findIndex(n => n.value === draft.nature))}
                 onSelect={item => {
                   setDraft(d => ({ ...d, nature: item.value as string }));
                   setStep('spread');
@@ -433,7 +538,7 @@ export function TeamBuilder({ stores, onDone, onCancel }: TeamBuilderProps) {
               <Text dimColor>Stored as standard EVs (each SP × ~8) for the calc layer.</Text>
             </StepBlock>
           ) : (
-            <StepBlock label={`Move ${parseInt(step.slice(4), 10) + 1} of 4`} hint="Type to search learnset · Tab autocomplete · Enter commit · Esc back">
+            <StepBlock label={`Move ${parseInt(step.slice(4), 10) + 1} of 4`} hint="Enter keeps the shown move · type to change · Tab autocomplete · Esc back">
               <Text dimColor>Picked so far: {draft.moves.filter(Boolean).join(', ') || '(none)'}</Text>
               <InputLine inputKey={inputKey} value={input} setValue={setInput} onSubmit={commitField} />
               <SuggestionList items={suggestions} highlight={highlight} />
