@@ -26,7 +26,7 @@ import type { PokemonSet, OpponentEntry, FieldState, Match } from './types.js';
 import { ZERO_EVS, MAX_IVS } from './types.js';
 import { predictOffense, predictThreat, pikalyticsMoves } from './predictions.js';
 import { actualSpeed, effectiveSpeedRange } from './speed.js';
-import { getMove, toId, isSpreadMove, moveFlinchChance } from './data.js';
+import { getMove, getSpecies, toId, isSpreadMove, moveFlinchChance } from './data.js';
 import { getMegaOptions } from './gimmicks/mega.js';
 import { defaultOpponentSet } from './bring.js';
 import { maxHpFor } from './damage.js';
@@ -55,6 +55,8 @@ export interface SearchMyMon {
   status?: string;
   /** Focus Sash / Sturdy survival (my items are known, so prob is 0 or 1). */
   survival?: Survival;
+  /** Already under Leech Seed — the OPP search-index of the seeder (heals it). */
+  seededBy?: number;
 }
 export interface SearchOppMon {
   entry: OpponentEntry;
@@ -66,6 +68,11 @@ export interface SearchOppMon {
   status?: string;
   /** Focus Sash / Sturdy survival — probabilistic (from inference or usage %). */
   survival?: Survival;
+  /** A KNOWN-but-not-yet-brought mon, folded in so the opponent can switch it in
+   *  at the root. It is NOT counted as material until actually switched in. */
+  phantom?: boolean;
+  /** Already under Leech Seed — the MY search-index of the seeder (heals it). */
+  seededBy?: number;
 }
 export interface SearchInput {
   mine: SearchMyMon[];
@@ -92,6 +99,8 @@ export interface SearchPlay {
   spread?: boolean;
   /** True when `move` targets the user itself (e.g. Protect). Display omits target. */
   self?: boolean;
+  /** True when this play is a voluntary switch; `targetSpecies` is the incoming mon. */
+  switch?: boolean;
 }
 /** A named uncertainty that affects the outcome, with its probability. */
 export interface SearchRisk {
@@ -104,6 +113,54 @@ export interface SearchRisk {
   effect: string;
   /** True if this uncertainty, resolved against me, flips the expected verdict. */
   blocking: boolean;
+}
+
+/** A scope-derived note explaining a pivotal assumption behind the verdict
+ *  (e.g. a contingent-speed outspeed). `prob`, when present, is the chance the
+ *  assumption holds AGAINST me (so the user can weigh it). */
+export interface SearchAssumption {
+  text: string;
+  prob?: number;
+}
+
+/** A concrete damage cutpoint that flips the verdict for one exchange — stated
+ *  as an observation the user can check against the real roll this turn. */
+export interface SearchBreakpoint {
+  /** The mon the threshold is read against (my mon for 'survive', the foe for 'ko'). */
+  subject: string;
+  /** The move whose damage we're thresholding. */
+  move: string;
+  /** 'survive' — "if their hit does < thresholdHp we live"; 'ko' — "we OHKO
+   *  unless it invested enough bulk to push its effective HP past thresholdHp". */
+  direction: 'survive' | 'ko';
+  /** The HP% cutpoint (of the subject's max) that flips the outcome. */
+  thresholdHp: number;
+  /** What happens on the good-for-me side of the cutpoint. */
+  thenNote: string;
+  /** Short note on the spread investment behind the bad side, if known. */
+  spreadNote?: string;
+  /** Probability (0..1) the good-for-me side actually occurs, from pooled rolls. */
+  prob?: number;
+}
+
+/** Honest, scope-derived report of how much the search actually explored. The
+ *  `actionClasses` list is generated from the action kinds REALLY in the tree,
+ *  so the breadth wording never overclaims (no "switches" until they're nodes). */
+export interface SearchExplored {
+  depth: number;
+  /** My joint actions enumerated at the root this turn. */
+  myActions: number;
+  /** The opponent's joint replies enumerated at the root. */
+  oppActions: number;
+  /** Largest number of candidate opp spreads pooled behind any damage cell. */
+  spreads: number;
+  /** Damage-matrix combos built (mega plans per side multiplied). */
+  megaBranches: number;
+  /** Roll/survival regimes evaluated (expected + pessimistic + optimistic). */
+  regimes: number;
+  /** Action kinds present in the tree: 'attack' | 'spread' | 'protect' |
+   *  'switch' | 'tailwind' | 'trickroom'. Drives the breadth wording. */
+  actionClasses: string[];
 }
 
 /** A single lucky event that could flip a losing position. */
@@ -148,6 +205,19 @@ export interface SearchResult {
   allOppRevealed: boolean;
   /** Named uncertainties (survival items, swing rolls, unrevealed bench). */
   risks: SearchRisk[];
+  /** The opponent's minimizing reply to my recommended joint — "how they beat
+   *  us". Populated whenever an opp reply exists (most useful when losing). */
+  oppLine?: SearchPlay[];
+  /** Pivotal assumptions behind the verdict (contingent speed, etc.). */
+  assumptions?: SearchAssumption[];
+  /** Concrete damage cutpoints that flip the verdict this turn. */
+  breakpoints?: SearchBreakpoint[];
+  /** Honest breadth-of-search report for the confidence chip. */
+  explored?: SearchExplored;
+  /** True when the opponent's spread/item has been refined from observed damage
+   *  (inference produced candidates) — surfaced so the user knows the read is
+   *  data-driven, not a prior. */
+  adapted?: boolean;
   /** Dice-roll outs analysis — only present when verdict === 'losing' && !forced
    *  and the optimistic regime finds a winning path. */
   hailMary?: HailMary;
@@ -160,10 +230,37 @@ export interface SearchResult {
 const WIN = 100_000;          // terminal magnitude; faster wins score higher
 const MATERIAL = 1_000;       // per-mon material weight (dominates HP)
 const MAX_ACTIVE = 2;
-// Sentinel target meaning "spread move — hit every live foe" (vs a foe index).
-const SPREAD = -1;
-// Sentinel target meaning "use Protect/Detect/etc. on self" (vs a foe index).
-const PROTECT = -2;
+// Non-attack target sentinels (vs a foe index ≥ 0). Small negatives are single
+// actions; switches occupy a separate range below SWITCH_BASE so a benched-index
+// encoding never collides with them.
+const SPREAD = -1;        // spread move — hit every live foe
+const PROTECT = -2;       // Protect/Detect/etc. on self
+const SET_TAILWIND = -3;  // set Tailwind (order field move; no damage)
+const SET_TRICKROOM = -4; // set/flip Trick Room (order field move; no damage)
+const SET_BOOST = -5;     // setup move (Calm Mind / Swords Dance …) — self-boost
+// Ranged sentinel blocks that each carry an index, kept disjoint so a code is
+// unambiguous. Switches: [-19,-10] → bench idx. Leech Seed: [-29,-20] → foe idx.
+// Baton Pass: ≤ -30 → bench idx (switch that passes boosts). All ROOT-ply only.
+const SWITCH_BASE = -10;  // switch → bench idx `SWITCH_BASE - target`
+const LEECH_BASE = -20;   // Leech Seed → foe idx `LEECH_BASE - target`
+const BATON_BASE = -30;   // Baton Pass → bench idx `BATON_BASE - target`
+function isSwitchTarget(t: number): boolean { return t <= SWITCH_BASE && t > LEECH_BASE; }
+function switchBenchIdx(t: number): number { return SWITCH_BASE - t; }
+function switchCode(benchIdx: number): number { return SWITCH_BASE - benchIdx; }
+function isLeechTarget(t: number): boolean { return t <= LEECH_BASE && t > BATON_BASE; }
+function leechFoeIdx(t: number): number { return LEECH_BASE - t; }
+function leechCode(foeIdx: number): number { return LEECH_BASE - foeIdx; }
+function isBatonTarget(t: number): boolean { return t <= BATON_BASE; }
+function batonBenchIdx(t: number): number { return BATON_BASE - t; }
+function batonCode(benchIdx: number): number { return BATON_BASE - benchIdx; }
+function isFieldTarget(t: number): boolean { return t === SET_TAILWIND || t === SET_TRICKROOM; }
+// Benched live team-indices a side can switch INTO (not on the field, hp > 0).
+function benchSwitchTargets(active: number[], hp: number[], n: number): number[] {
+  const onField = new Set(active);
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) if ((hp[i] ?? 0) > 0 && !onField.has(i)) out.push(i);
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // Internal flat model (indices into precomputed arrays)
@@ -172,11 +269,20 @@ const PROTECT = -2;
 // Damage as % of target max, at three roll points so the tree can be evaluated
 // under different regimes without rebuilding the (expensive) matrix. Roll risk
 // is derived from the dmgMin..dmgMax envelope vs the target's HP at use time.
-interface Cell { dmgMin: number; dmgMid: number; dmgMax: number; move: string; priority: number; multiHit: boolean; koRolls: number[] }
+interface Cell { dmgMin: number; dmgMid: number; dmgMax: number; move: string; priority: number; multiHit: boolean; koRolls: number[]; candidates: number; physical: boolean }
 
 /** A spread move option for one of my mons: the move plus its (already
  *  spread-reduced) damage vs each opp index, at min/mid/max rolls. */
-interface SpreadOpt { move: string; priority: number; dmgMin: number[]; dmgMid: number[]; dmgMax: number[] }
+interface SpreadOpt { move: string; priority: number; dmgMin: number[]; dmgMid: number[]; dmgMax: number[]; physical: boolean }
+
+/** Live stat-stage boosts (−6..+6) per stat. */
+type BoostMap = Partial<Record<'atk' | 'def' | 'spa' | 'spd' | 'spe', number>>;
+
+// True for a physical move (uses Atk/Def); false = special (SpA/SpD). Status
+// moves are physical=false but never deal damage so it's moot.
+function isPhysicalMove(move: string): boolean {
+  return ((getMove(move) as { category?: string } | undefined)?.category) === 'Physical';
+}
 
 // Which roll point each side uses. "pessimistic"/"optimistic" are from MY
 // perspective: pessimistic = my low rolls + opp high rolls (+ opp survives);
@@ -231,7 +337,83 @@ interface Tables {
   oppSpreadActors: Set<number>; // indices of opps that have a spread option
   myProtectMove: (string | null)[]; // protect move name per my mon, null = can't protect
   oppProtectMove: (string | null)[]; // protect move name per opp (from knownMoves), null = can't protect
+  // Order-affecting field moves a mon can cast (null = doesn't have it). These
+  // change turn order, not damage, so the live flags live in State; here we only
+  // record CAPABILITY (who could set it).
+  myTailwindMove: (string | null)[];
+  oppTailwindMove: (string | null)[];
+  myTrickRoomMove: (string | null)[];
+  oppTrickRoomMove: (string | null)[];
+  // Leech Seed capability (null = doesn't know it) + max HP per mon (for the
+  // drain→heal conversion across differing HP totals) + Grass immunity flags.
+  myLeechMove: (string | null)[];
+  oppLeechMove: (string | null)[];
+  myMaxHp: number[];
+  oppMaxHp: number[];
+  myGrass: boolean[];
+  oppGrass: boolean[];
+  // Boost stages baked into the damage cells (= the input boosts). Dynamic
+  // boosts during the search scale damage by the ratio vs these.
+  myBaked: BoostMap[];
+  oppBaked: BoostMap[];
+  // Setup-move capability: the self-boost map a mon applies if it sets up
+  // (Calm Mind / Swords Dance / …), + the move name; null = no setup move.
+  mySetup: (BoostMap | null)[];
+  oppSetup: (BoostMap | null)[];
+  mySetupMove: (string | null)[];
+  oppSetupMove: (string | null)[];
+  // Baton Pass capability (passes boosts to a switch-in).
+  myBatonMove: (string | null)[];
+  oppBatonMove: (string | null)[];
+  // Speed Boost ability (+1 Spe each EOT while active).
+  mySpeedBoost: boolean[];
+  oppSpeedBoost: boolean[];
   field: FieldState;
+}
+
+// Self-boost effects for the setup moves we model. Drops are included where they
+// matter (Shell Smash) so the trade-off is honest.
+const SETUP_MOVES: Record<string, BoostMap> = {
+  swordsdance: { atk: 2 },
+  howl: { atk: 1 },
+  nastyplot: { spa: 2 },
+  tailglow: { spa: 3 },
+  calmmind: { spa: 1, spd: 1 },
+  takeheart: { spa: 1, spd: 1 },
+  dragondance: { atk: 1, spe: 1 },
+  bulkup: { atk: 1, def: 1 },
+  coil: { atk: 1, def: 1 },
+  workup: { atk: 1, spa: 1 },
+  growth: { atk: 1, spa: 1 },
+  irondefense: { def: 2 },
+  acidarmor: { def: 2 },
+  amnesia: { spd: 2 },
+  agility: { spe: 2 },
+  rockpolish: { spe: 2 },
+  quiverdance: { spa: 1, spd: 1, spe: 1 },
+  victorydance: { atk: 1, def: 1, spe: 1 },
+  clangoroussoul: { atk: 1, def: 1, spa: 1, spd: 1, spe: 1 },
+  shellsmash: { atk: 2, spa: 2, spe: 2, def: -1, spd: -1 },
+};
+// The best setup move a mon knows (by total positive boost), + its boost map.
+function findSetupMove(moves: string[]): { move: string; boosts: BoostMap } | null {
+  let best: { move: string; boosts: BoostMap; score: number } | null = null;
+  for (const mv of moves) {
+    const b = SETUP_MOVES[toId(mv)];
+    if (!b) continue;
+    const score = (['atk', 'def', 'spa', 'spd', 'spe'] as const).reduce((a, k) => a + Math.max(0, b[k] ?? 0), 0);
+    if (!best || score > best.score) best = { move: mv, boosts: b, score };
+  }
+  return best ? { move: best.move, boosts: best.boosts } : null;
+}
+function hasSpeedBoost(ability: string | null | undefined): boolean {
+  return !!ability && toId(ability) === 'speedboost';
+}
+
+// True for a Grass-type species (immune to Leech Seed).
+function isGrassType(species: string): boolean {
+  const sp = getSpecies(species) as { types?: string[] } | undefined;
+  return (sp?.types ?? []).includes('Grass');
 }
 
 // Single-user protection moves (user fully blocks incoming damage for one turn).
@@ -242,6 +424,9 @@ function isProtectMove(move: string): boolean {
 }
 function findProtectMove(moves: string[]): string | null {
   return moves.find(m => isProtectMove(m)) ?? null;
+}
+function findMoveId(moves: string[], id: string): string | null {
+  return moves.find(m => toId(m) === id) ?? null;
 }
 
 // Best spread move for my mon (by total damage across the current opponents),
@@ -267,7 +452,7 @@ function bestSpread(
       defenderBoosts: opp.boosts, defenderStatus: opp.status,
     })));
     const opt: SpreadOpt = {
-      move: mv, priority: movePriority(mv),
+      move: mv, priority: movePriority(mv), physical: isPhysicalMove(mv),
       dmgMin: cells.map(c => c.dmgMin),
       dmgMid: cells.map(c => c.dmgMid),
       dmgMax: cells.map(c => c.dmgMax),
@@ -305,7 +490,7 @@ function bestSpreadOpp(
       defenderBoosts: m.boosts, defenderStatus: m.status,
     })));
     const so: SpreadOpt = {
-      move: mv, priority: movePriority(mv),
+      move: mv, priority: movePriority(mv), physical: isPhysicalMove(mv),
       dmgMin: cells.map(c => c.dmgMin),
       dmgMid: cells.map(c => c.dmgMid),
       dmgMax: cells.map(c => c.dmgMax),
@@ -323,6 +508,44 @@ interface State {
   oppActive: number[];
   myProtectStreak: number[];   // consecutive protect turns per my mon (0 = not protecting last turn)
   oppProtectStreak: number[];
+  /** Per opp index: has this mon been revealed/brought? True for everything we've
+   *  seen; false for an UNREVEALED phantom until it's switched in. Gates opp
+   *  material so phantoms don't count until deployed. */
+  oppSeen: boolean[];
+  /** Order-affecting field flags — mutable because Tailwind / Trick Room can be
+   *  SET mid-search (they change turn order, not damage). Seeded from the live
+   *  field; a field action flips them for subsequent plies. */
+  trickRoom: boolean;
+  myTailwind: boolean;
+  theirTailwind: boolean;
+  /** Turns remaining for each timed order-effect. Undefined = duration unknown →
+   *  the effect persists for the search horizon (no expiry). A known count ticks
+   *  down each ply and clears the flag at 0 — so the search can STALL an effect
+   *  out (e.g. Protect until the opponent's Tailwind / Trick Room ends). */
+  trickRoomTurns?: number;
+  myTailwindTurns?: number;
+  theirTailwindTurns?: number;
+  /** Leech Seed: per mon, the seeder's index ON THE OTHER SIDE (or null). The
+   *  seeded mon drains 1/8 each EOT while active; the seeder heals. Removed when
+   *  the seeded mon switches out. */
+  mySeeded: (number | null)[];
+  oppSeeded: (number | null)[];
+  /** Live TOTAL stat-stage boosts per mon, seeded from the input boosts (= the
+   *  level baked into the damage cells). Setup moves add to these, Speed Boost
+   *  bumps Spe each EOT, Baton Pass transfers them — and damage/speed scale by
+   *  the ratio vs the baked level (`Tables.my/oppBaked`). */
+  myBoost: BoostMap[];
+  oppBoost: BoostMap[];
+}
+
+// Add boost stages onto a map (clamped to ±6), returning a NEW map.
+function addBoosts(base: BoostMap, add: BoostMap): BoostMap {
+  const out: BoostMap = { ...base };
+  for (const k of ['atk', 'def', 'spa', 'spd', 'spe'] as const) {
+    const v = (out[k] ?? 0) + (add[k] ?? 0);
+    if (v !== 0) out[k] = Math.max(-6, Math.min(6, v));
+  }
+  return out;
 }
 
 // Gimmick flags plus the live boosts/status that shape the damage roll. Keys
@@ -340,7 +563,7 @@ interface CellOpts {
 // midpoint (the old representative value); min/max = the honest envelope edges
 // (worst/best roll across surviving candidate spreads).
 function cellFrom(c: ReturnType<typeof predictOffense>): Cell {
-  if (!c) return { dmgMin: 0, dmgMid: 0, dmgMax: 0, move: '', priority: 0, multiHit: false, koRolls: [] };
+  if (!c) return { dmgMin: 0, dmgMid: 0, dmgMax: 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false };
   const lo = c.likelyMinPercent ?? c.minPercent;
   const hi = c.likelyMaxPercent ?? c.maxPercent;
   return {
@@ -351,6 +574,8 @@ function cellFrom(c: ReturnType<typeof predictOffense>): Cell {
     priority: movePriority(c.move),
     multiHit: isMultiHit(c.move),
     koRolls: c.percentRolls ?? [],
+    candidates: c.candidatesConsidered ?? 0,
+    physical: isPhysicalMove(c.move),
   };
 }
 function cellFromOffense(attacker: PokemonSet, defender: OpponentEntry, field: FieldState, o: CellOpts = {}): Cell {
@@ -362,10 +587,32 @@ function cellFromThreat(attacker: OpponentEntry, defender: PokemonSet, field: Fi
 
 // Spe stat-stage multiplier. +n → (2+n)/2, −n → 2/(2+|n|). Folded into the
 // base speed used for turn order (a stat-level change, like nature/EVs).
-function speStageMult(stage: number | undefined): number {
+// Stat-stage multiplier for a regular stat (Atk/Def/SpA/SpD/Spe): +n → (2+n)/2,
+// −n → 2/(2+|n|). Damage scales ~linearly with Atk and ~inversely with Def, so a
+// boost's effect on a precomputed cell is the RATIO of the new/old multipliers.
+function statStageMult(stage: number | undefined): number {
   const n = stage ?? 0;
   if (n === 0) return 1;
   return n > 0 ? (2 + n) / 2 : 2 / (2 - n);
+}
+const speStageMult = statStageMult; // back-compat alias (Spe uses the same curve)
+
+// Damage scale factor applied to a precomputed cell when the live boost stage
+// DIFFERS from the level baked into the cell. Offensive (Atk/SpA) scales up with
+// the attacker's stage; defensive (Def/SpD) scales down with the defender's. The
+// ratio is exactly 1 when no boost changed, so positions without setup are
+// numerically identical to before. An approximation (ignores the formula's +2 /
+// rounding) but well within the roll envelope the search already collapses.
+function boostDamageScale(
+  attacker: BoostMap | undefined, attackerBaked: BoostMap | undefined,
+  defender: BoostMap | undefined, defenderBaked: BoostMap | undefined,
+  physical: boolean,
+): number {
+  const off = physical ? 'atk' : 'spa';
+  const def = physical ? 'def' : 'spd';
+  const offScale = statStageMult(attacker?.[off]) / statStageMult(attackerBaked?.[off]);
+  const defScale = statStageMult(defenderBaked?.[def]) / statStageMult(defender?.[def]);
+  return offScale * defScale;
 }
 
 function movePriority(move: string): number {
@@ -433,7 +680,7 @@ function oppMegaInfo(species: string): { forme: string; stone: string } | null {
 // impossible — and assuming one anyway yields misleading verdicts (an Absol
 // holding Scope Lens can't become Mega Absol). When the item is still unknown
 // (no commit, no candidates) we keep the worst-case mega branch.
-function oppCanMega(entry: OpponentEntry): boolean {
+export function oppCanMega(entry: OpponentEntry): boolean {
   const info = oppMegaInfo(entry.species);
   if (!info) return false;
   if (entry.itemConsumed) return false;          // consumed a (non-stone) held item
@@ -515,6 +762,29 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     // Opp protect: only offer it in the search when the opp has REVEALED a
     // protect variant (opp-conservatism rule — we don't model unseen moves).
     oppProtectMove: opp.map(o => findProtectMove(o.entry.knownMoves)),
+    // Order field moves. Mine come from the real moveset; the opp's only from
+    // REVEALED moves (same opp-conservatism — we don't assume an unseen Tailwind
+    // / Trick Room).
+    myTailwindMove: mine.map(m => findMoveId(m.set.moves ?? [], 'tailwind')),
+    oppTailwindMove: opp.map(o => findMoveId(o.entry.knownMoves, 'tailwind')),
+    myTrickRoomMove: mine.map(m => findMoveId(m.set.moves ?? [], 'trickroom')),
+    oppTrickRoomMove: opp.map(o => findMoveId(o.entry.knownMoves, 'trickroom')),
+    myLeechMove: mine.map(m => findMoveId(m.set.moves ?? [], 'leechseed')),
+    oppLeechMove: opp.map(o => findMoveId(o.entry.knownMoves, 'leechseed')),
+    myMaxHp: mine.map(m => maxHpFor(m.set)),
+    oppMaxHp: opp.map(o => maxHpFor(o.entry.candidates?.[0] ?? defaultOpponentSet(o.entry, 50))),
+    myGrass: mine.map(m => isGrassType(m.set.species)),
+    oppGrass: opp.map(o => isGrassType(o.entry.species)),
+    myBaked: mine.map(m => ({ ...(m.boosts as BoostMap | undefined) })),
+    oppBaked: opp.map(o => ({ ...(o.boosts as BoostMap | undefined) })),
+    mySetup: mine.map(m => findSetupMove(m.set.moves ?? [])?.boosts ?? null),
+    oppSetup: opp.map(o => findSetupMove(o.entry.knownMoves)?.boosts ?? null),
+    mySetupMove: mine.map(m => findSetupMove(m.set.moves ?? [])?.move ?? null),
+    oppSetupMove: opp.map(o => findSetupMove(o.entry.knownMoves)?.move ?? null),
+    myBatonMove: mine.map(m => findMoveId(m.set.moves ?? [], 'batonpass')),
+    oppBatonMove: opp.map(o => findMoveId(o.entry.knownMoves, 'batonpass')),
+    mySpeedBoost: mine.map(m => hasSpeedBoost(m.set.ability)),
+    oppSpeedBoost: opp.map(o => hasSpeedBoost(o.entry.ability)),
     field: input.field,
   };
 }
@@ -531,6 +801,17 @@ function initialState(input: SearchInput): State {
     oppActive: oppActive.slice(0, MAX_ACTIVE),
     myProtectStreak: input.mine.map(() => 0),
     oppProtectStreak: input.opp.map(() => 0),
+    oppSeen: input.opp.map(o => !o.phantom),
+    trickRoom: !!input.field.trickRoom,
+    myTailwind: !!input.field.myTailwind,
+    theirTailwind: !!input.field.theirTailwind,
+    trickRoomTurns: input.field.trickRoomTurns,
+    myTailwindTurns: input.field.myTailwindTurns,
+    theirTailwindTurns: input.field.theirTailwindTurns,
+    mySeeded: input.mine.map(m => m.seededBy ?? null),
+    oppSeeded: input.opp.map(o => o.seededBy ?? null),
+    myBoost: input.mine.map(m => ({ ...(m.boosts as BoostMap | undefined) })),
+    oppBoost: input.opp.map(o => ({ ...(o.boosts as BoostMap | undefined) })),
   };
 }
 
@@ -547,10 +828,10 @@ function effSpeed(base: number, tailwind: boolean, paralyzed: boolean): number {
 
 // Does opp active `oj` move before my active `mi` this turn (ignoring move
 // priority — used for "can it KO/flinch me before I act"). Trick Room inverts.
-function oppOutspeeds(t: Tables, oj: number, mi: number): boolean {
-  const myS = effSpeed(t.mySpeed[mi]!, !!t.field.myTailwind, t.myPar[mi]!);
-  const oppS = effSpeed(t.oppSpeed[oj]!, !!t.field.theirTailwind, t.oppPar[oj]!);
-  return t.field.trickRoom ? oppS < myS : oppS > myS;
+function oppOutspeeds(t: Tables, s: State, oj: number, mi: number): boolean {
+  const myS = effSpeed(t.mySpeed[mi]!, s.myTailwind, t.myPar[mi]!);
+  const oppS = effSpeed(t.oppSpeed[oj]!, s.theirTailwind, t.oppPar[oj]!);
+  return s.trickRoom ? oppS < myS : oppS > myS;
 }
 
 interface Acting { side: 'mine' | 'opp'; actor: number; target: number; priority: number; speed: number }
@@ -566,12 +847,47 @@ function resolveTurn(
 ): State {
   const myHp = s.myHp.slice();
   const oppHp = s.oppHp.slice();
-  const tr = !!t.field.trickRoom;
-  const r = pass.regime;
+  const tr = s.trickRoom;            // THIS turn's order uses the current flags;
+  const r = pass.regime;             // a Tailwind/TR set this turn applies NEXT ply.
   // Survival charges available this turn (Focus Sash / Sturdy), consumed on
   // first use. Only meaningful from full HP — enforced at apply time.
   const oppSurv = pass.survOpp.slice();
   const mySurv = pass.survMy.slice();
+
+  // Voluntary switches resolve BEFORE any move (standard VGC ordering). Build
+  // out→in maps and the post-switch active slots: a switching mon neither acts
+  // nor is hit on its old index; the incoming mon occupies that slot and takes
+  // any hit aimed there (no free dodge in doubles — switching into a resist is
+  // the value, not avoiding the slot).
+  // Switches AND Baton Pass both swap a slot to a bench mon; Baton Pass also
+  // PASSES the outgoing mon's boosts (handled at end of turn). Both populate the
+  // out→in maps so the active swap + hit-redirect work identically.
+  const mySwitchIn = new Map<number, number>();
+  const oppSwitchIn = new Map<number, number>();
+  const myBaton = new Map<number, number>();   // out → in, only the Baton Pass ones
+  const oppBaton = new Map<number, number>();
+  for (const [actor, target] of myTargets) {
+    if (isSwitchTarget(target)) mySwitchIn.set(actor, switchBenchIdx(target));
+    else if (isBatonTarget(target)) { const b = batonBenchIdx(target); mySwitchIn.set(actor, b); myBaton.set(actor, b); }
+  }
+  for (const [actor, target] of oppTargets) {
+    if (isSwitchTarget(target)) oppSwitchIn.set(actor, switchBenchIdx(target));
+    else if (isBatonTarget(target)) { const b = batonBenchIdx(target); oppSwitchIn.set(actor, b); oppBaton.set(actor, b); }
+  }
+  const myActiveNow = s.myActive.map(i => mySwitchIn.get(i) ?? i);
+  const oppActiveNow = s.oppActive.map(i => oppSwitchIn.get(i) ?? i);
+  // A hit aimed at a mon that switched out lands on its replacement instead.
+  const redirect = (target: number, defSwitch: Map<number, number>) => defSwitch.get(target) ?? target;
+
+  // Effective speed including the DYNAMIC Spe stage (Speed Boost / Dragon Dance):
+  // scale the baked speed by the ratio of current vs baked Spe-stage multiplier.
+  const mySpe = (i: number) => t.mySpeed[i]! * (statStageMult(s.myBoost[i]?.spe) / statStageMult(t.myBaked[i]?.spe));
+  const oppSpe = (j: number) => t.oppSpeed[j]! * (statStageMult(s.oppBoost[j]?.spe) / statStageMult(t.oppBaked[j]?.spe));
+  // Scale a precomputed roll by the live-vs-baked boost ratio (1 when unchanged).
+  const myDmg = (actor: number, tgt: number, raw: number, physical: boolean) =>
+    raw * boostDamageScale(s.myBoost[actor], t.myBaked[actor], s.oppBoost[tgt], t.oppBaked[tgt], physical);
+  const oppDmg = (actor: number, tgt: number, raw: number, physical: boolean) =>
+    raw * boostDamageScale(s.oppBoost[actor], t.oppBaked[actor], s.myBoost[tgt], t.myBaked[tgt], physical);
 
   // Build protected sets: a mon using PROTECT is immune to all damage this turn.
   const myProtected = new Set<number>();
@@ -589,18 +905,23 @@ function resolveTurn(
     else hp[idx] = Math.max(0, after);
   };
 
+  // Switch / field / Leech Seed / setup / Baton Pass deal no DIRECT damage.
+  const nonAttack = (target: number) =>
+    isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isFieldTarget(target) || target === SET_BOOST;
   const actings: Acting[] = [];
   for (const [actor, target] of myTargets) {
+    if (nonAttack(target)) continue;
     const priority = target === SPREAD ? t.mySpread[actor]!.priority
       : target === PROTECT ? movePriority(t.myProtectMove[actor] ?? 'Protect')
       : t.off[actor]![target]!.priority;
-    actings.push({ side: 'mine', actor, target, priority, speed: effSpeed(t.mySpeed[actor]!, !!t.field.myTailwind, t.myPar[actor]!) });
+    actings.push({ side: 'mine', actor, target, priority, speed: effSpeed(mySpe(actor), s.myTailwind, t.myPar[actor]!) });
   }
   for (const [actor, target] of oppTargets) {
+    if (nonAttack(target)) continue;
     const priority = target === SPREAD ? t.oppSpread[actor]!.priority
       : target === PROTECT ? movePriority(t.oppProtectMove[actor] ?? 'Protect')
       : t.thr[actor]![target]!.priority;
-    actings.push({ side: 'opp', actor, target, priority, speed: effSpeed(t.oppSpeed[actor]!, !!t.field.theirTailwind, t.oppPar[actor]!) });
+    actings.push({ side: 'opp', actor, target, priority, speed: effSpeed(oppSpe(actor), s.theirTailwind, t.oppPar[actor]!) });
   }
 
   // Priority first (higher acts first), then speed (Trick Room inverts speed).
@@ -614,40 +935,42 @@ function resolveTurn(
       if (myHp[act.actor]! <= 0) continue;          // KO'd before acting
       if (act.target === PROTECT) continue;           // mon uses Protect — no damage dealt
       if (act.target === SPREAD) {
-        // Spread move — hit every live, unprotected foe ON THE FIELD (s.oppActive,
-        // not the whole team: a benched mon isn't in range of a spread move).
+        // Spread move — hit every live, unprotected foe ON THE FIELD AFTER switches
+        // (oppActiveNow; a benched mon isn't in range of a spread move).
         const sp = t.mySpread[act.actor]!;
         const dmg = mySpreadRoll(sp, r);
-        for (const foe of s.oppActive) {
+        for (const foe of oppActiveNow) {
           if (oppHp[foe]! <= 0) continue;
           if (oppProtected.has(foe)) continue;       // opp protecting this turn
-          apply(oppHp, foe, dmg[foe] ?? 0, oppSurv, false); // spread moves aren't multi-hit
+          apply(oppHp, foe, myDmg(act.actor, foe, dmg[foe] ?? 0, sp.physical), oppSurv, false);
         }
         continue;
       }
-      if (oppProtected.has(act.target)) continue;    // target protecting → fizzle
-      if (oppHp[act.target]! <= 0) continue;        // target already down → fizzle
-      const oc = t.off[act.actor]![act.target]!;
-      apply(oppHp, act.target, myRoll(oc, r), oppSurv, oc.multiHit);
+      const oTgt = redirect(act.target, oppSwitchIn); // hit the replacement if the target switched
+      if (oppProtected.has(oTgt)) continue;          // target protecting → fizzle
+      if (oppHp[oTgt]! <= 0) continue;               // target already down → fizzle
+      const oc = t.off[act.actor]![oTgt]!;
+      apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r), oc.physical), oppSurv, oc.multiHit);
     } else {
       if (oppHp[act.actor]! <= 0) continue;
       if (act.target === PROTECT) continue;           // opp mon uses Protect
       if (act.target === SPREAD) {
         // Opp spread move — hit every live, unprotected mon of mine ON THE FIELD
-        // (s.myActive, not the whole team: my bench isn't in range).
+        // AFTER switches (myActiveNow; my bench isn't in range).
         const sp = t.oppSpread[act.actor]!;
         const dmg = oppSpreadRoll(sp, r);
-        for (const me of s.myActive) {
+        for (const me of myActiveNow) {
           if (myHp[me]! <= 0) continue;
           if (myProtected.has(me)) continue;          // my mon protecting this turn
-          apply(myHp, me, dmg[me] ?? 0, mySurv, false); // spread moves aren't multi-hit
+          apply(myHp, me, oppDmg(act.actor, me, dmg[me] ?? 0, sp.physical), mySurv, false);
         }
         continue;
       }
-      if (myProtected.has(act.target)) continue;     // my mon protecting → fizzle
-      if (myHp[act.target]! <= 0) continue;
-      const tc = t.thr[act.actor]![act.target]!;
-      apply(myHp, act.target, oppRoll(tc, r), mySurv, tc.multiHit);
+      const mTgt = redirect(act.target, mySwitchIn);  // hit the replacement if my target switched
+      if (myProtected.has(mTgt)) continue;            // my mon protecting → fizzle
+      if (myHp[mTgt]! <= 0) continue;
+      const tc = t.thr[act.actor]![mTgt]!;
+      apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r), tc.physical), mySurv, tc.multiHit);
     }
   }
 
@@ -662,21 +985,110 @@ function resolveTurn(
     oppProtectStreak[actor] = target === PROTECT ? (oppProtectStreak[actor]! + 1) : 0;
   }
 
-  // Refill active slots from the bench after KOs (heuristic replacement).
-  const myActive = refill(s.myActive, myHp, t.myN, t.off, oppHp, 'mine');
-  const oppActive = refill(s.oppActive, oppHp, t.oppN, t.thr, myHp, 'opp');
-  return { myHp, oppHp, myActive, oppActive, myProtectStreak, oppProtectStreak };
+  // A phantom (unrevealed) opp mon that switched in is now revealed/brought —
+  // flip its seen flag so it counts as material from here on.
+  const oppSeen = s.oppSeen.slice();
+  for (const inIdx of oppSwitchIn.values()) oppSeen[inIdx] = true;
+
+  // Order field effects: first TICK DOWN conditions that were active at the start
+  // of this turn (clearing at 0 — this is what lets the search stall an effect
+  // out), THEN apply this turn's sets with a fresh full duration (no same-turn
+  // tick). A known turn count expires the effect; an unknown count (undefined)
+  // persists for the horizon. Tailwind sets the caster's flag (4 turns); Trick
+  // Room toggles the shared flag (5 turns when turned on, so two TRs cancel).
+  const tick = (active: boolean, turns: number | undefined): [boolean, number | undefined] => {
+    if (active && turns != null) { const t = turns - 1; return t <= 0 ? [false, undefined] : [true, t]; }
+    return [active, turns];
+  };
+  let [trickRoom, trickRoomTurns] = tick(s.trickRoom, s.trickRoomTurns);
+  let [myTailwind, myTailwindTurns] = tick(s.myTailwind, s.myTailwindTurns);
+  let [theirTailwind, theirTailwindTurns] = tick(s.theirTailwind, s.theirTailwindTurns);
+  for (const [, target] of myTargets) {
+    if (target === SET_TAILWIND) { myTailwind = true; myTailwindTurns = 4; }
+    else if (target === SET_TRICKROOM) { trickRoom = !trickRoom; trickRoomTurns = trickRoom ? 5 : undefined; }
+  }
+  for (const [, target] of oppTargets) {
+    if (target === SET_TAILWIND) { theirTailwind = true; theirTailwindTurns = 4; }
+    else if (target === SET_TRICKROOM) { trickRoom = !trickRoom; trickRoomTurns = trickRoom ? 5 : undefined; }
+  }
+
+  // Leech Seed. A seed is removed when the seeded mon leaves the field (switch);
+  // a switched-in mon arrives unseeded. New seeds cast this turn land on the
+  // (post-switch) target unless it's Grass / already seeded, and drain THIS turn.
+  const mySeeded = s.mySeeded.slice();
+  const oppSeeded = s.oppSeeded.slice();
+  for (const out of mySwitchIn.keys()) mySeeded[out] = null;
+  for (const inn of mySwitchIn.values()) mySeeded[inn] = null;
+  for (const out of oppSwitchIn.keys()) oppSeeded[out] = null;
+  for (const inn of oppSwitchIn.values()) oppSeeded[inn] = null;
+  for (const [actor, target] of myTargets) {
+    if (!isLeechTarget(target)) continue;
+    const foe = redirect(leechFoeIdx(target), oppSwitchIn);
+    if ((oppHp[foe] ?? 0) > 0 && oppSeeded[foe] == null && !t.oppGrass[foe]) oppSeeded[foe] = actor;
+  }
+  for (const [actor, target] of oppTargets) {
+    if (!isLeechTarget(target)) continue;
+    const foe = redirect(leechFoeIdx(target), mySwitchIn);
+    if ((myHp[foe] ?? 0) > 0 && mySeeded[foe] == null && !t.myGrass[foe]) mySeeded[foe] = actor;
+  }
+  // End-of-turn drain (1/8 of the seeded mon's max) + heal the seeder (same
+  // ABSOLUTE HP, re-expressed as the seeder's %). Only ACTIVE seeded mons drain.
+  const LEECH_PCT = 100 / 8;
+  for (const mi of myActiveNow) {
+    if ((myHp[mi] ?? 0) <= 0 || mySeeded[mi] == null) continue;
+    const drain = Math.min(LEECH_PCT, myHp[mi]!);
+    myHp[mi]! -= drain;
+    const seeder = mySeeded[mi]!;
+    if (oppActiveNow.includes(seeder) && (oppHp[seeder] ?? 0) > 0) {
+      oppHp[seeder] = Math.min(100, oppHp[seeder]! + drain * (t.myMaxHp[mi]! / (t.oppMaxHp[seeder] || 1)));
+    }
+  }
+  for (const oj of oppActiveNow) {
+    if ((oppHp[oj] ?? 0) <= 0 || oppSeeded[oj] == null) continue;
+    const drain = Math.min(LEECH_PCT, oppHp[oj]!);
+    oppHp[oj]! -= drain;
+    const seeder = oppSeeded[oj]!;
+    if (myActiveNow.includes(seeder) && (myHp[seeder] ?? 0) > 0) {
+      myHp[seeder] = Math.min(100, myHp[seeder]! + drain * (t.oppMaxHp[oj]! / (t.myMaxHp[seeder] || 1)));
+    }
+  }
+
+  // Boost bookkeeping. A mon that LEAVES the field clears its stages; a switch-in
+  // arrives fresh — EXCEPT Baton Pass, which passes the outgoing mon's current
+  // stages to the incoming mon. Then setup moves apply their self-boost, and
+  // Speed Boost adds +1 Spe at end of turn to active holders.
+  const myBoost = s.myBoost.map(b => ({ ...b }));
+  const oppBoost = s.oppBoost.map(b => ({ ...b }));
+  for (const [outI, inB] of mySwitchIn) { const passed = myBaton.has(outI) ? { ...myBoost[outI] } : {}; myBoost[outI] = {}; myBoost[inB] = passed; }
+  for (const [outJ, inB] of oppSwitchIn) { const passed = oppBaton.has(outJ) ? { ...oppBoost[outJ] } : {}; oppBoost[outJ] = {}; oppBoost[inB] = passed; }
+  for (const [actor, target] of myTargets) if (target === SET_BOOST && t.mySetup[actor]) myBoost[actor] = addBoosts(myBoost[actor]!, t.mySetup[actor]!);
+  for (const [actor, target] of oppTargets) if (target === SET_BOOST && t.oppSetup[actor]) oppBoost[actor] = addBoosts(oppBoost[actor]!, t.oppSetup[actor]!);
+  for (const i of myActiveNow) if ((myHp[i] ?? 0) > 0 && t.mySpeedBoost[i]) myBoost[i] = addBoosts(myBoost[i]!, { spe: 1 });
+  for (const j of oppActiveNow) if ((oppHp[j] ?? 0) > 0 && t.oppSpeedBoost[j]) oppBoost[j] = addBoosts(oppBoost[j]!, { spe: 1 });
+
+  // Start from the post-switch slots, then refill from bench after KOs. The opp
+  // only auto-refills with ALREADY-REVEALED mons — an unrevealed phantom enters
+  // solely via a deliberate root switch (otherwise refill would silently reveal
+  // more than the 4 brought).
+  const myActive = refill(myActiveNow, myHp, t.myN, t.off, oppHp);
+  const oppActive = refill(oppActiveNow, oppHp, t.oppN, t.thr, myHp, oppSeen);
+  return {
+    myHp, oppHp, myActive, oppActive, myProtectStreak, oppProtectStreak, oppSeen,
+    trickRoom, myTailwind, theirTailwind, trickRoomTurns, myTailwindTurns, theirTailwindTurns,
+    mySeeded, oppSeeded, myBoost, oppBoost,
+  };
 }
 
 // Keep up to MAX_ACTIVE live mons on the field. Drop fainted actives; bring in
 // the live benched mon with the best total damage vs the current live foes.
+// `eligible` (the opp's seen mask) restricts which bench mons can be auto-brought.
 function refill(
   active: number[],
   hp: number[],
   n: number,
   dmgRows: Cell[][],     // dmgRows[mon][foe]
   foeHp: number[],
-  _side: 'mine' | 'opp',
+  eligible?: boolean[],
 ): number[] {
   const live = active.filter(i => hp[i]! > 0);
   if (live.length >= MAX_ACTIVE) return live.slice(0, MAX_ACTIVE);
@@ -687,6 +1099,7 @@ function refill(
     let bestDmg = -1;
     for (let i = 0; i < n; i++) {
       if (hp[i]! <= 0 || onField.has(i)) continue;
+      if (eligible && !eligible[i]) continue;     // unrevealed phantom — not auto-brought
       const total = liveFoes.reduce((acc, j) => acc + (dmgRows[i]?.[j]?.dmgMid ?? 0), 0);
       if (total > bestDmg) { bestDmg = total; best = i; }
     }
@@ -698,36 +1111,70 @@ function refill(
 }
 
 // All joint target assignments for a side's live actives (cartesian product of
-// each active's options). Each active's options are the live foes (single-
-// target) plus, for actors in `spreadActors`, the SPREAD sentinel (hit all
-// foes), plus, when eligible, the PROTECT sentinel.  Protect is eligible only
-// when `protectMoves[actor]` is non-null (the mon has the move) and
-// `protectStreak[actor] === 0` (not used last turn — consecutive protect fails).
-// Empty when there are no live foes.
+// each active's options). Each active's options are the foes ON THE FIELD
+// (`foeActive`, filtered to live) for single-target moves, plus the SPREAD
+// sentinel (for spread actors), the PROTECT sentinel, root switch/field moves.
+// Single-target moves can only hit a mon IN AN ACTIVE SLOT — never a benched or
+// unrevealed mon, even though those carry damage cells for switch-in modelling.
+// Empty when there are no live foes on the field.
 function jointActions(
   active: number[],
+  foeActive: number[],
   foeHp: number[],
   spreadActors?: Set<number>,
   protectMoves?: (string | null)[],
   protectStreak?: number[],
+  // Benched team-indices this side may switch into THIS ply (root only; empty
+  // or undefined ⇒ no switch options, the deeper-ply behaviour).
+  switchTargets?: number[],
+  // Per-actor order-field-move capability (root only). A non-null entry means the
+  // mon can set Tailwind / Trick Room this ply.
+  fieldMoves?: { tailwind?: (string | null)[]; trickRoom?: (string | null)[] },
+  // Leech Seed (root only): per-actor capability + the active foe indices that
+  // can still be seeded (live, not Grass, not already seeded).
+  leech?: { move: (string | null)[]; foes: number[] },
+  // Setup move capability (root only): a non-null entry → the mon can set up.
+  setupMove?: (string | null)[],
+  // Baton Pass (root only): per-actor capability + benched team-indices to pass to.
+  baton?: { move: (string | null)[]; targets: number[] },
 ): Array<Map<number, number>> {
-  const liveFoes = foeHp.map((h, j) => (h > 0 ? j : -1)).filter(j => j >= 0);
+  const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
+  const switchCodes = (switchTargets ?? []).map(switchCode);
+  // Bench index a switch/baton code resolves to (for the no-duplicate rule).
+  const benchOf = (code: number) => isSwitchTarget(code) ? switchBenchIdx(code) : isBatonTarget(code) ? batonBenchIdx(code) : -999;
   let combos: Array<Map<number, number>> = [new Map()];
   for (const actor of active) {
     const canProtect = (protectMoves?.[actor] != null) && (protectStreak?.[actor] ?? 0) === 0;
-    // SPREAD first so that when hitting all foes ties a single-target line, the
-    // maximin keeps the spread option (it makes the chip on the off-target
-    // foe visible, and never deals less than the single-target framing).
-    // PROTECT last — only chosen when it strictly beats attacking.
+    const canTailwind = fieldMoves?.tailwind?.[actor] != null;
+    const canTrickRoom = fieldMoves?.trickRoom?.[actor] != null;
+    const leechCodes = (leech && leech.move[actor] != null) ? leech.foes.map(leechCode) : [];
+    const canSetup = setupMove?.[actor] != null;
+    const batonCodes = (baton && baton.move[actor] != null) ? baton.targets.map(batonCode) : [];
+    // SPREAD first so a spread that ties a single-target line is kept. PROTECT /
+    // field / setup / Leech / SWITCH / Baton last — only chosen when they
+    // strictly beat attacking.
     const options = [
       ...(spreadActors?.has(actor) ? [SPREAD] : []),
       ...liveFoes,
       ...(canProtect ? [PROTECT] : []),
+      ...(canTailwind ? [SET_TAILWIND] : []),
+      ...(canTrickRoom ? [SET_TRICKROOM] : []),
+      ...(canSetup ? [SET_BOOST] : []),
+      ...leechCodes,
+      ...switchCodes,
+      ...batonCodes,
     ];
     const next: Array<Map<number, number>> = [];
     for (const combo of combos) {
       for (const opt of options) {
+        // Doubles legality: two actives can't switch/Baton-Pass into the SAME mon.
+        if (isSwitchTarget(opt) || isBatonTarget(opt)) {
+          const bench = benchOf(opt);
+          let dup = false;
+          for (const v of combo.values()) if (benchOf(v) === bench) { dup = true; break; }
+          if (dup) continue;
+        }
         const m = new Map(combo);
         m.set(actor, opt);
         next.push(m);
@@ -742,18 +1189,22 @@ function jointActions(
 // Evaluation + search
 // ---------------------------------------------------------------------------
 
-function liveCount(hp: number[]): number {
-  return hp.reduce((n, h) => n + (h > 0 ? 1 : 0), 0);
+// Live-mon / total-HP counts. A `seen` mask (used for the opponent) excludes
+// UNREVEALED phantom switch-ins — a known-but-not-yet-brought mon is a possible
+// switch target, NOT standing material, so it must not count toward the opp's
+// force until it's actually switched in (which flips its `seen` flag).
+function liveCount(hp: number[], seen?: boolean[]): number {
+  return hp.reduce((n, h, i) => n + (h > 0 && (!seen || seen[i]!) ? 1 : 0), 0);
 }
-function sumHp(hp: number[]): number {
-  return hp.reduce((s, h) => s + Math.max(0, h), 0);
+function sumHp(hp: number[], seen?: boolean[]): number {
+  return hp.reduce((s, h, i) => s + (!seen || seen[i]! ? Math.max(0, h) : 0), 0);
 }
 
 // Terminal value if a side is wiped, else null. `depth` (plies remaining) makes
-// faster wins / slower losses preferable.
+// faster wins / slower losses preferable. The opp side counts only SEEN mons.
 function terminal(s: State, depth: number): number | null {
   const myLive = liveCount(s.myHp);
-  const oppLive = liveCount(s.oppHp);
+  const oppLive = liveCount(s.oppHp, s.oppSeen);
   if (oppLive === 0 && myLive === 0) return 0;
   if (oppLive === 0) return WIN + depth;
   if (myLive === 0) return -(WIN + depth);
@@ -761,7 +1212,8 @@ function terminal(s: State, depth: number): number | null {
 }
 
 function leafScore(s: State): number {
-  return (liveCount(s.myHp) - liveCount(s.oppHp)) * MATERIAL + (sumHp(s.myHp) - sumHp(s.oppHp));
+  return (liveCount(s.myHp) - liveCount(s.oppHp, s.oppSeen)) * MATERIAL
+    + (sumHp(s.myHp) - sumHp(s.oppHp, s.oppSeen));
 }
 
 // Maximin value of a state to the given depth. I maximise; opp replies worst-
@@ -772,8 +1224,8 @@ function value(t: Tables, s: State, depth: number, alpha: number, pass: Pass): n
   if (term !== null) return term;
   if (depth === 0) return leafScore(s);
 
-  const myJoints = jointActions(s.myActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak);
-  const oppJoints = jointActions(s.oppActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak);
+  const myJoints = jointActions(s.myActive, s.oppActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak);
+  const oppJoints = jointActions(s.oppActive, s.myActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak);
   if (myJoints.length === 0) return leafScore(s);
 
   let best = -Infinity;
@@ -831,6 +1283,7 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
   const oppActive = new Set<number>(active.theirs.filter((x): x is number => x != null));
 
   const mine: SearchMyMon[] = [];
+  const myTeamIdx: number[] = [];               // search index → myTeam index
   for (const idx of match.bring) {
     const set = match.myTeam[idx];
     if (!set) continue;
@@ -842,9 +1295,11 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
       set, hpPercent, active: myActive.has(idx), megaActive: match.myMegaUsed?.includes(idx),
       boosts: match.myBoosts?.[idx], status: match.myStatus?.[idx], survival: mySurvival(set),
     });
+    myTeamIdx.push(idx);
   }
 
   const opp: SearchOppMon[] = [];
+  const oppTeamIdx: number[] = [];              // search index → opponentTeam index
   for (const idx of match.opponentBrought ?? []) {
     const entry = match.opponentTeam[idx];
     if (!entry) continue;
@@ -853,7 +1308,22 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
       entry, hpPercent, active: oppActive.has(idx), megaActive: entry.megaUsed,
       boosts: entry.currentBoosts, status: entry.status, survival: oppSurvival(entry),
     });
+    oppTeamIdx.push(idx);
   }
+
+  // Thread EXISTING Leech Seeds (from the live match) into the search. `seededBy`
+  // is the seeder's SEARCH index on the other side; -1 = seeded but the seeder
+  // isn't in the live search set (drain still applies, but no heal target).
+  const oppSearchOf = (teamIdx: number) => { const i = oppTeamIdx.indexOf(teamIdx); return i >= 0 ? i : -1; };
+  const mySearchOf = (teamIdx: number) => { const i = myTeamIdx.indexOf(teamIdx); return i >= 0 ? i : -1; };
+  myTeamIdx.forEach((ti, si) => {
+    const seed = match.myLeechSeeded?.[ti];
+    if (seed) mine[si]!.seededBy = seed.seederSide === 'theirs' ? oppSearchOf(seed.seederIndex) : -1;
+  });
+  oppTeamIdx.forEach((ti, oi) => {
+    const seed = match.opponentTeam[ti]?.leechSeeded;
+    if (seed) opp[oi]!.seededBy = seed.seederSide === 'mine' ? mySearchOf(seed.seederIndex) : -1;
+  });
 
   // Known opponents we haven't seen brought in yet — potential switch-ins.
   const broughtSet = new Set<number>(match.opponentBrought ?? []);
@@ -872,6 +1342,36 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
   };
 }
 
+// Root-ply joint actions INCLUDING voluntary switches (deeper plies stay
+// switch-free, via plain jointActions). Switch targets are the side's benched
+// live mons — for the opponent that's its revealed-but-retreated mons (the only
+// opp entries the tables cover today); unrevealed-roster switch-ins are a
+// separate, gated extension. Shared by rootSearch, the opp PV, and the breadth
+// report so they all agree on the action space.
+function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
+  // Foes I can still Leech Seed: on the field, alive, not Grass, not already seeded.
+  const leechFoes = s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0 && !t.oppGrass[j] && s.oppSeeded[j] == null);
+  const myBench = benchSwitchTargets(s.myActive, s.myHp, t.myN);
+  return jointActions(s.myActive, s.oppActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak,
+    myBench,
+    // Don't re-offer Tailwind when it's already up; Trick Room is always a
+    // meaningful toggle.
+    { tailwind: s.myTailwind ? undefined : t.myTailwindMove, trickRoom: t.myTrickRoomMove },
+    { move: t.myLeechMove, foes: leechFoes },
+    t.mySetupMove,
+    { move: t.myBatonMove, targets: myBench });
+}
+function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
+  const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
+  const oppBench = benchSwitchTargets(s.oppActive, s.oppHp, t.oppN);
+  return jointActions(s.oppActive, s.myActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak,
+    oppBench,
+    { tailwind: s.theirTailwind ? undefined : t.oppTailwindMove, trickRoom: t.oppTrickRoomMove },
+    { move: t.oppLeechMove, foes: leechFoes },
+    t.oppSetupMove,
+    { move: t.oppBatonMove, targets: oppBench });
+}
+
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
 // iterative driver so the (expensive) damage matrices are built only once per
 // position, not once per depth.
@@ -879,11 +1379,11 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
 // principal variation) and its score. `plays` are filled by the caller only for
 // the displayed pass.
 function rootSearch(t: Tables, s0: State, depth: number, pass: Pass): { score: number; joint: Map<number, number> | null } {
-  const myJoints = jointActions(s0.myActive, s0.oppHp, t.mySpreadActors, t.myProtectMove, s0.myProtectStreak);
+  const myJoints = rootMyJoints(t, s0);
   let bestJoint: Map<number, number> | null = null;
   let bestScore = -Infinity;
 
-  const oppJoints = jointActions(s0.oppActive, s0.myHp, t.oppSpreadActors, t.oppProtectMove, s0.oppProtectStreak);
+  const oppJoints = rootOppJoints(t, s0);
   for (const my of myJoints) {
     let worst = Infinity;
     const replies = oppJoints.length ? oppJoints : [new Map<number, number>()];
@@ -907,7 +1407,19 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
   const plays: SearchPlay[] = [];
   if (!joint) return plays;
   for (const [actor, target] of joint) {
-    if (target === SPREAD) {
+    if (isBatonTarget(target)) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myBatonMove[actor] ?? 'Baton Pass', targetSpecies: t.mySpecies[batonBenchIdx(target)]!, switch: true });
+    } else if (isLeechTarget(target)) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myLeechMove[actor] ?? 'Leech Seed', targetSpecies: t.oppSpecies[leechFoeIdx(target)]! });
+    } else if (isSwitchTarget(target)) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'switch', targetSpecies: t.mySpecies[switchBenchIdx(target)]!, switch: true });
+    } else if (target === SET_BOOST) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.mySetupMove[actor] ?? 'setup', targetSpecies: t.mySpecies[actor]!, self: true });
+    } else if (target === SET_TAILWIND) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myTailwindMove[actor] ?? 'Tailwind', targetSpecies: t.mySpecies[actor]!, self: true });
+    } else if (target === SET_TRICKROOM) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myTrickRoomMove[actor] ?? 'Trick Room', targetSpecies: t.mySpecies[actor]!, self: true });
+    } else if (target === SPREAD) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.mySpread[actor]!.move, targetSpecies: 'all foes', spread: true });
     } else if (target === PROTECT) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myProtectMove[actor] ?? 'Protect', targetSpecies: t.mySpecies[actor]!, self: true });
@@ -918,6 +1430,53 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
   return plays;
 }
 
+// The OPPONENT's joint formatted as plays ("how they beat us"). Mirror of
+// playsFromJoint over the thr/oppSpread tables: `mySpecies` carries the opp
+// actor's species and `targetSpecies` my mon (SearchPlay is side-agnostic).
+function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): SearchPlay[] {
+  const plays: SearchPlay[] = [];
+  if (!joint) return plays;
+  for (const [actor, target] of joint) {
+    if (isBatonTarget(target)) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppBatonMove[actor] ?? 'Baton Pass', targetSpecies: t.oppSpecies[batonBenchIdx(target)]!, switch: true });
+    } else if (isLeechTarget(target)) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppLeechMove[actor] ?? 'Leech Seed', targetSpecies: t.mySpecies[leechFoeIdx(target)]! });
+    } else if (isSwitchTarget(target)) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: 'switch', targetSpecies: t.oppSpecies[switchBenchIdx(target)]!, switch: true });
+    } else if (target === SET_BOOST) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppSetupMove[actor] ?? 'setup', targetSpecies: t.oppSpecies[actor]!, self: true });
+    } else if (target === SET_TAILWIND) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppTailwindMove[actor] ?? 'Tailwind', targetSpecies: t.oppSpecies[actor]!, self: true });
+    } else if (target === SET_TRICKROOM) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppTrickRoomMove[actor] ?? 'Trick Room', targetSpecies: t.oppSpecies[actor]!, self: true });
+    } else if (target === SPREAD) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppSpread[actor]!.move, targetSpecies: 'all my mons', spread: true });
+    } else if (target === PROTECT) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppProtectMove[actor] ?? 'Protect', targetSpecies: t.oppSpecies[actor]!, self: true });
+    } else {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.thr[actor]![target]!.move, targetSpecies: t.mySpecies[target]! });
+    }
+  }
+  return plays;
+}
+
+// The opponent's minimizing joint reply to my fixed `myJoint` (the argmin of the
+// inner min). Used to describe "how they beat us". Pure; no alpha prune so the
+// argmin is exact.
+function oppBestReply(t: Tables, s0: State, myJoint: Map<number, number> | null, depth: number, pass: Pass): Map<number, number> | null {
+  if (!myJoint) return null;
+  const oppJoints = rootOppJoints(t, s0);
+  const replies = oppJoints.length ? oppJoints : [new Map<number, number>()];
+  let worst = Infinity;
+  let arg: Map<number, number> | null = null;
+  for (const opp of replies) {
+    const child = resolveTurn(t, s0, myJoint, opp, pass);
+    const v = value(t, child, depth - 1, -Infinity, pass);
+    if (v < worst) { worst = v; arg = opp; }
+  }
+  return arg;
+}
+
 /** A reusable search over one position: builds the (expensive) damage matrices
  *  ONCE, then answers any-depth queries cheaply. The background driver builds
  *  this once per position change and deepens against it. */
@@ -925,6 +1484,19 @@ export interface PositionSearch {
   toDepth(depth: number): SearchResult;
 }
 export function createSearch(input: SearchInput): PositionSearch {
+  // Fold the opponent's KNOWN-but-unrevealed roster (`oppBench`) into the opp
+  // list as phantom switch-ins, so the search can model "they switch to one of
+  // their other 6". Gated on the bring not yet being complete (until 4 are
+  // revealed) and capped so the total opp bodies never exceed the 4 VGC brings.
+  // Phantoms carry damage cells (built like any opp) but DON'T count as material
+  // until switched in (see `oppSeen`). benchRisk still uses input.oppBench.
+  if (!input.allOppRevealed && input.oppBench?.length) {
+    const room = Math.max(0, 4 - input.opp.length);
+    const phantoms: SearchOppMon[] = input.oppBench.slice(0, room).map(entry => ({
+      entry, hpPercent: 100, active: false, phantom: true, survival: oppSurvival(entry),
+    }));
+    if (phantoms.length) input = { ...input, opp: [...input.opp, ...phantoms] };
+  }
   const s0 = initialState(input);
 
   // Mega is a root decision per side. I pick whether (and which active) to mega
@@ -974,7 +1546,7 @@ export function createSearch(input: SearchInput): PositionSearch {
         label: worst.pct >= worst.myHp
           ? `${worst.species} switch-in can KO ${worst.myMon}`
           : `${worst.species} switch-in hits ${worst.myMon} ~${Math.round(worst.pct)}%`,
-        effect: 'bench not modelled',
+        effect: 'can switch in',
         blocking: true,
       };
     }
@@ -1037,16 +1609,21 @@ export function createSearch(input: SearchInput): PositionSearch {
       let unpriced = false;
       let winChance: number | undefined;
 
-      // The opponent's bench can still switch in — the search models neither
-      // switches nor the unbrought mons, so this is a real, unpriceable factor.
-      if (!allOppRevealed && eV !== 'losing') {
+      // The opponent's known bench is now modelled as ROOT switch-ins (phantoms),
+      // but switches at DEEPER plies aren't searched — so the bench is still a
+      // real residual uncertainty. Name the scariest incoming threat regardless
+      // of verdict; the unpriced flag (only when not already losing) reflects the
+      // beyond-root switch we can't price into a clean win%.
+      if (!allOppRevealed) {
         if (benchRisk) {
           risks.push(benchRisk);
-        } else {
-          const unseen = Math.max(1, 4 - input.opp.length);
-          risks.push({ label: `${unseen} more foe${unseen === 1 ? '' : 's'} can switch in`, effect: 'bench not modelled', blocking: true });
+          if (eV !== 'losing') unpriced = true;
+        } else if (eV !== 'losing') {
+          const realOpp = input.opp.filter(o => !o.phantom).length;
+          const unseen = Math.max(1, 4 - realOpp);
+          risks.push({ label: `${unseen} more foe${unseen === 1 ? '' : 's'} can switch in`, effect: 'beyond-root switch', blocking: true });
+          unpriced = true;
         }
-        unpriced = true;
       }
 
       if (eV !== 'losing') {
@@ -1069,7 +1646,7 @@ export function createSearch(input: SearchInput): PositionSearch {
             if (koProb <= 0 || koProb >= 1) return;
             const base = tbl.oppSpecies[oj] ?? 'foe';
             const oppName = oppMega === oj ? (oppMegaInfo(base)?.forme ?? base) : base;
-            if (!worst || koProb > worst.koProb) worst = { oppName, koProb, outspeeds: oppOutspeeds(tbl, oj, mi) };
+            if (!worst || koProb > worst.koProb) worst = { oppName, koProb, outspeeds: oppOutspeeds(tbl, s0, oj, mi) };
           };
           for (const oppMega of oppPlans) {
             const tbl = tables.get(`${myMegaChosen},${oppMega}`);
@@ -1116,9 +1693,9 @@ export function createSearch(input: SearchInput): PositionSearch {
             if (target === SPREAD) {
               const sp = expected.table.mySpread[actor]!;
               for (const foe of s0.oppActive) {
-                consider({ dmgMin: sp.dmgMin[foe] ?? 0, dmgMid: sp.dmgMid[foe] ?? 0, dmgMax: sp.dmgMax[foe] ?? 0, move: '', priority: 0, multiHit: false, koRolls: [] }, s0.oppHp[foe] ?? 0, expected.table.oppSpecies[foe] ?? 'foe');
+                consider({ dmgMin: sp.dmgMin[foe] ?? 0, dmgMid: sp.dmgMid[foe] ?? 0, dmgMax: sp.dmgMax[foe] ?? 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false }, s0.oppHp[foe] ?? 0, expected.table.oppSpecies[foe] ?? 'foe');
               }
-            } else if (target !== PROTECT) {
+            } else if (target >= 0) {       // skip PROTECT / SWITCH (no attack)
               consider(expected.table.off[actor]![target]!, s0.oppHp[target] ?? 0, expected.table.oppSpecies[target] ?? 'foe');
             }
           }
@@ -1148,13 +1725,13 @@ export function createSearch(input: SearchInput): PositionSearch {
         // Surface per acting mon, priced like a survival item. Only my mons that
         // actually ACT this turn care (a protecting mon loses nothing to flinch).
         for (const [actor, target] of (expected.joint ?? [])) {
-          if (target === PROTECT) continue;
+          if (target === PROTECT || isSwitchTarget(target) || isBatonTarget(target)) continue; // not acting → can't be flinched
           let chance = 0;
           for (const oppMega of oppPlans) {
             const tbl = tables.get(`${myMegaChosen},${oppMega}`);
             if (!tbl) continue;
             for (const oj of s0.oppActive) {
-              if ((s0.oppHp[oj] ?? 0) <= 0 || !oppOutspeeds(tbl, oj, actor)) continue;
+              if ((s0.oppHp[oj] ?? 0) <= 0 || !oppOutspeeds(tbl, s0, oj, actor)) continue;
               const c = tbl.thr[oj]?.[actor];
               const sp = tbl.oppSpread[oj];
               chance = Math.max(chance, moveFlinchChance(c?.move ?? ''), moveFlinchChance(sp?.move ?? ''));
@@ -1200,7 +1777,7 @@ export function createSearch(input: SearchInput): PositionSearch {
                 hmOuts.push({ label: `${opt.table.oppSpecies[foe] ?? 'foe'} KO needs top roll`, prob: p });
                 hmCombined *= p;
               }
-            } else {
+            } else if (target >= 0) {        // skip PROTECT / SWITCH (no KO this turn)
               const c = opt.table.off[actor]?.[target];
               if (!c) continue;
               const h = s0.oppHp[target] ?? 0;
@@ -1230,6 +1807,154 @@ export function createSearch(input: SearchInput): PositionSearch {
         }
       }
 
+      // ---- Phase 1/2: explainability, assumptions, break-points, breadth ----
+
+      // "How they beat us": the opponent's minimizing reply to my recommended
+      // joint. Cheap (one root inner-min) and informative; rendered when losing.
+      const oppReply = oppBestReply(expected.table, s0, expected.joint, depth, buildPass('expected'));
+      const oppLine = oppPlaysFromJoint(expected.table, oppReply);
+
+      // Pivotal SPEED assumptions: an opp attacker that outspeeds (non-TR) — or
+      // moves first under Trick Room — ONLY if it invested the relevant Speed.
+      // Gated on it actually threatening a KO, so we don't list speed facts that
+      // don't matter. Honest: no fabricated probability (speed isn't uniform
+      // over the range; per feedback_nature_confidence we don't guess).
+      const assumptions: SearchAssumption[] = [];
+      {
+        const tr = !!input.field.trickRoom;
+        for (const oj of s0.oppActive) {
+          if (assumptions.length >= 3) break;
+          const oe = input.opp[oj];
+          if (!oe || (s0.oppHp[oj] ?? 0) <= 0) continue;
+          const range = effectiveSpeedRange(oe.entry);
+          if (!range) continue;
+          const oppBoost = speStageMult(oe.boosts?.spe);
+          const oppPar = oe.status === 'par';
+          const oppEff = (raw: number) => effSpeed(raw * oppBoost, !!input.field.theirTailwind, oppPar);
+          const effMin = oppEff(range.min);
+          const effMax = oppEff(range.max);
+          for (const mi of s0.myActive) {
+            if (assumptions.length >= 3) break;
+            const myHp = s0.myHp[mi] ?? 0;
+            if (myHp <= 0) continue;
+            const c = expected.table.thr[oj]?.[mi];
+            if (!c || c.dmgMax < myHp) continue;          // can't KO → speed not pivotal
+            const myEff = effSpeed(expected.table.mySpeed[mi]!, !!input.field.myTailwind, expected.table.myPar[mi]!);
+            const movesFirst = (s: number) => (tr ? s < myEff : s > myEff);
+            const myName = expected.table.mySpecies[mi]!;
+            if (movesFirst(effMin) !== movesFirst(effMax)) {
+              assumptions.push({ text: tr
+                ? `${oe.entry.species} moves before ${myName} under Trick Room only if it ran low Speed`
+                : `${oe.entry.species} outspeeds ${myName} only if it invested Speed` });
+            }
+          }
+        }
+      }
+
+      // ---- Break-points: damage cutpoints that flip the verdict this turn ----
+      const breakpoints: SearchBreakpoint[] = [];
+      {
+        // KO direction: a KO my recommended line relies on that isn't guaranteed
+        // — name the foe + how likely, so the user knows a bulkier spread saves it.
+        for (const [actor, target] of (expected.joint ?? [])) {
+          if (breakpoints.length >= 3) break;
+          if (target < 0) continue;                      // skip SPREAD / PROTECT / SWITCH
+          const c = expected.table.off[actor]?.[target];
+          if (!c) continue;
+          const h = s0.oppHp[target] ?? 0;
+          if (h <= 0 || c.dmgMax < h) continue;          // can't KO at all
+          const p = rollKoProb(c, h);
+          if (p <= 0 || p >= 1) continue;                // guaranteed or impossible → not a break-point
+          const foe = expected.table.oppSpecies[target]!;
+          breakpoints.push({
+            subject: foe, move: c.move, direction: 'ko', thresholdHp: h,
+            thenNote: `we OHKO ${foe}`,
+            spreadNote: c.candidates > 1 ? `bulkier of ${c.candidates} spreads survive` : undefined,
+            prob: p,
+          });
+        }
+        // Survive direction (the user's Rock Slide example): a contingent KO on
+        // one of MY actives — if their hit stays under our current HP we live,
+        // and (one ply out) we KO the threat back.
+        for (const mi of s0.myActive) {
+          if (breakpoints.length >= 3) break;
+          const myHp = s0.myHp[mi] ?? 0;
+          if (myHp <= 0) continue;
+          let worst: { oppName: string; move: string; koProb: number; oppIdx: number } | null = null;
+          for (const oppMega of oppPlans) {
+            const tbl = tables.get(`${expected.myMega},${oppMega}`);
+            if (!tbl) continue;
+            for (const oj of s0.oppActive) {
+              if ((s0.oppHp[oj] ?? 0) <= 0) continue;
+              const c = tbl.thr[oj]?.[mi];
+              if (!c || c.dmgMax < myHp || c.dmgMid >= myHp) continue;  // not a contingent KO
+              const koProb = rollKoProb(c, myHp);
+              if (koProb <= 0 || koProb >= 1) continue;
+              if (!worst || koProb > worst.koProb) {
+                const base = tbl.oppSpecies[oj] ?? 'foe';
+                worst = { oppName: oppMega === oj ? (oppMegaInfo(base)?.forme ?? base) : base, move: c.move, koProb, oppIdx: oj };
+              }
+            }
+          }
+          if (!worst) continue;
+          let koBack = false;
+          for (const ma of s0.myActive) {
+            const oc = expected.table.off[ma]?.[worst.oppIdx];
+            if (oc && oc.dmgMid >= (s0.oppHp[worst.oppIdx] ?? 0)) { koBack = true; break; }
+          }
+          breakpoints.push({
+            subject: expected.table.mySpecies[mi]!, move: worst.move, direction: 'survive', thresholdHp: myHp,
+            thenNote: koBack ? `we survive & KO ${worst.oppName} back` : 'we survive',
+            prob: 1 - worst.koProb,
+          });
+        }
+      }
+
+      // ---- Honest breadth report (scope-derived) ----
+      // Root joints INCLUDE the switch options actually offered this ply.
+      const myRootJoints = rootMyJoints(expected.table, s0);
+      const oppRootJoints = rootOppJoints(expected.table, s0);
+      let maxSpreads = 0;
+      for (const row of expected.table.thr) for (const cell of row) if (cell.candidates > maxSpreads) maxSpreads = cell.candidates;
+      // Action kinds REALLY in the tree — drives breadth wording so it never
+      // overclaims (e.g. only says "switch" when a switch is genuinely offered).
+      const actionClasses = ['attack'];
+      if (expected.table.mySpreadActors.size || expected.table.oppSpreadActors.size) actionClasses.push('spread');
+      if (expected.table.myProtectMove.some(p => p) || expected.table.oppProtectMove.some(p => p)) actionClasses.push('protect');
+      const switchesOffered = benchSwitchTargets(s0.myActive, s0.myHp, expected.table.myN).length > 0
+        || benchSwitchTargets(s0.oppActive, s0.oppHp, expected.table.oppN).length > 0;
+      if (switchesOffered) actionClasses.push('switch');
+      // Field-move classes only when a mon that's actually on the field can set it.
+      const canSet = (moves: (string | null)[], active: number[]) => active.some(i => moves[i] != null);
+      if ((!s0.myTailwind && canSet(expected.table.myTailwindMove, s0.myActive)) || (!s0.theirTailwind && canSet(expected.table.oppTailwindMove, s0.oppActive))) actionClasses.push('tailwind');
+      if (canSet(expected.table.myTrickRoomMove, s0.myActive) || canSet(expected.table.oppTrickRoomMove, s0.oppActive)) actionClasses.push('trickroom');
+      // Leech Seed offered when a mon on the field knows it and a non-Grass,
+      // not-yet-seeded foe is in range.
+      const canLeech = (moves: (string | null)[], active: number[], foeActive: number[], foeGrass: boolean[], foeSeeded: (number | null)[]) =>
+        active.some(i => moves[i] != null) && foeActive.some(j => !foeGrass[j] && foeSeeded[j] == null);
+      if (canLeech(expected.table.myLeechMove, s0.myActive, s0.oppActive, expected.table.oppGrass, s0.oppSeeded)
+        || canLeech(expected.table.oppLeechMove, s0.oppActive, s0.myActive, expected.table.myGrass, s0.mySeeded)) actionClasses.push('leech');
+      if (canSet(expected.table.mySetupMove, s0.myActive) || canSet(expected.table.oppSetupMove, s0.oppActive)) actionClasses.push('setup');
+      const myBenchNow = benchSwitchTargets(s0.myActive, s0.myHp, expected.table.myN).length > 0;
+      const oppBenchNow = benchSwitchTargets(s0.oppActive, s0.oppHp, expected.table.oppN).length > 0;
+      if ((myBenchNow && canSet(expected.table.myBatonMove, s0.myActive)) || (oppBenchNow && canSet(expected.table.oppBatonMove, s0.oppActive))) actionClasses.push('batonpass');
+      if (s0.myActive.some(i => expected.table.mySpeedBoost[i]) || s0.oppActive.some(j => expected.table.oppSpeedBoost[j])) actionClasses.push('speedboost');
+      const explored: SearchExplored = {
+        depth,
+        myActions: myRootJoints.length,
+        oppActions: oppRootJoints.length,
+        spreads: maxSpreads,
+        megaBranches: myPlans.length * oppPlans.length,
+        regimes: 3,
+        actionClasses,
+      };
+
+      // True only when inference has actually learned something from observed
+      // damage / turn order (not merely seeded candidates).
+      const adapted = input.opp.some(o =>
+        (o.entry.candidateLikelihoods?.length ?? 0) > 0 ||
+        o.entry.speedFloor != null || o.entry.speedCeiling != null || !!o.entry.scarfSuspected);
+
       return {
         depth,
         score: expected.score,
@@ -1240,6 +1965,11 @@ export function createSearch(input: SearchInput): PositionSearch {
         winChance,
         allOppRevealed,
         risks,
+        oppLine: oppLine.length ? oppLine : undefined,
+        assumptions: assumptions.length ? assumptions : undefined,
+        breakpoints: breakpoints.length ? breakpoints : undefined,
+        explored,
+        adapted,
         hailMary,
       };
     },

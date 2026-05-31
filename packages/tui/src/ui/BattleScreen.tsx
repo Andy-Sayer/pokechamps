@@ -36,7 +36,7 @@ import { applyMegaAction } from '@pokechamps/core/domain/megaResolve.js';
 import { getMegaOptions } from '@pokechamps/core/domain/gimmicks/mega.js';
 import { solveEndgame } from '@pokechamps/core/domain/endgame.js';
 import type { EndgamePosition } from '@pokechamps/core/domain/endgame.js';
-import { createSearch, searchInputFromMatch, type SearchResult } from '@pokechamps/core/domain/endgameSearch.js';
+import { createSearch, searchInputFromMatch, oppCanMega, type SearchResult } from '@pokechamps/core/domain/endgameSearch.js';
 
 export interface BattleScreenProps {
   stores: Stores;
@@ -387,7 +387,9 @@ export function runAskCommand(
   // popping mega is worth it. Same for the opponent's potential mega.
   const myCanMega = !mine.megaActive && !!mine.megaForme;
   const oppMegaOpts = getMegaOptions(opp.entry.species);
-  const oppCanMega = !opp.megaActive && oppMegaOpts.length > 0 && !opp.entry.megaUsed;
+  // Only offer the opp-mega comparison when it could actually hold the stone
+  // (oppCanMega rules out a known/inferred non-stone item).
+  const oppMega = !opp.megaActive && oppMegaOpts.length > 0 && !opp.entry.megaUsed && oppCanMega(opp.entry);
 
   // All of MY moves vs this foe, base + (when available) the post-mega forme,
   // zipped by move name so each line can show "X-Y%  ⭢mega X-Y%".
@@ -416,7 +418,7 @@ export function runAskCommand(
   // the WORST-case forme per move (highest damage to me) and label it — never
   // assume the first option, which can badly understate the mega threat.
   const oppMegaByMove = new Map<string, { cell: MatchupCell; variant: string }>();
-  if (oppCanMega) {
+  if (oppMega) {
     const baseCands = opp.entry.candidates?.length ? opp.entry.candidates : [defaultOpponentSet(opp.entry, 50)];
     for (const optn of oppMegaOpts) {
       const megaEntry: OpponentEntry = { ...opp.entry, candidates: baseCands.map(c => ({ ...c, item: optn.stone })) };
@@ -2255,10 +2257,12 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             defenderStatus: opp.status,
           }) : null,
           threatMega: (() => {
-            // Opp can mega only if it hasn't used the gimmick and its species
-            // has a mega option. Build a synthetic entry with the stone attached
-            // so resolveSpecies resolves the mega forme.
-            if (opp.megaUsed) return null;
+            // Opp can mega only if it hasn't used the gimmick AND could still be
+            // holding the stone (oppCanMega rules out a committed/inferred
+            // non-stone item — e.g. an Absol on Scope Lens won't show a Mega
+            // Absol threat). Build a synthetic entry with the stone attached so
+            // resolveSpecies resolves the mega forme.
+            if (opp.megaUsed || !oppCanMega(opp)) return null;
             const oppMegaOpts = getMegaOptions(opp.species);
             if (!oppMegaOpts.length) return null;
             const stone = oppMegaOpts[0]!.stone;
@@ -2306,11 +2310,39 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
           vColor = v === 'winning' ? 'green' : v === 'losing' ? 'red' : 'yellow';
         }
         const turns = bestSearch.depth;
-        const conf = `${turns} turn${turns === 1 ? '' : 's'} ahead`;
-        const plays = bestSearch.plays
+        // Confidence chip: turns ahead + an HONEST, scope-derived breadth report
+        // (lines explored this ply, candidate spreads behind the cells, mega
+        // combos, and the non-attack action kinds ACTUALLY in the tree — so it
+        // never claims "switches" until they're real nodes).
+        let conf = `${turns} turn${turns === 1 ? '' : 's'} ahead`;
+        const ex = bestSearch.explored;
+        if (ex) {
+          const parts: string[] = [];
+          const lines = ex.myActions * ex.oppActions;
+          if (lines > 1) parts.push(`${lines} lines/ply`);
+          if (ex.spreads > 1) parts.push(`${ex.spreads} spreads`);
+          if (ex.megaBranches > 1) parts.push(`mega ×${ex.megaBranches}`);
+          const extra = ex.actionClasses.filter(c => c !== 'attack');
+          if (extra.length) parts.push(`incl ${extra.join('/')}`);
+          if (parts.length) conf += ` · ${parts.join(' · ')}`;
+        }
+        const fmtPlays = (ps: typeof bestSearch.plays) => ps
           .map(p => p.self ? `${p.mySpecies}→${p.move}` : `${p.mySpecies}→${p.move || '—'}→${p.targetSpecies}`)
           .join(' · ');
+        const plays = fmtPlays(bestSearch.plays);
         const mega = bestSearch.megaMon ? `mega ${bestSearch.megaMon} · ` : '';
+        // Pivotal assumptions behind the verdict (e.g. contingent-speed outspeed).
+        const whyText = (bestSearch.assumptions ?? []).map(a => a.text).join('; ');
+        // Break-points: damage cutpoints to watch against the real roll this turn.
+        const watchText = (bestSearch.breakpoints ?? []).map(b => {
+          const pct = b.prob != null ? ` ~${Math.round(b.prob * 100)}%` : '';
+          if (b.direction === 'ko') {
+            return `${b.move} on ${b.subject}:${pct} to OHKO${b.spreadNote ? ` (${b.spreadNote})` : ''}`;
+          }
+          return `${b.move} on ${b.subject}:${pct} → ${b.thenNote}`;
+        }).join(' · ');
+        // "How they beat us" — the opponent's minimizing reply (rendered losing).
+        const oppLineText = v === 'losing' && bestSearch.oppLine ? fmtPlays(bestSearch.oppLine) : '';
         // Compact risk breakdown: "label NN%", joined — labels are self-explanatory.
         const riskText = bestSearch.risks
           .map(r => `${r.label}${r.prob != null ? ` ${Math.round(r.prob * 100)}%` : ''}`)
@@ -2332,6 +2364,10 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
               <Text color="magenta">⌁ best play </Text><Text dimColor>({conf})</Text><Text color="magenta">: </Text>
               {mega ? <Text color="cyan">{mega}</Text> : null}{plays}  <Text color={vColor}>— {vText}</Text>
             </Text>
+            {watchText ? <Text dimColor>   watch: {watchText}</Text> : null}
+            {whyText ? <Text dimColor>   why: {whyText}</Text> : null}
+            {oppLineText ? <Text dimColor>   they win via: {oppLineText}</Text> : null}
+            {bestSearch.adapted ? <Text dimColor>   spread refined from observed damage</Text> : null}
             {riskText ? <Text dimColor>   risks: {riskText}</Text> : null}
             {hmLine ? <Text dimColor>   {hmLine}</Text> : null}
           </>

@@ -585,6 +585,347 @@ describe('hailMary outs analysis', () => {
   });
 });
 
+describe('Phase 1/2: explainability, assumptions, break-points, breadth', () => {
+  // (a) Opponent forcing line is populated on a losing position so the UI can
+  // say "they win via: …".
+  test('oppLine names how the opponent beats us when losing', () => {
+    const input: SearchInput = {
+      mine: [{ set: flutter, hpPercent: 20, active: true }],
+      opp: [
+        { entry: oppOf(garchomp), hpPercent: 100, active: true },
+        { entry: oppOf(incin), hpPercent: 100, active: true },
+      ],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    };
+    const r = searchToDepth(input, 2);
+    expect(r.verdict).toBe('losing');
+    expect(r.oppLine && r.oppLine.length).toBeGreaterThan(0);
+    for (const p of r.oppLine!) {
+      expect(p.mySpecies).toBeTruthy();   // the opp actor's species
+      expect(p.move).toBeTruthy();
+    }
+  });
+
+  // (b) A contingent-speed outspeed surfaces as a pivotal assumption. A
+  // neutral-nature, 252-Spe mirror always sits strictly inside its own species'
+  // 0→252 Speed envelope, so the opponent outspeeds ONLY if it invested Speed.
+  test('emits a speed assumption for a contingent-speed KO threat', () => {
+    const myDrap = mon({
+      species: 'Dragapult', nature: 'Hardy', // neutral Spe
+      evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Shadow Ball'],
+    });
+    const oppDrap: OpponentEntry = { species: 'Dragapult', knownMoves: ['Shadow Ball'] };
+    const r = searchToDepth({
+      mine: [{ set: myDrap, hpPercent: 30, active: true }],   // low HP → opp's hit can KO
+      opp: [{ entry: oppDrap, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 2);
+    expect(r.assumptions?.some(a => /outspeeds .* only if it invested Speed/.test(a.text))).toBe(true);
+  });
+
+  // (c-ko) A roll-dependent KO in the recommended line becomes a 'ko' break-point
+  // with the foe's current HP as the cutpoint and a probability in (0,1).
+  test('a roll-dependent KO surfaces as a ko break-point with the HP cutpoint', () => {
+    const flutterMoon = mon({
+      species: 'Flutter Mane', ability: 'Protosynthesis', nature: 'Timid',
+      evs: { hp: 0, atk: 0, def: 0, spa: 252, spd: 4, spe: 252 }, moves: ['Moonblast'],
+    });
+    const whim = mon({ species: 'Whimsicott', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252 }, moves: ['Moonblast'] });
+    const r = searchToDepth({
+      mine: [{ set: flutterMoon, hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(whim), hpPercent: 66, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 1);
+    const bp = r.breakpoints?.find(b => b.direction === 'ko' && b.subject === 'Whimsicott');
+    expect(bp).toBeDefined();
+    expect(bp!.thresholdHp).toBe(66);
+    expect(bp!.prob).toBeGreaterThan(0);
+    expect(bp!.prob).toBeLessThan(1);
+  });
+
+  // (c-survive) A contingent KO on one of MY mons surfaces as a 'survive'
+  // break-point (the user's Rock Slide example): if their hit stays under our
+  // HP we live. Mega Aerodactyl can KO full-HP Delphox only on a high roll.
+  test('a contingent KO on my mon surfaces as a survive break-point', () => {
+    const delphox = mon({ species: 'Delphox', item: 'Delphoxite', ability: 'Blaze', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Heat Wave', 'Psychic'] });
+    const sableye = mon({ species: 'Sableye', item: 'Sitrus Berry', ability: 'Prankster', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Foul Play', 'Will-O-Wisp'] });
+    const r = searchToDepth({
+      mine: [
+        { set: delphox, hpPercent: 100, active: true },
+        { set: sableye, hpPercent: 100, active: true },
+      ],
+      opp: [
+        { entry: { species: 'Abomasnow', knownMoves: ['Blizzard'] }, hpPercent: 100, active: true },
+        { entry: { species: 'Aerodactyl', knownMoves: ['Rock Slide', 'Dual Wingbeat'] }, hpPercent: 100, active: true },
+      ],
+      field: { ...NEUTRAL_FIELD },
+    }, 1);
+    const bp = r.breakpoints?.find(b => b.direction === 'survive' && b.subject === 'Delphox');
+    expect(bp).toBeDefined();
+    expect(bp!.thresholdHp).toBe(100);          // we live if the hit stays under full HP
+    expect(bp!.prob).toBeGreaterThan(0);
+    expect(bp!.prob).toBeLessThan(1);
+  });
+
+  // (d) Breadth report is populated and scope-derived: it reflects the action
+  // kinds ACTUALLY in the tree and must NOT claim "switch" in a no-bench 1v1
+  // (switches only appear with a live bench).
+  test('explored breadth is scope-derived and omits switch in a no-bench 1v1', () => {
+    const r = searchToDepth({
+      mine: [{ set: flutter, hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(incin), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD },
+    }, 2);
+    expect(r.explored).toBeDefined();
+    expect(r.explored!.depth).toBe(2);
+    expect(r.explored!.actionClasses).toContain('attack');
+    expect(r.explored!.actionClasses).not.toContain('switch');
+    expect(r.explored!.myActions).toBeGreaterThanOrEqual(1);
+    expect(r.explored!.regimes).toBe(3);
+  });
+});
+
+describe('Phase 3a: root-ply voluntary switches', () => {
+  // Rock-4×-weak Volcarona is doomed against a fast Aerodactyl's Stone Edge
+  // (OHKO). Both its partner Aggron (Steel/Rock) and the benched Bronzong
+  // (Steel/Psychic) RESIST Rock, so switching Volcarona → Bronzong keeps all
+  // three mons alive; attacking loses Volcarona. The maximin should switch.
+  // (Two active slots so the post-switch refill doesn't re-add the doomed mon.)
+  const volcarona = mon({ species: 'Volcarona', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Bug Buzz', 'Fiery Dance'] });
+  const aggron = mon({ species: 'Aggron', ability: 'Sturdy', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, atk: 252 }, moves: ['Heavy Slam', 'Earthquake'] });
+  const bronzong = mon({ species: 'Bronzong', ability: 'Levitate', nature: 'Sassy', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Flash Cannon', 'Body Press'] });
+  const fastAero: OpponentEntry = { species: 'Aerodactyl', knownMoves: ['Stone Edge'], candidates: [mon({ species: 'Aerodactyl', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Stone Edge'] })] };
+
+  test('recommends switching a doomed mon to a bench mon that walls the threat', () => {
+    const r = searchToDepth({
+      mine: [
+        { set: volcarona, hpPercent: 100, active: true },
+        { set: aggron, hpPercent: 100, active: true },      // Rock-resisting partner stays
+        { set: bronzong, hpPercent: 100, active: false },   // benched wall
+      ],
+      // Two healthy opp mons → no turn-1 KO shortcut, so PRESERVING Volcarona by
+      // switching it to a Rock-resisting wall is the materially best line.
+      opp: [
+        { entry: fastAero, hpPercent: 100, active: true },
+        { entry: oppOf(incin), hpPercent: 100, active: true },
+      ],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 2);
+    const sw = r.plays.find(p => p.switch);
+    expect(sw).toBeDefined();
+    expect(sw!.mySpecies).toBe('Volcarona');
+    expect(sw!.targetSpecies).toBe('Bronzong');
+    // Switching is offered → the breadth report must say so.
+    expect(r.explored!.actionClasses).toContain('switch');
+  });
+
+  // A switched-in mon takes the hit aimed at the slot it occupies — no free
+  // dodge in doubles. When every mon (active + bench) is OHKO'd by the spread,
+  // switching just relocates the loss, so it must NOT be chosen.
+  test('does not switch when the bench mon is no safer than attacking', () => {
+    const charizard = mon({ species: 'Charizard', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Heat Wave'] });
+    const ninetales = mon({ species: 'Ninetales', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Flamethrower'] });
+    const slideAero: OpponentEntry = { species: 'Aerodactyl', knownMoves: ['Rock Slide'], candidates: [mon({ species: 'Aerodactyl', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Rock Slide'] })] };
+    const r = searchToDepth({
+      mine: [
+        { set: volcarona, hpPercent: 100, active: true },
+        { set: charizard, hpPercent: 100, active: true },   // Rock-weak
+        { set: ninetales, hpPercent: 100, active: false },  // Rock-weak bench
+      ],
+      opp: [{ entry: slideAero, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 2);
+    expect(r.plays.find(p => p.switch)).toBeUndefined();
+  });
+
+  test('a doubles position with a shared bench never double-assigns a switch', () => {
+    // 2 actives, 1 live benched mon: at most ONE active may switch into it. The
+    // recommended joint must not contain two switches to the same mon.
+    const r = searchToDepth({
+      mine: [
+        { set: volcarona, hpPercent: 100, active: true },
+        { set: mon({ species: 'Charizard', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Heat Wave'] }), hpPercent: 100, active: true },
+        { set: bronzong, hpPercent: 100, active: false },
+      ],
+      opp: [{ entry: fastAero, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 2);
+    const switchTargets = r.plays.filter(p => p.switch).map(p => p.targetSpecies);
+    expect(new Set(switchTargets).size).toBe(switchTargets.length); // all distinct
+  });
+
+  // Unrevealed-roster (oppBench) switch-ins: the opponent may switch a doomed
+  // visible mon to one of its KNOWN-but-unbrought mons. Hydreigon (Dark/Dragon)
+  // is OHKO'd by Flutter Mane's Moonblast (Fairy 4×); Heatran (Fire/Steel)
+  // resists it. With Heatran benched + <4 revealed, the opp can dodge the OHKO
+  // by switching — strictly worse for me. Once all 4 are revealed, oppBench is
+  // ignored, so the search is identical with or without it.
+  test('opp can switch a doomed mon to an unrevealed-roster wall (gated on <4 revealed)', () => {
+    const hydreigon = mon({ species: 'Hydreigon', nature: 'Modest', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Dark Pulse'] });
+    const heatran: OpponentEntry = { species: 'Heatran', knownMoves: ['Magma Storm'], candidates: [mon({ species: 'Heatran', ability: 'Flash Fire', nature: 'Modest', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Magma Storm'] })] };
+    const base = (allRevealed: boolean, bench?: OpponentEntry[]): SearchInput => ({
+      mine: [
+        { set: flutter, hpPercent: 100, active: true },
+        { set: garchomp, hpPercent: 100, active: true },
+      ],
+      opp: [
+        { entry: oppOf(hydreigon), hpPercent: 100, active: true },
+        { entry: oppOf(incin), hpPercent: 100, active: true },
+      ],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: allRevealed, oppBench: bench,
+    });
+    const withBench = (rev: boolean) => searchToDepth(base(rev, [heatran]), 2).score;
+    const noBench = (rev: boolean) => searchToDepth(base(rev), 2).score;
+
+    // While the bring is incomplete, the unrevealed wall is a real opp option →
+    // it can only hurt my maximin value (the opp dodges the OHKO).
+    expect(withBench(false)).toBeLessThan(noBench(false));
+    // Once all 4 are revealed, oppBench is ignored → the search is unchanged.
+    expect(withBench(true)).toBe(noBench(true));
+  });
+
+  // Regression: a single-target move may only hit a foe ON THE FIELD. Benched /
+  // unrevealed mons carry damage cells (for switch-in modelling) but must never
+  // be an attack TARGET. Flutter Mane OHKOs the benched Hydreigon (Fairy 4×) but
+  // only chips the two Steel actives — the buggy search picked the juicy benched
+  // KO ("Moonblast the benched mon"), which is impossible.
+  test('never recommends attacking a benched / unrevealed opponent', () => {
+    const flutterMoon = mon({ species: 'Flutter Mane', ability: 'Protosynthesis', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Moonblast'] });
+    const hydreigon: OpponentEntry = { species: 'Hydreigon', knownMoves: ['Dark Pulse'] }; // Fairy 4× — a tempting KO
+    const input: SearchInput = {
+      mine: [{ set: flutterMoon, hpPercent: 100, active: true }],
+      opp: [
+        { entry: { species: 'Metagross', knownMoves: ['Bullet Punch'] }, hpPercent: 100, active: true },
+        { entry: { species: 'Heatran', knownMoves: ['Magma Storm'] }, hpPercent: 100, active: true },
+      ],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: false, oppBench: [hydreigon],
+    };
+    const r = searchToDepth(input, 3);
+    const onField = ['Metagross', 'Heatran'];
+    for (const p of r.plays) {
+      if (p.switch || p.self || p.spread) continue;
+      expect(onField).toContain(p.targetSpecies);     // never 'Hydreigon' (benched)
+    }
+  });
+});
+
+describe('Phase 3b: Tailwind / Trick Room as actions', () => {
+  // A very slow, very strong sweeper (Glastrier) is outsped by fast foes, so it
+  // takes hits before it can act. A Trick Room setter (Bronzong) flips the order
+  // for subsequent turns → the slow sweeper moves first. Trick Room must be an
+  // offered action, and having it available can only help my maximin value.
+  const glastrier = mon({ species: 'Glastrier', ability: 'Chilling Neigh', nature: 'Brave', evs: { ...ZERO_EVS, hp: 252, atk: 252 }, ivs: { ...MAX_IVS, spe: 0 }, moves: ['High Horsepower', 'Icicle Crash'] });
+  const bronzongTR = mon({ species: 'Bronzong', ability: 'Levitate', nature: 'Sassy', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, ivs: { ...MAX_IVS, spe: 0 }, moves: ['Trick Room', 'Gyro Ball'] });
+  const bronzongNoTR = mon({ species: 'Bronzong', ability: 'Levitate', nature: 'Sassy', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, ivs: { ...MAX_IVS, spe: 0 }, moves: ['Iron Defense', 'Gyro Ball'] });
+  const fastFoe = (species: string): SearchInput['opp'][number] => ({
+    entry: { species, knownMoves: [], candidates: [mon({ species, nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Earthquake'] })] },
+    hpPercent: 100, active: true,
+  });
+  const position = (setter: PokemonSet): SearchInput => ({
+    mine: [
+      { set: glastrier, hpPercent: 100, active: true },
+      { set: setter, hpPercent: 100, active: true },
+    ],
+    opp: [fastFoe('Dragapult'), fastFoe('Aerodactyl')],
+    field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+  });
+
+  test('Trick Room is an offered action when a mon on the field knows it', () => {
+    const r = searchToDepth(position(bronzongTR), 2);
+    expect(r.explored!.actionClasses).toContain('trickroom');
+  });
+
+  test('having Trick Room available never lowers my maximin value', () => {
+    // Maximin monotonicity: adding one of MY actions can only help me.
+    const withTR = searchToDepth(position(bronzongTR), 3).score;
+    const withoutTR = searchToDepth(position(bronzongNoTR), 3).score;
+    expect(withTR).toBeGreaterThanOrEqual(withoutTR);
+  });
+
+  // Tailwind likewise is offered + integrated. A mon that knows Tailwind exposes
+  // the action; the breadth report reflects it (scope-derived wording).
+  test('Tailwind is an offered action and surfaces in the breadth report', () => {
+    const tailwindMon = mon({ species: 'Talonflame', ability: 'Gale Wings', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Tailwind', 'Brave Bird'] });
+    const r = searchToDepth({
+      mine: [
+        { set: tailwindMon, hpPercent: 100, active: true },
+        { set: glastrier, hpPercent: 100, active: true },
+      ],
+      opp: [fastFoe('Dragapult'), fastFoe('Aerodactyl')],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 2);
+    expect(r.explored!.actionClasses).toContain('tailwind');
+  });
+
+  // Field-effect DURATIONS: a known turn count lets the search stall an effect
+  // out. Garchomp (169 Spe) normally outspeeds Incineroar (123), but the opp's
+  // Tailwind doubles Incineroar to 246 → it outspeeds + KOs first. At 1 HP each,
+  // with the Tailwind down to its LAST turn, Garchomp Protects through it; the
+  // Tailwind expires; next turn Garchomp outspeeds and KOs → win. With an
+  // UNKNOWN (untracked) duration the Tailwind never expires → Garchomp is outsped
+  // forever → loss.
+  test('a known Tailwind duration lets the search stall it out (vs permanent)', () => {
+    const garchompProtect = mon({ species: 'Garchomp', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Earthquake', 'Protect'] });
+    const fastIncin: OpponentEntry = { species: 'Incineroar', knownMoves: ['Flare Blitz'], candidates: [mon({ species: 'Incineroar', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Flare Blitz'] })] };
+    const pos = (theirTailwindTurns?: number): SearchInput => ({
+      mine: [{ set: garchompProtect, hpPercent: 1, active: true }],
+      opp: [{ entry: fastIncin, hpPercent: 1, active: true }],
+      field: { ...NEUTRAL_FIELD, theirTailwind: true, theirTailwindTurns },
+      allOppRevealed: true,
+    });
+    // One turn of Tailwind left → Protect through it, then outspeed + KO.
+    expect(searchToDepth(pos(1), 3).verdict).toBe('winning');
+    // Untracked duration → assumed permanent → outsped forever → loss.
+    expect(searchToDepth(pos(undefined), 3).verdict).toBe('losing');
+  });
+});
+
+describe('Leech Seed', () => {
+  // An EXISTING Leech Seed drains the seeded mon each turn (and heals the
+  // seeder). In an Incineroar mirror where neither side can KO, the ONLY HP
+  // movement is the seed — so being seeded scores strictly worse for me.
+  test('an existing Leech Seed drains the seeded mon over the search horizon', () => {
+    const base: SearchInput = {
+      mine: [{ set: incin, hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(incin), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    };
+    const seeded: SearchInput = {
+      ...base,
+      mine: [{ set: incin, hpPercent: 100, active: true, seededBy: 0 }], // seeded by opp 0
+    };
+    expect(searchToDepth(seeded, 3).score).toBeLessThan(searchToDepth(base, 3).score);
+  });
+
+  // Leech Seed is an offered action against a non-Grass foe, but Grass types are
+  // IMMUNE — so it must NOT be offered when the only foe is Grass.
+  test('Leech Seed is offered vs a non-Grass foe but not vs a Grass foe (immunity)', () => {
+    const seeder = mon({ species: 'Amoonguss', ability: 'Regenerator', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Leech Seed', 'Pollen Puff'] });
+    const vs = (oppSpecies: string): SearchInput => ({
+      mine: [{ set: seeder, hpPercent: 100, active: true }],
+      opp: [{ entry: { species: oppSpecies, knownMoves: ['Tackle'] }, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    expect(searchToDepth(vs('Snorlax'), 1).explored!.actionClasses).toContain('leech');   // Normal — seedable
+    expect(searchToDepth(vs('Ferrothorn'), 1).explored!.actionClasses).not.toContain('leech'); // Grass — immune
+  });
+
+  // The search VALUES Leech Seed: in a stall where direct damage is negligible,
+  // having Leech Seed available strictly improves my maximin value (it chips
+  // 1/8 per turn + heals), so the search uses it.
+  test('having Leech Seed available improves my value in a stall', () => {
+    const dondozo: OpponentEntry = { species: 'Dondozo', knownMoves: ['Wave Crash'], candidates: [mon({ species: 'Dondozo', ability: 'Unaware', nature: 'Impish', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Wave Crash'] })] };
+    const stall = (moves: string[]): SearchInput => ({
+      mine: [{ set: mon({ species: 'Amoonguss', ability: 'Regenerator', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves }), hpPercent: 100, active: true }],
+      opp: [{ entry: dondozo, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    const withLeech = searchToDepth(stall(['Leech Seed', 'Clear Smog']), 3).score;
+    const withoutLeech = searchToDepth(stall(['Clear Smog']), 3).score;
+    expect(withLeech).toBeGreaterThan(withoutLeech);
+  });
+});
+
 describe('Protect action', () => {
   // Sneasler (Jolly, 252 Spe, 252 Atk) easily OHKOs Incineroar at 1% HP and
   // goes first (189 > max Incin 123). Incineroar has Protect in its moveset.
@@ -683,5 +1024,75 @@ describe('Protect action', () => {
     const d2 = searchToDepth(input, 2);
     // Depth 2 forces an eventual attack → Incin dies → score drops relative to depth-1-protect.
     expect(d2.score).toBeLessThanOrEqual(d1.score);
+  });
+});
+
+describe('Boosts: setup, Speed Boost, Baton Pass', () => {
+  // Speed Boost (order-only): Espathra is outsped by a faster foe, but Protecting
+  // through one turn accrues +1 Spe, flipping the race so it KOs next turn. With
+  // a non-Speed-Boost ability the race is never won → loss. (1 HP each so order
+  // alone decides the KO.)
+  const fastFoe: OpponentEntry = {
+    species: 'Dragapult', knownMoves: ['Dragon Darts'],
+    candidates: [mon({ species: 'Dragapult', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Dragon Darts'] })],
+  };
+  const espathra = (ability: string) => mon({
+    species: 'Espathra', ability, nature: 'Timid',
+    evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Lumina Crash', 'Protect'],
+  });
+  const speedRace = (ability: string): SearchInput => ({
+    mine: [{ set: espathra(ability), hpPercent: 1, active: true }],
+    opp: [{ entry: fastFoe, hpPercent: 1, active: true }],
+    field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+  });
+
+  test('Speed Boost is an offered/known mechanic and surfaces in the breadth report', () => {
+    const r = searchToDepth(speedRace('Speed Boost'), 3);
+    expect(r.explored!.actionClasses).toContain('speedboost');
+  });
+
+  test('Speed Boost flips a losing speed race once it stacks (vs a plain ability)', () => {
+    expect(searchToDepth(speedRace('Speed Boost'), 3).verdict).toBe('winning');
+    expect(searchToDepth(speedRace('Competitive'), 3).verdict).toBe('losing');
+  });
+
+  // Setup (Swords Dance): a Snorlax mirror where neither side can KO, so the only
+  // HP movement is damage dealt. Having Swords Dance lets my Snorlax spend a turn
+  // on +2 Atk and then out-damage over the horizon → strictly higher value.
+  test('Swords Dance setup raises my value in a no-KO stall', () => {
+    const make = (moves: string[]): SearchInput => ({
+      mine: [{ set: mon({ species: 'Snorlax', ability: 'Thick Fat', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves }), hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(mon({ species: 'Snorlax', ability: 'Thick Fat', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Body Slam'] })), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    const withSD = searchToDepth(make(['Swords Dance', 'Body Slam']), 3);
+    const withoutSD = searchToDepth(make(['Body Slam']), 3);
+    expect(withSD.explored!.actionClasses).toContain('setup');
+    expect(withSD.score).toBeGreaterThan(withoutSD.score);
+  });
+
+  // Baton Pass: a +2 SpA passer that invests 0 SpA (so its own attacks are
+  // feeble) hands the boost to a strong special sweeper, which then chips a bulky
+  // wall far harder than the raw switch-in would. Both lines spend turn 1 moving
+  // the sweeper in, so the ONLY difference is whether the +2 transfers.
+  test('Baton Pass transfers boosts to the switch-in (beats a plain switch)', () => {
+    const sweeper = mon({ species: 'Flutter Mane', ability: 'Protosynthesis', nature: 'Modest', evs: { ...ZERO_EVS, hp: 252, spa: 252 }, moves: ['Moonblast'] });
+    const passer = (moves: string[]) => mon({ species: 'Sylveon', ability: 'Pixilate', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves });
+    const wall: OpponentEntry = { species: 'Blissey', knownMoves: ['Pollen Puff'], candidates: [mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Pollen Puff'] })] };
+    const make = (passerMoves: string[]): SearchInput => ({
+      mine: [
+        { set: passer(passerMoves), hpPercent: 100, active: true, boosts: { spa: 2 } }, // already set up
+        { set: sweeper, hpPercent: 100, active: false },
+      ],
+      opp: [{ entry: wall, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    // Passer has no real attack either way, so BOTH lines bring the sweeper in on
+    // turn 1 — withBP via Baton Pass (+2 rides along), withoutBP via plain switch
+    // (+2 lost). Isolates the transfer.
+    const withBP = searchToDepth(make(['Baton Pass', 'Wish']), 3);
+    const withoutBP = searchToDepth(make(['Protect', 'Wish']), 3);
+    expect(withBP.explored!.actionClasses).toContain('batonpass');
+    expect(withBP.score).toBeGreaterThan(withoutBP.score);
   });
 });
