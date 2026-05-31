@@ -397,6 +397,8 @@ interface Tables {
   myTerrainMove: ({ move: string; terrain: Terrain } | null)[];
   oppTerrainMove: ({ move: string; terrain: Terrain } | null)[];
   myTerrainAbility: (Terrain | null)[]; oppTerrainAbility: (Terrain | null)[];
+  // End-of-turn residual info per mon (status chip, sand immunity, heals).
+  myResidual: ResidualInfo[]; oppResidual: ResidualInfo[];
   field: FieldState;
 }
 
@@ -596,6 +598,10 @@ interface State {
   /** Global terrain + turns remaining (same stall-out treatment as weather). */
   terrain: Terrain;
   terrainTurns?: number;
+  /** Toxic (badly-poisoned) counter per mon — damage escalates by n/16 each EOT.
+   *  1 for a tox-statused mon at the root, 0 otherwise. */
+  myToxicN: number[];
+  oppToxicN: number[];
 }
 
 // Doubles screen damage reduction (2732/4096 ≈ 0.667), matching @smogon/calc's
@@ -705,6 +711,18 @@ function terrainSetByAbility(ability: string | null | undefined): Terrain | null
 function findTerrainMove(moves: string[]): { move: string; terrain: Terrain } | null {
   for (const m of moves) { const ter = terrainSetByMove(m); if (ter) return { move: m, terrain: ter }; }
   return null;
+}
+
+// --- End-of-turn residuals --------------------------------------------------
+/** Per-mon info for the EOT residual pass (status chip, sand/heal eligibility). */
+interface ResidualInfo { status: string; magicGuard: boolean; leftovers: boolean; sandImmune: boolean }
+function residualInfo(species: string, ability: string | null | undefined, item: string | null | undefined, status: string | undefined): ResidualInfo {
+  const ab = toId(ability ?? '');
+  const magicGuard = ab === 'magicguard';
+  const leftovers = /leftovers/i.test(item ?? '');
+  const sandImmune = magicGuard || ['sandveil', 'sandrush', 'sandforce', 'overcoat'].includes(ab)
+    || isType(species, 'Rock') || isType(species, 'Ground') || isType(species, 'Steel');
+  return { status: status ?? '', magicGuard, leftovers, sandImmune };
 }
 // The weather that doubles a mon's Speed. Known ability wins; if the opp's
 // ability is unknown, fall back to a weather-speed ability the species could
@@ -985,6 +1003,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppTerrainMove: opp.map(o => findTerrainMove(o.entry.knownMoves)),
     myTerrainAbility: mine.map(m => terrainSetByAbility(m.set.ability)),
     oppTerrainAbility: opp.map(o => terrainSetByAbility(o.entry.ability)),
+    myResidual: mine.map(m => residualInfo(m.set.species, m.set.ability, m.set.item, m.status)),
+    oppResidual: opp.map(o => residualInfo(o.entry.species, o.entry.ability, o.entry.item, o.status)),
     field: input.field,
   };
 }
@@ -1024,6 +1044,8 @@ function initialState(input: SearchInput): State {
     weatherTurns: input.field.weatherTurns,
     terrain: input.field.terrain ?? null,
     terrainTurns: input.field.terrainTurns,
+    myToxicN: input.mine.map(m => (m.status === 'tox' ? 1 : 0)),
+    oppToxicN: input.opp.map(o => (o.status === 'tox' ? 1 : 0)),
   };
 }
 
@@ -1329,6 +1351,29 @@ function resolveTurn(
     }
   }
 
+  // End-of-turn residuals on ACTIVE mons: status chip (burn 1/16, poison 1/8,
+  // toxic n/16 escalating), Sandstorm chip, Grassy + Leftovers heal. Magic Guard
+  // blocks the DAMAGE (not the heals). Uses the start-of-turn weather/terrain.
+  const myToxicN = s.myToxicN.slice();
+  const oppToxicN = s.oppToxicN.slice();
+  const sand = normWeather(s.weather) === 'Sand';
+  const grassy = s.terrain === 'Grassy';
+  const residual = (hp: number[], idx: number, info: ResidualInfo, toxicN: number[], grounded: boolean) => {
+    if ((hp[idx] ?? 0) <= 0) return;
+    let delta = 0;
+    if (!info.magicGuard) {
+      if (info.status === 'brn') delta -= 100 / 16;
+      else if (info.status === 'psn') delta -= 100 / 8;
+      else if (info.status === 'tox') { const n = toxicN[idx] || 1; delta -= n * (100 / 16); toxicN[idx] = n + 1; }
+      if (sand && !info.sandImmune) delta -= 100 / 16;
+    }
+    if (info.leftovers) delta += 100 / 16;             // heals ignore Magic Guard
+    if (grassy && grounded) delta += 100 / 16;
+    if (delta !== 0) hp[idx] = Math.max(0, Math.min(100, hp[idx]! + delta));
+  };
+  for (const mi of myActiveNow) residual(myHp, mi, t.myResidual[mi]!, myToxicN, t.myGrounded[mi]!);
+  for (const oj of oppActiveNow) residual(oppHp, oj, t.oppResidual[oj]!, oppToxicN, t.oppGrounded[oj]!);
+
   // Boost bookkeeping. A mon that LEAVES the field clears its stages; a switch-in
   // arrives fresh — EXCEPT Baton Pass, which passes the outgoing mon's current
   // stages to the incoming mon. Then setup moves apply their self-boost, and
@@ -1354,7 +1399,7 @@ function resolveTurn(
     mySeeded, oppSeeded, myBoost, oppBoost,
     myReflect, myLightScreen, theirReflect, theirLightScreen,
     myReflectTurns, myLightScreenTurns, theirReflectTurns, theirLightScreenTurns,
-    weather, weatherTurns, terrain, terrainTurns,
+    weather, weatherTurns, terrain, terrainTurns, myToxicN, oppToxicN,
   };
 }
 

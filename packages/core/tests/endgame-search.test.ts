@@ -1219,3 +1219,41 @@ describe('Phase 4: terrain (Electric/Grassy/Misty/Psychic)', () => {
     expect(r.explored!.actionClasses).toContain('terrain');
   });
 });
+
+describe('Phase 4: end-of-turn residuals', () => {
+  // Incineroar mirror (deeply sub-OHKO → no KOs), so the only HP movement is the
+  // residual. A POISONED opponent chips itself 1/8 per turn → strictly better for
+  // me than a healthy one.
+  test('poison drains the opponent over the horizon', () => {
+    const base = (oppStatus?: string): SearchInput => ({
+      mine: [{ set: incin, hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(incin), hpPercent: 100, active: true, status: oppStatus }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    expect(searchToDepth(base('psn'), 3).score).toBeGreaterThan(searchToDepth(base(undefined), 3).score);
+  });
+
+  // Leftovers heals 1/16 per turn. True stall: my Dark Incineroar is IMMUNE to
+  // the opp's Psychic move and only carries Taunt (0 damage), so neither side
+  // chips the other — only Leftovers moves HP.
+  test('Leftovers heals my mon across a stall', () => {
+    const psychic: OpponentEntry = { species: 'Bronzong', knownMoves: ['Psychic'], candidates: [mon({ species: 'Bronzong', ability: 'Levitate', nature: 'Sassy', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Psychic'] })] };
+    const make = (item?: string): SearchInput => ({
+      mine: [{ set: mon({ species: 'Incineroar', item, ability: 'Intimidate', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Taunt'] }), hpPercent: 60, active: true }],
+      opp: [{ entry: psychic, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    expect(searchToDepth(make('Leftovers'), 3).score).toBeGreaterThan(searchToDepth(make(undefined), 3).score);
+  });
+
+  // Magic Guard blocks residual DAMAGE: a poisoned Magic Guard mon takes no chip,
+  // so its value is identical to being unpoisoned.
+  test('Magic Guard ignores poison chip', () => {
+    const make = (status?: string): SearchInput => ({
+      mine: [{ set: mon({ species: 'Clefable', ability: 'Magic Guard', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Moonblast'] }), hpPercent: 100, active: true, status }],
+      opp: [{ entry: oppOf(incin), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    expect(searchToDepth(make('psn'), 3).score).toBe(searchToDepth(make(undefined), 3).score);
+  });
+});

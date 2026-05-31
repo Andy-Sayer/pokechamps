@@ -258,9 +258,16 @@ deferred; phantom mega-evolution isn't modelled.
     to `FieldState`) tick down → stall-out; `SET_TERRAIN` action + surge abilities
     on switch-in. Action class `terrain`. NOT modelled: Psychic Terrain blocking
     priority (an order effect), Grassy heal residual (below).
-  - **Remaining:** end-of-turn residuals (burn/poison/toxic/sand chip, Grassy
-    heal) the search still ignores, and inflicted status (Will-O-Wisp/Thunder Wave
-    gaining burn/para mid-search).
+  - **✅ End-of-turn residuals — SHIPPED (2026-06-01).** On active mons each ply:
+    burn 1/16, poison 1/8, toxic n/16 escalating (counter in `State`), Sandstorm
+    chip 1/16 (non-Rock/Ground/Steel & no Sand-* ability), Grassy heal 1/16
+    (grounded), Leftovers heal 1/16. Magic Guard blocks the DAMAGE (not heals).
+    Like Leech Seed, only ACTIVE mons tick. `Tables.my/oppResidual` precomputes
+    status/immunity/heal eligibility.
+  - **Remaining (small):** inflicted status mid-search (Will-O-Wisp/Thunder Wave
+    GAINING burn/para — the search reads existing status but doesn't model a move
+    applying it), and Psychic-Terrain priority-block. **Phase 4 is otherwise
+    complete** — only GPU (Phase 5) remains.
   - **✅ Dynamic stat boosts (setup) + Speed Boost + Baton Pass — SHIPPED
     (2026-05-31).** `State.myBoost`/`oppBoost` track live TOTAL stages (seeded
     from input = the level baked into the cells). Solved the matrix-rebuild problem
