@@ -2199,7 +2199,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         const turns = bestSearch.depth;
         const conf = `${turns} turn${turns === 1 ? '' : 's'} ahead`;
         const plays = bestSearch.plays
-          .map(p => `${p.mySpecies}→${p.move || '—'}→${p.targetSpecies}`)
+          .map(p => p.self ? `${p.mySpecies}→${p.move}` : `${p.mySpecies}→${p.move || '—'}→${p.targetSpecies}`)
           .join(' · ');
         const mega = bestSearch.megaMon ? `mega ${bestSearch.megaMon} · ` : '';
         // Compact risk breakdown: "label NN%", joined — labels are self-explanatory.

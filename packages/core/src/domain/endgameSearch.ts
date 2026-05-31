@@ -90,6 +90,8 @@ export interface SearchPlay {
   targetSpecies: string;
   /** True when `move` is a spread move hitting all live foes at once. */
   spread?: boolean;
+  /** True when `move` targets the user itself (e.g. Protect). Display omits target. */
+  self?: boolean;
 }
 /** A named uncertainty that affects the outcome, with its probability. */
 export interface SearchRisk {
@@ -160,6 +162,8 @@ const MATERIAL = 1_000;       // per-mon material weight (dominates HP)
 const MAX_ACTIVE = 2;
 // Sentinel target meaning "spread move — hit every live foe" (vs a foe index).
 const SPREAD = -1;
+// Sentinel target meaning "use Protect/Detect/etc. on self" (vs a foe index).
+const PROTECT = -2;
 
 // ---------------------------------------------------------------------------
 // Internal flat model (indices into precomputed arrays)
@@ -218,6 +222,8 @@ interface Tables {
   thr: Cell[][];               // thr[oj][mi] — opp oj attacking my mi
   mySpread: (SpreadOpt | null)[]; // mySpread[mi] — best spread move, or null
   mySpreadActors: Set<number>; // indices of mine that have a spread option
+  myProtectMove: (string | null)[]; // protect move name per my mon, null = can't protect
+  oppProtectMove: (string | null)[]; // protect move name per opp (from knownMoves), null = can't protect
   field: FieldState;
 }
 
@@ -228,6 +234,16 @@ interface Tables {
 function isSpreadMove(move: string): boolean {
   const t = (getMove(move) as { target?: string } | undefined)?.target;
   return t === 'allAdjacentFoes' || t === 'allAdjacent';
+}
+
+// Single-user protection moves (user fully blocks incoming damage for one turn).
+// Wide Guard / Quick Guard / Mat Block protect the TEAM and are not modelled here.
+const PROTECT_MOVE_IDS = new Set(['protect', 'detect', 'kingsshield', 'banefulbunker', 'spikyshield', 'obstruct', 'silktrap']);
+function isProtectMove(move: string): boolean {
+  return PROTECT_MOVE_IDS.has(toId(move));
+}
+function findProtectMove(moves: string[]): string | null {
+  return moves.find(m => isProtectMove(m)) ?? null;
 }
 
 // Best spread move for my mon (by total damage across the current opponents),
@@ -269,6 +285,8 @@ interface State {
   oppHp: number[];
   myActive: number[];          // indices currently on the field (≤2)
   oppActive: number[];
+  myProtectStreak: number[];   // consecutive protect turns per my mon (0 = not protecting last turn)
+  oppProtectStreak: number[];
 }
 
 // Gimmick flags plus the live boosts/status that shape the damage roll. Keys
@@ -430,6 +448,10 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     myPar: mine.map(m => m.status === 'par'),
     oppPar: opp.map(o => o.status === 'par'),
     off, thr, mySpread, mySpreadActors,
+    myProtectMove: mine.map(m => findProtectMove(m.set.moves ?? [])),
+    // Opp protect: only offer it in the search when the opp has REVEALED a
+    // protect variant (opp-conservatism rule — we don't model unseen moves).
+    oppProtectMove: opp.map(o => findProtectMove(o.entry.knownMoves)),
     field: input.field,
   };
 }
@@ -444,6 +466,8 @@ function initialState(input: SearchInput): State {
     oppHp: input.opp.map(o => o.hpPercent),
     myActive: myActive.slice(0, MAX_ACTIVE),
     oppActive: oppActive.slice(0, MAX_ACTIVE),
+    myProtectStreak: input.mine.map(() => 0),
+    oppProtectStreak: input.opp.map(() => 0),
   };
 }
 
@@ -461,7 +485,7 @@ function effSpeed(base: number, tailwind: boolean, paralyzed: boolean): number {
 interface Acting { side: 'mine' | 'opp'; actor: number; target: number; priority: number; speed: number }
 
 // Resolve one turn given each side's target assignment (active index → enemy
-// index). Returns a NEW state; inputs are not mutated.
+// index, or SPREAD/PROTECT sentinel). Returns a NEW state; inputs are not mutated.
 function resolveTurn(
   t: Tables,
   s: State,
@@ -478,6 +502,12 @@ function resolveTurn(
   const oppSurv = pass.survOpp.slice();
   const mySurv = pass.survMy.slice();
 
+  // Build protected sets: a mon using PROTECT is immune to all damage this turn.
+  const myProtected = new Set<number>();
+  const oppProtected = new Set<number>();
+  for (const [actor, target] of myTargets) { if (target === PROTECT) myProtected.add(actor); }
+  for (const [actor, target] of oppTargets) { if (target === PROTECT) oppProtected.add(actor); }
+
   // Apply `dmg` to hp[idx]; if it would be lethal FROM FULL HP and a survival
   // charge is available, clamp to 1 and consume it (Focus Sash / Sturdy). A
   // multi-hit move breaks through survival, so `breaks` skips the clamp.
@@ -490,12 +520,15 @@ function resolveTurn(
 
   const actings: Acting[] = [];
   for (const [actor, target] of myTargets) {
-    const priority = target === SPREAD ? t.mySpread[actor]!.priority : t.off[actor]![target]!.priority;
+    const priority = target === SPREAD ? t.mySpread[actor]!.priority
+      : target === PROTECT ? movePriority(t.myProtectMove[actor] ?? 'Protect')
+      : t.off[actor]![target]!.priority;
     actings.push({ side: 'mine', actor, target, priority, speed: effSpeed(t.mySpeed[actor]!, !!t.field.myTailwind, t.myPar[actor]!) });
   }
   for (const [actor, target] of oppTargets) {
-    const cell = t.thr[actor]![target]!;
-    actings.push({ side: 'opp', actor, target, priority: cell.priority, speed: effSpeed(t.oppSpeed[actor]!, !!t.field.theirTailwind, t.oppPar[actor]!) });
+    const priority = target === PROTECT ? movePriority(t.oppProtectMove[actor] ?? 'Protect')
+      : t.thr[actor]![target]!.priority;
+    actings.push({ side: 'opp', actor, target, priority, speed: effSpeed(t.oppSpeed[actor]!, !!t.field.theirTailwind, t.oppPar[actor]!) });
   }
 
   // Priority first (higher acts first), then speed (Trick Room inverts speed).
@@ -507,32 +540,47 @@ function resolveTurn(
   for (const act of actings) {
     if (act.side === 'mine') {
       if (myHp[act.actor]! <= 0) continue;          // KO'd before acting
+      if (act.target === PROTECT) continue;           // mon uses Protect — no damage dealt
       if (act.target === SPREAD) {
-        // Spread move — hit every live foe with this move's (already
-        // spread-reduced) damage vs each.
+        // Spread move — hit every live, unprotected foe.
         const sp = t.mySpread[act.actor]!;
         const dmg = mySpreadRoll(sp, r);
         for (let foe = 0; foe < oppHp.length; foe++) {
           if (oppHp[foe]! <= 0) continue;
+          if (oppProtected.has(foe)) continue;       // opp protecting this turn
           apply(oppHp, foe, dmg[foe] ?? 0, oppSurv, false); // spread moves aren't multi-hit
         }
         continue;
       }
+      if (oppProtected.has(act.target)) continue;    // target protecting → fizzle
       if (oppHp[act.target]! <= 0) continue;        // target already down → fizzle
       const oc = t.off[act.actor]![act.target]!;
       apply(oppHp, act.target, myRoll(oc, r), oppSurv, oc.multiHit);
     } else {
       if (oppHp[act.actor]! <= 0) continue;
+      if (act.target === PROTECT) continue;           // opp mon uses Protect
+      if (myProtected.has(act.target)) continue;     // my mon protecting → fizzle
       if (myHp[act.target]! <= 0) continue;
       const tc = t.thr[act.actor]![act.target]!;
       apply(myHp, act.target, oppRoll(tc, r), mySurv, tc.multiHit);
     }
   }
 
+  // Update consecutive protect streaks. Using Protect increments the streak
+  // (disabling the option next turn); any other action resets it to 0.
+  const myProtectStreak = s.myProtectStreak.slice();
+  const oppProtectStreak = s.oppProtectStreak.slice();
+  for (const [actor, target] of myTargets) {
+    myProtectStreak[actor] = target === PROTECT ? (myProtectStreak[actor]! + 1) : 0;
+  }
+  for (const [actor, target] of oppTargets) {
+    oppProtectStreak[actor] = target === PROTECT ? (oppProtectStreak[actor]! + 1) : 0;
+  }
+
   // Refill active slots from the bench after KOs (heuristic replacement).
   const myActive = refill(s.myActive, myHp, t.myN, t.off, oppHp, 'mine');
   const oppActive = refill(s.oppActive, oppHp, t.oppN, t.thr, myHp, 'opp');
-  return { myHp, oppHp, myActive, oppActive };
+  return { myHp, oppHp, myActive, oppActive, myProtectStreak, oppProtectStreak };
 }
 
 // Keep up to MAX_ACTIVE live mons on the field. Drop fainted actives; bring in
@@ -567,16 +615,31 @@ function refill(
 // All joint target assignments for a side's live actives (cartesian product of
 // each active's options). Each active's options are the live foes (single-
 // target) plus, for actors in `spreadActors`, the SPREAD sentinel (hit all
-// foes). Empty when there are no live foes.
-function jointActions(active: number[], foeHp: number[], spreadActors?: Set<number>): Array<Map<number, number>> {
+// foes), plus, when eligible, the PROTECT sentinel.  Protect is eligible only
+// when `protectMoves[actor]` is non-null (the mon has the move) and
+// `protectStreak[actor] === 0` (not used last turn — consecutive protect fails).
+// Empty when there are no live foes.
+function jointActions(
+  active: number[],
+  foeHp: number[],
+  spreadActors?: Set<number>,
+  protectMoves?: (string | null)[],
+  protectStreak?: number[],
+): Array<Map<number, number>> {
   const liveFoes = foeHp.map((h, j) => (h > 0 ? j : -1)).filter(j => j >= 0);
   if (liveFoes.length === 0) return [];
   let combos: Array<Map<number, number>> = [new Map()];
   for (const actor of active) {
+    const canProtect = (protectMoves?.[actor] != null) && (protectStreak?.[actor] ?? 0) === 0;
     // SPREAD first so that when hitting all foes ties a single-target line, the
     // maximin keeps the spread option (it makes the chip on the off-target
     // foe visible, and never deals less than the single-target framing).
-    const options = spreadActors?.has(actor) ? [SPREAD, ...liveFoes] : liveFoes;
+    // PROTECT last — only chosen when it strictly beats attacking.
+    const options = [
+      ...(spreadActors?.has(actor) ? [SPREAD] : []),
+      ...liveFoes,
+      ...(canProtect ? [PROTECT] : []),
+    ];
     const next: Array<Map<number, number>> = [];
     for (const combo of combos) {
       for (const opt of options) {
@@ -624,8 +687,8 @@ function value(t: Tables, s: State, depth: number, alpha: number, pass: Pass): n
   if (term !== null) return term;
   if (depth === 0) return leafScore(s);
 
-  const myJoints = jointActions(s.myActive, s.oppHp, t.mySpreadActors);
-  const oppJoints = jointActions(s.oppActive, s.myHp);
+  const myJoints = jointActions(s.myActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak);
+  const oppJoints = jointActions(s.oppActive, s.myHp, undefined, t.oppProtectMove, s.oppProtectStreak);
   if (myJoints.length === 0) return leafScore(s);
 
   let best = -Infinity;
@@ -731,11 +794,11 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
 // principal variation) and its score. `plays` are filled by the caller only for
 // the displayed pass.
 function rootSearch(t: Tables, s0: State, depth: number, pass: Pass): { score: number; joint: Map<number, number> | null } {
-  const myJoints = jointActions(s0.myActive, s0.oppHp, t.mySpreadActors);
+  const myJoints = jointActions(s0.myActive, s0.oppHp, t.mySpreadActors, t.myProtectMove, s0.myProtectStreak);
   let bestJoint: Map<number, number> | null = null;
   let bestScore = -Infinity;
 
-  const oppJoints = jointActions(s0.oppActive, s0.myHp);
+  const oppJoints = jointActions(s0.oppActive, s0.myHp, undefined, t.oppProtectMove, s0.oppProtectStreak);
   for (const my of myJoints) {
     let worst = Infinity;
     const replies = oppJoints.length ? oppJoints : [new Map<number, number>()];
@@ -761,6 +824,8 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
   for (const [actor, target] of joint) {
     if (target === SPREAD) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.mySpread[actor]!.move, targetSpecies: 'all foes', spread: true });
+    } else if (target === PROTECT) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myProtectMove[actor] ?? 'Protect', targetSpecies: t.mySpecies[actor]!, self: true });
     } else {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.off[actor]![target]!.move, targetSpecies: t.oppSpecies[target]! });
     }

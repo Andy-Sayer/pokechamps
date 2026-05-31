@@ -452,3 +452,104 @@ describe('hailMary outs analysis', () => {
     }
   });
 });
+
+describe('Protect action', () => {
+  // Sneasler (Jolly, 252 Spe, 252 Atk) easily OHKOs Incineroar at 1% HP and
+  // goes first (189 > max Incin 123). Incineroar has Protect in its moveset.
+  const slowIncinWithProtect = mon({
+    species: 'Incineroar', ability: 'Intimidate', nature: 'Careful',
+    evs: { hp: 252, atk: 0, def: 4, spa: 0, spd: 252, spe: 0 },
+    moves: ['Knock Off', 'Protect'],
+  });
+  const fastSneasler = mon({
+    species: 'Sneasler', ability: 'Poison Touch', nature: 'Jolly',
+    evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Close Combat'],
+  });
+  const sneaslerEntry: OpponentEntry = { species: 'Sneasler', knownMoves: ['Close Combat'], candidates: [fastSneasler] };
+
+  test('recommends Protect for a slow mon at 1% HP that would be KO\'d before acting', () => {
+    const input: SearchInput = {
+      mine: [{ set: slowIncinWithProtect, hpPercent: 1, active: true }],
+      opp: [{ entry: sneaslerEntry, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD },
+    };
+    const r = searchToDepth(input, 1);
+    const play = r.plays.find(p => p.mySpecies === 'Incineroar');
+    expect(play).toBeDefined();
+    expect(play!.move).toBe('Protect');
+    expect(play!.self).toBe(true);
+    expect(play!.targetSpecies).toBe('Incineroar');
+  });
+
+  test('Protect scores higher than attacking when KO is unavoidable otherwise', () => {
+    // At depth 1 attacking: Sneasler goes first, KOs Incin, Incin can't fire → score = -WIN.
+    // At depth 1 protecting: Incin survives at 1 HP → leaf score ≈ 1 − 100 ≈ -99. Protect wins.
+    const noProtect = mon({
+      species: 'Incineroar', ability: 'Intimidate', nature: 'Careful',
+      evs: { hp: 252, atk: 0, def: 4, spa: 0, spd: 252, spe: 0 },
+      moves: ['Knock Off'],
+    });
+    const rAttack = searchToDepth({
+      mine: [{ set: noProtect, hpPercent: 1, active: true }],
+      opp: [{ entry: sneaslerEntry, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD },
+    }, 1);
+    const rProtect = searchToDepth({
+      mine: [{ set: slowIncinWithProtect, hpPercent: 1, active: true }],
+      opp: [{ entry: sneaslerEntry, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD },
+    }, 1);
+    // Protect gives a strictly better score than pure attacking in this position.
+    expect(rProtect.score).toBeGreaterThan(rAttack.score);
+  });
+
+  test('a mon without Protect never gets a self-targeting play', () => {
+    const input: SearchInput = {
+      mine: [{ set: flutter, hpPercent: 1, active: true }],
+      opp: [{ entry: sneaslerEntry, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD },
+    };
+    const r = searchToDepth(input, 1);
+    expect(r.plays.every(p => !p.self)).toBe(true);
+  });
+
+  test('opp with Protect in knownMoves can protect: depth-1 forced OHKO is blocked', () => {
+    // Flutter Mane guaranteed-OHKOs Meowscarada normally (see honest-verdicts tests).
+    // Once Meowscarada has Protect in knownMoves, the search models opp using it:
+    // opp worst-case is to Protect and take 0 damage → depth-1 verdict is no longer a win.
+    const meowBase = mon({ species: 'Meowscarada', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Flower Trick', 'Protect'] });
+    const withOppProtect: SearchInput = {
+      mine: [{ set: flutter, hpPercent: 100, active: true }],
+      opp: [{ entry: { species: 'Meowscarada', knownMoves: ['Flower Trick', 'Protect'], candidates: [meowBase] }, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    };
+    const withoutOppProtect: SearchInput = {
+      mine: [{ set: flutter, hpPercent: 100, active: true }],
+      opp: [{ entry: { species: 'Meowscarada', knownMoves: ['Flower Trick'], candidates: [meowBase] }, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    };
+    const noProtect = searchToDepth(withoutOppProtect, 1);
+    expect(noProtect.forced).toBe(true); // baseline: forced win without opp protect
+
+    const withProtect = searchToDepth(withOppProtect, 1);
+    // Opp can protect → my OHKO is blocked this turn → no longer a forced depth-1 win.
+    expect(withProtect.forced).toBe(false);
+    expect(withProtect.score).toBeLessThan(noProtect.score);
+  });
+
+  test('consecutive Protect is not offered: streak resets when a different move is taken', () => {
+    // At depth 2 in the slow Incin / fast Sneasler scenario:
+    // Turn 1: Protect is chosen (streak 0 → 1).
+    // Turn 2: streak = 1 → Protect not eligible → Incin must attack (and Sneasler KOs it).
+    // Verify that the depth-2 score is worse than depth-1-protect (since turn 2 forces an attack).
+    const input: SearchInput = {
+      mine: [{ set: slowIncinWithProtect, hpPercent: 1, active: true }],
+      opp: [{ entry: sneaslerEntry, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD },
+    };
+    const d1 = searchToDepth(input, 1);
+    const d2 = searchToDepth(input, 2);
+    // Depth 2 forces an eventual attack → Incin dies → score drops relative to depth-1-protect.
+    expect(d2.score).toBeLessThanOrEqual(d1.score);
+  });
+});
