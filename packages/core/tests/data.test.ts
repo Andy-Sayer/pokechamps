@@ -2,6 +2,7 @@ import { describe, test, expect } from 'vitest';
 import {
   getSpecies,
   getItem,
+  getLearnset,
   loadFormat,
   isLegalSpecies,
   isLegalItem,
@@ -90,6 +91,25 @@ describe('isLegalSpecies', () => {
     // Primal Reversion + Gigantamax + Ash-Greninja are battle-only too.
     expect(isLegalSpecies('Kyogre-Primal')).toBe(false);
     expect(isLegalSpecies('Greninja-Ash')).toBe(false);
+  });
+});
+
+describe('getLearnset (inherits pre-evolution moves)', () => {
+  test('Scovillain can run Leech Seed + Rage Powder (inherited from Capsakid)', () => {
+    // Scovillain's OWN learnset lacks these, but its pre-evo Capsakid learns
+    // them, and a mon may know any move its pre-evolutions can — so the pool
+    // must include them. (Regression: we used to read only the own learnset.)
+    const ls = getLearnset('Scovillain');
+    expect(ls).toContain('Leech Seed');
+    expect(ls).toContain('Rage Powder');
+    // And it still includes the species' own moves.
+    expect(ls).toContain('Spicy Extract');
+  });
+
+  test('a base species with no pre-evo is unaffected', () => {
+    const ls = getLearnset('Incineroar');
+    expect(ls.length).toBeGreaterThan(0);
+    expect(ls).toContain('Flare Blitz');
   });
 });
 

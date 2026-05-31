@@ -296,9 +296,22 @@ export function isLegalItem(itemId: string, format = loadFormat()): boolean {
 // Display-name move list a species can learn, alphabetical, with format bans
 // filtered out. Empty array if the species isn't in the learnset dump.
 export function getLearnset(speciesName: string, format = loadFormat()): string[] {
-  const id = toId(speciesName);
-  const ids = learnsetsData?.[id] ?? [];
-  if (!ids.length) return [];
+  // A Pokémon can know any move its PRE-EVOLUTIONS can learn (e.g. Scovillain
+  // inherits Leech Seed / Rage Powder from Capsakid). The dumped per-species
+  // learnset only lists the species' OWN moves, so walk the `prevo` chain and
+  // union everything.
+  const ids = new Set<string>();
+  const seen = new Set<string>();
+  let cur: string | undefined = speciesName;
+  while (cur) {
+    const cid = toId(cur);
+    if (seen.has(cid)) break;            // cycle guard
+    seen.add(cid);
+    for (const moveId of learnsetsData?.[cid] ?? []) ids.add(moveId);
+    const sp = getSpecies(cur) as { prevo?: string } | undefined;
+    cur = sp?.prevo || undefined;
+  }
+  if (!ids.size) return [];
   const bannedIds = new Set(format.moves.ban.map(toId));
   const names: string[] = [];
   for (const moveId of ids) {
