@@ -1180,3 +1180,42 @@ describe('Phase 4: weather (sun/rain damage + Chlorophyll-style speed)', () => {
     expect(r.explored!.actionClasses).toContain('weather');
   });
 });
+
+describe('Phase 4: terrain (Electric/Grassy/Misty/Psychic)', () => {
+  const wall: OpponentEntry = { species: 'Blissey', knownMoves: ['Pollen Puff'], candidates: [mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Pollen Puff'] })] };
+
+  // Electric Terrain boosts a grounded user's Electric move x1.3. Permanent
+  // terrain keeps boosting it over the horizon → out-damages one that expires.
+  test('Electric Terrain keeps boosting my Electric move (permanent > finite)', () => {
+    const magnezone = mon({ species: 'Magnezone', ability: 'Analytic', nature: 'Modest', evs: { ...ZERO_EVS, hp: 252, spa: 252 }, moves: ['Thunderbolt'] });
+    const make = (turns: number | undefined): SearchInput => ({
+      mine: [{ set: magnezone, hpPercent: 100, active: true }],
+      opp: [{ entry: wall, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD, terrain: 'Electric', terrainTurns: turns }, allOppRevealed: true,
+    });
+    expect(searchToDepth(make(undefined), 3).score).toBeGreaterThan(searchToDepth(make(1), 3).score);
+  });
+
+  // Grassy Terrain halves Earthquake against a grounded defender, so my EQ chips
+  // a grounded wall LESS under Grassy than on clear ground.
+  test('Grassy Terrain halves my Earthquake vs a grounded foe', () => {
+    // Passive grounded Blissey so nothing is KO'd — isolates the EQ reduction.
+    const garchomp = mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, atk: 252 }, moves: ['Earthquake'] });
+    const make = (terrain: 'Grassy' | null): SearchInput => ({
+      mine: [{ set: garchomp, hpPercent: 100, active: true }],
+      opp: [{ entry: wall, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD, terrain }, allOppRevealed: true,
+    });
+    expect(searchToDepth(make(null), 3).score).toBeGreaterThan(searchToDepth(make('Grassy'), 3).score);
+  });
+
+  test('a terrain-setting move is an offered action', () => {
+    const magnezone = mon({ species: 'Magnezone', ability: 'Analytic', nature: 'Modest', evs: { ...ZERO_EVS, hp: 252, spa: 252 }, moves: ['Electric Terrain', 'Thunderbolt'] });
+    const r = searchToDepth({
+      mine: [{ set: magnezone, hpPercent: 100, active: true }],
+      opp: [{ entry: wall, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 2);
+    expect(r.explored!.actionClasses).toContain('terrain');
+  });
+});

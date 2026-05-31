@@ -250,10 +250,17 @@ deferred; phantom mega-evolution isn't modelled.
     **stalled out** (the user's example). `SET_WEATHER` action (Sunny Day/Rain
     Dance/Sandstorm/Snowscape) + switch-in weather abilities (Drought/Drizzle/Sand
     Stream/Snow Warning). Action class `weather`.
-  - **Remaining:** terrain (Electric/Grassy/Misty/Psychic — boost damage + minor
-    effects), and end-of-turn residuals (burn/poison/toxic/sand chip) the search
-    still ignores. (Inflicted status — Will-O-Wisp/Thunder Wave gaining burn/para
-    mid-search — also pending.)
+  - **✅ Terrain (Electric/Grassy/Misty/Psychic) — SHIPPED (2026-06-01).** At-use
+    scaling: ×1.3 for the matching TYPE from a GROUNDED attacker (Electric/Grassy/
+    Psychic); Grassy halves Earthquake/Bulldoze/Magnitude and Misty halves Dragon
+    vs a GROUNDED defender. `isGrounded` = not Flying & not Levitate (Air Balloon/
+    Iron Ball ignored). `terrain`+`terrainTurns` in `State` (added `terrainTurns`
+    to `FieldState`) tick down → stall-out; `SET_TERRAIN` action + surge abilities
+    on switch-in. Action class `terrain`. NOT modelled: Psychic Terrain blocking
+    priority (an order effect), Grassy heal residual (below).
+  - **Remaining:** end-of-turn residuals (burn/poison/toxic/sand chip, Grassy
+    heal) the search still ignores, and inflicted status (Will-O-Wisp/Thunder Wave
+    gaining burn/para mid-search).
   - **✅ Dynamic stat boosts (setup) + Speed Boost + Baton Pass — SHIPPED
     (2026-05-31).** `State.myBoost`/`oppBoost` track live TOTAL stages (seeded
     from input = the level baked into the cells). Solved the matrix-rebuild problem

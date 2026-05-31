@@ -240,6 +240,7 @@ const SET_TRICKROOM = -4; // set/flip Trick Room (order field move; no damage)
 const SET_BOOST = -5;     // setup move (Calm Mind / Swords Dance …) — self-boost
 const SET_SCREEN = -6;    // screen move (Reflect / Light Screen / Aurora Veil)
 const SET_WEATHER = -7;   // weather move (Sunny Day / Rain Dance / …)
+const SET_TERRAIN = -8;   // terrain move (Electric / Grassy / Misty / Psychic)
 // Ranged sentinel blocks that each carry an index, kept disjoint so a code is
 // unambiguous. Switches: [-19,-10] → bench idx. Leech Seed: [-29,-20] → foe idx.
 // Baton Pass: ≤ -30 → bench idx (switch that passes boosts). All ROOT-ply only.
@@ -271,11 +272,11 @@ function benchSwitchTargets(active: number[], hp: number[], n: number): number[]
 // Damage as % of target max, at three roll points so the tree can be evaluated
 // under different regimes without rebuilding the (expensive) matrix. Roll risk
 // is derived from the dmgMin..dmgMax envelope vs the target's HP at use time.
-interface Cell { dmgMin: number; dmgMid: number; dmgMax: number; move: string; priority: number; multiHit: boolean; koRolls: number[]; candidates: number; physical: boolean; type: string }
+interface Cell { dmgMin: number; dmgMid: number; dmgMax: number; move: string; priority: number; multiHit: boolean; koRolls: number[]; candidates: number; physical: boolean; type: string; groundMove: boolean }
 
 /** A spread move option for one of my mons: the move plus its (already
  *  spread-reduced) damage vs each opp index, at min/mid/max rolls. */
-interface SpreadOpt { move: string; priority: number; dmgMin: number[]; dmgMid: number[]; dmgMax: number[]; physical: boolean; type: string }
+interface SpreadOpt { move: string; priority: number; dmgMin: number[]; dmgMid: number[]; dmgMax: number[]; physical: boolean; type: string; groundMove: boolean }
 
 /** Live stat-stage boosts (−6..+6) per stat. */
 type BoostMap = Partial<Record<'atk' | 'def' | 'spa' | 'spd' | 'spe', number>>;
@@ -288,6 +289,9 @@ function isPhysicalMove(move: string): boolean {
 function moveType(move: string): string {
   return ((getMove(move) as { type?: string } | undefined)?.type) ?? '';
 }
+// Ground moves halved by Grassy Terrain.
+const GRASSY_HALVED = new Set(['earthquake', 'bulldoze', 'magnitude']);
+function isGroundMove(move: string): boolean { return GRASSY_HALVED.has(toId(move)); }
 
 // Which roll point each side uses. "pessimistic"/"optimistic" are from MY
 // perspective: pessimistic = my low rolls + opp high rolls (+ opp survives);
@@ -387,6 +391,12 @@ interface Tables {
   myWeatherMove: ({ move: string; weather: Weather } | null)[];
   oppWeatherMove: ({ move: string; weather: Weather } | null)[];
   myWeatherAbility: (Weather | null)[]; oppWeatherAbility: (Weather | null)[];
+  // Terrain: grounded flags (terrain only affects grounded mons), terrain-move
+  // capability, and the terrain a surge ability sets on switch-in.
+  myGrounded: boolean[]; oppGrounded: boolean[];
+  myTerrainMove: ({ move: string; terrain: Terrain } | null)[];
+  oppTerrainMove: ({ move: string; terrain: Terrain } | null)[];
+  myTerrainAbility: (Terrain | null)[]; oppTerrainAbility: (Terrain | null)[];
   field: FieldState;
 }
 
@@ -482,7 +492,7 @@ function bestSpread(
       defenderBoosts: opp.boosts, defenderStatus: opp.status,
     })));
     const opt: SpreadOpt = {
-      move: mv, priority: movePriority(mv), physical: isPhysicalMove(mv), type: moveType(mv),
+      move: mv, priority: movePriority(mv), physical: isPhysicalMove(mv), type: moveType(mv), groundMove: isGroundMove(mv),
       dmgMin: cells.map(c => c.dmgMin),
       dmgMid: cells.map(c => c.dmgMid),
       dmgMax: cells.map(c => c.dmgMax),
@@ -520,7 +530,7 @@ function bestSpreadOpp(
       defenderBoosts: m.boosts, defenderStatus: m.status,
     })));
     const so: SpreadOpt = {
-      move: mv, priority: movePriority(mv), physical: isPhysicalMove(mv), type: moveType(mv),
+      move: mv, priority: movePriority(mv), physical: isPhysicalMove(mv), type: moveType(mv), groundMove: isGroundMove(mv),
       dmgMin: cells.map(c => c.dmgMin),
       dmgMid: cells.map(c => c.dmgMid),
       dmgMax: cells.map(c => c.dmgMax),
@@ -583,6 +593,9 @@ interface State {
    *  removes a Chlorophyll mon's speed). */
   weather: Weather;
   weatherTurns?: number;
+  /** Global terrain + turns remaining (same stall-out treatment as weather). */
+  terrain: Terrain;
+  terrainTurns?: number;
 }
 
 // Doubles screen damage reduction (2732/4096 ≈ 0.667), matching @smogon/calc's
@@ -648,6 +661,51 @@ function findWeatherMove(moves: string[]): { move: string; weather: Weather } | 
 function isType(species: string, t: string): boolean {
   return ((getSpecies(species) as { types?: string[] } | undefined)?.types ?? []).includes(t);
 }
+
+// --- Terrain ----------------------------------------------------------------
+type Terrain = FieldState['terrain'];           // 'Electric' | 'Grassy' | 'Misty' | 'Psychic' | null
+// Terrain affects only GROUNDED mons: not Flying-type and not Levitate (Air
+// Balloon / Iron Ball ignored — a documented simplification).
+function isGrounded(species: string, ability: string | null | undefined): boolean {
+  if (toId(ability ?? '') === 'levitate') return false;
+  return !isType(species, 'Flying');
+}
+// Damage factor terrain applies to ONE hit. Electric/Grassy/Psychic boost the
+// matching TYPE ×1.3 for a GROUNDED ATTACKER; Grassy halves Earthquake/Bulldoze/
+// Magnitude and Misty halves Dragon against a GROUNDED DEFENDER. 1 otherwise.
+function terrainDamageFactor(type: string, groundMove: boolean, attackerGrounded: boolean, defenderGrounded: boolean, ter: Terrain): number {
+  let f = 1;
+  if (ter === 'Electric') { if (attackerGrounded && type === 'Electric') f *= 1.3; }
+  else if (ter === 'Grassy') {
+    if (attackerGrounded && type === 'Grass') f *= 1.3;
+    if (defenderGrounded && groundMove) f *= 0.5;
+  }
+  else if (ter === 'Psychic') { if (attackerGrounded && type === 'Psychic') f *= 1.3; }
+  else if (ter === 'Misty') { if (defenderGrounded && type === 'Dragon') f *= 0.5; }
+  return f;
+}
+function terrainSetByMove(move: string): Terrain | null {
+  switch (toId(move)) {
+    case 'electricterrain': return 'Electric';
+    case 'grassyterrain': return 'Grassy';
+    case 'mistyterrain': return 'Misty';
+    case 'psychicterrain': return 'Psychic';
+    default: return null;
+  }
+}
+function terrainSetByAbility(ability: string | null | undefined): Terrain | null {
+  switch (toId(ability ?? '')) {
+    case 'electricsurge': case 'hadronengine': return 'Electric';
+    case 'grassysurge': return 'Grassy';
+    case 'mistysurge': return 'Misty';
+    case 'psychicsurge': return 'Psychic';
+    default: return null;
+  }
+}
+function findTerrainMove(moves: string[]): { move: string; terrain: Terrain } | null {
+  for (const m of moves) { const ter = terrainSetByMove(m); if (ter) return { move: m, terrain: ter }; }
+  return null;
+}
 // The weather that doubles a mon's Speed. Known ability wins; if the opp's
 // ability is unknown, fall back to a weather-speed ability the species could
 // plausibly have (worst-case: it might outspeed me in that weather).
@@ -685,7 +743,7 @@ interface CellOpts {
 // midpoint (the old representative value); min/max = the honest envelope edges
 // (worst/best roll across surviving candidate spreads).
 function cellFrom(c: ReturnType<typeof predictOffense>): Cell {
-  if (!c) return { dmgMin: 0, dmgMid: 0, dmgMax: 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '' };
+  if (!c) return { dmgMin: 0, dmgMid: 0, dmgMax: 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false };
   const lo = c.likelyMinPercent ?? c.minPercent;
   const hi = c.likelyMaxPercent ?? c.maxPercent;
   return {
@@ -699,6 +757,7 @@ function cellFrom(c: ReturnType<typeof predictOffense>): Cell {
     candidates: c.candidatesConsidered ?? 0,
     physical: isPhysicalMove(c.move),
     type: moveType(c.move),
+    groundMove: isGroundMove(c.move),
   };
 }
 function cellFromOffense(attacker: PokemonSet, defender: OpponentEntry, field: FieldState, o: CellOpts = {}): Cell {
@@ -920,6 +979,12 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppWeatherMove: opp.map(o => findWeatherMove(o.entry.knownMoves)),
     myWeatherAbility: mine.map(m => weatherSetByAbility(m.set.ability)),
     oppWeatherAbility: opp.map(o => weatherSetByAbility(o.entry.ability)),
+    myGrounded: mine.map(m => isGrounded(m.set.species, m.set.ability)),
+    oppGrounded: opp.map(o => isGrounded(o.entry.species, o.entry.ability)),
+    myTerrainMove: mine.map(m => findTerrainMove(m.set.moves ?? [])),
+    oppTerrainMove: opp.map(o => findTerrainMove(o.entry.knownMoves)),
+    myTerrainAbility: mine.map(m => terrainSetByAbility(m.set.ability)),
+    oppTerrainAbility: opp.map(o => terrainSetByAbility(o.entry.ability)),
     field: input.field,
   };
 }
@@ -957,6 +1022,8 @@ function initialState(input: SearchInput): State {
     theirLightScreenTurns: input.field.theirLightScreenTurns,
     weather: input.field.weather ?? null,
     weatherTurns: input.field.weatherTurns,
+    terrain: input.field.terrain ?? null,
+    terrainTurns: input.field.terrainTurns,
   };
 }
 
@@ -1043,12 +1110,18 @@ function resolveTurn(
     weatherDamageFactor(type, physical, t.oppRock[tgt]!, t.oppIce[tgt]!, s.weather) / weatherDamageFactor(type, physical, t.oppRock[tgt]!, t.oppIce[tgt]!, t.field.weather);
   const oppWeatherScale = (type: string, physical: boolean, tgt: number) =>
     weatherDamageFactor(type, physical, t.myRock[tgt]!, t.myIce[tgt]!, s.weather) / weatherDamageFactor(type, physical, t.myRock[tgt]!, t.myIce[tgt]!, t.field.weather);
-  // Scale a precomputed roll by the live-vs-baked boost, screen AND weather ratios
-  // (each 1 when unchanged → positions without dynamic effects are unaffected).
-  const myDmg = (actor: number, tgt: number, raw: number, physical: boolean, type: string) =>
-    raw * boostDamageScale(s.myBoost[actor], t.myBaked[actor], s.oppBoost[tgt], t.oppBaked[tgt], physical) * myScreenScale(physical) * myWeatherScale(type, physical, tgt);
-  const oppDmg = (actor: number, tgt: number, raw: number, physical: boolean, type: string) =>
-    raw * boostDamageScale(s.oppBoost[actor], t.oppBaked[actor], s.myBoost[tgt], t.myBaked[tgt], physical) * oppScreenScale(physical) * oppWeatherScale(type, physical, tgt);
+  // Terrain damage scale: ×1.3 matching type for a grounded attacker, Grassy/Misty
+  // reductions for a grounded defender — live terrain vs the baked one.
+  const myTerrainScale = (type: string, gm: boolean, actor: number, tgt: number) =>
+    terrainDamageFactor(type, gm, t.myGrounded[actor]!, t.oppGrounded[tgt]!, s.terrain) / terrainDamageFactor(type, gm, t.myGrounded[actor]!, t.oppGrounded[tgt]!, t.field.terrain);
+  const oppTerrainScale = (type: string, gm: boolean, actor: number, tgt: number) =>
+    terrainDamageFactor(type, gm, t.oppGrounded[actor]!, t.myGrounded[tgt]!, s.terrain) / terrainDamageFactor(type, gm, t.oppGrounded[actor]!, t.myGrounded[tgt]!, t.field.terrain);
+  // Scale a precomputed roll by the live-vs-baked boost, screen, weather AND terrain
+  // ratios (each 1 when unchanged → positions without dynamic effects are unaffected).
+  const myDmg = (actor: number, tgt: number, raw: number, physical: boolean, type: string, gm: boolean) =>
+    raw * boostDamageScale(s.myBoost[actor], t.myBaked[actor], s.oppBoost[tgt], t.oppBaked[tgt], physical) * myScreenScale(physical) * myWeatherScale(type, physical, tgt) * myTerrainScale(type, gm, actor, tgt);
+  const oppDmg = (actor: number, tgt: number, raw: number, physical: boolean, type: string, gm: boolean) =>
+    raw * boostDamageScale(s.oppBoost[actor], t.oppBaked[actor], s.myBoost[tgt], t.myBaked[tgt], physical) * oppScreenScale(physical) * oppWeatherScale(type, physical, tgt) * oppTerrainScale(type, gm, actor, tgt);
 
   // Build protected sets: a mon using PROTECT is immune to all damage this turn.
   const myProtected = new Set<number>();
@@ -1066,10 +1139,10 @@ function resolveTurn(
     else hp[idx] = Math.max(0, after);
   };
 
-  // Switch / field / Leech Seed / setup / screen / weather / Baton Pass: no direct damage.
+  // Switch / field / Leech / setup / screen / weather / terrain / Baton: no direct damage.
   const nonAttack = (target: number) =>
     isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isFieldTarget(target)
-    || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER;
+    || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN;
   const actings: Acting[] = [];
   for (const [actor, target] of myTargets) {
     if (nonAttack(target)) continue;
@@ -1104,7 +1177,7 @@ function resolveTurn(
         for (const foe of oppActiveNow) {
           if (oppHp[foe]! <= 0) continue;
           if (oppProtected.has(foe)) continue;       // opp protecting this turn
-          apply(oppHp, foe, myDmg(act.actor, foe, dmg[foe] ?? 0, sp.physical, sp.type), oppSurv, false);
+          apply(oppHp, foe, myDmg(act.actor, foe, dmg[foe] ?? 0, sp.physical, sp.type, sp.groundMove), oppSurv, false);
         }
         continue;
       }
@@ -1112,7 +1185,7 @@ function resolveTurn(
       if (oppProtected.has(oTgt)) continue;          // target protecting → fizzle
       if (oppHp[oTgt]! <= 0) continue;               // target already down → fizzle
       const oc = t.off[act.actor]![oTgt]!;
-      apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r), oc.physical, oc.type), oppSurv, oc.multiHit);
+      apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r), oc.physical, oc.type, oc.groundMove), oppSurv, oc.multiHit);
     } else {
       if (oppHp[act.actor]! <= 0) continue;
       if (act.target === PROTECT) continue;           // opp mon uses Protect
@@ -1124,7 +1197,7 @@ function resolveTurn(
         for (const me of myActiveNow) {
           if (myHp[me]! <= 0) continue;
           if (myProtected.has(me)) continue;          // my mon protecting this turn
-          apply(myHp, me, oppDmg(act.actor, me, dmg[me] ?? 0, sp.physical, sp.type), mySurv, false);
+          apply(myHp, me, oppDmg(act.actor, me, dmg[me] ?? 0, sp.physical, sp.type, sp.groundMove), mySurv, false);
         }
         continue;
       }
@@ -1132,7 +1205,7 @@ function resolveTurn(
       if (myProtected.has(mTgt)) continue;            // my mon protecting → fizzle
       if (myHp[mTgt]! <= 0) continue;
       const tc = t.thr[act.actor]![mTgt]!;
-      apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r), tc.physical, tc.type), mySurv, tc.multiHit);
+      apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r), tc.physical, tc.type, tc.groundMove), mySurv, tc.multiHit);
     }
   }
 
@@ -1205,6 +1278,16 @@ function resolveTurn(
   for (const [actor, target] of myTargets) if (target === SET_WEATHER) setWeather(t.myWeatherMove[actor]?.weather ?? null);
   for (const [actor, target] of oppTargets) if (target === SET_WEATHER) setWeather(t.oppWeatherMove[actor]?.weather ?? null);
 
+  // Terrain: same tick + set pattern (surge abilities on switch-in, terrain moves).
+  let terrain = s.terrain;
+  let terrainTurns = s.terrainTurns;
+  if (terrain && terrainTurns != null) { terrainTurns -= 1; if (terrainTurns <= 0) { terrain = null; terrainTurns = undefined; } }
+  const setTerrain = (ter: Terrain | null) => { if (ter) { terrain = ter; terrainTurns = 5; } };
+  for (const inB of mySwitchIn.values()) setTerrain(t.myTerrainAbility[inB] ?? null);
+  for (const inB of oppSwitchIn.values()) setTerrain(t.oppTerrainAbility[inB] ?? null);
+  for (const [actor, target] of myTargets) if (target === SET_TERRAIN) setTerrain(t.myTerrainMove[actor]?.terrain ?? null);
+  for (const [actor, target] of oppTargets) if (target === SET_TERRAIN) setTerrain(t.oppTerrainMove[actor]?.terrain ?? null);
+
   // Leech Seed. A seed is removed when the seeded mon leaves the field (switch);
   // a switched-in mon arrives unseeded. New seeds cast this turn land on the
   // (post-switch) target unless it's Grass / already seeded, and drain THIS turn.
@@ -1271,7 +1354,7 @@ function resolveTurn(
     mySeeded, oppSeeded, myBoost, oppBoost,
     myReflect, myLightScreen, theirReflect, theirLightScreen,
     myReflectTurns, myLightScreenTurns, theirReflectTurns, theirLightScreenTurns,
-    weather, weatherTurns,
+    weather, weatherTurns, terrain, terrainTurns,
   };
 }
 
@@ -1339,6 +1422,8 @@ function jointActions(
   // Weather capability (root only): a true entry → the mon can usefully set
   // weather (knows a weather move + it'd change the current weather).
   weatherSet?: boolean[],
+  // Terrain capability (root only): same idea as weather.
+  terrainSet?: boolean[],
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -1354,6 +1439,7 @@ function jointActions(
     const canSetup = setupMove?.[actor] != null;
     const canScreen = screenSet?.[actor] === true;
     const canWeather = weatherSet?.[actor] === true;
+    const canTerrain = terrainSet?.[actor] === true;
     const batonCodes = (baton && baton.move[actor] != null) ? baton.targets.map(batonCode) : [];
     // SPREAD first so a spread that ties a single-target line is kept. PROTECT /
     // field / setup / screen / weather / Leech / SWITCH / Baton last — only chosen
@@ -1367,6 +1453,7 @@ function jointActions(
       ...(canSetup ? [SET_BOOST] : []),
       ...(canScreen ? [SET_SCREEN] : []),
       ...(canWeather ? [SET_WEATHER] : []),
+      ...(canTerrain ? [SET_TERRAIN] : []),
       ...leechCodes,
       ...switchCodes,
       ...batonCodes,
@@ -1562,6 +1649,7 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
   const myScreenCap = t.myScreen.map(sc => !!sc && ((sc.reflect && !s.myReflect) || (sc.lightScreen && !s.myLightScreen)));
   // Weather is useful only if it'd CHANGE the current weather.
   const myWeatherCap = t.myWeatherMove.map(wm => !!wm && normWeather(wm.weather) !== normWeather(s.weather));
+  const myTerrainCap = t.myTerrainMove.map(tm => !!tm && tm.terrain !== s.terrain);
   return jointActions(s.myActive, s.oppActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak,
     myBench,
     // Don't re-offer Tailwind when it's already up; Trick Room is always a
@@ -1571,13 +1659,15 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     t.mySetupMove,
     { move: t.myBatonMove, targets: myBench },
     myScreenCap,
-    myWeatherCap);
+    myWeatherCap,
+    myTerrainCap);
 }
 function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
   const oppBench = benchSwitchTargets(s.oppActive, s.oppHp, t.oppN);
   const oppScreenCap = t.oppScreen.map(sc => !!sc && ((sc.reflect && !s.theirReflect) || (sc.lightScreen && !s.theirLightScreen)));
   const oppWeatherCap = t.oppWeatherMove.map(wm => !!wm && normWeather(wm.weather) !== normWeather(s.weather));
+  const oppTerrainCap = t.oppTerrainMove.map(tm => !!tm && tm.terrain !== s.terrain);
   return jointActions(s.oppActive, s.myActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak,
     oppBench,
     { tailwind: s.theirTailwind ? undefined : t.oppTailwindMove, trickRoom: t.oppTrickRoomMove },
@@ -1585,7 +1675,8 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     t.oppSetupMove,
     { move: t.oppBatonMove, targets: oppBench },
     oppScreenCap,
-    oppWeatherCap);
+    oppWeatherCap,
+    oppTerrainCap);
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -1635,6 +1726,8 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myScreen[actor]?.move ?? 'Screen', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_WEATHER) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myWeatherMove[actor]?.move ?? 'Weather', targetSpecies: t.mySpecies[actor]!, self: true });
+    } else if (target === SET_TERRAIN) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myTerrainMove[actor]?.move ?? 'Terrain', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myTailwindMove[actor] ?? 'Tailwind', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_TRICKROOM) {
@@ -1669,6 +1762,8 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): Search
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppScreen[actor]?.move ?? 'Screen', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_WEATHER) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppWeatherMove[actor]?.move ?? 'Weather', targetSpecies: t.oppSpecies[actor]!, self: true });
+    } else if (target === SET_TERRAIN) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppTerrainMove[actor]?.move ?? 'Terrain', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppTailwindMove[actor] ?? 'Tailwind', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_TRICKROOM) {
@@ -1917,7 +2012,7 @@ export function createSearch(input: SearchInput): PositionSearch {
             if (target === SPREAD) {
               const sp = expected.table.mySpread[actor]!;
               for (const foe of s0.oppActive) {
-                consider({ dmgMin: sp.dmgMin[foe] ?? 0, dmgMid: sp.dmgMid[foe] ?? 0, dmgMax: sp.dmgMax[foe] ?? 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '' }, s0.oppHp[foe] ?? 0, expected.table.oppSpecies[foe] ?? 'foe');
+                consider({ dmgMin: sp.dmgMin[foe] ?? 0, dmgMid: sp.dmgMid[foe] ?? 0, dmgMax: sp.dmgMax[foe] ?? 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false }, s0.oppHp[foe] ?? 0, expected.table.oppSpecies[foe] ?? 'foe');
               }
             } else if (target >= 0) {       // skip PROTECT / SWITCH (no attack)
               consider(expected.table.off[actor]![target]!, s0.oppHp[target] ?? 0, expected.table.oppSpecies[target] ?? 'foe');
@@ -2170,6 +2265,9 @@ export function createSearch(input: SearchInput): PositionSearch {
       const weatherable = (moves: ({ weather: Weather } | null)[], active: number[]) =>
         active.some(i => { const wm = moves[i]; return !!wm && normWeather(wm.weather) !== normWeather(s0.weather); });
       if (weatherable(expected.table.myWeatherMove, s0.myActive) || weatherable(expected.table.oppWeatherMove, s0.oppActive)) actionClasses.push('weather');
+      const terrainable = (moves: ({ terrain: Terrain } | null)[], active: number[]) =>
+        active.some(i => { const tm = moves[i]; return !!tm && tm.terrain !== s0.terrain; });
+      if (terrainable(expected.table.myTerrainMove, s0.myActive) || terrainable(expected.table.oppTerrainMove, s0.oppActive)) actionClasses.push('terrain');
       const explored: SearchExplored = {
         depth,
         myActions: myRootJoints.length,

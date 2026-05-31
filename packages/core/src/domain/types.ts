@@ -126,6 +126,7 @@ export interface FieldState {
   // Turns remaining (countdown) for the timed conditions. Undefined = untracked
   // (count not known/seeded). Tick down each EOT; the effect clears at 0.
   weatherTurns?: number;
+  terrainTurns?: number;
   trickRoomTurns?: number;
   myTailwindTurns?: number;
   theirTailwindTurns?: number;
