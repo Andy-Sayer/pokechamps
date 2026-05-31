@@ -208,6 +208,41 @@ describe('inferOpponentSpeeds', () => {
     expect(inf[0]!.speedCeiling).toBeUndefined();
   });
 
+  test('Prankster status move with UNKNOWN ability still ignored (no false scarf)', () => {
+    // The common real case: we have NOT confirmed Whimsicott's ability, but
+    // Prankster is in its pool, so a status move (Tailwind) going first is
+    // explained by the ability — it must NOT be read as a Choice Scarf outspeed.
+    const myFast = mon({ species: 'Sneasler', nature: 'Jolly', evs: { ...ZERO_EVS, spe: 252 } });
+    const match = makeMatch(
+      [myFast],
+      ['Whimsicott'],
+      [turn([
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'Tailwind',     order: 1 }),
+        act({ side: 'mine',   attackerTeamIndex: 0, move: 'Close Combat', order: 2 }),
+      ])],
+    );
+    // NOTE: ability deliberately left unknown (undefined).
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    expect(inf[0]!.speedFloor).toBeUndefined();
+    expect(inf[0]!.scarfSuspected).toBeFalsy();
+  });
+
+  test('a NON-status move from a Prankster-capable mon still yields a speed signal', () => {
+    // Prankster only bumps STATUS moves — a damaging move going first is a real
+    // speed signal even when the ability is unknown (don't over-suppress).
+    const mySlow = mon({ species: 'Snorlax', nature: 'Relaxed', evs: { ...ZERO_EVS } });
+    const match = makeMatch(
+      [mySlow],
+      ['Whimsicott'],
+      [turn([
+        act({ side: 'theirs', attackerTeamIndex: 0, move: 'Moonblast',  order: 1 }),
+        act({ side: 'mine',   attackerTeamIndex: 0, move: 'Body Slam',   order: 2 }),
+      ])],
+    );
+    const inf = inferOpponentSpeeds(match, match.myTeam);
+    expect(inf[0]!.speedFloor).toBeDefined();   // Moonblast (non-status) → real ordering signal
+  });
+
   test('Gale Wings flying move at full HP — no speed signal', () => {
     const myFast = mon({
       species: 'Sneasler', nature: 'Jolly',

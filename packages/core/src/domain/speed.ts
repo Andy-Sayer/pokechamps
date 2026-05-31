@@ -1,6 +1,6 @@
 import type { Match, MoveAction, PokemonSet, OpponentEntry, Turn, FieldState } from './types.js';
 import { NEUTRAL_FIELD } from './types.js';
-import { getMove, getSpecies, getNature } from './data.js';
+import { getMove, getSpecies, getNature, toId } from './data.js';
 import { getPikalytics, evFromSp } from './pikalytics.js';
 import { fieldMoveEffect } from './fieldMoves.js';
 
@@ -57,6 +57,25 @@ interface PriorityCtx {
 //   Gale Wings  +1 to Flying moves   (Gen 7+: only at 100% HP)
 //   Triage      +3 to healing moves
 //   Stall       -7 to all moves      (moves last in bracket)
+// When an opponent's ability is UNKNOWN, a priority-affecting ability it could
+// plausibly have (it's in the species' ability pool) is enough to explain why a
+// move went first — so we must NOT read speed from that ordering. Returns the
+// priority ability the species could be running for THIS move, else null. Most
+// important case: Whimsicott / Grimmsnarl etc. setting Tailwind (a Status move)
+// via Prankster — without this they look like a Choice Scarf outspeed.
+function plausiblePriorityAbility(speciesName: string, move: string | undefined, hpPercent: number): string | null {
+  if (!move) return null;
+  const sp = getSpecies(speciesName) as { abilities?: Record<string, string> } | undefined;
+  if (!sp?.abilities) return null;
+  const pool = new Set(Object.values(sp.abilities).map(a => toId(a)));
+  const m = getMove(move) as any;
+  if (!m) return null;
+  if (m.category === 'Status' && pool.has('prankster')) return 'Prankster';
+  if (m.type === 'Flying' && hpPercent >= 100 && pool.has('galewings')) return 'Gale Wings';
+  if ((m.flags?.heal || m.heal || m.drain) && pool.has('triage')) return 'Triage';
+  return null;
+}
+
 function abilityBracketBump(a: MoveAction, ctx: PriorityCtx): number {
   if (a.kind === 'switch' || a.kind === 'mega') return 0;
   const ab = ctx.attackerAbility?.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -192,7 +211,11 @@ export function inferOpponentSpeeds(match: Match, myTeam: PokemonSet[]): SpeedIn
     }
     const entry = match.opponentTeam[idx];
     const hp = entry?.currentHpPercent ?? 100;
-    return { attackerAbility: entry?.ability ?? null, attackerHpPercent: hp };
+    // Known ability wins; otherwise fall back to a priority ability the species
+    // could plausibly have for this move (e.g. Prankster on a status move), so
+    // an ability-driven "moved first" isn't misread as a Choice Scarf outspeed.
+    const ability = entry?.ability ?? plausiblePriorityAbility(entry?.species ?? '', a.move, hp);
+    return { attackerAbility: ability, attackerHpPercent: hp };
   };
 
   // Earliest turn index at which each of my mons mega-evolved. Mega persists,
