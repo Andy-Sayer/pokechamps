@@ -24,7 +24,7 @@
  */
 import type { PokemonSet, OpponentEntry, FieldState, Match } from './types.js';
 import { ZERO_EVS, MAX_IVS } from './types.js';
-import { predictOffense, predictThreat } from './predictions.js';
+import { predictOffense, predictThreat, pikalyticsMoves } from './predictions.js';
 import { actualSpeed, effectiveSpeedRange } from './speed.js';
 import { getMove, toId } from './data.js';
 import { getMegaOptions } from './gimmicks/mega.js';
@@ -197,6 +197,11 @@ function oppRoll(c: Cell, r: Regime): number {
 function mySpreadRoll(s: SpreadOpt, r: Regime): number[] {
   return r === 'pessimistic' ? s.dmgMin : r === 'optimistic' ? s.dmgMax : s.dmgMid;
 }
+// Opp spread roll mirrors oppRoll: pessimistic (worst for me) = opp high rolls;
+// optimistic = opp low rolls.
+function oppSpreadRoll(s: SpreadOpt, r: Regime): number[] {
+  return r === 'pessimistic' ? s.dmgMax : r === 'optimistic' ? s.dmgMin : s.dmgMid;
+}
 
 // Probability the hit KOs a target at current HP `h`. Prefers the EMPIRICAL
 // distribution: the fraction of pooled rolls (across every surviving candidate
@@ -222,6 +227,8 @@ interface Tables {
   thr: Cell[][];               // thr[oj][mi] — opp oj attacking my mi
   mySpread: (SpreadOpt | null)[]; // mySpread[mi] — best spread move, or null
   mySpreadActors: Set<number>; // indices of mine that have a spread option
+  oppSpread: (SpreadOpt | null)[]; // oppSpread[oj] — opp's best spread move (dmg vs each my index), or null
+  oppSpreadActors: Set<number>; // indices of opps that have a spread option
   myProtectMove: (string | null)[]; // protect move name per my mon, null = can't protect
   oppProtectMove: (string | null)[]; // protect move name per opp (from knownMoves), null = can't protect
   field: FieldState;
@@ -276,6 +283,44 @@ function bestSpread(
     };
     const total = opt.dmgMid.reduce((a, b) => a + b, 0);
     if (!best || total > best.total) best = { opt, total };
+  }
+  return best?.opt ?? null;
+}
+
+// Best spread move for an OPPONENT mon (by total damage across MY current
+// actives), or null if it has none. Mirror of bestSpread. The move pool is
+// drawn from the SAME source predictThreat uses — knownMoves when we've seen
+// any, else Pikalytics top moves — so the spread option is consistent with the
+// single-target threat cells. `entryResolved` is megaified for the hypothetical
+// opp-mega branch; `o` carries the opp's live boosts/status.
+function bestSpreadOpp(
+  o: SearchOppMon,
+  entryResolved: OpponentEntry,
+  mine: SearchMyMon[],
+  field: FieldState,
+  opt: { attackerGimmickActive: boolean; myMega: (mi: number) => boolean },
+): SpreadOpt | null {
+  const pool = entryResolved.knownMoves.length ? entryResolved.knownMoves : pikalyticsMoves(entryResolved.species);
+  const spreads = pool.filter(isSpreadMove);
+  if (spreads.length === 0) return null;
+  let best: { opt: SpreadOpt; total: number } | null = null;
+  for (const mv of spreads) {
+    const synth: OpponentEntry = { ...entryResolved, knownMoves: [mv] };
+    const cells = mine.map((m, mi) => cellFrom(predictThreat({
+      opponent: synth, defender: m.set, field,
+      attackerGimmickActive: opt.attackerGimmickActive,
+      defenderGimmickActive: opt.myMega(mi),
+      attackerBoosts: o.boosts, attackerStatus: o.status,
+      defenderBoosts: m.boosts, defenderStatus: m.status,
+    })));
+    const so: SpreadOpt = {
+      move: mv, priority: movePriority(mv),
+      dmgMin: cells.map(c => c.dmgMin),
+      dmgMid: cells.map(c => c.dmgMid),
+      dmgMax: cells.map(c => c.dmgMax),
+    };
+    const total = so.dmgMid.reduce((a, b) => a + b, 0);
+    if (!best || total > best.total) best = { opt: so, total };
   }
   return best?.opt ?? null;
 }
@@ -344,6 +389,19 @@ function movePriority(move: string): number {
 function isMultiHit(move: string): boolean {
   if (!move) return false;
   return !!(getMove(move) as { multihit?: number | number[] } | undefined)?.multihit;
+}
+
+// Flinch probability (0..1) of a move's secondary effect, e.g. Rock Slide /
+// Iron Head / Air Slash 30%, Fake Out 100%. 0 if the move can't flinch. Flinch
+// only denies an action when the flincher moves FIRST — callers gate on speed.
+function flinchChance(move: string): number {
+  if (!move) return 0;
+  const m = getMove(move) as { secondary?: { chance?: number; volatileStatus?: string } | null; secondaries?: Array<{ chance?: number; volatileStatus?: string }> | null } | undefined;
+  const secs = m?.secondaries ?? (m?.secondary ? [m.secondary] : []);
+  for (const s of secs ?? []) {
+    if (s?.volatileStatus === 'flinch') return Math.max(0, Math.min(1, (s.chance ?? 0) / 100));
+  }
+  return 0;
 }
 
 // Worst-case mega-forme speed for a species at L50 (max Spe investment, +Spe
@@ -433,6 +491,15 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
   }));
   const mySpreadActors = new Set<number>();
   mySpread.forEach((s, i) => { if (s) mySpreadActors.add(i); });
+  // Opp spread moves (Rock Slide / Blizzard / Earthquake …) hit ALL my actives
+  // at once. Modeled symmetrically to mine so the maximin can pick the opp's
+  // spread reply when it's worst for me. entryResolved carries the mega forme
+  // for the hypothetical opp-mega branch.
+  const oppSpread = opp.map((o, oj) => bestSpreadOpp(o, oppEntries[oj]!, mine, input.field, {
+    attackerGimmickActive: oppHypoMega(oj), myMega,
+  }));
+  const oppSpreadActors = new Set<number>();
+  oppSpread.forEach((s, i) => { if (s) oppSpreadActors.add(i); });
   return {
     myN: mine.length,
     oppN: opp.length,
@@ -447,7 +514,7 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppSpeed: opp.map((o, oj) => (oj === plan.oppMega ? (megaMaxSpeed(o.entry.species) ?? oppBaseSpeed(o.entry, input.field)) : oppBaseSpeed(o.entry, input.field)) * speStageMult(o.boosts?.spe)),
     myPar: mine.map(m => m.status === 'par'),
     oppPar: opp.map(o => o.status === 'par'),
-    off, thr, mySpread, mySpreadActors,
+    off, thr, mySpread, mySpreadActors, oppSpread, oppSpreadActors,
     myProtectMove: mine.map(m => findProtectMove(m.set.moves ?? [])),
     // Opp protect: only offer it in the search when the opp has REVEALED a
     // protect variant (opp-conservatism rule — we don't model unseen moves).
@@ -480,6 +547,14 @@ function initialState(input: SearchInput): State {
 // Spe stat stage is already folded into `base`.
 function effSpeed(base: number, tailwind: boolean, paralyzed: boolean): number {
   return base * (tailwind ? 2 : 1) * (paralyzed ? 0.5 : 1);
+}
+
+// Does opp active `oj` move before my active `mi` this turn (ignoring move
+// priority — used for "can it KO/flinch me before I act"). Trick Room inverts.
+function oppOutspeeds(t: Tables, oj: number, mi: number): boolean {
+  const myS = effSpeed(t.mySpeed[mi]!, !!t.field.myTailwind, t.myPar[mi]!);
+  const oppS = effSpeed(t.oppSpeed[oj]!, !!t.field.theirTailwind, t.oppPar[oj]!);
+  return t.field.trickRoom ? oppS < myS : oppS > myS;
 }
 
 interface Acting { side: 'mine' | 'opp'; actor: number; target: number; priority: number; speed: number }
@@ -526,7 +601,8 @@ function resolveTurn(
     actings.push({ side: 'mine', actor, target, priority, speed: effSpeed(t.mySpeed[actor]!, !!t.field.myTailwind, t.myPar[actor]!) });
   }
   for (const [actor, target] of oppTargets) {
-    const priority = target === PROTECT ? movePriority(t.oppProtectMove[actor] ?? 'Protect')
+    const priority = target === SPREAD ? t.oppSpread[actor]!.priority
+      : target === PROTECT ? movePriority(t.oppProtectMove[actor] ?? 'Protect')
       : t.thr[actor]![target]!.priority;
     actings.push({ side: 'opp', actor, target, priority, speed: effSpeed(t.oppSpeed[actor]!, !!t.field.theirTailwind, t.oppPar[actor]!) });
   }
@@ -559,6 +635,17 @@ function resolveTurn(
     } else {
       if (oppHp[act.actor]! <= 0) continue;
       if (act.target === PROTECT) continue;           // opp mon uses Protect
+      if (act.target === SPREAD) {
+        // Opp spread move — hit every live, unprotected mon of mine.
+        const sp = t.oppSpread[act.actor]!;
+        const dmg = oppSpreadRoll(sp, r);
+        for (let me = 0; me < myHp.length; me++) {
+          if (myHp[me]! <= 0) continue;
+          if (myProtected.has(me)) continue;          // my mon protecting this turn
+          apply(myHp, me, dmg[me] ?? 0, mySurv, false); // spread moves aren't multi-hit
+        }
+        continue;
+      }
       if (myProtected.has(act.target)) continue;     // my mon protecting → fizzle
       if (myHp[act.target]! <= 0) continue;
       const tc = t.thr[act.actor]![act.target]!;
@@ -688,7 +775,7 @@ function value(t: Tables, s: State, depth: number, alpha: number, pass: Pass): n
   if (depth === 0) return leafScore(s);
 
   const myJoints = jointActions(s.myActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak);
-  const oppJoints = jointActions(s.oppActive, s.myHp, undefined, t.oppProtectMove, s.oppProtectStreak);
+  const oppJoints = jointActions(s.oppActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak);
   if (myJoints.length === 0) return leafScore(s);
 
   let best = -Infinity;
@@ -798,7 +885,7 @@ function rootSearch(t: Tables, s0: State, depth: number, pass: Pass): { score: n
   let bestJoint: Map<number, number> | null = null;
   let bestScore = -Infinity;
 
-  const oppJoints = jointActions(s0.oppActive, s0.myHp, undefined, t.oppProtectMove, s0.oppProtectStreak);
+  const oppJoints = jointActions(s0.oppActive, s0.myHp, t.oppSpreadActors, t.oppProtectMove, s0.oppProtectStreak);
   for (const my of myJoints) {
     let worst = Infinity;
     const replies = oppJoints.length ? oppJoints : [new Map<number, number>()];
@@ -966,6 +1053,39 @@ export function createSearch(input: SearchInput): PositionSearch {
 
       if (eV !== 'losing') {
         winChance = 1;
+        const myMegaChosen = expected.myMega;
+        // Scariest CONTINGENT way the opponent can KO my active `mi` this turn:
+        // a hit it survives at the median roll but dies to at the top roll
+        // (so the expected line assumed survival). Scans every opp mega plan and
+        // both single-target + spread threats. Returns the highest KO chance,
+        // with whether the threat outspeeds me and the (possibly mega) opp name.
+        const scariestIncoming = (mi: number): { oppName: string; koProb: number; outspeeds: boolean } | null => {
+          const myHp = s0.myHp[mi] ?? 0;
+          if (myHp <= 0) return null;
+          let worst: { oppName: string; koProb: number; outspeeds: boolean } | null = null;
+          const consider = (dmgMin: number, dmgMid: number, dmgMax: number, koRolls: number[], oj: number, oppMega: number | null, tbl: Tables) => {
+            if (dmgMax < myHp || dmgMid >= myHp) return; // can't KO, or already lethal at median (not contingent)
+            const koProb = koRolls.length
+              ? koRolls.filter(r => r >= myHp).length / koRolls.length
+              : dmgMax <= dmgMin ? 0 : Math.max(0, Math.min(1, (dmgMax - myHp) / (dmgMax - dmgMin)));
+            if (koProb <= 0 || koProb >= 1) return;
+            const base = tbl.oppSpecies[oj] ?? 'foe';
+            const oppName = oppMega === oj ? (oppMegaInfo(base)?.forme ?? base) : base;
+            if (!worst || koProb > worst.koProb) worst = { oppName, koProb, outspeeds: oppOutspeeds(tbl, oj, mi) };
+          };
+          for (const oppMega of oppPlans) {
+            const tbl = tables.get(`${myMegaChosen},${oppMega}`);
+            if (!tbl) continue;
+            for (const oj of s0.oppActive) {
+              if ((s0.oppHp[oj] ?? 0) <= 0) continue;
+              const c = tbl.thr[oj]?.[mi];
+              if (c) consider(c.dmgMin, c.dmgMid, c.dmgMax, c.koRolls, oj, oppMega, tbl);
+              const sp = tbl.oppSpread[oj];
+              if (sp) consider(sp.dmgMin[mi] ?? 0, sp.dmgMid[mi] ?? 0, sp.dmgMax[mi] ?? 0, [], oj, oppMega, tbl);
+            }
+          }
+          return worst;
+        };
         // Opponent survival items — listed ONLY when they actually threaten this
         // line (forcing the item present flips the verdict). Avoids noise like a
         // Sash on a foe we only 2HKO anyway.
@@ -987,11 +1107,12 @@ export function createSearch(input: SearchInput): PositionSearch {
           // the empirical roll distribution so it reflects the opponent's
           // possible bulkier spreads, not just roll variance.
           let bottleneck = 1;
-          let bottleneckTarget = '';
+          let bottleneckLabel = '';
+          let bottleneckEffect = 'rolls + spread';
           const consider = (c: Cell, h: number, who: string) => {
             if (h <= 0 || c.dmgMid < h) return;
             const p = rollKoProb(c, h);
-            if (p < bottleneck) { bottleneck = p; bottleneckTarget = who; }
+            if (p < bottleneck) { bottleneck = p; bottleneckLabel = `KO on ${who} not guaranteed`; bottleneckEffect = 'rolls + spread'; }
           };
           for (const [actor, target] of (expected.joint ?? [])) {
             if (target === SPREAD) {
@@ -999,14 +1120,55 @@ export function createSearch(input: SearchInput): PositionSearch {
               for (let foe = 0; foe < s0.oppHp.length; foe++) {
                 consider({ dmgMin: sp.dmgMin[foe] ?? 0, dmgMid: sp.dmgMid[foe] ?? 0, dmgMax: sp.dmgMax[foe] ?? 0, move: '', priority: 0, multiHit: false, koRolls: [] }, s0.oppHp[foe] ?? 0, expected.table.oppSpecies[foe] ?? 'foe');
               }
-            } else {
+            } else if (target !== PROTECT) {
               consider(expected.table.off[actor]![target]!, s0.oppHp[target] ?? 0, expected.table.oppSpecies[target] ?? 'foe');
             }
           }
-          const label = bottleneckTarget ? `KO on ${bottleneckTarget} not guaranteed` : 'damage rolls';
-          if (bottleneck < 1) { risks.push({ label, prob: 1 - bottleneck, effect: 'rolls + spread', blocking: true }); winChance *= bottleneck; }
-          else { risks.push({ label, effect: 'rolls + spread', blocking: true }); unpriced = true; }
+          // Incoming side: a contingent KO on one of MY actives is just as much a
+          // reason the line isn't guaranteed. Treat my-mon SURVIVAL (1 − koProb)
+          // as a candidate bottleneck so "Aerodactyl-Mega can KO Delphox" surfaces
+          // by name instead of the old catch-all "damage rolls".
+          for (const mi of s0.myActive) {
+            const inc = scariestIncoming(mi);
+            if (!inc) continue;
+            const pSurvive = 1 - inc.koProb;
+            if (pSurvive < bottleneck) {
+              bottleneck = pSurvive;
+              const myName = expected.table.mySpecies[mi] ?? 'my mon';
+              bottleneckLabel = `${inc.oppName} can KO ${myName}`;
+              bottleneckEffect = inc.outspeeds ? 'outspeeds + high roll' : 'high roll';
+            }
+          }
+          const label = bottleneckLabel || 'damage rolls';
+          if (bottleneck < 1) { risks.push({ label, prob: 1 - bottleneck, effect: bottleneckEffect, blocking: true }); winChance *= bottleneck; }
+          else { risks.push({ label, effect: bottleneckEffect, blocking: true }); unpriced = true; }
         }
+
+        // Flinch: an outspeeding opp move with a flinch secondary (Rock Slide /
+        // Iron Head / Fake Out …) can deny one of my acting mons its turn — a
+        // real swing the roll analysis doesn't capture (it's not a damage roll).
+        // Surface per acting mon, priced like a survival item. Only my mons that
+        // actually ACT this turn care (a protecting mon loses nothing to flinch).
+        for (const [actor, target] of (expected.joint ?? [])) {
+          if (target === PROTECT) continue;
+          let chance = 0;
+          for (const oppMega of oppPlans) {
+            const tbl = tables.get(`${myMegaChosen},${oppMega}`);
+            if (!tbl) continue;
+            for (const oj of s0.oppActive) {
+              if ((s0.oppHp[oj] ?? 0) <= 0 || !oppOutspeeds(tbl, oj, actor)) continue;
+              const c = tbl.thr[oj]?.[actor];
+              const sp = tbl.oppSpread[oj];
+              chance = Math.max(chance, flinchChance(c?.move ?? ''), flinchChance(sp?.move ?? ''));
+            }
+          }
+          if (chance > 0) {
+            const myName = expected.table.mySpecies[actor] ?? 'my mon';
+            risks.push({ label: `${myName} can be flinched`, prob: chance, effect: 'loses its turn', blocking: true });
+            winChance *= 1 - chance;
+          }
+        }
+
         winChance = unpriced ? undefined : Math.max(0, Math.min(1, winChance));
       }
 

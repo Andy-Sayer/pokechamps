@@ -132,6 +132,76 @@ describe('spread moves', () => {
     expect(play!.spread).toBe(true);
     expect(play!.targetSpecies).toBe('all foes');
   });
+
+  // The opponent's spread move must hit BOTH my actives. With a SINGLE opp
+  // active, the only way for both of my mons to be KO'd in one turn is a spread
+  // move — single-target could KO at most one. So a depth-1 terminal loss here
+  // proves the opp spread is modeled.
+  test("opp's spread move hits both my actives at once (single opp KOs two)", () => {
+    // Two Rock-weak frails at low HP. Aerodactyl (fast) Rock Slides both.
+    const fastAero = mon({
+      species: 'Aerodactyl', ability: 'Pressure', nature: 'Jolly',
+      evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Rock Slide'],
+    });
+    // My mons can't dent Aero enough to KO it first (resisted move, full HP).
+    const charizard = mon({ species: 'Charizard', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Flamethrower'] });
+    const volcarona = mon({ species: 'Volcarona', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Bug Buzz'] });
+    const input: SearchInput = {
+      mine: [
+        { set: charizard, hpPercent: 45, active: true },
+        { set: volcarona, hpPercent: 45, active: true },
+      ],
+      opp: [{ entry: oppOf(fastAero), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    };
+    const r = searchToDepth(input, 1);
+    // Both my mons KO'd by one Rock Slide → I have 0 live → terminal loss.
+    expect(r.verdict).toBe('losing');
+    expect(r.score).toBeLessThanOrEqual(-100_000);
+  });
+});
+
+describe('incoming threat: contingent KO + flinch on my mons', () => {
+  // The user's turn-1 position: Delphox + Sableye vs Abomasnow + Aerodactyl.
+  // Aerodactyl outspeeds both and its Rock Slide is a spread move that can KO
+  // Delphox on a high (mega) roll and flinch either of my mons.
+  const delphox = mon({ species: 'Delphox', item: 'Delphoxite', ability: 'Blaze', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Heat Wave', 'Psychic'] });
+  const sableye = mon({ species: 'Sableye', item: 'Sitrus Berry', ability: 'Prankster', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Foul Play', 'Will-O-Wisp'] });
+  const abomasnow: OpponentEntry = { species: 'Abomasnow', knownMoves: ['Blizzard'] };
+  const aero = (status?: string): SearchInput['opp'][number] => ({
+    entry: { species: 'Aerodactyl', knownMoves: ['Rock Slide', 'Dual Wingbeat'] }, hpPercent: 100, active: true, status,
+  });
+  const base = (aeroStatus?: string): SearchInput => ({
+    mine: [
+      { set: delphox, hpPercent: 100, active: true },
+      { set: sableye, hpPercent: 100, active: true },
+    ],
+    opp: [{ entry: abomasnow, hpPercent: 100, active: true }, aero(aeroStatus)],
+    field: { ...NEUTRAL_FIELD },
+  });
+
+  test("names the opp's contingent KO on my mon instead of a vague 'damage rolls'", () => {
+    const r = searchToDepth(base(), 4);
+    // The mega Aerodactyl outspeed+KO on Delphox is surfaced BY NAME.
+    expect(r.risks.some(x => /Aerodactyl-Mega can KO Delphox/.test(x.label))).toBe(true);
+    // And it must NOT fall back to the old catch-all label.
+    expect(r.risks.some(x => x.label === 'damage rolls')).toBe(false);
+  });
+
+  test('surfaces a flinch risk on each of my acting mons the opp outspeeds', () => {
+    const r = searchToDepth(base(), 1);
+    expect(r.risks.some(x => /Delphox can be flinched/.test(x.label) && x.prob === 0.3)).toBe(true);
+    // Rock Slide is a spread move, so it also threatens to flinch Sableye.
+    expect(r.risks.some(x => /Sableye can be flinched/.test(x.label) && x.prob === 0.3)).toBe(true);
+  });
+
+  test('flinch risk is gated on the opponent outspeeding me', () => {
+    // Paralysis halves Aerodactyl's speed below Delphox (171) but not Sableye (70):
+    // Delphox now acts first → can't be flinched; Sableye still can.
+    const r = searchToDepth(base('par'), 1);
+    expect(r.risks.some(x => /Delphox can be flinched/.test(x.label))).toBe(false);
+    expect(r.risks.some(x => /Sableye can be flinched/.test(x.label))).toBe(true);
+  });
 });
 
 describe('searchInputFromMatch', () => {

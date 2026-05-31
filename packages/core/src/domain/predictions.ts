@@ -98,8 +98,10 @@ function bestMoveAgainst(
 
 // Top-Pikalytics moves for a species when we have no observed moves yet.
 // Filters out the "Other" rollup bucket and any move that comes back as null
-// from the dex (shouldn't happen for legal species but harmless).
-function pikalyticsMoves(species: string): string[] {
+// from the dex (shouldn't happen for legal species but harmless). Exported so
+// the search can draw an opponent's spread-move pool from the SAME source
+// predictThreat uses (knownMoves else this), keeping the two consistent.
+export function pikalyticsMoves(species: string): string[] {
   const pik = getPikalytics(species);
   if (!pik) return [];
   return pik.moves
