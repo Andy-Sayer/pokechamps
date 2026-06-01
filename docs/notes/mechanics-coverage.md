@@ -189,7 +189,8 @@ EOT residual, root-ply action, switch-in hook).
    onto the *opponent's* dynamic boosts.
 7. ~~**Drain self-heal**~~ ✅ SHIPPED — Giga Drain/Drain Punch/… heal the attacker
    `drain × damage-dealt` (Draining Kiss 0.75); single-target. `Cell.drain`.
-8. **Regenerator** — +1/3 HP on switch-out (raises switch value).
+8. ~~**Regenerator**~~ ✅ SHIPPED — heals 1/3 max HP when a mon switches out
+   (makes pivoting heal); `Tables.my/oppRegen`.
 9. **Two-turn/charge + recharge** (Solar Beam, Fly, Hyper Beam) — model the lost
    turn / vulnerability window.
 10. ~~**Rocky Helmet / Rough Skin / Iron Barbs**~~ ✅ SHIPPED — a contact hit into a

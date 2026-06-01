@@ -398,6 +398,8 @@ interface Tables {
   // Intimidate (drops foes' Atk on switch-in) + which mons are immune to it.
   myIntimidate: boolean[]; oppIntimidate: boolean[];
   myIntimImmune: boolean[]; oppIntimImmune: boolean[];
+  // Regenerator: heals 1/3 max HP when the mon switches OUT.
+  myRegen: boolean[]; oppRegen: boolean[];
   // Screen-move capability: what a SET_SCREEN action puts up for the caster's
   // side, + the move name; null = the mon knows no screen move.
   myScreen: (ScreenSet | null)[];
@@ -498,6 +500,9 @@ function hasSpeedBoost(ability: string | null | undefined): boolean {
 }
 function hasIntimidate(ability: string | null | undefined): boolean {
   return !!ability && toId(ability) === 'intimidate';
+}
+function hasRegenerator(ability: string | null | undefined): boolean {
+  return !!ability && toId(ability) === 'regenerator';
 }
 // Abilities/items that block an Intimidate Atk drop (Defiant/Competitive/Guard
 // Dog REACTIONS are deferred — we just don't drop for the immune ones).
@@ -1108,6 +1113,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppIntimidate: opp.map(o => hasIntimidate(o.entry.ability)),
     myIntimImmune: mine.map(m => intimidateImmune(m.set.ability, m.set.item)),
     oppIntimImmune: opp.map(o => intimidateImmune(o.entry.ability, o.entry.item)),
+    myRegen: mine.map(m => hasRegenerator(m.set.ability)),
+    oppRegen: opp.map(o => hasRegenerator(o.entry.ability)),
     myScreen: mine.map(m => findScreenMove(m.set.moves ?? [])),
     oppScreen: opp.map(o => findScreenMove(o.entry.knownMoves)),
     myRock: mine.map(m => isType(m.set.species, 'Rock')),
@@ -1602,6 +1609,10 @@ function resolveTurn(
   for (const inMon of oppSwitchIn.values()) if (t.oppIntimidate[inMon]) {
     for (const mi of myActiveNow) if ((myHp[mi] ?? 0) > 0 && !t.myIntimImmune[mi]) myBoost[mi] = addBoosts(myBoost[mi]!, { atk: -1 });
   }
+  // Regenerator: a mon that switched OUT heals 1/3 of its max HP (it left before
+  // this turn's hits, so its HP is its start-of-turn value). Makes pivoting heal.
+  for (const outMon of mySwitchIn.keys()) if (t.myRegen[outMon] && (myHp[outMon] ?? 0) > 0) myHp[outMon] = Math.min(100, myHp[outMon]! + 100 / 3);
+  for (const outMon of oppSwitchIn.keys()) if (t.oppRegen[outMon] && (oppHp[outMon] ?? 0) > 0) oppHp[outMon] = Math.min(100, oppHp[outMon]! + 100 / 3);
 
   // Entry hazards: a mon that SWITCHED IN this turn (incl. Baton Pass) takes its
   // side's hazard chip + Toxic Spikes status + Sticky Web −1 Spe. Applied before

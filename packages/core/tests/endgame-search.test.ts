@@ -1417,3 +1417,25 @@ describe('P2: drain heal + contact chip', () => {
     expect(searchToDepth(make('Giga Drain'), 3).score).toBeGreaterThan(searchToDepth(make('Energy Ball'), 3).score);
   });
 });
+
+describe('P2: Regenerator', () => {
+  // Switching a doomed Volcarona (at 55%) out to a wall is the best line; with
+  // Regenerator it heals 1/3 on the way out, so the switched-out mon is healthier
+  // on the bench → the line is worth more than with a neutral ability.
+  test('Regenerator heals the mon that switches out', () => {
+    const aggron = mon({ species: 'Aggron', ability: 'Sturdy', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, atk: 252 }, moves: ['Heavy Slam'] });
+    const bronzong = mon({ species: 'Bronzong', ability: 'Levitate', nature: 'Sassy', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Flash Cannon'] });
+    const aero: OpponentEntry = { species: 'Aerodactyl', knownMoves: ['Stone Edge'], candidates: [mon({ species: 'Aerodactyl', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Stone Edge'] })] };
+    const incinO: OpponentEntry = { species: 'Incineroar', knownMoves: ['Knock Off'], candidates: [mon({ species: 'Incineroar', ability: 'Intimidate', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Knock Off'] })] };
+    const make = (ability: string): SearchInput => ({
+      mine: [
+        { set: mon({ species: 'Volcarona', ability, nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Bug Buzz'] }), hpPercent: 55, active: true },
+        { set: aggron, hpPercent: 100, active: true },
+        { set: bronzong, hpPercent: 100, active: false },
+      ],
+      opp: [{ entry: aero, hpPercent: 100, active: true }, { entry: incinO, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    expect(searchToDepth(make('Regenerator'), 3).score).toBeGreaterThan(searchToDepth(make('Swarm'), 3).score);
+  });
+});
