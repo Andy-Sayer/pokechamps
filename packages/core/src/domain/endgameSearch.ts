@@ -291,7 +291,7 @@ function benchSwitchTargets(active: number[], hp: number[], n: number): number[]
 // Damage as % of target max, at three roll points so the tree can be evaluated
 // under different regimes without rebuilding the (expensive) matrix. Roll risk
 // is derived from the dmgMin..dmgMax envelope vs the target's HP at use time.
-interface Cell { dmgMin: number; dmgMid: number; dmgMax: number; move: string; priority: number; multiHit: boolean; koRolls: number[]; candidates: number; physical: boolean; type: string; groundMove: boolean; drain: number; contact: boolean; setsHazard: HazardKind | null; selfDrop: BoostMap | null; foeDrop: BoostMap | null }
+interface Cell { dmgMin: number; dmgMid: number; dmgMax: number; move: string; priority: number; multiHit: boolean; koRolls: number[]; candidates: number; physical: boolean; type: string; groundMove: boolean; drain: number; contact: boolean; recoil: number; setsHazard: HazardKind | null; selfDrop: BoostMap | null; foeDrop: BoostMap | null }
 
 /** A spread move option for one of my mons: the move plus its (already
  *  spread-reduced) damage vs each opp index, at min/mid/max rolls. */
@@ -317,6 +317,16 @@ function moveDrain(move: string): number {
 // True for a contact move (triggers Rocky Helmet / Rough Skin / Iron Barbs).
 function moveContact(move: string): boolean {
   return !!(getMove(move) as { flags?: { contact?: number } } | undefined)?.flags?.contact;
+}
+// Recoil fraction of DAMAGE DEALT the attacker takes (Brave Bird/Flare Blitz/Wave
+// Crash 33%, Head Smash 50%, Take Down 25%). `recoil` in the dex is [num, den].
+// Rock Head and Magic Guard negate it (checked at apply time).
+function moveRecoil(move: string): number {
+  const r = (getMove(move) as { recoil?: [number, number] } | undefined)?.recoil;
+  return r ? r[0] / r[1] : 0;
+}
+function hasRockHead(ability: string | null | undefined): boolean {
+  return toId(ability ?? '') === 'rockhead';
 }
 // Guaranteed self-stat-drop a damaging move inflicts on its OWN user (Draco
 // Meteor/Overheat/Leaf Storm/Fleur Cannon −2 SpA, Make It Rain −1 SpA, Close
@@ -497,6 +507,8 @@ interface Tables {
   myDefiantStat: ('atk' | 'spa' | null)[]; oppDefiantStat: ('atk' | 'spa' | null)[];
   // Regenerator: heals 1/3 max HP when the mon switches OUT.
   myRegen: boolean[]; oppRegen: boolean[];
+  // Rock Head: negates a recoil move's self-damage (Magic Guard does too, via myResidual).
+  myRockHead: boolean[]; oppRockHead: boolean[];
   // Screen-move capability: what a SET_SCREEN action puts up for the caster's
   // side, + the move name; null = the mon knows no screen move.
   myScreen: (ScreenSet | null)[];
@@ -989,7 +1001,7 @@ interface CellOpts {
 // midpoint (the old representative value); min/max = the honest envelope edges
 // (worst/best roll across surviving candidate spreads).
 function cellFrom(c: ReturnType<typeof predictOffense>): Cell {
-  if (!c) return { dmgMin: 0, dmgMid: 0, dmgMax: 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false, drain: 0, contact: false, setsHazard: null, selfDrop: null, foeDrop: null };
+  if (!c) return { dmgMin: 0, dmgMid: 0, dmgMax: 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false, drain: 0, contact: false, recoil: 0, setsHazard: null, selfDrop: null, foeDrop: null };
   const lo = c.likelyMinPercent ?? c.minPercent;
   const hi = c.likelyMaxPercent ?? c.maxPercent;
   return {
@@ -1006,6 +1018,7 @@ function cellFrom(c: ReturnType<typeof predictOffense>): Cell {
     groundMove: isGroundMove(c.move),
     drain: moveDrain(c.move),
     contact: moveContact(c.move),
+    recoil: moveRecoil(c.move),
     setsHazard: hazardSecondaryOf(c.move),
     selfDrop: selfDropOf(c.move),
     foeDrop: foeDropOf(c.move),
@@ -1226,6 +1239,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppDefiantStat: opp.map(o => defiantStat(o.entry.ability)),
     myIntimImmune: mine.map(m => intimidateImmune(m.set.ability, m.set.item)),
     oppIntimImmune: opp.map(o => intimidateImmune(o.entry.ability, o.entry.item)),
+    myRockHead: mine.map(m => hasRockHead(m.set.ability)),
+    oppRockHead: opp.map(o => hasRockHead(o.entry.ability)),
     myRegen: mine.map(m => hasRegenerator(m.set.ability)),
     oppRegen: opp.map(o => hasRegenerator(o.entry.ability)),
     myScreen: mine.map(m => findScreenMove(m.set.moves ?? [])),
@@ -1505,6 +1520,7 @@ function resolveTurn(
       if (oDealt > 0 && (myHp[act.actor] ?? 0) > 0) {
         if (oc.drain > 0) myHp[act.actor] = Math.min(100, myHp[act.actor]! + oc.drain * oDealt * (t.oppMaxHp[oTgt]! / (t.myMaxHp[act.actor] || 1)));
         if (oc.contact && t.oppContactChip[oTgt]! > 0 && !t.myResidual[act.actor]!.magicGuard) myHp[act.actor] = Math.max(0, myHp[act.actor]! - t.oppContactChip[oTgt]!);
+        if (oc.recoil > 0 && !t.myResidual[act.actor]!.magicGuard && !t.myRockHead[act.actor]) myHp[act.actor] = Math.max(0, myHp[act.actor]! - oc.recoil * oDealt * (t.oppMaxHp[oTgt]! / (t.myMaxHp[act.actor] || 1)));
       }
     } else {
       if (oppHp[act.actor]! <= 0) continue;
@@ -1537,6 +1553,7 @@ function resolveTurn(
       if (mDealt > 0 && (oppHp[act.actor] ?? 0) > 0) {
         if (tc.drain > 0) oppHp[act.actor] = Math.min(100, oppHp[act.actor]! + tc.drain * mDealt * (t.myMaxHp[mTgt]! / (t.oppMaxHp[act.actor] || 1)));
         if (tc.contact && t.myContactChip[mTgt]! > 0 && !t.oppResidual[act.actor]!.magicGuard) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - t.myContactChip[mTgt]!);
+        if (tc.recoil > 0 && !t.oppResidual[act.actor]!.magicGuard && !t.oppRockHead[act.actor]) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - tc.recoil * mDealt * (t.myMaxHp[mTgt]! / (t.oppMaxHp[act.actor] || 1)));
       }
     }
   }
@@ -2521,7 +2538,7 @@ export function createSearch(input: SearchInput): PositionSearch {
             if (target === SPREAD) {
               const sp = expected.table.mySpread[actor]!;
               for (const foe of s0.oppActive) {
-                consider({ dmgMin: sp.dmgMin[foe] ?? 0, dmgMid: sp.dmgMid[foe] ?? 0, dmgMax: sp.dmgMax[foe] ?? 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false, drain: 0, contact: false, setsHazard: null, selfDrop: null, foeDrop: null }, s0.oppHp[foe] ?? 0, expected.table.oppSpecies[foe] ?? 'foe');
+                consider({ dmgMin: sp.dmgMin[foe] ?? 0, dmgMid: sp.dmgMid[foe] ?? 0, dmgMax: sp.dmgMax[foe] ?? 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false, drain: 0, contact: false, recoil: 0, setsHazard: null, selfDrop: null, foeDrop: null }, s0.oppHp[foe] ?? 0, expected.table.oppSpecies[foe] ?? 'foe');
               }
             } else if (target >= 0) {       // skip PROTECT / SWITCH (no attack)
               consider(expected.table.off[actor]![target]!, s0.oppHp[target] ?? 0, expected.table.oppSpecies[target] ?? 'foe');

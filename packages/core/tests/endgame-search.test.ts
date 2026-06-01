@@ -704,10 +704,14 @@ describe('Phase 3a: root-ply voluntary switches', () => {
         { set: bronzong, hpPercent: 100, active: false },   // benched wall
       ],
       // Two healthy opp mons → no turn-1 KO shortcut, so PRESERVING Volcarona by
-      // switching it to a Rock-resisting wall is the materially best line.
+      // switching it to a Rock-resisting wall is the materially best line. The
+      // partner uses a recoil-FREE set (Knock Off, not Flare Blitz): this test
+      // isolates switch-to-wall logic, and recoil would otherwise make the
+      // attack-and-trade line competitive in this winning 3-vs-2 (recoil is modelled
+      // and validated separately).
       opp: [
         { entry: fastAero, hpPercent: 100, active: true },
-        { entry: oppOf(incin), hpPercent: 100, active: true },
+        { entry: oppOf(mon({ species: 'Incineroar', ability: 'Intimidate', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Knock Off'] })), hpPercent: 100, active: true },
       ],
       field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
     }, 2);
@@ -1457,6 +1461,21 @@ describe('self-stat-drop secondaries (Draco Meteor / Contrary / Close Combat)', 
     const b = run(mon({ species: 'Great Tusk', ability: 'Protosynthesis', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Close Combat'] }));
     expect(b.def).toBe(-1);
     expect(b.spd).toBe(-1);
+  });
+});
+
+describe('recoil moves (Brave Bird / Rock Head)', () => {
+  const wall = (): OpponentEntry => oppOf(mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Seismic Toss'] }));
+  const hpAfter = (ability: string) => resolveOneTurn(
+    { mine: [{ set: mon({ species: 'Talonflame', ability, nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Brave Bird'] }), hpPercent: 100, active: true }], opp: [{ entry: wall(), hpPercent: 100, active: true }], field: { ...NEUTRAL_FIELD }, allOppRevealed: true },
+    new Map([[0, { kind: 'attack', target: 0 } as const]]), new Map(),
+  ).mine[0]!.hpPct;
+
+  test('Brave Bird recoils the attacker', () => {
+    expect(hpAfter('Flame Body')).toBeLessThan(100);     // took recoil
+  });
+  test('Rock Head negates recoil', () => {
+    expect(hpAfter('Rock Head')).toBe(100);              // no recoil
   });
 });
 

@@ -80,6 +80,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Recharge | Hyper Beam, Giga Impact | ✅ | ? | **GAP** | must recharge next turn |
 | Locked multi-turn | Outrage, Petal Dance, Thrash | ✅ | ? | **GAP** | lock + confusion after |
 | Multi-hit | Bullet Seed, Rock Blast, Population Bomb | ✅ | ✅ | ✅ | ×hits; breaks Sash ✅ |
+| Recoil | Brave Bird/Flare Blitz/Wave Crash 33%, Head Smash 50%, Take Down 25% | ✅(dmg) | ✅ | ✅ | `Cell.recoil` = recoil×damage-dealt to the attacker; Rock Head / Magic Guard negate. Found by the sim diff-harness (all residual faints were unmodelled recoil). Life Orb recoil (item) still a search GAP |
 | OHKO | Fissure, Guillotine, Sheer Cold | ✅ | ✅ | n/a | rare in format; accuracy-gated |
 | Fixed / level damage | Seismic Toss, Night Shade, Super Fang, Endeavor | ✅ | ✅ | ✅ | calc gives the % |
 | Redirection | Follow Me, Rage Powder | – | ? | **GAP** | pulls single-target hits to the user (doubles-critical) |
