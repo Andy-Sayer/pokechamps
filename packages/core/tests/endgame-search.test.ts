@@ -1439,3 +1439,60 @@ describe('P2: Regenerator', () => {
     expect(searchToDepth(make('Regenerator'), 3).score).toBeGreaterThan(searchToDepth(make('Swarm'), 3).score);
   });
 });
+
+describe('P2: hazard setting (Stone Axe + dedicated moves + refill chip)', () => {
+  // The frail opp active is OHKO'd; the opponent refills its (revealed) bench. A
+  // replacement entering AFTER a faint now eats the Stealth Rock chip — so the
+  // same board scores better for me when their side already has rocks up.
+  test('existing Stealth Rock chips the opponent refill-in after a KO', () => {
+    const make = (rocks: boolean): SearchInput => ({
+      mine: [{ set: mon({ species: 'Iron Bundle', ability: 'Quark Drive', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Hydro Pump'] }), hpPercent: 100, active: true }],
+      opp: [
+        { entry: oppOf(mon({ species: 'Vulpix', nature: 'Timid', evs: { ...ZERO_EVS, spa: 4, spe: 4 }, moves: ['Ember'] })), hpPercent: 100, active: true },
+        { entry: oppOf(mon({ species: 'Talonflame', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Brave Bird'] })), hpPercent: 100, active: false },
+      ],
+      field: { ...NEUTRAL_FIELD, theirHazards: rocks ? { rocks: true } : undefined }, allOppRevealed: true,
+    });
+    // Talonflame is 4× weak to Rock, so the refill SR chip is large → my score
+    // higher. Depth 1 so the opp isn't wiped (a WIN terminal would mask the HP).
+    expect(searchToDepth(make(true), 1).score).toBeGreaterThan(searchToDepth(make(false), 1).score);
+  });
+
+  // Stone Axe SETS Stealth Rock on the foe's side as it hits (a damaging-move
+  // secondary), feeding the SAME oppHazards path the existing-rocks refill test
+  // exercises. It's modelled as a normal ATTACK (not the dedicated hazard class)
+  // and the search stays stable with the hazard plumbing live. (A freshly-set
+  // hazard is correctly dodgeable in a short horizon — a rational opp pre-switches
+  // before the rock lands — so its in-search payoff is the FORCED-refill case the
+  // existing-rocks test covers, not a single-turn score swing here.)
+  test('Stone Axe is handled as an attack with hazard-setting live (stable, recommended)', () => {
+    const r = searchToDepth({
+      mine: [{ set: mon({ species: 'Kleavor', ability: 'Sharpness', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Stone Axe'] }), hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(mon({ species: 'Vulpix', nature: 'Timid', evs: { ...ZERO_EVS, spa: 4, spe: 4 }, moves: ['Ember'] })), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 2);
+    expect(r.plays.map(p => p.move)).toContain('Stone Axe');   // recommended, not crashed
+    expect(r.verdict).toBe('winning');                          // OHKO line still found
+    expect(r.explored!.actionClasses).not.toContain('hazard');  // it's an attack, not a dedicated setter
+  });
+
+  // A dedicated Stealth Rock move is offered as an action (breadth chip lists it).
+  test('a Stealth Rock user surfaces the hazard action class', () => {
+    const withRocks = searchToDepth({
+      mine: [{ set: mon({ species: 'Tyranitar', ability: 'Sand Stream', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Stealth Rock', 'Rock Slide'] }), hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(mon({ species: 'Dondozo', ability: 'Unaware', nature: 'Impish', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Wave Crash'] })), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 1);
+    expect(withRocks.explored!.actionClasses).toContain('hazard');
+  });
+
+  // Rocks already up on the foe's side → no point re-setting → no hazard class.
+  test('no hazard class when the layer is already maxed on the foe side', () => {
+    const r = searchToDepth({
+      mine: [{ set: mon({ species: 'Tyranitar', ability: 'Sand Stream', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Stealth Rock', 'Rock Slide'] }), hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(mon({ species: 'Dondozo', ability: 'Unaware', nature: 'Impish', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Wave Crash'] })), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD, theirHazards: { rocks: true } }, allOppRevealed: true,
+    }, 1);
+    expect(r.explored!.actionClasses).not.toContain('hazard');
+  });
+});

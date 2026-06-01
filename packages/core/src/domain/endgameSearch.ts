@@ -22,7 +22,7 @@
  *
  * All exports are PURE — no I/O, no mutation of inputs.
  */
-import type { PokemonSet, OpponentEntry, FieldState, Match } from './types.js';
+import type { PokemonSet, OpponentEntry, FieldState, Match, HazardState } from './types.js';
 import { ZERO_EVS, MAX_IVS } from './types.js';
 import { predictOffense, predictThreat, pikalyticsMoves } from './predictions.js';
 import { actualSpeed, effectiveSpeedRange } from './speed.js';
@@ -162,7 +162,9 @@ export interface SearchExplored {
   /** Roll/survival regimes evaluated (expected + pessimistic + optimistic). */
   regimes: number;
   /** Action kinds present in the tree: 'attack' | 'spread' | 'protect' |
-   *  'switch' | 'tailwind' | 'trickroom'. Drives the breadth wording. */
+   *  'switch' | 'tailwind' | 'trickroom' | 'leech' | 'setup' | 'batonpass' |
+   *  'speedboost' | 'screen' | 'weather' | 'terrain' | 'status' | 'recover' |
+   *  'hazard'. Drives the breadth wording. */
   actionClasses: string[];
 }
 
@@ -245,13 +247,16 @@ const SET_SCREEN = -6;    // screen move (Reflect / Light Screen / Aurora Veil)
 const SET_WEATHER = -7;   // weather move (Sunny Day / Rain Dance / …)
 const SET_TERRAIN = -8;   // terrain move (Electric / Grassy / Misty / Psychic)
 const RECOVER = -9;       // recovery move (Recover / Roost / Synthesis / …) — self-heal
+const SET_HAZARD = -10;   // dedicated hazard move (Stealth Rock / Spikes / …) — sets on the FOE's side
 // Ranged sentinel blocks that each carry an index, kept disjoint so a code is
-// unambiguous. Switches: [-19,-10] → bench idx. Leech Seed: [-29,-20] → foe idx.
-// Baton Pass: ≤ -30 → bench idx (switch that passes boosts). All ROOT-ply only.
-const SWITCH_BASE = -10;  // switch → bench idx `SWITCH_BASE - target`
-const LEECH_BASE = -20;   // Leech Seed → foe idx `LEECH_BASE - target`
-const BATON_BASE = -30;   // Baton Pass → bench idx `BATON_BASE - target`
-const STATUS_BASE = -40;  // status move → foe idx `STATUS_BASE - target`
+// unambiguous. Switches: [-29,-20] → bench idx. Leech Seed: [-39,-30] → foe idx.
+// Baton Pass: [-49,-40] → bench idx (switch that passes boosts). Status: ≤ -50 →
+// foe idx. All ROOT-ply only. Bases sit 10 below the singles so a benched-index
+// encoding never collides with a single-action sentinel.
+const SWITCH_BASE = -20;  // switch → bench idx `SWITCH_BASE - target`
+const LEECH_BASE = -30;   // Leech Seed → foe idx `LEECH_BASE - target`
+const BATON_BASE = -40;   // Baton Pass → bench idx `BATON_BASE - target`
+const STATUS_BASE = -50;  // status move → foe idx `STATUS_BASE - target`
 function isSwitchTarget(t: number): boolean { return t <= SWITCH_BASE && t > LEECH_BASE; }
 function switchBenchIdx(t: number): number { return SWITCH_BASE - t; }
 function switchCode(benchIdx: number): number { return SWITCH_BASE - benchIdx; }
@@ -280,7 +285,7 @@ function benchSwitchTargets(active: number[], hp: number[], n: number): number[]
 // Damage as % of target max, at three roll points so the tree can be evaluated
 // under different regimes without rebuilding the (expensive) matrix. Roll risk
 // is derived from the dmgMin..dmgMax envelope vs the target's HP at use time.
-interface Cell { dmgMin: number; dmgMid: number; dmgMax: number; move: string; priority: number; multiHit: boolean; koRolls: number[]; candidates: number; physical: boolean; type: string; groundMove: boolean; drain: number; contact: boolean }
+interface Cell { dmgMin: number; dmgMid: number; dmgMax: number; move: string; priority: number; multiHit: boolean; koRolls: number[]; candidates: number; physical: boolean; type: string; groundMove: boolean; drain: number; contact: boolean; setsHazard: HazardKind | null }
 
 /** A spread move option for one of my mons: the move plus its (already
  *  spread-reduced) damage vs each opp index, at min/mid/max rolls. */
@@ -310,6 +315,42 @@ function moveContact(move: string): boolean {
 // Ground moves halved by Grassy Terrain.
 const GRASSY_HALVED = new Set(['earthquake', 'bulldoze', 'magnitude']);
 function isGroundMove(move: string): boolean { return GRASSY_HALVED.has(toId(move)); }
+
+// --- Entry hazards (setting) ------------------------------------------------
+/** The four entry-hazard side conditions. Keys match HazardState fields. */
+type HazardKind = 'rocks' | 'spikes' | 'toxicspikes' | 'stickyweb';
+// Damaging moves that ALSO lay a hazard on the target's side as a (near-)100%
+// secondary. Our @pkmn/dex dump flattens the secondary, so we key by name.
+const HAZARD_SECONDARY: Record<string, HazardKind> = { stoneaxe: 'rocks', ceaselessedge: 'spikes' };
+function hazardSecondaryOf(move: string): HazardKind | null { return HAZARD_SECONDARY[toId(move)] ?? null; }
+// Dedicated hazard-setting STATUS moves → the hazard they put on the foe's side.
+const HAZARD_MOVES: Record<string, HazardKind> = { stealthrock: 'rocks', spikes: 'spikes', toxicspikes: 'toxicspikes', stickyweb: 'stickyweb' };
+function findHazardMove(moves: string[]): { move: string; hazard: HazardKind } | null {
+  for (const m of moves) { const h = HAZARD_MOVES[toId(m)]; if (h) return { move: m, hazard: h }; }
+  return null;
+}
+// Add one layer of `kind` to a side's hazards, returning a NEW state (Spikes
+// stack to 3, Toxic Spikes to 2; Stealth Rock / Sticky Web are single-layer).
+function addHazard(h: HazardState, kind: HazardKind): HazardState {
+  const out: HazardState = { ...h };
+  if (kind === 'rocks') out.rocks = true;
+  else if (kind === 'spikes') out.spikes = Math.min((out.spikes ?? 0) + 1, 3) as 0 | 1 | 2 | 3;
+  else if (kind === 'toxicspikes') out.toxicSpikes = Math.min((out.toxicSpikes ?? 0) + 1, 2) as 0 | 1 | 2;
+  else if (kind === 'stickyweb') out.stickyWeb = true;
+  return out;
+}
+// True if a hazard of `kind` could still be added to this side (not already maxed).
+function hazardRoom(h: HazardState, kind: HazardKind): boolean {
+  if (kind === 'rocks') return !h.rocks;
+  if (kind === 'spikes') return (h.spikes ?? 0) < 3;
+  if (kind === 'toxicspikes') return (h.toxicSpikes ?? 0) < 2;
+  return !h.stickyWeb;
+}
+// The per-mon switch-in hazard effect, computed DYNAMICALLY from the live side
+// hazards (so a hazard SET mid-search bites a later switch/refill-in).
+function hazardEffectFor(hazards: HazardState | undefined, species: string, ability: string | null | undefined, item: string | undefined): HazardEffect {
+  return applyHazardsToSwitchIn(hazards, { species, ability: ability ?? undefined, item });
+}
 
 // Which roll point each side uses. "pessimistic"/"optimistic" are from MY
 // perspective: pessimistic = my low rolls + opp high rolls (+ opp survives);
@@ -430,9 +471,12 @@ interface Tables {
   myRecover: (RecoverMove | null)[]; oppRecover: (RecoverMove | null)[];
   // Held item per mon (for HP-trigger / status berries). Known-only for the opp.
   myItem: (string | undefined)[]; oppItem: (string | undefined)[];
-  // Entry-hazard effect each mon takes when it switches IN (HP chip + Toxic
-  // Spikes status + Sticky Web Spe drop), precomputed from the field hazards.
-  myHazardEffect: HazardEffect[]; oppHazardEffect: HazardEffect[];
+  // Dedicated hazard-setting move a mon knows (Stealth Rock / Spikes / Toxic
+  // Spikes / Sticky Web), null if none. The switch-in hazard CHIP is computed
+  // dynamically (hazardEffectFor) from the live side hazards in State, since a
+  // hazard set mid-search must bite a later switch/refill-in.
+  myHazardMove: ({ move: string; hazard: HazardKind } | null)[];
+  oppHazardMove: ({ move: string; hazard: HazardKind } | null)[];
   // % HP a mon's Rocky Helmet / Rough Skin / Iron Barbs chips off a contacting
   // attacker (0 if none). Max HP per mon (for drain heal — already have *MaxHp).
   myContactChip: number[]; oppContactChip: number[];
@@ -671,6 +715,12 @@ interface State {
    *  fired, so it can't fire again this search. */
   myBerryUsed: boolean[];
   oppBerryUsed: boolean[];
+  /** Live entry hazards per SIDE (myHazards = on my side, oppHazards = on the
+   *  opponent's). Seeded from the field; a hazard MOVE (Stealth Rock / Spikes /
+   *  …) or a setting attack (Stone Axe → SR, Ceaseless Edge → Spikes) adds to the
+   *  DEFENDER's side, so a later switch / refill-in eats the chip. */
+  myHazards: HazardState;
+  oppHazards: HazardState;
 }
 
 // Doubles screen damage reduction (2732/4096 ≈ 0.667), matching @smogon/calc's
@@ -883,7 +933,7 @@ interface CellOpts {
 // midpoint (the old representative value); min/max = the honest envelope edges
 // (worst/best roll across surviving candidate spreads).
 function cellFrom(c: ReturnType<typeof predictOffense>): Cell {
-  if (!c) return { dmgMin: 0, dmgMid: 0, dmgMax: 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false, drain: 0, contact: false };
+  if (!c) return { dmgMin: 0, dmgMid: 0, dmgMax: 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false, drain: 0, contact: false, setsHazard: null };
   const lo = c.likelyMinPercent ?? c.minPercent;
   const hi = c.likelyMaxPercent ?? c.maxPercent;
   return {
@@ -900,6 +950,7 @@ function cellFrom(c: ReturnType<typeof predictOffense>): Cell {
     groundMove: isGroundMove(c.move),
     drain: moveDrain(c.move),
     contact: moveContact(c.move),
+    setsHazard: hazardSecondaryOf(c.move),
   };
 }
 function cellFromOffense(attacker: PokemonSet, defender: OpponentEntry, field: FieldState, o: CellOpts = {}): Cell {
@@ -1143,8 +1194,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppRecover: opp.map(o => findRecoverMove(o.entry.knownMoves)),
     myItem: mine.map(m => m.set.item ?? undefined),
     oppItem: opp.map(o => o.entry.item ?? undefined),
-    myHazardEffect: mine.map(m => applyHazardsToSwitchIn(input.field.myHazards, { species: m.set.species, ability: m.set.ability ?? undefined, item: m.set.item ?? undefined })),
-    oppHazardEffect: opp.map(o => applyHazardsToSwitchIn(input.field.theirHazards, { species: o.entry.species, ability: o.entry.ability ?? undefined, item: o.entry.item ?? undefined })),
+    myHazardMove: mine.map(m => findHazardMove(m.set.moves ?? [])),
+    oppHazardMove: opp.map(o => findHazardMove(o.entry.knownMoves)),
     myContactChip: mine.map(m => contactChipFor(m.set.ability, m.set.item)),
     oppContactChip: opp.map(o => contactChipFor(o.entry.ability, o.entry.item)),
     field: input.field,
@@ -1193,6 +1244,8 @@ function initialState(input: SearchInput): State {
     // A consumed item (Sitrus already eaten, Knock Off'd, …) can't fire again.
     myBerryUsed: input.mine.map(m => !m.set.item),
     oppBerryUsed: input.opp.map(o => !!o.entry.itemConsumed || !o.entry.item),
+    myHazards: { ...(input.field.myHazards ?? {}) },
+    oppHazards: { ...(input.field.theirHazards ?? {}) },
   };
 }
 
@@ -1228,6 +1281,11 @@ function resolveTurn(
 ): State {
   const myHp = s.myHp.slice();
   const oppHp = s.oppHp.slice();
+  // Live side hazards — mutable so a setting move/attack THIS turn lays a layer
+  // that a refill-in eats at EOT. Switch-ins (start of turn) still read the
+  // START-of-turn hazards (s.my/oppHazards) below.
+  let myHazards = { ...s.myHazards };
+  let oppHazards = { ...s.oppHazards };
   const tr = s.trickRoom;            // THIS turn's order uses the current flags;
   const r = pass.regime;             // a Tailwind/TR set this turn applies NEXT ply.
   // Survival charges available this turn (Focus Sash / Sturdy), consumed on
@@ -1320,7 +1378,7 @@ function resolveTurn(
   // Switch / field / Leech / setup / screen / weather / terrain / status / recover / Baton: no direct damage.
   const nonAttack = (target: number) =>
     isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isStatusTarget(target) || isFieldTarget(target)
-    || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN || target === RECOVER;
+    || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN || target === RECOVER || target === SET_HAZARD;
   const actings: Acting[] = [];
   for (const [actor, target] of myTargets) {
     if (nonAttack(target)) continue;
@@ -1367,6 +1425,7 @@ function resolveTurn(
       const oBefore = oppHp[oTgt]!;
       apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r), oc.physical, oc.type, oc.groundMove), oppSurv, oc.multiHit);
       const oDealt = oBefore - oppHp[oTgt]!;
+      if (oc.setsHazard) oppHazards = addHazard(oppHazards, oc.setsHazard); // Stone Axe → SR, Ceaseless Edge → Spikes (on their side)
       // Drain heal + contact punish (Rocky Helmet / Rough Skin) on my attacker.
       if (oDealt > 0 && (myHp[act.actor] ?? 0) > 0) {
         if (oc.drain > 0) myHp[act.actor] = Math.min(100, myHp[act.actor]! + oc.drain * oDealt * (t.oppMaxHp[oTgt]! / (t.myMaxHp[act.actor] || 1)));
@@ -1395,6 +1454,7 @@ function resolveTurn(
       const mBefore = myHp[mTgt]!;
       apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r), tc.physical, tc.type, tc.groundMove), mySurv, tc.multiHit);
       const mDealt = mBefore - myHp[mTgt]!;
+      if (tc.setsHazard) myHazards = addHazard(myHazards, tc.setsHazard); // their Stone Axe / Ceaseless Edge → hazard on my side
       if (mDealt > 0 && (oppHp[act.actor] ?? 0) > 0) {
         if (tc.drain > 0) oppHp[act.actor] = Math.min(100, oppHp[act.actor]! + tc.drain * mDealt * (t.myMaxHp[mTgt]! / (t.oppMaxHp[act.actor] || 1)));
         if (tc.contact && t.myContactChip[mTgt]! > 0 && !t.oppResidual[act.actor]!.magicGuard) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - t.myContactChip[mTgt]!);
@@ -1480,6 +1540,11 @@ function resolveTurn(
   for (const inB of oppSwitchIn.values()) setTerrain(t.oppTerrainAbility[inB] ?? null);
   for (const [actor, target] of myTargets) if (target === SET_TERRAIN) setTerrain(t.myTerrainMove[actor]?.terrain ?? null);
   for (const [actor, target] of oppTargets) if (target === SET_TERRAIN) setTerrain(t.oppTerrainMove[actor]?.terrain ?? null);
+
+  // Dedicated hazard-setting moves: Stealth Rock / Spikes / Toxic Spikes / Sticky
+  // Web lay a layer on the OPPOSING side (my move → their side, and vice versa).
+  for (const [actor, target] of myTargets) if (target === SET_HAZARD && t.myHazardMove[actor]) oppHazards = addHazard(oppHazards, t.myHazardMove[actor]!.hazard);
+  for (const [actor, target] of oppTargets) if (target === SET_HAZARD && t.oppHazardMove[actor]) myHazards = addHazard(myHazards, t.oppHazardMove[actor]!.hazard);
 
   // Leech Seed. A seed is removed when the seeded mon leaves the field (switch);
   // a switched-in mon arrives unseeded. New seeds cast this turn land on the
@@ -1623,8 +1688,10 @@ function resolveTurn(
     if (eff.statusApplied && !statusArr[inMon]) { statusArr[inMon] = eff.statusApplied; if (eff.statusApplied === 'tox') toxicN[inMon] = 1; }
     if (eff.boostsApplied) boost[inMon] = addBoosts(boost[inMon]!, eff.boostsApplied);
   };
-  for (const inMon of mySwitchIn.values()) applyHazard(inMon, myHp, t.myHazardEffect[inMon], myStatus, myToxicN, myBoost);
-  for (const inMon of oppSwitchIn.values()) applyHazard(inMon, oppHp, t.oppHazardEffect[inMon], oppStatus, oppToxicN, oppBoost);
+  // Deliberate switches happen at the START of the turn → they read the
+  // start-of-turn hazards (s.my/oppHazards), before any layer set this turn.
+  for (const inMon of mySwitchIn.values()) applyHazard(inMon, myHp, hazardEffectFor(s.myHazards, t.mySpecies[inMon]!, t.myAbility[inMon], t.myItem[inMon]), myStatus, myToxicN, myBoost);
+  for (const inMon of oppSwitchIn.values()) applyHazard(inMon, oppHp, hazardEffectFor(s.oppHazards, t.oppSpecies[inMon]!, t.oppAbility[inMon], t.oppItem[inMon]), oppStatus, oppToxicN, oppBoost);
 
   // HP-trigger consumables (Sitrus heal 25% @ ≤50%, pinch berries +1 stat @ ≤25%)
   // fire on the FALLING edge across this turn (start HP → end HP), one-time. Heal
@@ -1648,6 +1715,13 @@ function resolveTurn(
   // more than the 4 brought).
   const myActive = refill(myActiveNow, myHp, t.myN, t.off, oppHp);
   const oppActive = refill(oppActiveNow, oppHp, t.oppN, t.thr, myHp, oppSeen);
+  // A replacement brought in after a faint enters at EOT and eats the hazards
+  // present NOW (the post-set copies) — this is what makes a hazard set this turn
+  // (incl. Stone Axe's SR) actually bite the opponent's next mon.
+  for (const inMon of myActive) if (!myActiveNow.includes(inMon))
+    applyHazard(inMon, myHp, hazardEffectFor(myHazards, t.mySpecies[inMon]!, t.myAbility[inMon], t.myItem[inMon]), myStatus, myToxicN, myBoost);
+  for (const inMon of oppActive) if (!oppActiveNow.includes(inMon))
+    applyHazard(inMon, oppHp, hazardEffectFor(oppHazards, t.oppSpecies[inMon]!, t.oppAbility[inMon], t.oppItem[inMon]), oppStatus, oppToxicN, oppBoost);
   return {
     myHp, oppHp, myActive, oppActive, myProtectStreak, oppProtectStreak, oppSeen,
     trickRoom, myTailwind, theirTailwind, trickRoomTurns, myTailwindTurns, theirTailwindTurns,
@@ -1655,7 +1729,7 @@ function resolveTurn(
     myReflect, myLightScreen, theirReflect, theirLightScreen,
     myReflectTurns, myLightScreenTurns, theirReflectTurns, theirLightScreenTurns,
     weather, weatherTurns, terrain, terrainTurns, myToxicN, oppToxicN, myStatus, oppStatus,
-    myBerryUsed, oppBerryUsed,
+    myBerryUsed, oppBerryUsed, myHazards, oppHazards,
   };
 }
 
@@ -1731,6 +1805,9 @@ function jointActions(
   // Recovery capability (root only): a true entry → the mon can usefully heal
   // (knows a recovery move + isn't at full HP).
   recoverSet?: boolean[],
+  // Hazard-setting capability (root only): a true entry → the mon can usefully
+  // lay a hazard on the foe's side (knows one + that layer isn't already maxed).
+  hazardSet?: boolean[],
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -1748,6 +1825,7 @@ function jointActions(
     const canWeather = weatherSet?.[actor] === true;
     const canTerrain = terrainSet?.[actor] === true;
     const canRecover = recoverSet?.[actor] === true;
+    const canHazard = hazardSet?.[actor] === true;
     const statusCodes = (status && status.move[actor] != null) ? status.foes.map(statusCode) : [];
     const batonCodes = (baton && baton.move[actor] != null) ? baton.targets.map(batonCode) : [];
     // SPREAD first so a spread that ties a single-target line is kept. PROTECT /
@@ -1764,6 +1842,7 @@ function jointActions(
       ...(canWeather ? [SET_WEATHER] : []),
       ...(canTerrain ? [SET_TERRAIN] : []),
       ...(canRecover ? [RECOVER] : []),
+      ...(canHazard ? [SET_HAZARD] : []),
       ...leechCodes,
       ...statusCodes,
       ...switchCodes,
@@ -1963,6 +2042,8 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
   const myTerrainCap = t.myTerrainMove.map(tm => !!tm && tm.terrain !== s.terrain);
   // Foes I can still inflict a status on: active, alive, not already statused.
   const myStatusFoes = s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0 && !s.oppStatus[j]);
+  // Hazard useful only if it'd add a layer not already maxed on the OPP's side.
+  const myHazardCap = t.myHazardMove.map(hm => !!hm && hazardRoom(s.oppHazards, hm.hazard));
   return jointActions(s.myActive, s.oppActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak,
     myBench,
     // Don't re-offer Tailwind when it's already up; Trick Room is always a
@@ -1976,7 +2057,8 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     myTerrainCap,
     { move: t.myStatusMove, foes: myStatusFoes },
     // Recover only when the mon knows one AND is below full HP (mon-indexed).
-    t.myRecover.map((rec, i) => !!rec && (s.myHp[i] ?? 100) < 100));
+    t.myRecover.map((rec, i) => !!rec && (s.myHp[i] ?? 100) < 100),
+    myHazardCap);
 }
 function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
@@ -1985,6 +2067,7 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const oppWeatherCap = t.oppWeatherMove.map(wm => !!wm && normWeather(wm.weather) !== normWeather(s.weather));
   const oppTerrainCap = t.oppTerrainMove.map(tm => !!tm && tm.terrain !== s.terrain);
   const oppStatusFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !s.myStatus[j]);
+  const oppHazardCap = t.oppHazardMove.map(hm => !!hm && hazardRoom(s.myHazards, hm.hazard));
   return jointActions(s.oppActive, s.myActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak,
     oppBench,
     { tailwind: s.theirTailwind ? undefined : t.oppTailwindMove, trickRoom: t.oppTrickRoomMove },
@@ -1995,7 +2078,8 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     oppWeatherCap,
     oppTerrainCap,
     { move: t.oppStatusMove, foes: oppStatusFoes },
-    t.oppRecover.map((rec, j) => !!rec && (s.oppHp[j] ?? 100) < 100));
+    t.oppRecover.map((rec, j) => !!rec && (s.oppHp[j] ?? 100) < 100),
+    oppHazardCap);
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -2051,6 +2135,8 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myTerrainMove[actor]?.move ?? 'Terrain', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === RECOVER) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myRecover[actor]?.move ?? 'Recover', targetSpecies: t.mySpecies[actor]!, self: true });
+    } else if (target === SET_HAZARD) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myHazardMove[actor]?.move ?? 'Stealth Rock', targetSpecies: 'their side' });
     } else if (target === SET_TAILWIND) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myTailwindMove[actor] ?? 'Tailwind', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_TRICKROOM) {
@@ -2091,6 +2177,8 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): Search
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppTerrainMove[actor]?.move ?? 'Terrain', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === RECOVER) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppRecover[actor]?.move ?? 'Recover', targetSpecies: t.oppSpecies[actor]!, self: true });
+    } else if (target === SET_HAZARD) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppHazardMove[actor]?.move ?? 'Stealth Rock', targetSpecies: 'my side' });
     } else if (target === SET_TAILWIND) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppTailwindMove[actor] ?? 'Tailwind', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_TRICKROOM) {
@@ -2339,7 +2427,7 @@ export function createSearch(input: SearchInput): PositionSearch {
             if (target === SPREAD) {
               const sp = expected.table.mySpread[actor]!;
               for (const foe of s0.oppActive) {
-                consider({ dmgMin: sp.dmgMin[foe] ?? 0, dmgMid: sp.dmgMid[foe] ?? 0, dmgMax: sp.dmgMax[foe] ?? 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false, drain: 0, contact: false }, s0.oppHp[foe] ?? 0, expected.table.oppSpecies[foe] ?? 'foe');
+                consider({ dmgMin: sp.dmgMin[foe] ?? 0, dmgMid: sp.dmgMid[foe] ?? 0, dmgMax: sp.dmgMax[foe] ?? 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false, drain: 0, contact: false, setsHazard: null }, s0.oppHp[foe] ?? 0, expected.table.oppSpecies[foe] ?? 'foe');
               }
             } else if (target >= 0) {       // skip PROTECT / SWITCH (no attack)
               consider(expected.table.off[actor]![target]!, s0.oppHp[target] ?? 0, expected.table.oppSpecies[target] ?? 'foe');
@@ -2602,6 +2690,11 @@ export function createSearch(input: SearchInput): PositionSearch {
       const recoverable = (recs: (RecoverMove | null)[], hp: number[], active: number[]) =>
         active.some(i => !!recs[i] && (hp[i] ?? 100) < 100);
       if (recoverable(expected.table.myRecover, s0.myHp, s0.myActive) || recoverable(expected.table.oppRecover, s0.oppHp, s0.oppActive)) actionClasses.push('recover');
+      // Hazard class when a mon on the field knows a hazard-setting move AND that
+      // layer isn't already maxed on the side it'd land on.
+      const hazardable = (moves: ({ hazard: HazardKind } | null)[], active: number[], foeHazards: HazardState) =>
+        active.some(i => { const hm = moves[i]; return !!hm && hazardRoom(foeHazards, hm.hazard); });
+      if (hazardable(expected.table.myHazardMove, s0.myActive, s0.oppHazards) || hazardable(expected.table.oppHazardMove, s0.oppActive, s0.myHazards)) actionClasses.push('hazard');
       const explored: SearchExplored = {
         depth,
         myActions: myRootJoints.length,

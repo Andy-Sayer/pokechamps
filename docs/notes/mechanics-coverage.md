@@ -85,7 +85,8 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Fake Out | — | ✅(dmg) | ✅ | **PARTIAL** | flinch is informational only; first-turn-only not enforced in search |
 | Counter / mirror | Counter, Mirror Coat, Metal Burst | ✅ | ? | **GAP** | reflects damage |
 | Item manipulation | Knock Off, Trick, Switcheroo, Thief, Covet | ✅(KO dmg) | ✅ | **PARTIAL** | live tracks item removal/swap; search uses static items |
-| Hazard set/clear | Stealth Rock/Spikes/Toxic Spikes/Sticky Web; Defog/Rapid Spin/Court Change | – | ✅ | **GAP** | live applies switch-in chip; search ignores hazards entirely |
+| Hazard SET | Stealth Rock/Spikes/Toxic Spikes/Sticky Web (dedicated) + Stone Axe→SR / Ceaseless Edge→Spikes (secondary) | – | ✅ | ✅ | search lays hazards on the foe's side (`SET_HAZARD` action + `Cell.setsHazard`); dynamic `State.my/oppHazards`; refill-ins eat the chip. Freshly-set hazards are correctly dodgeable in a short horizon (opp pre-switches) → payoff is the FORCED-refill case |
+| Hazard CLEAR | Defog/Rapid Spin/Mortal Spin/Court Change/Tidy Up | – | ✅ | **GAP** | live clears via `applyHazardClear`; search doesn't model removal yet |
 | Encore/Taunt/Disable/Torment | — | – | ✅(counters) | **GAP** | restrict opp options; not in search |
 | Substitute | — | ✅(partial) | ✅(limited) | **PARTIAL** | sub-HP tracking is limited (see `project_sub_hp_tracking`) |
 | Self-destruct | Explosion, Final Gambit, Misty/Healing Wish | ✅ | ? | **GAP** | user faints; special semantics |
@@ -136,7 +137,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Psychic-Terrain priority block | – | ? | ✅ |
 | Grassy heal residual | – | ✅ | **GAP** (search) |
 | Trick Room / Tailwind / Gravity / Wonder Room / Magic Room | ✅(calc has TR/Gravity) | ✅(TR/TW) | TR/TW ✅; **Gravity/Wonder/Magic Room GAP** |
-| Entry hazards (chip + speed drop) | – | ✅ | **GAP** (search) |
+| Entry hazards (chip + speed drop, on switch-in AND refill) | – | ✅ | ✅ (dynamic `State.my/oppHazards`; chip on deliberate switch + post-faint refill; set via `SET_HAZARD` + Stone Axe/Ceaseless Edge secondary) |
 
 ### Status / volatiles
 | Status | calc effect | live | search |
@@ -171,10 +172,18 @@ EOT residual, root-ply action, switch-in hook).
    `hpItemTriggerFor` (Sitrus 25% @ ≤50%, pinch berries +1 stat @ ≤25%, falling
    edge) + `statusBerryFor` (Lum/Cheri/… cure on infliction). One-time per mon
    (`State.my/oppBerryUsed`); known items only for the opp.
-3. ~~**Entry hazards**~~ ✅ SHIPPED — reuses `applyHazardsToSwitchIn`; precomputed
-   per-mon `HazardEffect` applied on any switch-in (incl. Baton Pass): HP chip +
-   Toxic Spikes status + Sticky Web −1 Spe, before the berry check. Makes switch
-   evaluation honest.
+3. ~~**Entry hazards (consume + SET)**~~ ✅ SHIPPED — reuses `applyHazardsToSwitchIn`;
+   the per-mon `HazardEffect` is now computed DYNAMICALLY from `State.my/oppHazards`
+   (HP chip + Toxic Spikes status + Sticky Web −1 Spe, before the berry check) and
+   applied on a deliberate switch-in (incl. Baton Pass, START-of-turn hazards) AND
+   on a post-faint refill replacement (post-set hazards). Hazards are now SET in the
+   search too: the `SET_HAZARD` action casts the dedicated moves (Stealth Rock /
+   Spikes / Toxic Spikes / Sticky Web) and `Cell.setsHazard` lays the secondary from
+   Stone Axe (→SR) / Ceaseless Edge (→Spikes) on the defender's side. NOTE: a hazard
+   set this turn is correctly dodgeable in a short horizon (a rational opp
+   pre-switches its bench mon in before the rock lands), so the realized payoff is
+   the forced-refill case, not a single-turn swing. Hazard CLEAR (Defog/Rapid Spin/…)
+   is still a search GAP.
 4. ~~**Intimidate on switch-in**~~ ✅ SHIPPED — a switch-in with Intimidate drops
    the opposing actives' Atk −1 (into the dynamic boosts), honoring Clear Body /
    Clear Amulet / Hyper Cutter / … immunity. Defiant/Competitive/Guard Dog
