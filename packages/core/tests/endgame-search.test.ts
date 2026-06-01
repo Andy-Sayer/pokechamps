@@ -3,7 +3,7 @@
 // predictThreat compute real damage; assertions stay on verdict/targets/score
 // sign to be robust to exact rolls.
 import { describe, test, expect } from 'vitest';
-import { searchToDepth, searchIterative, searchInputFromMatch, megaMaxSpeed, type SearchInput } from '../src/domain/endgameSearch.js';
+import { searchToDepth, searchIterative, searchInputFromMatch, megaMaxSpeed, resolveOneTurn, type SearchInput } from '../src/domain/endgameSearch.js';
 import type { PokemonSet, OpponentEntry, Match } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } from '../src/domain/types.js';
 import { maxHpFor } from '../src/domain/damage.js';
@@ -1437,6 +1437,26 @@ describe('P2: Regenerator', () => {
       field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
     });
     expect(searchToDepth(make('Regenerator'), 3).score).toBeGreaterThan(searchToDepth(make('Swarm'), 3).score);
+  });
+});
+
+describe('self-stat-drop secondaries (Draco Meteor / Contrary / Close Combat)', () => {
+  const wall = (): OpponentEntry => oppOf(mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Seismic Toss'] }));
+  const run = (set: PokemonSet) => resolveOneTurn(
+    { mine: [{ set, hpPercent: 100, active: true }], opp: [{ entry: wall(), hpPercent: 100, active: true }], field: { ...NEUTRAL_FIELD }, allOppRevealed: true },
+    new Map([[0, { kind: 'attack', target: 0 } as const]]), new Map(),
+  ).mine[0]!.boosts;
+
+  test('Draco Meteor drops the user SpA -2', () => {
+    expect(run(mon({ species: 'Dragapult', ability: 'Clear Body', nature: 'Modest', evs: { ...ZERO_EVS, spa: 252 }, moves: ['Draco Meteor'] })).spa).toBe(-2);
+  });
+  test('Contrary inverts the self-drop into +2 SpA', () => {
+    expect(run(mon({ species: 'Serperior', ability: 'Contrary', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Leaf Storm'] })).spa).toBe(2);
+  });
+  test('Close Combat drops the user Def and SpD -1 each', () => {
+    const b = run(mon({ species: 'Great Tusk', ability: 'Protosynthesis', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Close Combat'] }));
+    expect(b.def).toBe(-1);
+    expect(b.spd).toBe(-1);
   });
 });
 

@@ -61,8 +61,9 @@ describe('sim diff-harness', () => {
     expect(sleep!.ours).toBe('-');
   });
 
-  // Draco Meteor's self −2 SpA is a secondary the search omits → caught as a boost gap.
-  test('catches the self-stat-drop gap (Draco Meteor)', () => {
+  // Draco Meteor's self −2 SpA is now PORTED into the fast search, so the harness
+  // confirms the gap is closed — both engines agree (no boost:spa divergence).
+  test('self-stat-drop gap is closed (Draco Meteor agrees with the engine)', () => {
     const input: SearchInput = {
       mine: [
         { set: mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Seismic Toss'] }), hpPercent: 100, active: true },
@@ -76,7 +77,6 @@ describe('sim diff-harness', () => {
     };
     const { divergences } = diffTurn(input, new Map([[0, atk(0)], [1, atk(1)]]), new Map([[0, atk(0)], [1, atk(1)]]));
     const spaDrop = divergences.find(d => d.field === 'boost:spa' && d.who === 'Dragapult');
-    expect(spaDrop).toBeDefined();
-    expect(spaDrop!.sim).toBe('-2');
+    expect(spaDrop).toBeUndefined();   // ported → no divergence
   });
 });

@@ -67,7 +67,8 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Field — weather | Sunny Day/Rain Dance/Sandstorm/Snowscape | ✅ | ✅ | ✅ | + durations/stall-out |
 | Field — terrain | Electric/Grassy/Misty/Psychic Terrain | ✅ | ✅ | ✅ | + durations |
 | Setup (self-boost) | Swords Dance/Calm Mind/Dragon Dance/Shell Smash/… | – | ✅ | ✅ | `SETUP_MOVES` table |
-| Stat-drop on foe | Charm, Snarl, Icy Wind, Electroweb | ✅(dmg) | ✅ | **GAP** | search models self-boosts, not *foe* stat drops applied mid-search |
+| Self stat-drop | Draco Meteor/Overheat/Leaf Storm/Make It Rain/Close Combat/Superpower/V-create | ✅(dmg) | ✅ | ✅ | `Cell.selfDrop` from `move.self.boosts`; applied to the user's boosts (Contrary inverts). **Evidence-ranked #1 gap — closed first via the sim diff-harness** |
+| Stat-drop on foe | Charm, Snarl, Icy Wind, Electroweb | ✅(dmg) | ✅ | **GAP** | search models self-boosts/self-drops, not *foe* stat drops applied mid-search |
 | Status moves | Will-O-Wisp/Thunder Wave/Toxic/Glare/Poison Powder | – | ✅ | ✅ | SET_STATUS; **sleep/freeze NOT** |
 | Sleep-inducing | Spore/Sleep Powder/Hypnosis/Yawn | – | ✅ | **GAP** | sleep = can't-act + wake counter; deferred |
 | Leech / drain HP | Leech Seed; Giga Drain (heal) | ✅(dmg) | ✅ | ✅ | Leech Seed ✅; drain-move self-heal added (`Cell.drain`) |

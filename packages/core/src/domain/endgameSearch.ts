@@ -291,11 +291,11 @@ function benchSwitchTargets(active: number[], hp: number[], n: number): number[]
 // Damage as % of target max, at three roll points so the tree can be evaluated
 // under different regimes without rebuilding the (expensive) matrix. Roll risk
 // is derived from the dmgMin..dmgMax envelope vs the target's HP at use time.
-interface Cell { dmgMin: number; dmgMid: number; dmgMax: number; move: string; priority: number; multiHit: boolean; koRolls: number[]; candidates: number; physical: boolean; type: string; groundMove: boolean; drain: number; contact: boolean; setsHazard: HazardKind | null }
+interface Cell { dmgMin: number; dmgMid: number; dmgMax: number; move: string; priority: number; multiHit: boolean; koRolls: number[]; candidates: number; physical: boolean; type: string; groundMove: boolean; drain: number; contact: boolean; setsHazard: HazardKind | null; selfDrop: BoostMap | null }
 
 /** A spread move option for one of my mons: the move plus its (already
  *  spread-reduced) damage vs each opp index, at min/mid/max rolls. */
-interface SpreadOpt { move: string; priority: number; dmgMin: number[]; dmgMid: number[]; dmgMax: number[]; physical: boolean; type: string; groundMove: boolean }
+interface SpreadOpt { move: string; priority: number; dmgMin: number[]; dmgMid: number[]; dmgMax: number[]; physical: boolean; type: string; groundMove: boolean; selfDrop: BoostMap | null }
 
 /** Live stat-stage boosts (−6..+6) per stat. */
 type BoostMap = Partial<Record<'atk' | 'def' | 'spa' | 'spd' | 'spe', number>>;
@@ -317,6 +317,26 @@ function moveDrain(move: string): number {
 // True for a contact move (triggers Rocky Helmet / Rough Skin / Iron Barbs).
 function moveContact(move: string): boolean {
   return !!(getMove(move) as { flags?: { contact?: number } } | undefined)?.flags?.contact;
+}
+// Guaranteed self-stat-drop a damaging move inflicts on its OWN user (Draco
+// Meteor/Overheat/Leaf Storm/Fleur Cannon −2 SpA, Make It Rain −1 SpA, Close
+// Combat/Superpower −Def/−SpD, V-create, Spin Out…). Reads `move.self.boosts`;
+// null if none. Only the stat stages we track (no acc/eva).
+function selfDropOf(move: string): BoostMap | null {
+  const b = (getMove(move) as { self?: { boosts?: Record<string, number> } } | undefined)?.self?.boosts;
+  if (!b) return null;
+  const out: BoostMap = {};
+  for (const k of ['atk', 'def', 'spa', 'spd', 'spe'] as const) if (b[k]) out[k] = b[k]!;
+  return Object.keys(out).length ? out : null;
+}
+// Contrary inverts stat changes (a self-drop becomes a self-boost).
+function hasContrary(ability: string | null | undefined): boolean {
+  return toId(ability ?? '') === 'contrary';
+}
+function negateBoosts(b: BoostMap): BoostMap {
+  const out: BoostMap = {};
+  for (const k of ['atk', 'def', 'spa', 'spd', 'spe'] as const) if (b[k]) out[k] = -b[k]!;
+  return out;
 }
 // Ground moves halved by Grassy Terrain.
 const GRASSY_HALVED = new Set(['earthquake', 'bulldoze', 'magnitude']);
@@ -603,7 +623,7 @@ function bestSpread(
       defenderBoosts: opp.boosts, defenderStatus: opp.status,
     })));
     const opt: SpreadOpt = {
-      move: mv, priority: movePriority(mv), physical: isPhysicalMove(mv), type: moveType(mv), groundMove: isGroundMove(mv),
+      move: mv, priority: movePriority(mv), physical: isPhysicalMove(mv), type: moveType(mv), groundMove: isGroundMove(mv), selfDrop: selfDropOf(mv),
       dmgMin: cells.map(c => c.dmgMin),
       dmgMid: cells.map(c => c.dmgMid),
       dmgMax: cells.map(c => c.dmgMax),
@@ -641,7 +661,7 @@ function bestSpreadOpp(
       defenderBoosts: m.boosts, defenderStatus: m.status,
     })));
     const so: SpreadOpt = {
-      move: mv, priority: movePriority(mv), physical: isPhysicalMove(mv), type: moveType(mv), groundMove: isGroundMove(mv),
+      move: mv, priority: movePriority(mv), physical: isPhysicalMove(mv), type: moveType(mv), groundMove: isGroundMove(mv), selfDrop: selfDropOf(mv),
       dmgMin: cells.map(c => c.dmgMin),
       dmgMid: cells.map(c => c.dmgMid),
       dmgMax: cells.map(c => c.dmgMax),
@@ -939,7 +959,7 @@ interface CellOpts {
 // midpoint (the old representative value); min/max = the honest envelope edges
 // (worst/best roll across surviving candidate spreads).
 function cellFrom(c: ReturnType<typeof predictOffense>): Cell {
-  if (!c) return { dmgMin: 0, dmgMid: 0, dmgMax: 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false, drain: 0, contact: false, setsHazard: null };
+  if (!c) return { dmgMin: 0, dmgMid: 0, dmgMax: 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false, drain: 0, contact: false, setsHazard: null, selfDrop: null };
   const lo = c.likelyMinPercent ?? c.minPercent;
   const hi = c.likelyMaxPercent ?? c.maxPercent;
   return {
@@ -957,6 +977,7 @@ function cellFrom(c: ReturnType<typeof predictOffense>): Cell {
     drain: moveDrain(c.move),
     contact: moveContact(c.move),
     setsHazard: hazardSecondaryOf(c.move),
+    selfDrop: selfDropOf(c.move),
   };
 }
 function cellFromOffense(attacker: PokemonSet, defender: OpponentEntry, field: FieldState, o: CellOpts = {}): Cell {
@@ -1292,6 +1313,10 @@ function resolveTurn(
   // START-of-turn hazards (s.my/oppHazards) below.
   let myHazards = { ...s.myHazards };
   let oppHazards = { ...s.oppHazards };
+  // Self-stat-drops a mon's own move inflicts on it this turn (Draco Meteor −2 SpA
+  // …), applied to the user's boosts at end of turn. actor index → drop map.
+  const mySelfDrop = new Map<number, BoostMap>();
+  const oppSelfDrop = new Map<number, BoostMap>();
   const tr = s.trickRoom;            // THIS turn's order uses the current flags;
   const r = pass.regime;             // a Tailwind/TR set this turn applies NEXT ply.
   // Survival charges available this turn (Focus Sash / Sturdy), consumed on
@@ -1421,6 +1446,7 @@ function resolveTurn(
           if (oppProtected.has(foe)) continue;       // opp protecting this turn
           apply(oppHp, foe, myDmg(act.actor, foe, dmg[foe] ?? 0, sp.physical, sp.type, sp.groundMove), oppSurv, false);
         }
+        if (sp.selfDrop) mySelfDrop.set(act.actor, sp.selfDrop);
         continue;
       }
       const oTgt = redirect(act.target, oppSwitchIn); // hit the replacement if the target switched
@@ -1432,6 +1458,7 @@ function resolveTurn(
       apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r), oc.physical, oc.type, oc.groundMove), oppSurv, oc.multiHit);
       const oDealt = oBefore - oppHp[oTgt]!;
       if (oc.setsHazard) oppHazards = addHazard(oppHazards, oc.setsHazard); // Stone Axe → SR, Ceaseless Edge → Spikes (on their side)
+      if (oc.selfDrop) mySelfDrop.set(act.actor, oc.selfDrop);       // Draco Meteor −2 SpA etc.
       // Drain heal + contact punish (Rocky Helmet / Rough Skin) on my attacker.
       if (oDealt > 0 && (myHp[act.actor] ?? 0) > 0) {
         if (oc.drain > 0) myHp[act.actor] = Math.min(100, myHp[act.actor]! + oc.drain * oDealt * (t.oppMaxHp[oTgt]! / (t.myMaxHp[act.actor] || 1)));
@@ -1450,6 +1477,7 @@ function resolveTurn(
           if (myProtected.has(me)) continue;          // my mon protecting this turn
           apply(myHp, me, oppDmg(act.actor, me, dmg[me] ?? 0, sp.physical, sp.type, sp.groundMove), mySurv, false);
         }
+        if (sp.selfDrop) oppSelfDrop.set(act.actor, sp.selfDrop);
         continue;
       }
       const mTgt = redirect(act.target, mySwitchIn);  // hit the replacement if my target switched
@@ -1461,6 +1489,7 @@ function resolveTurn(
       apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r), tc.physical, tc.type, tc.groundMove), mySurv, tc.multiHit);
       const mDealt = mBefore - myHp[mTgt]!;
       if (tc.setsHazard) myHazards = addHazard(myHazards, tc.setsHazard); // their Stone Axe / Ceaseless Edge → hazard on my side
+      if (tc.selfDrop) oppSelfDrop.set(act.actor, tc.selfDrop);
       if (mDealt > 0 && (oppHp[act.actor] ?? 0) > 0) {
         if (tc.drain > 0) oppHp[act.actor] = Math.min(100, oppHp[act.actor]! + tc.drain * mDealt * (t.myMaxHp[mTgt]! / (t.oppMaxHp[act.actor] || 1)));
         if (tc.contact && t.myContactChip[mTgt]! > 0 && !t.oppResidual[act.actor]!.magicGuard) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - t.myContactChip[mTgt]!);
@@ -1670,6 +1699,10 @@ function resolveTurn(
   for (const [outJ, inB] of oppSwitchIn) { const passed = oppBaton.has(outJ) ? { ...oppBoost[outJ] } : {}; oppBoost[outJ] = {}; oppBoost[inB] = passed; }
   for (const [actor, target] of myTargets) if (target === SET_BOOST && t.mySetup[actor]) myBoost[actor] = addBoosts(myBoost[actor]!, t.mySetup[actor]!);
   for (const [actor, target] of oppTargets) if (target === SET_BOOST && t.oppSetup[actor]) oppBoost[actor] = addBoosts(oppBoost[actor]!, t.oppSetup[actor]!);
+  // Self-stat-drops from this turn's moves (Draco Meteor −2 SpA …) hit the user's
+  // own boosts; Contrary inverts them into a self-boost. Only if the user survived.
+  for (const [actor, drop] of mySelfDrop) if ((myHp[actor] ?? 0) > 0) myBoost[actor] = addBoosts(myBoost[actor]!, hasContrary(t.myAbility[actor]) ? negateBoosts(drop) : drop);
+  for (const [actor, drop] of oppSelfDrop) if ((oppHp[actor] ?? 0) > 0) oppBoost[actor] = addBoosts(oppBoost[actor]!, hasContrary(t.oppAbility[actor]) ? negateBoosts(drop) : drop);
   for (const i of myActiveNow) if ((myHp[i] ?? 0) > 0 && t.mySpeedBoost[i]) myBoost[i] = addBoosts(myBoost[i]!, { spe: 1 });
   for (const j of oppActiveNow) if ((oppHp[j] ?? 0) > 0 && t.oppSpeedBoost[j]) oppBoost[j] = addBoosts(oppBoost[j]!, { spe: 1 });
   // Intimidate: a mon that switched IN drops the OPPOSING actives' Atk by 1
@@ -2433,7 +2466,7 @@ export function createSearch(input: SearchInput): PositionSearch {
             if (target === SPREAD) {
               const sp = expected.table.mySpread[actor]!;
               for (const foe of s0.oppActive) {
-                consider({ dmgMin: sp.dmgMin[foe] ?? 0, dmgMid: sp.dmgMid[foe] ?? 0, dmgMax: sp.dmgMax[foe] ?? 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false, drain: 0, contact: false, setsHazard: null }, s0.oppHp[foe] ?? 0, expected.table.oppSpecies[foe] ?? 'foe');
+                consider({ dmgMin: sp.dmgMin[foe] ?? 0, dmgMid: sp.dmgMid[foe] ?? 0, dmgMax: sp.dmgMax[foe] ?? 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false, drain: 0, contact: false, setsHazard: null, selfDrop: null }, s0.oppHp[foe] ?? 0, expected.table.oppSpecies[foe] ?? 'foe');
               }
             } else if (target >= 0) {       // skip PROTECT / SWITCH (no attack)
               consider(expected.table.off[actor]![target]!, s0.oppHp[target] ?? 0, expected.table.oppSpecies[target] ?? 'foe');
