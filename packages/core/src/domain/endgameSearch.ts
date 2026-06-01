@@ -241,6 +241,7 @@ const SET_BOOST = -5;     // setup move (Calm Mind / Swords Dance …) — self-
 const SET_SCREEN = -6;    // screen move (Reflect / Light Screen / Aurora Veil)
 const SET_WEATHER = -7;   // weather move (Sunny Day / Rain Dance / …)
 const SET_TERRAIN = -8;   // terrain move (Electric / Grassy / Misty / Psychic)
+const RECOVER = -9;       // recovery move (Recover / Roost / Synthesis / …) — self-heal
 // Ranged sentinel blocks that each carry an index, kept disjoint so a code is
 // unambiguous. Switches: [-19,-10] → bench idx. Leech Seed: [-29,-20] → foe idx.
 // Baton Pass: ≤ -30 → bench idx (switch that passes boosts). All ROOT-ply only.
@@ -407,6 +408,8 @@ interface Tables {
   // if none. + per-mon ability (for status-immunity checks at apply time).
   myStatusMove: (StatusMove | null)[]; oppStatusMove: (StatusMove | null)[];
   myAbility: (string | null | undefined)[]; oppAbility: (string | null | undefined)[];
+  // Recovery move a mon knows (Recover/Roost/Synthesis/…), null if none.
+  myRecover: (RecoverMove | null)[]; oppRecover: (RecoverMove | null)[];
   field: FieldState;
 }
 
@@ -725,6 +728,28 @@ function terrainSetByAbility(ability: string | null | undefined): Terrain | null
 function findTerrainMove(moves: string[]): { move: string; terrain: Terrain } | null {
   for (const m of moves) { const ter = terrainSetByMove(m); if (ter) return { move: m, terrain: ter }; }
   return null;
+}
+
+// --- Recovery moves ---------------------------------------------------------
+/** A recovery move + how its heal scales: 'flat' = 50%, 'sun' = boosted in sun /
+ *  cut in other weather (Synthesis/Moonlight/Morning Sun), 'sand' = Shore Up. */
+interface RecoverMove { move: string; kind: 'flat' | 'sun' | 'sand' }
+const FLAT_RECOVER = new Set(['recover', 'slackoff', 'softboiled', 'milkdrink', 'roost', 'healorder', 'lifedew', 'junglehealing']);
+function findRecoverMove(moves: string[]): RecoverMove | null {
+  for (const m of moves) {
+    const id = toId(m);
+    if (FLAT_RECOVER.has(id)) return { move: m, kind: 'flat' };
+    if (id === 'synthesis' || id === 'moonlight' || id === 'morningsun') return { move: m, kind: 'sun' };
+    if (id === 'shoreup') return { move: m, kind: 'sand' };
+  }
+  return null;
+}
+// Heal % for a recovery move given the current weather.
+function recoverPct(kind: RecoverMove['kind'], w: Weather): number {
+  if (kind === 'flat') return 50;
+  const nw = normWeather(w);
+  if (kind === 'sun') return nw === 'Sun' ? 200 / 3 : nw == null ? 50 : 25;
+  /* sand */ return nw === 'Sand' ? 200 / 3 : nw == null ? 50 : 25;
 }
 
 // --- End-of-turn residuals --------------------------------------------------
@@ -1054,6 +1079,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppStatusMove: opp.map(o => findStatusMove(o.entry.knownMoves)),
     myAbility: mine.map(m => m.set.ability),
     oppAbility: opp.map(o => o.entry.ability),
+    myRecover: mine.map(m => findRecoverMove(m.set.moves ?? [])),
+    oppRecover: opp.map(o => findRecoverMove(o.entry.knownMoves)),
     field: input.field,
   };
 }
@@ -1221,10 +1248,10 @@ function resolveTurn(
     else hp[idx] = Math.max(0, after);
   };
 
-  // Switch / field / Leech / setup / screen / weather / terrain / status / Baton: no direct damage.
+  // Switch / field / Leech / setup / screen / weather / terrain / status / recover / Baton: no direct damage.
   const nonAttack = (target: number) =>
     isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isStatusTarget(target) || isFieldTarget(target)
-    || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN;
+    || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN || target === RECOVER;
   const actings: Acting[] = [];
   for (const [actor, target] of myTargets) {
     if (nonAttack(target)) continue;
@@ -1436,6 +1463,18 @@ function resolveTurn(
   for (const mi of myActiveNow) residual(myHp, mi, t.myResidual[mi]!, s.myStatus[mi]!, myToxicN, t.myGrounded[mi]!);
   for (const oj of oppActiveNow) residual(oppHp, oj, t.oppResidual[oj]!, s.oppStatus[oj]!, oppToxicN, t.oppGrounded[oj]!);
 
+  // Recovery moves: heal the caster (if it survived the turn) by the move's % of
+  // its max, weather-scaled for Synthesis/Moonlight/Morning Sun / Shore Up. A
+  // recover trades this turn's attack for HP — the search weighs that.
+  for (const [actor, target] of myTargets) {
+    if (target !== RECOVER) continue;
+    if ((myHp[actor] ?? 0) > 0 && t.myRecover[actor]) myHp[actor] = Math.min(100, myHp[actor]! + recoverPct(t.myRecover[actor]!.kind, s.weather));
+  }
+  for (const [actor, target] of oppTargets) {
+    if (target !== RECOVER) continue;
+    if ((oppHp[actor] ?? 0) > 0 && t.oppRecover[actor]) oppHp[actor] = Math.min(100, oppHp[actor]! + recoverPct(t.oppRecover[actor]!.kind, s.weather));
+  }
+
   // Inflict status this turn (applies from NEXT ply, like other set-effects): a
   // status MOVE lands on its (post-switch) target unless the target is already
   // statused, immune by type/ability, or behind Misty Terrain.
@@ -1559,6 +1598,9 @@ function jointActions(
   // Status moves (root only): per-actor capability + the active foe indices that
   // can still be given a status (alive, not already statused).
   status?: { move: (StatusMove | null)[]; foes: number[] },
+  // Recovery capability (root only): a true entry → the mon can usefully heal
+  // (knows a recovery move + isn't at full HP).
+  recoverSet?: boolean[],
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -1575,6 +1617,7 @@ function jointActions(
     const canScreen = screenSet?.[actor] === true;
     const canWeather = weatherSet?.[actor] === true;
     const canTerrain = terrainSet?.[actor] === true;
+    const canRecover = recoverSet?.[actor] === true;
     const statusCodes = (status && status.move[actor] != null) ? status.foes.map(statusCode) : [];
     const batonCodes = (baton && baton.move[actor] != null) ? baton.targets.map(batonCode) : [];
     // SPREAD first so a spread that ties a single-target line is kept. PROTECT /
@@ -1590,6 +1633,7 @@ function jointActions(
       ...(canScreen ? [SET_SCREEN] : []),
       ...(canWeather ? [SET_WEATHER] : []),
       ...(canTerrain ? [SET_TERRAIN] : []),
+      ...(canRecover ? [RECOVER] : []),
       ...leechCodes,
       ...statusCodes,
       ...switchCodes,
@@ -1800,7 +1844,9 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     myScreenCap,
     myWeatherCap,
     myTerrainCap,
-    { move: t.myStatusMove, foes: myStatusFoes });
+    { move: t.myStatusMove, foes: myStatusFoes },
+    // Recover only when the mon knows one AND is below full HP (mon-indexed).
+    t.myRecover.map((rec, i) => !!rec && (s.myHp[i] ?? 100) < 100));
 }
 function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
@@ -1818,7 +1864,8 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     oppScreenCap,
     oppWeatherCap,
     oppTerrainCap,
-    { move: t.oppStatusMove, foes: oppStatusFoes });
+    { move: t.oppStatusMove, foes: oppStatusFoes },
+    t.oppRecover.map((rec, j) => !!rec && (s.oppHp[j] ?? 100) < 100));
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -1872,6 +1919,8 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myWeatherMove[actor]?.move ?? 'Weather', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_TERRAIN) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myTerrainMove[actor]?.move ?? 'Terrain', targetSpecies: t.mySpecies[actor]!, self: true });
+    } else if (target === RECOVER) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myRecover[actor]?.move ?? 'Recover', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myTailwindMove[actor] ?? 'Tailwind', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_TRICKROOM) {
@@ -1910,6 +1959,8 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): Search
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppWeatherMove[actor]?.move ?? 'Weather', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_TERRAIN) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppTerrainMove[actor]?.move ?? 'Terrain', targetSpecies: t.oppSpecies[actor]!, self: true });
+    } else if (target === RECOVER) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppRecover[actor]?.move ?? 'Recover', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppTailwindMove[actor] ?? 'Tailwind', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_TRICKROOM) {
@@ -2418,6 +2469,9 @@ export function createSearch(input: SearchInput): PositionSearch {
         active.some(i => moves[i] != null) && foeActive.some(j => !foeStatus[j]);
       if (statusable(expected.table.myStatusMove, s0.myActive, s0.oppActive, s0.oppStatus)
         || statusable(expected.table.oppStatusMove, s0.oppActive, s0.myActive, s0.myStatus)) actionClasses.push('status');
+      const recoverable = (recs: (RecoverMove | null)[], hp: number[], active: number[]) =>
+        active.some(i => !!recs[i] && (hp[i] ?? 100) < 100);
+      if (recoverable(expected.table.myRecover, s0.myHp, s0.myActive) || recoverable(expected.table.oppRecover, s0.oppHp, s0.oppActive)) actionClasses.push('recover');
       const explored: SearchExplored = {
         depth,
         myActions: myRootJoints.length,

@@ -1300,3 +1300,20 @@ describe('Inflicted status (Will-O-Wisp / Thunder Wave)', () => {
     expect(searchToDepth(make('Psychic'), 2).verdict).toBe('losing');
   });
 });
+
+describe('P1: recovery moves', () => {
+  // True stall: Dark-type Mandibuzz is immune to Bronzong's Psychic (takes 0) and
+  // only carries Taunt (0 damage), so neither side chips the other. Starting at
+  // 50%, having Roost lets it heal back up → strictly better than not having it.
+  test('Roost heals the user across a stall', () => {
+    const bronzong: OpponentEntry = { species: 'Bronzong', knownMoves: ['Psychic'], candidates: [mon({ species: 'Bronzong', ability: 'Levitate', nature: 'Sassy', evs: { ...ZERO_EVS, hp: 252, spa: 252 }, moves: ['Psychic'] })] };
+    const make = (moves: string[]): SearchInput => ({
+      mine: [{ set: mon({ species: 'Mandibuzz', ability: 'Overcoat', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves }), hpPercent: 50, active: true }],
+      opp: [{ entry: bronzong, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    const withRoost = searchToDepth(make(['Roost', 'Taunt']), 3);
+    expect(withRoost.explored!.actionClasses).toContain('recover');
+    expect(withRoost.score).toBeGreaterThan(searchToDepth(make(['Taunt']), 3).score);
+  });
+});

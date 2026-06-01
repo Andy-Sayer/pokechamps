@@ -164,9 +164,9 @@ a self-contained extension following the patterns already built (at-use scaling,
 EOT residual, root-ply action, switch-in hook).
 
 **P1 — high impact, common, tractable**
-1. **Recovery moves** (Recover/Roost/Synthesis/Slack Off/Moonlight) — a healing
-   action (heal % at EOT, weather-scaled for the sun/moon ones). Massive stall
-   lever. Mirrors Leech-Seed/residual code.
+1. ~~**Recovery moves**~~ ✅ SHIPPED — `RECOVER` self-action, EOT heal (50% flat;
+   Synthesis/Moonlight/Morning Sun sun-scaled, Shore Up sand-scaled); offered when
+   below full HP. Action class `recover`.
 2. **HP-trigger items** (Sitrus +25%, pinch berries) + **status berries** (Lum) —
    reuse `hpItemTriggers.ts`/`statusBerries.ts`; apply at the HP-cross / on-status
    in `resolveTurn`. Changes nearly every bulky-mon line.
