@@ -1367,3 +1367,26 @@ describe('P1: entry hazards on switch-in', () => {
     expect(searchToDepth(make(true), 2).score).toBeLessThan(searchToDepth(make(false), 2).score);
   });
 });
+
+describe('P1: Intimidate on switch-in', () => {
+  // Switching a doomed Volcarona to a benched Mandibuzz is the best line; when
+  // that switch-in has Intimidate it drops the opponents' (physical) Atk, so the
+  // incoming Stone Edge / Knock Off hit softer → the line is worth more than with
+  // a neutral ability.
+  test('an Intimidate switch-in weakens the opp physical attackers', () => {
+    const volcarona = mon({ species: 'Volcarona', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Bug Buzz'] });
+    const aggron = mon({ species: 'Aggron', ability: 'Sturdy', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, atk: 252 }, moves: ['Heavy Slam'] });
+    const aero: OpponentEntry = { species: 'Aerodactyl', knownMoves: ['Stone Edge'], candidates: [mon({ species: 'Aerodactyl', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Stone Edge'] })] };
+    const incinO: OpponentEntry = { species: 'Incineroar', knownMoves: ['Knock Off'], candidates: [mon({ species: 'Incineroar', ability: 'Intimidate', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Knock Off'] })] };
+    const make = (ability: string): SearchInput => ({
+      mine: [
+        { set: volcarona, hpPercent: 100, active: true },
+        { set: aggron, hpPercent: 100, active: true },
+        { set: mon({ species: 'Mandibuzz', ability, nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Foul Play'] }), hpPercent: 100, active: false },
+      ],
+      opp: [{ entry: aero, hpPercent: 100, active: true }, { entry: incinO, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    expect(searchToDepth(make('Intimidate'), 3).score).toBeGreaterThan(searchToDepth(make('Overcoat'), 3).score);
+  });
+});

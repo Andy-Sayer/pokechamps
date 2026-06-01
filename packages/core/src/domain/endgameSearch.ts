@@ -385,6 +385,9 @@ interface Tables {
   // Speed Boost ability (+1 Spe each EOT while active).
   mySpeedBoost: boolean[];
   oppSpeedBoost: boolean[];
+  // Intimidate (drops foes' Atk on switch-in) + which mons are immune to it.
+  myIntimidate: boolean[]; oppIntimidate: boolean[];
+  myIntimImmune: boolean[]; oppIntimImmune: boolean[];
   // Screen-move capability: what a SET_SCREEN action puts up for the caster's
   // side, + the move name; null = the mon knows no screen move.
   myScreen: (ScreenSet | null)[];
@@ -469,6 +472,15 @@ function findSetupMove(moves: string[]): { move: string; boosts: BoostMap } | nu
 }
 function hasSpeedBoost(ability: string | null | undefined): boolean {
   return !!ability && toId(ability) === 'speedboost';
+}
+function hasIntimidate(ability: string | null | undefined): boolean {
+  return !!ability && toId(ability) === 'intimidate';
+}
+// Abilities/items that block an Intimidate Atk drop (Defiant/Competitive/Guard
+// Dog REACTIONS are deferred — we just don't drop for the immune ones).
+const INTIM_IMMUNE_ABILITIES = new Set(['clearbody', 'whitesmoke', 'fullmetalbody', 'hypercutter', 'innerfocus', 'oblivious', 'owntempo', 'scrappy', 'guarddog']);
+function intimidateImmune(ability: string | null | undefined, item: string | null | undefined): boolean {
+  return INTIM_IMMUNE_ABILITIES.has(toId(ability ?? '')) || /clear\s*amulet/i.test(item ?? '');
 }
 
 // True for a Grass-type species (immune to Leech Seed).
@@ -1067,6 +1079,10 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppBatonMove: opp.map(o => findMoveId(o.entry.knownMoves, 'batonpass')),
     mySpeedBoost: mine.map(m => hasSpeedBoost(m.set.ability)),
     oppSpeedBoost: opp.map(o => hasSpeedBoost(o.entry.ability)),
+    myIntimidate: mine.map(m => hasIntimidate(m.set.ability)),
+    oppIntimidate: opp.map(o => hasIntimidate(o.entry.ability)),
+    myIntimImmune: mine.map(m => intimidateImmune(m.set.ability, m.set.item)),
+    oppIntimImmune: opp.map(o => intimidateImmune(o.entry.ability, o.entry.item)),
     myScreen: mine.map(m => findScreenMove(m.set.moves ?? [])),
     oppScreen: opp.map(o => findScreenMove(o.entry.knownMoves)),
     myRock: mine.map(m => isType(m.set.species, 'Rock')),
@@ -1538,6 +1554,14 @@ function resolveTurn(
   for (const [actor, target] of oppTargets) if (target === SET_BOOST && t.oppSetup[actor]) oppBoost[actor] = addBoosts(oppBoost[actor]!, t.oppSetup[actor]!);
   for (const i of myActiveNow) if ((myHp[i] ?? 0) > 0 && t.mySpeedBoost[i]) myBoost[i] = addBoosts(myBoost[i]!, { spe: 1 });
   for (const j of oppActiveNow) if ((oppHp[j] ?? 0) > 0 && t.oppSpeedBoost[j]) oppBoost[j] = addBoosts(oppBoost[j]!, { spe: 1 });
+  // Intimidate: a mon that switched IN drops the OPPOSING actives' Atk by 1
+  // (skipping Clear Body / Clear Amulet / … holders). Feeds the dynamic boosts.
+  for (const inMon of mySwitchIn.values()) if (t.myIntimidate[inMon]) {
+    for (const oj of oppActiveNow) if ((oppHp[oj] ?? 0) > 0 && !t.oppIntimImmune[oj]) oppBoost[oj] = addBoosts(oppBoost[oj]!, { atk: -1 });
+  }
+  for (const inMon of oppSwitchIn.values()) if (t.oppIntimidate[inMon]) {
+    for (const mi of myActiveNow) if ((myHp[mi] ?? 0) > 0 && !t.myIntimImmune[mi]) myBoost[mi] = addBoosts(myBoost[mi]!, { atk: -1 });
+  }
 
   // Entry hazards: a mon that SWITCHED IN this turn (incl. Baton Pass) takes its
   // side's hazard chip + Toxic Spikes status + Sticky Web −1 Spe. Applied before

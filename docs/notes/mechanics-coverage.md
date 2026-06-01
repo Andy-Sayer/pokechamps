@@ -175,8 +175,10 @@ EOT residual, root-ply action, switch-in hook).
    per-mon `HazardEffect` applied on any switch-in (incl. Baton Pass): HP chip +
    Toxic Spikes status + Sticky Web −1 Spe, before the berry check. Makes switch
    evaluation honest.
-4. **Intimidate on switch-in** — when a switch-in (mine or opp) has Intimidate,
-   apply −1 Atk to the foes' dynamic boosts (we already have dynamic boosts).
+4. ~~**Intimidate on switch-in**~~ ✅ SHIPPED — a switch-in with Intimidate drops
+   the opposing actives' Atk −1 (into the dynamic boosts), honoring Clear Body /
+   Clear Amulet / Hyper Cutter / … immunity. Defiant/Competitive/Guard Dog
+   REACTIONS deferred.
 5. **Choice lock** — after a Choice mon attacks, restrict it to that move next
    plies. Reuses `itemSignals.ts`/inference's choice detection.
 
