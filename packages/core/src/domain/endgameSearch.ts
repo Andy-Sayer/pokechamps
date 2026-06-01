@@ -2767,3 +2767,80 @@ export function searchIterative(
   }
   return last;
 }
+
+// ---------------------------------------------------------------------------
+// Public one-turn resolution (for the @pkmn/sim diff-harness)
+// ---------------------------------------------------------------------------
+
+/** One action our fast search can represent for an active mon. `target` is the
+ *  opponent's team-index (the foe to hit). */
+export type TurnAction =
+  | { kind: 'attack'; target: number }
+  | { kind: 'spread' }
+  | { kind: 'protect' };
+
+/** Post-turn structural state of one mon (by team-index). HP is our coarse
+ *  representative value — the harness compares the DISCRETE fields (fainted /
+ *  status / boosts / field) where a difference means a real modelling gap, not a
+ *  damage roll. `moveUsed` is the concrete move our cell picked, so the sim can be
+ *  told to use the SAME move for a fair comparison. */
+export interface ResolvedSlot {
+  species: string;
+  hpPct: number;
+  fainted: boolean;
+  status: string;
+  boosts: Partial<Record<'atk' | 'def' | 'spa' | 'spd' | 'spe', number>>;
+  moveUsed?: string;
+}
+export interface ResolvedTurn {
+  mine: ResolvedSlot[];
+  opp: ResolvedSlot[];
+  weather: string;
+  terrain: string;
+}
+
+/**
+ * Resolve a SINGLE turn through the fast search's own turn engine, given each
+ * side's chosen actions (keyed by active team-index). Returns the post-turn
+ * structural state of every mon plus the concrete move each attacker used. Pure;
+ * no mega branch (the harness drives base formes). This is the fast-search side of
+ * the sim diff-harness — see `project_sim_engine_strategy`.
+ */
+export function resolveOneTurn(
+  input: SearchInput,
+  myActions: Map<number, TurnAction>,
+  oppActions: Map<number, TurnAction>,
+): ResolvedTurn {
+  const t = buildTables(input, { myMega: null, oppMega: null });
+  const s0 = initialState(input);
+  const myTargets = new Map<number, number>();
+  const oppTargets = new Map<number, number>();
+  const myMove = new Map<number, string>();
+  const oppMove = new Map<number, string>();
+  for (const [actor, a] of myActions) {
+    if (a.kind === 'attack') { myTargets.set(actor, a.target); myMove.set(actor, t.off[actor]?.[a.target]?.move ?? ''); }
+    else if (a.kind === 'spread') { myTargets.set(actor, SPREAD); myMove.set(actor, t.mySpread[actor]?.move ?? ''); }
+    else { myTargets.set(actor, PROTECT); }
+  }
+  for (const [actor, a] of oppActions) {
+    if (a.kind === 'attack') { oppTargets.set(actor, a.target); oppMove.set(actor, t.thr[actor]?.[a.target]?.move ?? ''); }
+    else if (a.kind === 'spread') { oppTargets.set(actor, SPREAD); oppMove.set(actor, t.oppSpread[actor]?.move ?? ''); }
+    else { oppTargets.set(actor, PROTECT); }
+  }
+  const pass: Pass = {
+    regime: 'expected',
+    survMy: input.mine.map(m => !!m.survival),
+    survOpp: input.opp.map(o => !!o.survival),
+  };
+  const s = resolveTurn(t, s0, myTargets, oppTargets, pass);
+  const slot = (i: number, hp: number[], status: string[], boost: BoostMap[], species: string[], move?: string): ResolvedSlot => ({
+    species: species[i]!, hpPct: Math.max(0, hp[i] ?? 0), fainted: (hp[i] ?? 0) <= 0,
+    status: status[i] ?? '', boosts: { ...boost[i] }, moveUsed: move,
+  });
+  return {
+    mine: input.mine.map((_, i) => slot(i, s.myHp, s.myStatus, s.myBoost, t.mySpecies, myMove.get(i))),
+    opp: input.opp.map((_, j) => slot(j, s.oppHp, s.oppStatus, s.oppBoost, t.oppSpecies, oppMove.get(j))),
+    weather: s.weather ?? '',
+    terrain: s.terrain ?? '',
+  };
+}
