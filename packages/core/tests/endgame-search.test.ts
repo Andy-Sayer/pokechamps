@@ -1460,6 +1460,45 @@ describe('self-stat-drop secondaries (Draco Meteor / Contrary / Close Combat)', 
   });
 });
 
+describe('foe stat-drops + Defiant / Competitive', () => {
+  const wall = (over: Partial<PokemonSet> = {}): OpponentEntry => oppOf(mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Seismic Toss'], ...over }));
+
+  // Low Sweep's 100% -1 Spe secondary lands on the target (speed control).
+  test('Low Sweep drops the target Spe -1', () => {
+    const me = mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Low Sweep'] });
+    const out = resolveOneTurn({ mine: [{ set: me, hpPercent: 100, active: true }], opp: [{ entry: wall(), hpPercent: 100, active: true }], field: { ...NEUTRAL_FIELD }, allOppRevealed: true },
+      new Map([[0, { kind: 'attack', target: 0 } as const]]), new Map());
+    expect(out.opp[0]!.boosts.spe).toBe(-1);
+  });
+
+  // Snarl's 100% -1 SpA spread secondary lands on every foe hit.
+  test('Snarl (spread) drops the foe SpA -1', () => {
+    const me = mon({ species: 'Incineroar', ability: 'Blaze', nature: 'Modest', evs: { ...ZERO_EVS, spa: 252 }, moves: ['Snarl'] });
+    const out = resolveOneTurn({ mine: [{ set: me, hpPercent: 100, active: true }], opp: [{ entry: wall(), hpPercent: 100, active: true }], field: { ...NEUTRAL_FIELD }, allOppRevealed: true },
+      new Map([[0, { kind: 'spread' } as const]]), new Map());
+    expect(out.opp[0]!.boosts.spa).toBe(-1);
+  });
+
+  // Defiant reacts to an opponent-caused drop with +2 Atk (net here: SpA -1, Atk +2).
+  test('Defiant reacts +2 Atk to a foe stat-drop', () => {
+    const kingambit = mon({ species: 'Kingambit', ability: 'Defiant', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, atk: 252 }, moves: ['Iron Head'] });
+    const snarler: OpponentEntry = oppOf(mon({ species: 'Incineroar', ability: 'Blaze', nature: 'Modest', evs: { ...ZERO_EVS, spa: 252 }, moves: ['Snarl'] }));
+    const out = resolveOneTurn({ mine: [{ set: kingambit, hpPercent: 100, active: true }], opp: [{ entry: snarler, hpPercent: 100, active: true }], field: { ...NEUTRAL_FIELD }, allOppRevealed: true },
+      new Map([[0, { kind: 'attack', target: 0 } as const]]), new Map([[0, { kind: 'spread' } as const]]));
+    expect(out.mine[0]!.boosts.spa).toBe(-1);
+    expect(out.mine[0]!.boosts.atk).toBe(2);
+  });
+
+  // Clear Body blocks the drop entirely (and so no Defiant-style reaction).
+  test('Clear Body blocks the foe stat-drop', () => {
+    const metagross = mon({ species: 'Metagross', ability: 'Clear Body', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, atk: 252 }, moves: ['Iron Head'] });
+    const snarler: OpponentEntry = oppOf(mon({ species: 'Incineroar', ability: 'Blaze', nature: 'Modest', evs: { ...ZERO_EVS, spa: 252 }, moves: ['Snarl'] }));
+    const out = resolveOneTurn({ mine: [{ set: metagross, hpPercent: 100, active: true }], opp: [{ entry: snarler, hpPercent: 100, active: true }], field: { ...NEUTRAL_FIELD }, allOppRevealed: true },
+      new Map([[0, { kind: 'attack', target: 0 } as const]]), new Map([[0, { kind: 'spread' } as const]]));
+    expect(out.mine[0]!.boosts.spa ?? 0).toBe(0);
+  });
+});
+
 describe('unmodeled-mechanics detector (self-flagging)', () => {
   // A clean position (only standard attacks) carries NO unmodeled warning.
   test('fully-modelled position reports nothing', () => {
@@ -1492,8 +1531,8 @@ describe('unmodeled-mechanics detector (self-flagging)', () => {
       opp: [{ entry: { ...hidden, knownMoves }, hpPercent: 100, active: true }],
       field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
     });
-    expect(searchToDepth(make(['Hurricane']), 1).unmodeled?.some(u => u.kind === 'foestatdrop')).toBeFalsy();
-    expect(searchToDepth(make(['Icy Wind']), 1).unmodeled?.some(u => u.kind === 'foestatdrop')).toBe(true);
+    expect(searchToDepth(make(['Hurricane']), 1).unmodeled?.some(u => u.kind === 'foedebuff')).toBeFalsy();
+    expect(searchToDepth(make(['Parting Shot']), 1).unmodeled?.some(u => u.kind === 'foedebuff')).toBe(true);
   });
 });
 

@@ -68,7 +68,8 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Field — terrain | Electric/Grassy/Misty/Psychic Terrain | ✅ | ✅ | ✅ | + durations |
 | Setup (self-boost) | Swords Dance/Calm Mind/Dragon Dance/Shell Smash/… | – | ✅ | ✅ | `SETUP_MOVES` table |
 | Self stat-drop | Draco Meteor/Overheat/Leaf Storm/Make It Rain/Close Combat/Superpower/V-create | ✅(dmg) | ✅ | ✅ | `Cell.selfDrop` from `move.self.boosts`; applied to the user's boosts (Contrary inverts). **Evidence-ranked #1 gap — closed first via the sim diff-harness** |
-| Stat-drop on foe | Charm, Snarl, Icy Wind, Electroweb | ✅(dmg) | ✅ | **GAP** | search models self-boosts/self-drops, not *foe* stat drops applied mid-search |
+| Foe stat-drop (damaging 2ndary) | Icy Wind/Electroweb/Bulldoze −Spe, Snarl/Struggle Bug −SpA, Breaking Swipe −Atk, Low Sweep | ✅(dmg) | ✅ | ✅ | `Cell.foeDrop` from 100%-chance `secondary.boosts`; applied to the target's boosts (Clear Body/Clear Amulet immune, Contrary inverts). Probabilistic 10–30% drops left out by policy (flinch rule) |
+| Foe stat-drop (dedicated move) | Charm, Scary Face, Eerie Impulse, Parting Shot | – | ✅ | **GAP** | 0-damage debuff moves — search has no `SET_DEBUFF` action yet (flagged by `unmodeled.ts`) |
 | Status moves | Will-O-Wisp/Thunder Wave/Toxic/Glare/Poison Powder | – | ✅ | ✅ | SET_STATUS; **sleep/freeze NOT** |
 | Sleep-inducing | Spore/Sleep Powder/Hypnosis/Yawn | – | ✅ | **GAP** | sleep = can't-act + wake counter; deferred |
 | Leech / drain HP | Leech Seed; Giga Drain (heal) | ✅(dmg) | ✅ | ✅ | Leech Seed ✅; drain-move self-heal added (`Cell.drain`) |
@@ -102,6 +103,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Type immunity / absorb | Levitate, Flash Fire, Water Absorb, Volt Absorb, Storm Drain, Lightning Rod, Sap Sipper, Dry Skin | ✅ calc; ✅ live | search: absorb-heal not added; redirection (Storm Drain/Lightning Rod) **GAP** |
 | Speed in weather | Chlorophyll, Swift Swim, Sand Rush, Slush Rush | ✅ search | — (done Phase 4) |
 | EOT stat gain | Speed Boost | ✅ search | Moxie/Beast Boost/Grim Neigh (on-KO boost) **GAP** |
+| Stat-drop reaction | Defiant / Competitive (+2 on a foe-caused drop) | ✅ search | triggers on Intimidate + foe stat-drops; Contrary inversion handled |
 | Switch-in: Intimidate | — | ✅ live | ✅ search (a switch-in drops the opposing actives' Atk −1; honors Clear Body/Clear Amulet/… immunity) |
 | Switch-in: weather/terrain | Drought/Drizzle/Sand Stream/Snow Warning; Electric/Grassy/Misty/Psychic Surge | ✅ live; ✅ search | done Phase 4 |
 | Switch-in: Regenerator | — | ✅ live | ✅ search (heals 1/3 on switch-out — makes pivoting heal) |

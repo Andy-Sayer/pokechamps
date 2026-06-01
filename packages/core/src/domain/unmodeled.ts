@@ -50,11 +50,14 @@ const RULES: GapRule[] = [
     abilities: ['stormdrain', 'lightningrod'] },
   { kind: 'teamprotect', label: 'Wide / Quick Guard',
     moves: ['wideguard', 'quickguard', 'matblock', 'craftyshield'] },
-  { kind: 'foestatdrop', label: 'foe stat-drop (speed control etc.)',
-    moves: ['icywind', 'snarl', 'electroweb', 'strugglebug', 'breakingswipe', 'lowsweep', 'bulldoze',
-      'charm', 'featherdance', 'eerieimpulse', 'scaryface', 'cottonspore', 'stringshot', 'tickle',
+  // NOTE: the 100%-chance DAMAGING foe-drops (Icy Wind/Snarl/Electroweb/Struggle
+  // Bug/Breaking Swipe/Low Sweep/Bulldoze/Lunge/Acid Spray/Mystical Fire/…) are now
+  // MODELLED (Cell.foeDrop). Only the dedicated 0-damage stat-lowering moves remain
+  // a gap — the search has no SET_DEBUFF action for them yet.
+  { kind: 'foedebuff', label: 'stat-lowering move (Charm / Scary Face / Parting Shot)',
+    moves: ['charm', 'featherdance', 'eerieimpulse', 'scaryface', 'cottonspore', 'stringshot', 'tickle',
       'growl', 'leer', 'screech', 'metalsound', 'faketears', 'confide', 'playnice', 'nobleroar',
-      'partingshot', 'lunge', 'skittersmack', 'acidspray', 'mysticalfire', 'tearfullook', 'aurorabeam', 'mudshot'] },
+      'partingshot', 'tearfullook', 'sandattack', 'babydolleyes', 'venomdrench'] },
   { kind: 'twoturn', label: 'two-turn / charge move',
     moves: ['solarbeam', 'solarblade', 'fly', 'dig', 'dive', 'bounce', 'phantomforce', 'shadowforce',
       'skyattack', 'meteorbeam', 'electroshot', 'geomancy', 'skullbash', 'razorwind', 'freezeshock', 'iceburn'] },
