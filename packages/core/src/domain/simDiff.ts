@@ -32,6 +32,23 @@ function toSimMon(set: PokemonSet): SimMon {
   };
 }
 
+const SIM_WEATHER: Record<string, string> = { sunnyday: 'Sun', desolateland: 'Sun', raindance: 'Rain', primordialsea: 'Rain', sandstorm: 'Sand', snowscape: 'Snow', snow: 'Snow', hail: 'Snow' };
+const SIM_TERRAIN: Record<string, string> = { electricterrain: 'Electric', grassyterrain: 'Grassy', mistyterrain: 'Misty', psychicterrain: 'Psychic' };
+const nz = (b: SimSlot['boosts']): SimSlotState['boosts'] => { const o: Record<string, number> = {}; for (const k of ['atk', 'def', 'spa', 'spd', 'spe'] as const) if (b[k]) o[k] = b[k]!; return o; };
+
+/** Re-seed the SearchInput from the sim's POST-SEND-OUT baseline (boosts/status/
+ *  field), so both engines start the turn from the same state. The sim fires lead
+ *  abilities (Intimidate/Drizzle) on send-out that our logged input wouldn't carry;
+ *  aligning here de-confounds the comparison (esp. faints from Intimidate'd damage). */
+function applySimBaseline(input: SearchInput, pos: SimPosition, before: ReturnType<typeof readOutcome>): SearchInput {
+  const mine = input.mine.map(m => ({ ...m }));
+  const opp = input.opp.map(o => ({ ...o }));
+  pos.p1active.forEach(i => { const s = before.p1.find(x => x && x.species === mine[i]!.set.species); if (s) { mine[i]!.boosts = nz(s.boosts); mine[i]!.status = s.status || undefined; } });
+  pos.p2active.forEach(j => { const s = before.p2.find(x => x && x.species === opp[j]!.entry.species); if (s) { opp[j]!.boosts = nz(s.boosts); opp[j]!.status = s.status || undefined; } });
+  const field = { ...input.field, weather: (SIM_WEATHER[before.weather] ?? null) as SearchInput['field']['weather'], terrain: (SIM_TERRAIN[before.terrain] ?? null) as SearchInput['field']['terrain'] };
+  return { ...input, mine, opp, field };
+}
+
 /** The concrete opponent set both engines reason about (top candidate, else a
  *  default) — so the comparison is apples-to-apples, not set-vs-set. */
 function oppSet(input: SearchInput, j: number): PokemonSet {
@@ -91,15 +108,17 @@ export function diffTurn(
   input: SearchInput,
   myActions: Map<number, TurnAction>,
   oppActions: Map<number, TurnAction>,
+  seed?: [number, number, number, number],
 ): TurnDiffResult {
-  const ours = resolveOneTurn(input, myActions, oppActions);
   const pos = searchInputToSimPosition(input);
+  if (seed) pos.seed = seed;     // vary across positions so damage rolls average out
   const battle = buildBattle(pos);
-  // The sim fires send-out abilities (Drizzle / Intimidate / …) when building the
-  // position; our SearchInput reflects only what was logged. So compare the CHANGE
-  // each turn causes, not absolute state — that cancels any send-out setup the two
-  // engines disagree on and isolates real turn-resolution gaps.
   const simBefore = readOutcome(battle);
+  // Start BOTH engines from the sim's post-send-out baseline (lead Intimidate /
+  // weather …), so those don't show up as turn-resolution gaps. We still compare
+  // the per-turn delta below as a second safeguard.
+  const aligned = applySimBaseline(input, pos, simBefore);
+  const ours = resolveOneTurn(aligned, myActions, oppActions);
 
   // Build sim choices in active-slot order, mapping our team-index targets → sim
   // slot positions (1-based index within the opposing side's active list).
@@ -145,8 +164,8 @@ export function diffTurn(
       hpGaps[oA.species] = Math.abs(oA.hpPct - sA.hpPct);
     }
   };
-  const myBefore = pos.p1active.map(i => ({ status: input.mine[i]!.status, boosts: input.mine[i]!.boosts as SimSlot['boosts'], hpPct: input.mine[i]!.hpPercent }));
-  const opBefore = pos.p2active.map(j => ({ status: input.opp[j]!.status, boosts: input.opp[j]!.boosts as SimSlot['boosts'], hpPct: input.opp[j]!.hpPercent }));
+  const myBefore = pos.p1active.map(i => ({ status: aligned.mine[i]!.status, boosts: aligned.mine[i]!.boosts as SimSlot['boosts'], hpPct: aligned.mine[i]!.hpPercent }));
+  const opBefore = pos.p2active.map(j => ({ status: aligned.opp[j]!.status, boosts: aligned.opp[j]!.boosts as SimSlot['boosts'], hpPct: aligned.opp[j]!.hpPercent }));
   // ourBefore is indexed by team-index in cmpSide, so build full-length arrays.
   const fill = (active: number[], vals: { status?: string; boosts?: SimSlot['boosts']; hpPct: number }[], n: number) => {
     const arr: { status?: string; boosts?: SimSlot['boosts']; hpPct: number }[] = Array.from({ length: n }, () => ({ hpPct: 100 }));
@@ -158,7 +177,7 @@ export function diffTurn(
 
   // Weather/terrain: compare what the TURN changed it TO (relative to each side's
   // own pre-turn value), so a lead's send-out weather isn't counted.
-  const wChangedOurs = (ours.weather || '') !== (toId(input.field.weather || '') ? (input.field.weather || '') : '');
+  const wChangedOurs = (ours.weather || '') !== (toId(aligned.field.weather || '') ? (aligned.field.weather || '') : '');
   const ourW = ours.weather || '-', simW = sim.weather || '-', simWBefore = simBefore.weather || '-';
   if (simW !== simWBefore || wChangedOurs) {
     if (toId(ourW.replace(/-/, '')) !== toId(simW)) divergences.push({ field: 'weather', who: 'field', ours: ourW, sim: simW });

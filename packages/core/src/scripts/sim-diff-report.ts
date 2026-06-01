@@ -74,7 +74,8 @@ function main() {
       // Skip degenerate positions where our engine has no move for an actor.
       const our = resolveOneTurn(input, myAct, opAct);
       if (![our.mine[0], our.mine[1], our.opp[0], our.opp[1]].every(s => s)) continue;
-      const { divergences } = diffTurn(input, myAct, opAct);
+      const seed: [number, number, number, number] = [(n * 2 + 1) % 9999, (n * 7 + 3) % 9973, (n * 13 + 5) % 9967, (n * 31 + 7) % 9949];
+      const { divergences } = diffTurn(input, myAct, opAct, seed);
       positions++;
       if (divergences.length) withDiv++;
       for (const d of divergences) {
@@ -94,11 +95,14 @@ function main() {
   }
   if (!ranked.length) console.log('  (none — fast search matched the engine on every sampled turn)');
   console.log('\nNotes:');
-  console.log('  - boost:* and status are CLEAN turn-caused gaps (self-drops like Draco Meteor,');
-  console.log('    Will-O-Wisp/Flame Body burn, Defiant). These rank the porting backlog.');
-  console.log('  - `fainted` is partly CONFOUNDED: the sim applies lead Intimidate/weather on');
-  console.log('    send-out (weakening its attackers) which our input did not carry, so our damage');
-  console.log('    runs hot. Pre-applying send-out abilities to the input would clean this up.\n');
+  console.log('  - boost:* and status are the CLEAN, discrete gaps that rank the backlog. The');
+  console.log('    GUARANTEED ones are portable (self-drops [done], Defiant +2, Parting Shot -1/-1).');
+  console.log('    The rest are PROBABILISTIC secondaries (10-30% burn/poison/def-drop, Flame Body)');
+  console.log('    which we deliberately do NOT auto-apply — same policy as flinch / 25% para.');
+  console.log('  - `fainted` is now DE-CONFOUNDED (we align to the sim post-send-out baseline) and');
+  console.log('    the per-position seed is varied. The residual flips both directions → it is');
+  console.log('    roll-boundary NOISE (coarse mid-estimate vs one exact roll), not a mechanic gap.');
+  console.log('    A true fix compares our KO-probability envelope to the sim over many seeds.\n');
 }
 
 main();
