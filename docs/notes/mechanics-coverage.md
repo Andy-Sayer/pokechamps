@@ -171,9 +171,10 @@ EOT residual, root-ply action, switch-in hook).
    `hpItemTriggerFor` (Sitrus 25% @ ≤50%, pinch berries +1 stat @ ≤25%, falling
    edge) + `statusBerryFor` (Lum/Cheri/… cure on infliction). One-time per mon
    (`State.my/oppBerryUsed`); known items only for the opp.
-3. **Entry hazards** (Stealth Rock/Spikes/Toxic Spikes/Sticky Web) — apply
-   switch-in chip/speed-drop when a mon switches in during the lookahead; reuse
-   `hazards.ts`. Makes switch evaluation honest.
+3. ~~**Entry hazards**~~ ✅ SHIPPED — reuses `applyHazardsToSwitchIn`; precomputed
+   per-mon `HazardEffect` applied on any switch-in (incl. Baton Pass): HP chip +
+   Toxic Spikes status + Sticky Web −1 Spe, before the berry check. Makes switch
+   evaluation honest.
 4. **Intimidate on switch-in** — when a switch-in (mine or opp) has Intimidate,
    apply −1 Atk to the foes' dynamic boosts (we already have dynamic boosts).
 5. **Choice lock** — after a Choice mon attacks, restrict it to that move next

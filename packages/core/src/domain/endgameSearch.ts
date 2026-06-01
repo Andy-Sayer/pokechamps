@@ -33,6 +33,7 @@ import { maxHpFor } from './damage.js';
 import { getPikalytics } from './pikalytics.js';
 import { hpItemTriggerFor, isHpItemTriggerItem } from './hpItemTriggers.js';
 import { statusBerryFor, isStatusBerry } from './statusBerries.js';
+import { applyHazardsToSwitchIn, type HazardEffect } from './hazards.js';
 
 // ---------------------------------------------------------------------------
 // Input
@@ -414,6 +415,9 @@ interface Tables {
   myRecover: (RecoverMove | null)[]; oppRecover: (RecoverMove | null)[];
   // Held item per mon (for HP-trigger / status berries). Known-only for the opp.
   myItem: (string | undefined)[]; oppItem: (string | undefined)[];
+  // Entry-hazard effect each mon takes when it switches IN (HP chip + Toxic
+  // Spikes status + Sticky Web Spe drop), precomputed from the field hazards.
+  myHazardEffect: HazardEffect[]; oppHazardEffect: HazardEffect[];
   field: FieldState;
 }
 
@@ -1091,6 +1095,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppRecover: opp.map(o => findRecoverMove(o.entry.knownMoves)),
     myItem: mine.map(m => m.set.item ?? undefined),
     oppItem: opp.map(o => o.entry.item ?? undefined),
+    myHazardEffect: mine.map(m => applyHazardsToSwitchIn(input.field.myHazards, { species: m.set.species, ability: m.set.ability ?? undefined, item: m.set.item ?? undefined })),
+    oppHazardEffect: opp.map(o => applyHazardsToSwitchIn(input.field.theirHazards, { species: o.entry.species, ability: o.entry.ability ?? undefined, item: o.entry.item ?? undefined })),
     field: input.field,
   };
 }
@@ -1532,6 +1538,18 @@ function resolveTurn(
   for (const [actor, target] of oppTargets) if (target === SET_BOOST && t.oppSetup[actor]) oppBoost[actor] = addBoosts(oppBoost[actor]!, t.oppSetup[actor]!);
   for (const i of myActiveNow) if ((myHp[i] ?? 0) > 0 && t.mySpeedBoost[i]) myBoost[i] = addBoosts(myBoost[i]!, { spe: 1 });
   for (const j of oppActiveNow) if ((oppHp[j] ?? 0) > 0 && t.oppSpeedBoost[j]) oppBoost[j] = addBoosts(oppBoost[j]!, { spe: 1 });
+
+  // Entry hazards: a mon that SWITCHED IN this turn (incl. Baton Pass) takes its
+  // side's hazard chip + Toxic Spikes status + Sticky Web −1 Spe. Applied before
+  // the berry check so a Stealth-Rock drop can trigger Sitrus.
+  const applyHazard = (inMon: number, hp: number[], eff: HazardEffect | undefined, statusArr: string[], toxicN: number[], boost: BoostMap[]) => {
+    if (!eff || (hp[inMon] ?? 0) <= 0) return;
+    if (eff.hpPctLoss) hp[inMon] = Math.max(0, hp[inMon]! - eff.hpPctLoss);
+    if (eff.statusApplied && !statusArr[inMon]) { statusArr[inMon] = eff.statusApplied; if (eff.statusApplied === 'tox') toxicN[inMon] = 1; }
+    if (eff.boostsApplied) boost[inMon] = addBoosts(boost[inMon]!, eff.boostsApplied);
+  };
+  for (const inMon of mySwitchIn.values()) applyHazard(inMon, myHp, t.myHazardEffect[inMon], myStatus, myToxicN, myBoost);
+  for (const inMon of oppSwitchIn.values()) applyHazard(inMon, oppHp, t.oppHazardEffect[inMon], oppStatus, oppToxicN, oppBoost);
 
   // HP-trigger consumables (Sitrus heal 25% @ ≤50%, pinch berries +1 stat @ ≤25%)
   // fire on the FALLING edge across this turn (start HP → end HP), one-time. Heal

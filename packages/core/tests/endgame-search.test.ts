@@ -1344,3 +1344,26 @@ describe('P1: berries (Sitrus + Lum)', () => {
     expect(searchToDepth(make('Lum Berry'), 3).score).toBeGreaterThan(searchToDepth(make(undefined), 3).score);
   });
 });
+
+describe('P1: entry hazards on switch-in', () => {
+  // A switch the search WOULD make (preserving a doomed Volcarona behind a wall)
+  // costs more when Stealth Rock is up: the incoming Bronzong takes chip on
+  // entry, so the same line scores lower than on a clear field.
+  test('Stealth Rock chips a switch-in, lowering the switch line', () => {
+    const volcarona = mon({ species: 'Volcarona', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Bug Buzz'] });
+    const aggron = mon({ species: 'Aggron', ability: 'Sturdy', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, atk: 252 }, moves: ['Heavy Slam'] });
+    const bronzong = mon({ species: 'Bronzong', ability: 'Levitate', nature: 'Sassy', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Flash Cannon'] });
+    const fastAero: OpponentEntry = { species: 'Aerodactyl', knownMoves: ['Stone Edge'], candidates: [mon({ species: 'Aerodactyl', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Stone Edge'] })] };
+    const make = (rocks: boolean): SearchInput => ({
+      mine: [
+        { set: volcarona, hpPercent: 100, active: true },
+        { set: aggron, hpPercent: 100, active: true },
+        { set: bronzong, hpPercent: 100, active: false },
+      ],
+      opp: [{ entry: fastAero, hpPercent: 100, active: true }, { entry: oppOf(mon({ species: 'Incineroar', ability: 'Intimidate', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Knock Off'] })), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD, myHazards: rocks ? { rocks: true } : undefined }, allOppRevealed: true,
+    });
+    // Same switch is still best (Bronzong survives), but the entry chip makes the line worth less.
+    expect(searchToDepth(make(true), 2).score).toBeLessThan(searchToDepth(make(false), 2).score);
+  });
+});
