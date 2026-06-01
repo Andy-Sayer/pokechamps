@@ -70,7 +70,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Stat-drop on foe | Charm, Snarl, Icy Wind, Electroweb | ✅(dmg) | ✅ | **GAP** | search models self-boosts, not *foe* stat drops applied mid-search |
 | Status moves | Will-O-Wisp/Thunder Wave/Toxic/Glare/Poison Powder | – | ✅ | ✅ | SET_STATUS; **sleep/freeze NOT** |
 | Sleep-inducing | Spore/Sleep Powder/Hypnosis/Yawn | – | ✅ | **GAP** | sleep = can't-act + wake counter; deferred |
-| Leech / drain HP | Leech Seed; Giga Drain (heal) | ✅(dmg) | ✅ | **PARTIAL** | Leech Seed ✅; **drain-move self-heal not added to HP in search** |
+| Leech / drain HP | Leech Seed; Giga Drain (heal) | ✅(dmg) | ✅ | ✅ | Leech Seed ✅; drain-move self-heal added (`Cell.drain`) |
 | Recovery | Recover/Roost/Slack Off/Synthesis/Moonlight | – | ✅ | **GAP** | a huge stall lever — search can't heal on demand |
 | Wish / delayed heal | Wish | – | ✅ | **GAP** | EOT heal to the slot |
 | Delayed damage | Future Sight, Doom Desire | ✅(dmg) | ? | **GAP** | hits 2 turns later |
@@ -101,11 +101,11 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Type immunity / absorb | Levitate, Flash Fire, Water Absorb, Volt Absorb, Storm Drain, Lightning Rod, Sap Sipper, Dry Skin | ✅ calc; ✅ live | search: absorb-heal not added; redirection (Storm Drain/Lightning Rod) **GAP** |
 | Speed in weather | Chlorophyll, Swift Swim, Sand Rush, Slush Rush | ✅ search | — (done Phase 4) |
 | EOT stat gain | Speed Boost | ✅ search | Moxie/Beast Boost/Grim Neigh (on-KO boost) **GAP** |
-| Switch-in: Intimidate | — | ✅ live | **search GAP** (an opp switching in an Intimidate mon should drop my Atk for the lookahead) |
+| Switch-in: Intimidate | — | ✅ live | ✅ search (a switch-in drops the opposing actives' Atk −1; honors Clear Body/Clear Amulet/… immunity) |
 | Switch-in: weather/terrain | Drought/Drizzle/Sand Stream/Snow Warning; Electric/Grassy/Misty/Psychic Surge | ✅ live; ✅ search | done Phase 4 |
-| Switch-in: Regenerator | — | ✅ live | **search GAP** (heals 1/3 on switch-out — affects switch value) |
+| Switch-in: Regenerator | — | ✅ live | ✅ search (heals 1/3 on switch-out — makes pivoting heal) |
 | Survive-a-hit | Sturdy, (Focus Sash item) | ✅ search | — |
-| Contact punish | Rough Skin, Iron Barbs, Rocky Helmet (item) | ✅ live | **search GAP** (chip the attacker) |
+| Contact punish | Rough Skin, Iron Barbs, Rocky Helmet (item) | ✅ live | ✅ search (contact hit chips the attacker; Magic Guard negates) |
 | Status/effect immunity | Limber, Water Veil, Immunity, Magic Guard, Overcoat, Magic Bounce | ✅ live; ✅ search (status-land + Magic Guard residual) | Magic Bounce reflecting status/hazards **GAP** |
 | Item-based | Unburden, Magician, Pickpocket, Klutz | ✅ live (partial) | search **GAP** |
 | Form/disguise | Disguise, Ice Face, Multiscale, Zero-to-Hero | ✅ live (partial) | search **GAP** (free hit absorb) |
@@ -157,6 +157,26 @@ Mega ✅ (full: search + calc + live). Tera/Z-Move/Dynamax: gimmick interface +
 scope for Reg M-A (revisit per regulation via `format.champions.json`).
 
 ---
+
+## Self-flagging: the runtime gap detector
+
+`packages/core/src/domain/unmodeled.ts` is the **runtime mirror of this audit**.
+`unmodeledMechanics(input)` scans the live position's moves/abilities/items/status
+against the GAP/PARTIAL classes below and returns labels, surfaced on
+`SearchResult.unmodeled` and shown in `BattleScreen` as a yellow
+`⚠ approximating: …` line. This delivers step 1 of the
+`project_sim_engine_strategy` plan (tell the user when a verdict has blind spots /
+when to opt into the exact `@pkmn/sim` engine). **When a gap moves GAP→✅ in the
+search, delete its rule from `unmodeled.ts` in the same change** so the warning
+stays honest. Opp scan is revealed-only (opp-conservatism).
+
+## Engine strategy (the bigger arc)
+
+See `project_sim_engine_strategy` memory + the `/sync-showdown` skill. In short:
+keep this fast search as the always-on breadth layer; add `@pkmn/sim` as an opt-in
+EXACT oracle for the shown line; port real `sim/` logic to close the gaps below;
+GPU-ify later. The gaps here are still the work list — but now grounded in
+Showdown's source, not memory of the rules.
 
 ## Prioritized gap backlog (search lookahead)
 

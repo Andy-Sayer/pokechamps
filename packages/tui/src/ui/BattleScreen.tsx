@@ -2347,6 +2347,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         const riskText = bestSearch.risks
           .map(r => `${r.label}${r.prob != null ? ` ${Math.round(r.prob * 100)}%` : ''}`)
           .join(' · ');
+        // Mechanics in this position the fast search only approximates — surfaced
+        // so the verdict's blind spots are explicit (one example per class).
+        const unmodeledText = (bestSearch.unmodeled ?? [])
+          .map(u => `${u.label}${u.examples[0] ? ` (${u.examples[0]})` : ''}`)
+          .join(' · ');
         // Hail Mary: dice rolls needed when verdict is losing but a win is possible.
         const hm = bestSearch.hailMary;
         let hmLine: string | null = null;
@@ -2369,6 +2374,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             {oppLineText ? <Text dimColor>   they win via: {oppLineText}</Text> : null}
             {bestSearch.adapted ? <Text dimColor>   spread refined from observed damage</Text> : null}
             {riskText ? <Text dimColor>   risks: {riskText}</Text> : null}
+            {unmodeledText ? <Text color="yellow">   ⚠ approximating: {unmodeledText}</Text> : null}
             {hmLine ? <Text dimColor>   {hmLine}</Text> : null}
           </>
         );

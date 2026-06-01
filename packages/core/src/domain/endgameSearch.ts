@@ -34,6 +34,7 @@ import { getPikalytics } from './pikalytics.js';
 import { hpItemTriggerFor, isHpItemTriggerItem } from './hpItemTriggers.js';
 import { statusBerryFor, isStatusBerry } from './statusBerries.js';
 import { applyHazardsToSwitchIn, type HazardEffect } from './hazards.js';
+import { unmodeledMechanics, type UnmodeledMechanic } from './unmodeled.js';
 
 // ---------------------------------------------------------------------------
 // Input
@@ -226,6 +227,11 @@ export interface SearchResult {
   /** Dice-roll outs analysis — only present when verdict === 'losing' && !forced
    *  and the optimistic regime finds a winning path. */
   hailMary?: HailMary;
+  /** Mechanics in THIS position that the fast search only approximates (sleep,
+   *  redirection, two-turn moves, …). Surfaced so the user knows the verdict has
+   *  blind spots here and can opt into the exact `@pkmn/sim` engine. Omitted when
+   *  the position is fully within the model. */
+  unmodeled?: UnmodeledMechanic[];
 }
 
 // ---------------------------------------------------------------------------
@@ -2711,6 +2717,10 @@ export function createSearch(input: SearchInput): PositionSearch {
         (o.entry.candidateLikelihoods?.length ?? 0) > 0 ||
         o.entry.speedFloor != null || o.entry.speedCeiling != null || !!o.entry.scarfSuspected);
 
+      // Mechanics in this position the fast search only approximates → the user
+      // can weigh the verdict / opt into the exact engine.
+      const unmodeled = unmodeledMechanics(input);
+
       return {
         depth,
         score: expected.score,
@@ -2727,6 +2737,7 @@ export function createSearch(input: SearchInput): PositionSearch {
         explored,
         adapted,
         hailMary,
+        unmodeled: unmodeled.length ? unmodeled : undefined,
       };
     },
   };

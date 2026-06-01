@@ -1440,6 +1440,43 @@ describe('P2: Regenerator', () => {
   });
 });
 
+describe('unmodeled-mechanics detector (self-flagging)', () => {
+  // A clean position (only standard attacks) carries NO unmodeled warning.
+  test('fully-modelled position reports nothing', () => {
+    const r = searchToDepth({
+      mine: [{ set: mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Earthquake', 'Dragon Claw'] }), hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(mon({ species: 'Dondozo', ability: 'Unaware', nature: 'Impish', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Wave Crash'] })), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 1);
+    expect(r.unmodeled).toBeUndefined();
+  });
+
+  // My Amoonguss's Spore (sleep) is a known approximation → flagged with the source.
+  test('flags sleep from my own moveset with a concrete example', () => {
+    const r = searchToDepth({
+      mine: [{ set: mon({ species: 'Amoonguss', ability: 'Regenerator', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Spore', 'Sludge Bomb'] }), hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Earthquake'] })), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 1);
+    const sleep = r.unmodeled?.find(u => u.kind === 'sleep');
+    expect(sleep).toBeDefined();
+    expect(sleep!.examples).toContain('Amoonguss Spore');
+  });
+
+  // Opponent scan is REVEALED-only: an unseen Icy Wind isn't warned about, a
+  // revealed one is.
+  test('opponent stat-drop flagged only once revealed (opp-conservatism)', () => {
+    const hidden = oppOf(mon({ species: 'Pelipper', ability: 'Drizzle', nature: 'Modest', evs: { ...ZERO_EVS, spa: 252 }, moves: ['Hurricane'] }));
+    const make = (knownMoves: string[]): SearchInput => ({
+      mine: [{ set: mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Earthquake'] }), hpPercent: 100, active: true }],
+      opp: [{ entry: { ...hidden, knownMoves }, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    expect(searchToDepth(make(['Hurricane']), 1).unmodeled?.some(u => u.kind === 'foestatdrop')).toBeFalsy();
+    expect(searchToDepth(make(['Icy Wind']), 1).unmodeled?.some(u => u.kind === 'foestatdrop')).toBe(true);
+  });
+});
+
 describe('P2: hazard setting (Stone Axe + dedicated moves + refill chip)', () => {
   // The frail opp active is OHKO'd; the opponent refills its (revealed) bench. A
   // replacement entering AFTER a faint now eats the Stealth Rock chip — so the
