@@ -1482,6 +1482,24 @@ describe('on-KO boosts (Moxie / Beast Boost)', () => {
   });
 });
 
+describe('Life Orb recoil', () => {
+  const wall = (): OpponentEntry => oppOf(mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Seismic Toss'] }));
+  const hpAfter = (item: string, ability = 'Sand Stream') => resolveOneTurn(
+    { mine: [{ set: mon({ species: 'Tyranitar', item, ability, nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Crunch'] }), hpPercent: 100, active: true }], opp: [{ entry: wall(), hpPercent: 100, active: true }], field: { ...NEUTRAL_FIELD }, allOppRevealed: true },
+    new Map([[0, { kind: 'attack', target: 0 } as const]]), new Map(),
+  ).mine[0]!.hpPct;
+
+  test('a Life Orb holder loses 10% on a damaging hit', () => {
+    expect(hpAfter('Life Orb')).toBe(90);
+  });
+  test('no Life Orb → no chip', () => {
+    expect(hpAfter('Leftovers')).toBeGreaterThanOrEqual(100);   // (Leftovers heals, but at full it stays 100)
+  });
+  test('Magic Guard negates Life Orb recoil', () => {
+    expect(hpAfter('Life Orb', 'Magic Guard')).toBe(100);
+  });
+});
+
 describe('recoil moves (Brave Bird / Rock Head)', () => {
   const wall = (): OpponentEntry => oppOf(mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Seismic Toss'] }));
   const hpAfter = (ability: string) => resolveOneTurn(

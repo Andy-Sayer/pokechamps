@@ -119,7 +119,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 ### Items — by behaviour class
 | Class | Examples | Where | Gap |
 |---|---|---|---|
-| Damage-scaling | Choice Band/Specs, Life Orb, Expert Belt, plates/gems, Muscle Band | ✅ calc | Life Orb recoil **search GAP** |
+| Damage-scaling | Choice Band/Specs, Life Orb, Expert Belt, plates/gems, Muscle Band | ✅ calc | Life Orb recoil ✅ search (10% max HP on a damaging hit; Magic Guard/Sheer Force negate) |
 | Defensive | Assault Vest, Eviolite, Rocky Helmet, type-resist berries | ✅ calc; ✅ live (resistBerries) | Rocky Helmet chip in search **GAP** |
 | Survive | Focus Sash, (Sturdy) | ✅ search | — |
 | HP-trigger heal | Sitrus, Aguav/figy/… pinch berries | ✅ live (hpItemTriggers) | **search GAP** (heal at 50%/25% — big for stall lines) |
