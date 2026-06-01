@@ -103,12 +103,20 @@ function choiceFor(action: TurnAction | undefined, moveUsed: string | undefined,
  * `myActions`/`oppActions` are keyed by active team-index; only attack/spread are
  * compared (protect/switch deferred). HP threshold: flagged only when one engine
  * faints a mon the other keeps alive (a roll won't flip that for a healthy mon).
+ *
+ * `faintSeeds`: when supplied, run the sim over each seed and compute per-mon faint
+ * frequency. A `fainted` divergence is only emitted when the sim is UNANIMOUS
+ * (faints in 0/K or K/K of the seeds) AND our engine disagrees. Positions where
+ * some-but-not-all seeds produce a faint are roll-boundary noise and are excluded.
+ * Boost/status/field comparisons use the primary single-seed run (they're
+ * deterministic given the same starting state).
  */
 export function diffTurn(
   input: SearchInput,
   myActions: Map<number, TurnAction>,
   oppActions: Map<number, TurnAction>,
   seed?: [number, number, number, number],
+  faintSeeds?: [number, number, number, number][],
 ): TurnDiffResult {
   const pos = searchInputToSimPosition(input);
   if (seed) pos.seed = seed;     // vary across positions so damage rolls average out
@@ -130,6 +138,39 @@ export function diffTurn(
 
   const sim = stepTurn(battle, p1choice, p2choice);
 
+  // --- Multi-seed faint frequency ----------------------------------------
+  // Maps `species → fraction of seeds in which the mon gained-faint this turn`.
+  // Only populated when faintSeeds is provided. Used to suppress roll-boundary
+  // noise: only flag a faint divergence when ALL seeds agree (0/K or K/K).
+  const faintRate = new Map<string, number>();
+  if (faintSeeds && faintSeeds.length > 0) {
+    // Collect per-species faint counts across all seeds.
+    const faintCount = new Map<string, number>();
+    const K = faintSeeds.length;
+    for (const s of faintSeeds) {
+      const seedPos = { ...pos, seed: s };
+      const seedBattle = buildBattle(seedPos);
+      const seedBefore = readOutcome(seedBattle);
+      // Use the same aligned baseline (species/HP/status) — only the RNG seed differs.
+      stepTurn(seedBattle, p1choice, p2choice);
+      const seedAfter = readOutcome(seedBattle);
+      // p1 actives
+      for (const sl of [...seedAfter.p1, ...seedAfter.p2]) {
+        if (!sl) continue;
+        const wasFainted = [...seedBefore.p1, ...seedBefore.p2].find(s => s && s.species === sl.species)?.fainted ?? false;
+        const gainedFaint = !wasFainted && sl.fainted;
+        if (gainedFaint) faintCount.set(sl.species, (faintCount.get(sl.species) ?? 0) + 1);
+      }
+    }
+    // Convert to rates.
+    for (const [sp, cnt] of faintCount) faintRate.set(sp, cnt / K);
+    // Species that never fainted in any seed → rate 0 (implicitly; we need to
+    // record them for active mons that our engine DOES faint so we can check).
+    for (const sl of [...simBefore.p1, ...simBefore.p2]) {
+      if (sl && !faintRate.has(sl.species)) faintRate.set(sl.species, 0);
+    }
+  }
+
   const divergences: Divergence[] = [];
   const hpGaps: Record<string, number> = {};
   const bm = (b?: SimSlot['boosts']) => ({ atk: 0, def: 0, spa: 0, spd: 0, spe: 0, ...(b ?? {}) });
@@ -149,7 +190,24 @@ export function diffTurn(
       // Gained-faint this turn (was alive at start).
       const ourFaint = !( (oB.hpPct ?? 0) <= 0) && oA.fainted;
       const simFaint = !sB.fainted && sA.fainted;
-      if (ourFaint !== simFaint) divergences.push({ field: 'fainted', who: oA.species, ours: String(ourFaint), sim: String(simFaint) });
+      if (ourFaint !== simFaint) {
+        // With multi-seed sampling: only flag when the sim is unanimous AND our
+        // engine disagrees. Partial disagreement (some seeds faint, some don't)
+        // is roll-boundary noise — skip those.
+        if (faintSeeds && faintSeeds.length > 0) {
+          const rate = faintRate.get(oA.species);
+          if (rate === undefined) {
+            // No seed data for this species — fall back to single-seed behaviour.
+            divergences.push({ field: 'fainted', who: oA.species, ours: String(ourFaint), sim: String(simFaint) });
+          } else if (rate === 0 || rate === 1) {
+            // Unanimous across all seeds: a real modelling gap.
+            divergences.push({ field: 'fainted', who: oA.species, ours: String(ourFaint), sim: String(simFaint) });
+          }
+          // else: mixed outcome across seeds → roll-boundary noise → skip.
+        } else {
+          divergences.push({ field: 'fainted', who: oA.species, ours: String(ourFaint), sim: String(simFaint) });
+        }
+      }
       if (oA.fainted || sA.fainted) { hpGaps[oA.species] = Math.abs(oA.hpPct - sA.hpPct); continue; }
       // Gained status this turn (start was clean).
       const ourGained = !(oB.status || '') ? (oA.status || '') : '';

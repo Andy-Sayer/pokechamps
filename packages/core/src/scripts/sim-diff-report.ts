@@ -75,7 +75,14 @@ function main() {
       const our = resolveOneTurn(input, myAct, opAct);
       if (![our.mine[0], our.mine[1], our.opp[0], our.opp[1]].every(s => s)) continue;
       const seed: [number, number, number, number] = [(n * 2 + 1) % 9999, (n * 7 + 3) % 9973, (n * 13 + 5) % 9967, (n * 31 + 7) % 9949];
-      const { divergences } = diffTurn(input, myAct, opAct, seed);
+      // 8 varied seeds for the multi-seed faint check — primary seed + 7 offsets.
+      const faintSeeds: [number, number, number, number][] = Array.from({ length: 8 }, (_, k) => [
+        ((n * 2 + 1) + k * 1009) % 9999,
+        ((n * 7 + 3) + k * 1013) % 9973,
+        ((n * 13 + 5) + k * 1019) % 9967,
+        ((n * 31 + 7) + k * 1021) % 9949,
+      ] as [number, number, number, number]);
+      const { divergences } = diffTurn(input, myAct, opAct, seed, faintSeeds);
       positions++;
       if (divergences.length) withDiv++;
       for (const d of divergences) {
@@ -99,10 +106,12 @@ function main() {
   console.log('    GUARANTEED ones are portable (self-drops [done], Defiant +2, Parting Shot -1/-1).');
   console.log('    The rest are PROBABILISTIC secondaries (10-30% burn/poison/def-drop, Flame Body)');
   console.log('    which we deliberately do NOT auto-apply — same policy as flinch / 25% para.');
-  console.log('  - `fainted` is now DE-CONFOUNDED (we align to the sim post-send-out baseline) and');
-  console.log('    the per-position seed is varied. The residual flips both directions → it is');
-  console.log('    roll-boundary NOISE (coarse mid-estimate vs one exact roll), not a mechanic gap.');
-  console.log('    A true fix compares our KO-probability envelope to the sim over many seeds.\n');
+  console.log('  - `fainted` uses MULTI-SEED sampling (8 seeds per position). Only positions where');
+  console.log('    the sim faints a mon in 0/8 OR 8/8 seeds AND our engine disagrees are flagged.');
+  console.log('    Positions where the sim faints in some-but-not-all seeds are roll-boundary noise');
+  console.log('    (KO threshold straddles the mid-estimate) and are excluded. Residual `fainted`');
+  console.log('    divergences are genuine modelling gaps — the mid-estimate is wrong by enough that');
+  console.log('    every seed agrees, pointing to a real damage-formula difference.\n');
 }
 
 main();
