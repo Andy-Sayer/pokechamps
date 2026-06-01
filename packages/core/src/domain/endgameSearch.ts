@@ -26,7 +26,7 @@ import type { PokemonSet, OpponentEntry, FieldState, Match, HazardState } from '
 import { ZERO_EVS, MAX_IVS } from './types.js';
 import { predictOffense, predictThreat, pikalyticsMoves } from './predictions.js';
 import { actualSpeed, effectiveSpeedRange } from './speed.js';
-import { getMove, getSpecies, toId, isSpreadMove, moveFlinchChance } from './data.js';
+import { getMove, getSpecies, getNature, toId, isSpreadMove, moveFlinchChance } from './data.js';
 import { getMegaOptions } from './gimmicks/mega.js';
 import { defaultOpponentSet } from './bring.js';
 import { maxHpFor } from './damage.js';
@@ -374,6 +374,38 @@ function defiantStat(ability: string | null | undefined): 'atk' | 'spa' | null {
   if (a === 'competitive') return 'spa';
   return null;
 }
+// L50 / 31-IV stat value (same formula as actualSpeed), for Beast Boost's
+// highest-stat pick. Nature multiplier applied per stat.
+function statAt50(set: PokemonSet, key: 'atk' | 'def' | 'spa' | 'spd' | 'spe'): number {
+  const base = (getSpecies(set.species) as { baseStats?: Record<string, number> } | undefined)?.baseStats?.[key] ?? 0;
+  const ev = (set.evs as Record<string, number>)[key] ?? 0;
+  const raw = Math.floor(((2 * base + 31 + Math.floor(ev / 4)) * 50) / 100) + 5;
+  const nat = getNature(set.nature) as { plus?: string; minus?: string } | undefined;
+  const mult = nat?.plus === key ? 1.1 : nat?.minus === key ? 0.9 : 1.0;
+  return Math.floor(raw * mult);
+}
+function highestStat(set: PokemonSet): 'atk' | 'def' | 'spa' | 'spd' | 'spe' {
+  let best: 'atk' | 'def' | 'spa' | 'spd' | 'spe' = 'atk', bestV = -1;
+  for (const k of ['atk', 'def', 'spa', 'spd', 'spe'] as const) { const v = statAt50(set, k); if (v > bestV) { bestV = v; best = k; } }
+  return best;
+}
+// The +1 stat boost a mon gains when it KOes a foe: Moxie/Chilling Neigh/As One-G
+// → Atk, Grim Neigh/As One-S → SpA, Beast Boost → the mon's highest stat. null else.
+function onKoBoost(set: PokemonSet, ability: string | null | undefined): BoostMap | null {
+  switch (toId(ability ?? '')) {
+    case 'moxie': case 'chillingneigh': case 'asoneglastrier': return { atk: 1 };
+    case 'grimneigh': case 'asonespectrier': return { spa: 1 };
+    case 'beastboost': return { [highestStat(set)]: 1 };
+    default: return null;
+  }
+}
+// Scale a boost map by an integer (n KOs → n× the on-KO boost, e.g. a spread that
+// KOes two foes gives Moxie +2).
+function scaleBoosts(b: BoostMap, n: number): BoostMap {
+  const out: BoostMap = {};
+  for (const k of ['atk', 'def', 'spa', 'spd', 'spe'] as const) if (b[k]) out[k] = b[k]! * n;
+  return out;
+}
 // Ground moves halved by Grassy Terrain.
 const GRASSY_HALVED = new Set(['earthquake', 'bulldoze', 'magnitude']);
 function isGroundMove(move: string): boolean { return GRASSY_HALVED.has(toId(move)); }
@@ -505,6 +537,9 @@ interface Tables {
   // and the Defiant/Competitive reaction stat (+2 on any opponent-caused drop).
   myStatDropImmune: boolean[]; oppStatDropImmune: boolean[];
   myDefiantStat: ('atk' | 'spa' | null)[]; oppDefiantStat: ('atk' | 'spa' | null)[];
+  // On-KO ability boost (Moxie/Beast Boost/Grim Neigh/…): the stage map a mon gains
+  // each time it KOes a foe, or null.
+  myOnKo: (BoostMap | null)[]; oppOnKo: (BoostMap | null)[];
   // Regenerator: heals 1/3 max HP when the mon switches OUT.
   myRegen: boolean[]; oppRegen: boolean[];
   // Rock Head: negates a recoil move's self-damage (Magic Guard does too, via myResidual).
@@ -1237,6 +1272,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppStatDropImmune: opp.map(o => statDropImmune(o.entry.ability, o.entry.item)),
     myDefiantStat: mine.map(m => defiantStat(m.set.ability)),
     oppDefiantStat: opp.map(o => defiantStat(o.entry.ability)),
+    myOnKo: mine.map(m => onKoBoost(m.set, m.set.ability)),
+    oppOnKo: opp.map(o => onKoBoost(o.entry.candidates?.[0] ?? defaultOpponentSet(o.entry, 50), o.entry.ability)),
     myIntimImmune: mine.map(m => intimidateImmune(m.set.ability, m.set.item)),
     oppIntimImmune: opp.map(o => intimidateImmune(o.entry.ability, o.entry.item)),
     myRockHead: mine.map(m => hasRockHead(m.set.ability)),
@@ -1372,6 +1409,10 @@ function resolveTurn(
   const myToFoeDrop = new Map<number, BoostMap>();   // drops I put on opp mons (opp index → drop)
   const oppToFoeDrop = new Map<number, BoostMap>();   // drops opp puts on my mons (my index → drop)
   const accDrop = (m: Map<number, BoostMap>, idx: number, d: BoostMap) => m.set(idx, addBoosts(m.get(idx) ?? {}, d));
+  // KOs each attacker scored this turn → on-KO ability boost (Moxie/Beast Boost),
+  // applied ×count at end of turn. actor index → KO count.
+  const myKoCount = new Map<number, number>();
+  const oppKoCount = new Map<number, number>();
   const tr = s.trickRoom;            // THIS turn's order uses the current flags;
   const r = pass.regime;             // a Tailwind/TR set this turn applies NEXT ply.
   // Survival charges available this turn (Focus Sash / Sturdy), consumed on
@@ -1499,8 +1540,10 @@ function resolveTurn(
         for (const foe of oppActiveNow) {
           if (oppHp[foe]! <= 0) continue;
           if (oppProtected.has(foe)) continue;       // opp protecting this turn
+          const koBefore = oppHp[foe]!;
           apply(oppHp, foe, myDmg(act.actor, foe, dmg[foe] ?? 0, sp.physical, sp.type, sp.groundMove), oppSurv, false);
           if (sp.foeDrop && (sp.dmgMax[foe] ?? 0) > 0) accDrop(myToFoeDrop, foe, sp.foeDrop); // Icy Wind etc. (skip type-immune)
+          if (koBefore > 0 && oppHp[foe]! <= 0 && t.myOnKo[act.actor]) myKoCount.set(act.actor, (myKoCount.get(act.actor) ?? 0) + 1);
         }
         if (sp.selfDrop) mySelfDrop.set(act.actor, sp.selfDrop);
         continue;
@@ -1516,6 +1559,7 @@ function resolveTurn(
       if (oc.setsHazard) oppHazards = addHazard(oppHazards, oc.setsHazard); // Stone Axe → SR, Ceaseless Edge → Spikes (on their side)
       if (oc.selfDrop) mySelfDrop.set(act.actor, oc.selfDrop);       // Draco Meteor −2 SpA etc.
       if (oc.foeDrop && oc.dmgMax > 0) accDrop(myToFoeDrop, oTgt, oc.foeDrop); // Low Sweep −1 Spe etc.
+      if (oBefore > 0 && oppHp[oTgt]! <= 0 && t.myOnKo[act.actor]) myKoCount.set(act.actor, (myKoCount.get(act.actor) ?? 0) + 1); // Moxie/Beast Boost
       // Drain heal + contact punish (Rocky Helmet / Rough Skin) on my attacker.
       if (oDealt > 0 && (myHp[act.actor] ?? 0) > 0) {
         if (oc.drain > 0) myHp[act.actor] = Math.min(100, myHp[act.actor]! + oc.drain * oDealt * (t.oppMaxHp[oTgt]! / (t.myMaxHp[act.actor] || 1)));
@@ -1533,8 +1577,10 @@ function resolveTurn(
         for (const me of myActiveNow) {
           if (myHp[me]! <= 0) continue;
           if (myProtected.has(me)) continue;          // my mon protecting this turn
+          const koBefore = myHp[me]!;
           apply(myHp, me, oppDmg(act.actor, me, dmg[me] ?? 0, sp.physical, sp.type, sp.groundMove), mySurv, false);
           if (sp.foeDrop && (sp.dmgMax[me] ?? 0) > 0) accDrop(oppToFoeDrop, me, sp.foeDrop);
+          if (koBefore > 0 && myHp[me]! <= 0 && t.oppOnKo[act.actor]) oppKoCount.set(act.actor, (oppKoCount.get(act.actor) ?? 0) + 1);
         }
         if (sp.selfDrop) oppSelfDrop.set(act.actor, sp.selfDrop);
         continue;
@@ -1550,6 +1596,7 @@ function resolveTurn(
       if (tc.setsHazard) myHazards = addHazard(myHazards, tc.setsHazard); // their Stone Axe / Ceaseless Edge → hazard on my side
       if (tc.selfDrop) oppSelfDrop.set(act.actor, tc.selfDrop);
       if (tc.foeDrop && tc.dmgMax > 0) accDrop(oppToFoeDrop, mTgt, tc.foeDrop);
+      if (mBefore > 0 && myHp[mTgt]! <= 0 && t.oppOnKo[act.actor]) oppKoCount.set(act.actor, (oppKoCount.get(act.actor) ?? 0) + 1);
       if (mDealt > 0 && (oppHp[act.actor] ?? 0) > 0) {
         if (tc.drain > 0) oppHp[act.actor] = Math.min(100, oppHp[act.actor]! + tc.drain * mDealt * (t.myMaxHp[mTgt]! / (t.oppMaxHp[act.actor] || 1)));
         if (tc.contact && t.myContactChip[mTgt]! > 0 && !t.oppResidual[act.actor]!.magicGuard) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - t.myContactChip[mTgt]!);
@@ -1764,6 +1811,10 @@ function resolveTurn(
   // own boosts; Contrary inverts them into a self-boost. Only if the user survived.
   for (const [actor, drop] of mySelfDrop) if ((myHp[actor] ?? 0) > 0) myBoost[actor] = addBoosts(myBoost[actor]!, hasContrary(t.myAbility[actor]) ? negateBoosts(drop) : drop);
   for (const [actor, drop] of oppSelfDrop) if ((oppHp[actor] ?? 0) > 0) oppBoost[actor] = addBoosts(oppBoost[actor]!, hasContrary(t.oppAbility[actor]) ? negateBoosts(drop) : drop);
+  // On-KO ability boost (Moxie/Beast Boost/…): +stage × KOs scored, if the booster
+  // survived the turn. Fuels snowball lines in the lookahead.
+  for (const [actor, n] of myKoCount) if ((myHp[actor] ?? 0) > 0 && t.myOnKo[actor]) myBoost[actor] = addBoosts(myBoost[actor]!, scaleBoosts(t.myOnKo[actor]!, n));
+  for (const [actor, n] of oppKoCount) if ((oppHp[actor] ?? 0) > 0 && t.oppOnKo[actor]) oppBoost[actor] = addBoosts(oppBoost[actor]!, scaleBoosts(t.oppOnKo[actor]!, n));
   // An OPPONENT-inflicted stat drop (Icy Wind / Snarl / Intimidate): blocked by
   // stat-drop immunity; Contrary inverts it into a boost (no Defiant); otherwise it
   // lands and a Defiant/Competitive holder reacts +2 Atk/SpA.

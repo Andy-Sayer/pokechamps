@@ -1464,6 +1464,24 @@ describe('self-stat-drop secondaries (Draco Meteor / Contrary / Close Combat)', 
   });
 });
 
+describe('on-KO boosts (Moxie / Beast Boost)', () => {
+  // A frail foe at 12% HP is KO'd by any hit → the attacker's on-KO ability fires.
+  const koFrailFoe = (set: PokemonSet) => resolveOneTurn(
+    { mine: [{ set, hpPercent: 100, active: true }], opp: [{ entry: oppOf(mon({ species: 'Flutter Mane', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Moonblast'] })), hpPercent: 12, active: true }], field: { ...NEUTRAL_FIELD }, allOppRevealed: true },
+    new Map([[0, { kind: 'attack', target: 0 } as const]]), new Map(),
+  ).mine[0]!.boosts;
+
+  test('Moxie gives +1 Atk on a KO', () => {
+    expect(koFrailFoe(mon({ species: 'Gyarados', ability: 'Moxie', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Waterfall'] })).atk).toBe(1);
+  });
+  test('Beast Boost raises the highest stat (Kartana → Atk)', () => {
+    expect(koFrailFoe(mon({ species: 'Kartana', ability: 'Beast Boost', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Leaf Blade'] })).atk).toBe(1);
+  });
+  test('no boost without the ability', () => {
+    expect(koFrailFoe(mon({ species: 'Gyarados', ability: 'Intimidate', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Waterfall'] })).atk ?? 0).toBe(0);
+  });
+});
+
 describe('recoil moves (Brave Bird / Rock Head)', () => {
   const wall = (): OpponentEntry => oppOf(mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Seismic Toss'] }));
   const hpAfter = (ability: string) => resolveOneTurn(

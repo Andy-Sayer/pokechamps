@@ -103,7 +103,8 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Damage-taken | Multiscale, Filter, Thick Fat, Fluffy, Heatproof, Ice Scales | ✅ calc | — |
 | Type immunity / absorb | Levitate, Flash Fire, Water Absorb, Volt Absorb, Storm Drain, Lightning Rod, Sap Sipper, Dry Skin | ✅ calc; ✅ live | search: absorb-heal not added; redirection (Storm Drain/Lightning Rod) **GAP** |
 | Speed in weather | Chlorophyll, Swift Swim, Sand Rush, Slush Rush | ✅ search | — (done Phase 4) |
-| EOT stat gain | Speed Boost | ✅ search | Moxie/Beast Boost/Grim Neigh (on-KO boost) **GAP** |
+| EOT stat gain | Speed Boost | ✅ search | — |
+| On-KO boost | Moxie/Beast Boost/Grim Neigh/Chilling Neigh/As One | ✅ search | `Tables.my/oppOnKo`; +stage × KOs scored (Beast Boost = highest stat); fuels snowball lines |
 | Stat-drop reaction | Defiant / Competitive (+2 on a foe-caused drop) | ✅ search | triggers on Intimidate + foe stat-drops; Contrary inversion handled |
 | Switch-in: Intimidate | — | ✅ live | ✅ search (a switch-in drops the opposing actives' Atk −1; honors Clear Body/Clear Amulet/… immunity) |
 | Switch-in: weather/terrain | Drought/Drizzle/Sand Stream/Snow Warning; Electric/Grassy/Misty/Psychic Surge | ✅ live; ✅ search | done Phase 4 |
