@@ -1390,3 +1390,30 @@ describe('P1: Intimidate on switch-in', () => {
     expect(searchToDepth(make('Intimidate'), 3).score).toBeGreaterThan(searchToDepth(make('Overcoat'), 3).score);
   });
 });
+
+describe('P2: drain heal + contact chip', () => {
+  const dondozo = (item?: string): OpponentEntry => ({ species: 'Dondozo', item, ability: 'Unaware', knownMoves: ['Wave Crash'], candidates: [mon({ species: 'Dondozo', item, ability: 'Unaware', nature: 'Impish', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Wave Crash'] })] });
+
+  // A Rocky Helmet on the foe chips my CONTACT attacker 1/6 per hit, so the same
+  // line scores lower than vs a foe holding nothing. (Earthquake is non-contact;
+  // Dragon Claw is contact.)
+  test('Rocky Helmet chips my contact attacker', () => {
+    const make = (item?: string): SearchInput => ({
+      mine: [{ set: mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, atk: 252 }, moves: ['Dragon Claw'] }), hpPercent: 100, active: true }],
+      opp: [{ entry: dondozo(item), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    expect(searchToDepth(make('Rocky Helmet'), 3).score).toBeLessThan(searchToDepth(make(undefined), 3).score);
+  });
+
+  // A draining move heals the attacker 50% of damage dealt, so at low HP Giga
+  // Drain (75 BP + heal) beats the higher-BP non-draining Energy Ball.
+  test('Giga Drain heals the attacker (beats a stronger non-drain move at low HP)', () => {
+    const make = (move: string): SearchInput => ({
+      mine: [{ set: mon({ species: 'Amoonguss', ability: 'Regenerator', nature: 'Modest', evs: { ...ZERO_EVS, hp: 252, spa: 252 }, moves: [move] }), hpPercent: 35, active: true }],
+      opp: [{ entry: dondozo(), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    expect(searchToDepth(make('Giga Drain'), 3).score).toBeGreaterThan(searchToDepth(make('Energy Ball'), 3).score);
+  });
+});

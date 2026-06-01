@@ -280,7 +280,7 @@ function benchSwitchTargets(active: number[], hp: number[], n: number): number[]
 // Damage as % of target max, at three roll points so the tree can be evaluated
 // under different regimes without rebuilding the (expensive) matrix. Roll risk
 // is derived from the dmgMin..dmgMax envelope vs the target's HP at use time.
-interface Cell { dmgMin: number; dmgMid: number; dmgMax: number; move: string; priority: number; multiHit: boolean; koRolls: number[]; candidates: number; physical: boolean; type: string; groundMove: boolean }
+interface Cell { dmgMin: number; dmgMid: number; dmgMax: number; move: string; priority: number; multiHit: boolean; koRolls: number[]; candidates: number; physical: boolean; type: string; groundMove: boolean; drain: number; contact: boolean }
 
 /** A spread move option for one of my mons: the move plus its (already
  *  spread-reduced) damage vs each opp index, at min/mid/max rolls. */
@@ -296,6 +296,16 @@ function isPhysicalMove(move: string): boolean {
 }
 function moveType(move: string): string {
   return ((getMove(move) as { type?: string } | undefined)?.type) ?? '';
+}
+// HP-draining fraction of a move (Giga Drain/Drain Punch 0.5, Draining Kiss 0.75),
+// or 0. `drain` in the dex is [num, den].
+function moveDrain(move: string): number {
+  const d = (getMove(move) as { drain?: [number, number] } | undefined)?.drain;
+  return d ? d[0] / d[1] : 0;
+}
+// True for a contact move (triggers Rocky Helmet / Rough Skin / Iron Barbs).
+function moveContact(move: string): boolean {
+  return !!(getMove(move) as { flags?: { contact?: number } } | undefined)?.flags?.contact;
 }
 // Ground moves halved by Grassy Terrain.
 const GRASSY_HALVED = new Set(['earthquake', 'bulldoze', 'magnitude']);
@@ -421,7 +431,20 @@ interface Tables {
   // Entry-hazard effect each mon takes when it switches IN (HP chip + Toxic
   // Spikes status + Sticky Web Spe drop), precomputed from the field hazards.
   myHazardEffect: HazardEffect[]; oppHazardEffect: HazardEffect[];
+  // % HP a mon's Rocky Helmet / Rough Skin / Iron Barbs chips off a contacting
+  // attacker (0 if none). Max HP per mon (for drain heal — already have *MaxHp).
+  myContactChip: number[]; oppContactChip: number[];
   field: FieldState;
+}
+
+// Contact-punish % an attacker suffers hitting this mon (Rocky Helmet 1/6,
+// Rough Skin / Iron Barbs / Spiky Surge-less 1/8). Both stack if present.
+function contactChipFor(ability: string | null | undefined, item: string | null | undefined): number {
+  let pct = 0;
+  if (/rocky\s*helmet/i.test(item ?? '')) pct += 100 / 6;
+  const ab = toId(ability ?? '');
+  if (ab === 'roughskin' || ab === 'ironbarbs') pct += 100 / 8;
+  return pct;
 }
 
 /** What a screen move sets on the caster's side. */
@@ -855,7 +878,7 @@ interface CellOpts {
 // midpoint (the old representative value); min/max = the honest envelope edges
 // (worst/best roll across surviving candidate spreads).
 function cellFrom(c: ReturnType<typeof predictOffense>): Cell {
-  if (!c) return { dmgMin: 0, dmgMid: 0, dmgMax: 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false };
+  if (!c) return { dmgMin: 0, dmgMid: 0, dmgMax: 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false, drain: 0, contact: false };
   const lo = c.likelyMinPercent ?? c.minPercent;
   const hi = c.likelyMaxPercent ?? c.maxPercent;
   return {
@@ -870,6 +893,8 @@ function cellFrom(c: ReturnType<typeof predictOffense>): Cell {
     physical: isPhysicalMove(c.move),
     type: moveType(c.move),
     groundMove: isGroundMove(c.move),
+    drain: moveDrain(c.move),
+    contact: moveContact(c.move),
   };
 }
 function cellFromOffense(attacker: PokemonSet, defender: OpponentEntry, field: FieldState, o: CellOpts = {}): Cell {
@@ -1113,6 +1138,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppItem: opp.map(o => o.entry.item ?? undefined),
     myHazardEffect: mine.map(m => applyHazardsToSwitchIn(input.field.myHazards, { species: m.set.species, ability: m.set.ability ?? undefined, item: m.set.item ?? undefined })),
     oppHazardEffect: opp.map(o => applyHazardsToSwitchIn(input.field.theirHazards, { species: o.entry.species, ability: o.entry.ability ?? undefined, item: o.entry.item ?? undefined })),
+    myContactChip: mine.map(m => contactChipFor(m.set.ability, m.set.item)),
+    oppContactChip: opp.map(o => contactChipFor(o.entry.ability, o.entry.item)),
     field: input.field,
   };
 }
@@ -1330,7 +1357,14 @@ function resolveTurn(
       if (oppHp[oTgt]! <= 0) continue;               // target already down → fizzle
       const oc = t.off[act.actor]![oTgt]!;
       if (psychicBlocked(oc.priority, t.oppGrounded[oTgt]!)) continue; // Psychic Terrain blocks priority
+      const oBefore = oppHp[oTgt]!;
       apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r), oc.physical, oc.type, oc.groundMove), oppSurv, oc.multiHit);
+      const oDealt = oBefore - oppHp[oTgt]!;
+      // Drain heal + contact punish (Rocky Helmet / Rough Skin) on my attacker.
+      if (oDealt > 0 && (myHp[act.actor] ?? 0) > 0) {
+        if (oc.drain > 0) myHp[act.actor] = Math.min(100, myHp[act.actor]! + oc.drain * oDealt * (t.oppMaxHp[oTgt]! / (t.myMaxHp[act.actor] || 1)));
+        if (oc.contact && t.oppContactChip[oTgt]! > 0 && !t.myResidual[act.actor]!.magicGuard) myHp[act.actor] = Math.max(0, myHp[act.actor]! - t.oppContactChip[oTgt]!);
+      }
     } else {
       if (oppHp[act.actor]! <= 0) continue;
       if (act.target === PROTECT) continue;           // opp mon uses Protect
@@ -1351,7 +1385,13 @@ function resolveTurn(
       if (myHp[mTgt]! <= 0) continue;
       const tc = t.thr[act.actor]![mTgt]!;
       if (psychicBlocked(tc.priority, t.myGrounded[mTgt]!)) continue; // Psychic Terrain blocks priority
+      const mBefore = myHp[mTgt]!;
       apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r), tc.physical, tc.type, tc.groundMove), mySurv, tc.multiHit);
+      const mDealt = mBefore - myHp[mTgt]!;
+      if (mDealt > 0 && (oppHp[act.actor] ?? 0) > 0) {
+        if (tc.drain > 0) oppHp[act.actor] = Math.min(100, oppHp[act.actor]! + tc.drain * mDealt * (t.myMaxHp[mTgt]! / (t.oppMaxHp[act.actor] || 1)));
+        if (tc.contact && t.myContactChip[mTgt]! > 0 && !t.oppResidual[act.actor]!.magicGuard) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - t.myContactChip[mTgt]!);
+      }
     }
   }
 
@@ -2288,7 +2328,7 @@ export function createSearch(input: SearchInput): PositionSearch {
             if (target === SPREAD) {
               const sp = expected.table.mySpread[actor]!;
               for (const foe of s0.oppActive) {
-                consider({ dmgMin: sp.dmgMin[foe] ?? 0, dmgMid: sp.dmgMid[foe] ?? 0, dmgMax: sp.dmgMax[foe] ?? 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false }, s0.oppHp[foe] ?? 0, expected.table.oppSpecies[foe] ?? 'foe');
+                consider({ dmgMin: sp.dmgMin[foe] ?? 0, dmgMid: sp.dmgMid[foe] ?? 0, dmgMax: sp.dmgMax[foe] ?? 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false, drain: 0, contact: false }, s0.oppHp[foe] ?? 0, expected.table.oppSpecies[foe] ?? 'foe');
               }
             } else if (target >= 0) {       // skip PROTECT / SWITCH (no attack)
               consider(expected.table.off[actor]![target]!, s0.oppHp[target] ?? 0, expected.table.oppSpecies[target] ?? 'foe');

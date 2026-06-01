@@ -179,18 +179,22 @@ EOT residual, root-ply action, switch-in hook).
    the opposing actives' Atk −1 (into the dynamic boosts), honoring Clear Body /
    Clear Amulet / Hyper Cutter / … immunity. Defiant/Competitive/Guard Dog
    REACTIONS deferred.
-5. **Choice lock** — after a Choice mon attacks, restrict it to that move next
-   plies. Reuses `itemSignals.ts`/inference's choice detection.
+5. **Choice lock** — **RE-TIERED to P3.** Its real value (a mon stuck in a move a
+   switch-in walls) needs PER-MOVE damage cells; the search collapses to
+   best-move-per-foe, and real Choice mons run 4 attacks so the "attacks-only"
+   restriction is nearly a no-op. Revisit if/when cells gain per-move data.
 
 **P2 — impactful but rarer / more work**
 6. **Foe stat-drops** (Snarl/Icy Wind/Charm/Electroweb) — symmetric to setup but
    onto the *opponent's* dynamic boosts.
-7. **Drain self-heal** (Giga Drain/Drain Punch/Horn Leech) — add 50% of dealt
-   damage back to the attacker.
+7. ~~**Drain self-heal**~~ ✅ SHIPPED — Giga Drain/Drain Punch/… heal the attacker
+   `drain × damage-dealt` (Draining Kiss 0.75); single-target. `Cell.drain`.
 8. **Regenerator** — +1/3 HP on switch-out (raises switch value).
 9. **Two-turn/charge + recharge** (Solar Beam, Fly, Hyper Beam) — model the lost
    turn / vulnerability window.
-10. **Rocky Helmet / Rough Skin / Iron Barbs** — contact chip on the attacker.
+10. ~~**Rocky Helmet / Rough Skin / Iron Barbs**~~ ✅ SHIPPED — a contact hit into a
+    holder chips the attacker (Rocky Helmet 1/6, Rough Skin/Iron Barbs 1/8; Magic
+    Guard negates). `Cell.contact` + `Tables.*ContactChip`.
 11. **Sleep** (Spore/Hypnosis/Yawn) — can't-act + wake counter (the big remaining
     status; deferred because it's a control mechanic, not a scale).
 12. **Redirection** (Follow Me/Rage Powder, Storm Drain/Lightning Rod) + **Wide/
