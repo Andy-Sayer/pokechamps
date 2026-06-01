@@ -1317,3 +1317,30 @@ describe('P1: recovery moves', () => {
     expect(withRoost.score).toBeGreaterThan(searchToDepth(make(['Taunt']), 3).score);
   });
 });
+
+describe('P1: berries (Sitrus + Lum)', () => {
+  // Sitrus heals 25% once HP drops to <=50%. A bulky mirror chips each other
+  // small; my Incineroar starting at 51% crosses 50% turn 1 and (with Sitrus)
+  // heals back up → strictly better than holding nothing.
+  test('Sitrus Berry heals after dropping below 50%', () => {
+    const make = (item?: string): SearchInput => ({
+      mine: [{ set: mon({ species: 'Incineroar', item, ability: 'Intimidate', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Flare Blitz'] }), hpPercent: 51, active: true }],
+      opp: [{ entry: oppOf(mon({ species: 'Incineroar', ability: 'Intimidate', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, atk: 252 }, moves: ['Flare Blitz'] })), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    expect(searchToDepth(make('Sitrus Berry'), 3).score).toBeGreaterThan(searchToDepth(make(undefined), 3).score);
+  });
+
+  // A Lum Berry cures a status the moment it lands: a Prankster Sableye's
+  // Will-O-Wisp burns my Garchomp, but with Lum the burn is immediately removed
+  // (no halved physical, no chip) → strictly better than without it.
+  test('Lum Berry cures an inflicted burn', () => {
+    const sableye: OpponentEntry = { species: 'Sableye', knownMoves: ['Will-O-Wisp'], candidates: [mon({ species: 'Sableye', ability: 'Prankster', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Will-O-Wisp'] })] };
+    const make = (item?: string): SearchInput => ({
+      mine: [{ set: mon({ species: 'Garchomp', item, ability: 'Rough Skin', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, atk: 252 }, moves: ['Earthquake'] }), hpPercent: 100, active: true }],
+      opp: [{ entry: sableye, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    });
+    expect(searchToDepth(make('Lum Berry'), 3).score).toBeGreaterThan(searchToDepth(make(undefined), 3).score);
+  });
+});

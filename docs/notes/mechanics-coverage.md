@@ -167,9 +167,10 @@ EOT residual, root-ply action, switch-in hook).
 1. ~~**Recovery moves**~~ ✅ SHIPPED — `RECOVER` self-action, EOT heal (50% flat;
    Synthesis/Moonlight/Morning Sun sun-scaled, Shore Up sand-scaled); offered when
    below full HP. Action class `recover`.
-2. **HP-trigger items** (Sitrus +25%, pinch berries) + **status berries** (Lum) —
-   reuse `hpItemTriggers.ts`/`statusBerries.ts`; apply at the HP-cross / on-status
-   in `resolveTurn`. Changes nearly every bulky-mon line.
+2. ~~**HP-trigger items + status berries**~~ ✅ SHIPPED — reuses
+   `hpItemTriggerFor` (Sitrus 25% @ ≤50%, pinch berries +1 stat @ ≤25%, falling
+   edge) + `statusBerryFor` (Lum/Cheri/… cure on infliction). One-time per mon
+   (`State.my/oppBerryUsed`); known items only for the opp.
 3. **Entry hazards** (Stealth Rock/Spikes/Toxic Spikes/Sticky Web) — apply
    switch-in chip/speed-drop when a mon switches in during the lookahead; reuse
    `hazards.ts`. Makes switch evaluation honest.

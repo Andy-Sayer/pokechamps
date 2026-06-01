@@ -31,6 +31,8 @@ import { getMegaOptions } from './gimmicks/mega.js';
 import { defaultOpponentSet } from './bring.js';
 import { maxHpFor } from './damage.js';
 import { getPikalytics } from './pikalytics.js';
+import { hpItemTriggerFor, isHpItemTriggerItem } from './hpItemTriggers.js';
+import { statusBerryFor, isStatusBerry } from './statusBerries.js';
 
 // ---------------------------------------------------------------------------
 // Input
@@ -410,6 +412,8 @@ interface Tables {
   myAbility: (string | null | undefined)[]; oppAbility: (string | null | undefined)[];
   // Recovery move a mon knows (Recover/Roost/Synthesis/…), null if none.
   myRecover: (RecoverMove | null)[]; oppRecover: (RecoverMove | null)[];
+  // Held item per mon (for HP-trigger / status berries). Known-only for the opp.
+  myItem: (string | undefined)[]; oppItem: (string | undefined)[];
   field: FieldState;
 }
 
@@ -619,6 +623,10 @@ interface State {
    *  drives the EOT residual. */
   myStatus: string[];
   oppStatus: string[];
+  /** True once a mon's one-time consumable (Sitrus / pinch / status berry) has
+   *  fired, so it can't fire again this search. */
+  myBerryUsed: boolean[];
+  oppBerryUsed: boolean[];
 }
 
 // Doubles screen damage reduction (2732/4096 ≈ 0.667), matching @smogon/calc's
@@ -1081,6 +1089,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppAbility: opp.map(o => o.entry.ability),
     myRecover: mine.map(m => findRecoverMove(m.set.moves ?? [])),
     oppRecover: opp.map(o => findRecoverMove(o.entry.knownMoves)),
+    myItem: mine.map(m => m.set.item ?? undefined),
+    oppItem: opp.map(o => o.entry.item ?? undefined),
     field: input.field,
   };
 }
@@ -1124,6 +1134,9 @@ function initialState(input: SearchInput): State {
     oppToxicN: input.opp.map(o => (o.status === 'tox' ? 1 : 0)),
     myStatus: input.mine.map(m => m.status ?? ''),
     oppStatus: input.opp.map(o => o.status ?? ''),
+    // A consumed item (Sitrus already eaten, Knock Off'd, …) can't fire again.
+    myBerryUsed: input.mine.map(m => !m.set.item),
+    oppBerryUsed: input.opp.map(o => !!o.entry.itemConsumed || !o.entry.item),
   };
 }
 
@@ -1480,15 +1493,22 @@ function resolveTurn(
   // statused, immune by type/ability, or behind Misty Terrain.
   const myStatus = s.myStatus.slice();
   const oppStatus = s.oppStatus.slice();
+  const myBerryUsed = s.myBerryUsed.slice();
+  const oppBerryUsed = s.oppBerryUsed.slice();
   // Status persists on a mon that switches out; a switch-in arrives clean.
   for (const inn of mySwitchIn.values()) { myStatus[inn] = ''; myToxicN[inn] = 0; }
   for (const inn of oppSwitchIn.values()) { oppStatus[inn] = ''; oppToxicN[inn] = 0; }
+  // Inflict a status — but a Lum/Cheri/… berry immediately cures it (and is eaten).
+  const inflict = (foe: number, status: string, toxicN: number[], statusArr: string[], berryUsed: boolean[], item: (string | undefined)[]) => {
+    statusArr[foe] = status; if (status === 'tox') toxicN[foe] = 1;
+    if (!berryUsed[foe] && statusBerryFor(item[foe], status as any)) { statusArr[foe] = ''; toxicN[foe] = 0; berryUsed[foe] = true; }
+  };
   for (const [actor, target] of myTargets) {
     if (!isStatusTarget(target)) continue;
     const sm = t.myStatusMove[actor]; if (!sm) continue;
     const foe = redirect(statusFoeIdx(target), oppSwitchIn);
     if ((oppHp[foe] ?? 0) > 0 && !oppStatus[foe] && statusLands(sm.status, sm.move, t.oppSpecies[foe]!, t.oppAbility[foe], t.oppGrounded[foe]!, s.terrain)) {
-      oppStatus[foe] = sm.status; if (sm.status === 'tox') oppToxicN[foe] = 1;
+      inflict(foe, sm.status, oppToxicN, oppStatus, oppBerryUsed, t.oppItem);
     }
   }
   for (const [actor, target] of oppTargets) {
@@ -1496,7 +1516,7 @@ function resolveTurn(
     const sm = t.oppStatusMove[actor]; if (!sm) continue;
     const foe = redirect(statusFoeIdx(target), mySwitchIn);
     if ((myHp[foe] ?? 0) > 0 && !myStatus[foe] && statusLands(sm.status, sm.move, t.mySpecies[foe]!, t.myAbility[foe], t.myGrounded[foe]!, s.terrain)) {
-      myStatus[foe] = sm.status; if (sm.status === 'tox') myToxicN[foe] = 1;
+      inflict(foe, sm.status, myToxicN, myStatus, myBerryUsed, t.myItem);
     }
   }
 
@@ -1513,6 +1533,22 @@ function resolveTurn(
   for (const i of myActiveNow) if ((myHp[i] ?? 0) > 0 && t.mySpeedBoost[i]) myBoost[i] = addBoosts(myBoost[i]!, { spe: 1 });
   for (const j of oppActiveNow) if ((oppHp[j] ?? 0) > 0 && t.oppSpeedBoost[j]) oppBoost[j] = addBoosts(oppBoost[j]!, { spe: 1 });
 
+  // HP-trigger consumables (Sitrus heal 25% @ ≤50%, pinch berries +1 stat @ ≤25%)
+  // fire on the FALLING edge across this turn (start HP → end HP), one-time. Heal
+  // adds HP; a pinch boost feeds the dynamic boost map (which scales damage/speed).
+  const berryHp = (prev: number[], cur: number[], boost: BoostMap[], berryUsed: boolean[], item: (string | undefined)[], active: number[]) => {
+    for (const i of active) {
+      if (berryUsed[i] || !isHpItemTriggerItem(item[i])) continue;
+      const trig = hpItemTriggerFor(item[i], prev[i] ?? 100, cur[i]!);
+      if (!trig) continue;
+      berryUsed[i] = true;
+      if (trig.healPercent) cur[i] = Math.min(100, cur[i]! + trig.healPercent);
+      if (trig.boost) boost[i] = addBoosts(boost[i]!, { [trig.boost.stat]: trig.boost.amount } as BoostMap);
+    }
+  };
+  berryHp(s.myHp, myHp, myBoost, myBerryUsed, t.myItem, myActiveNow);
+  berryHp(s.oppHp, oppHp, oppBoost, oppBerryUsed, t.oppItem, oppActiveNow);
+
   // Start from the post-switch slots, then refill from bench after KOs. The opp
   // only auto-refills with ALREADY-REVEALED mons — an unrevealed phantom enters
   // solely via a deliberate root switch (otherwise refill would silently reveal
@@ -1526,6 +1562,7 @@ function resolveTurn(
     myReflect, myLightScreen, theirReflect, theirLightScreen,
     myReflectTurns, myLightScreenTurns, theirReflectTurns, theirLightScreenTurns,
     weather, weatherTurns, terrain, terrainTurns, myToxicN, oppToxicN, myStatus, oppStatus,
+    myBerryUsed, oppBerryUsed,
   };
 }
 
