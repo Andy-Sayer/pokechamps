@@ -14,23 +14,28 @@ berries), setup + self-stat-drops + Defiant/Competitive + on-KO boosts + recoil 
 Orb recoil + Unaware + dedicated debuffs (Charm/Scary Face), **sleep**, **pivot moves**
 (U-turn/Volt Switch/Parting Shot), **Taunt + Encore**, hazard SET (incl. Stone Axe),
 weather/terrain/screens with durations, EOT residuals, inflicted status, Regenerator,
-Intimidate, contact-chip, drain. Hail-Mary outs analysis shipped. **The remaining
-high-value items, re-prioritised:**
+Intimidate, contact-chip, drain. Hail-Mary outs analysis shipped.
 
-1. **Perish Song + trap abilities (Shadow Tag / Arena Trap / Magnet Pull)** — a
-   DETERMINISTIC win-con in this league (Perish + trap). Not yet modelled. Highest value.
-2. **Resist berries in the search** (Yache/Occa/Passho/… — heavy use this format): a
-   one-time ½-damage on a super-effective hit of the matching type, then consumed. Big
-   swing (OHKO → survival). Live engine has `resistBerries.ts`; thread into the search.
-3. **Thread live-match volatiles into the search input** — Taunt/Encore/sleep counters,
-   Perish, trapping, Substitute, leech tracked live but `SearchInput` starts them clear;
-   carry them so the recommender reasons from the REAL current state.
-4. **Substitute** (search): 25% HP, blocks damage/status until broken.
-5. **Recoil KO-boundary** (the one empirical harness residual): per-move damage cells /
-   a KO-probability envelope so the ~10 unanimous-faint divergences close.
-6. **Inference** (the *backward* axis, still the original backlog): format-legal item
-   filter, item-permanence model, joint nature/item/EV solve, ability inference.
-7. Lower: Magic Bounce (reflect), two-turn/charge in search (niche), Choice-lock gating.
+**Remaining priorities are now META-DRIVEN** (from Pikalytics — see the
+`project_meta_priorities` memory; the earlier "Perish+trap #1" guess was WRONG, it's
+niche). For Champions Reg M-A (Sneasler 44% #1, Garchomp/Kingambit/Basculegion/Incineroar):
+
+1. **Unburden + White Herb (Sneasler — the #1 mon).** Its item is consumed (White Herb
+   pops after Close Combat's self def/spd drop) → Unburden DOUBLES Speed. Unmodelled →
+   wrong turn order vs the most common threat. Pure search gap. **Highest value.**
+2. **Fake Out guaranteed flinch** (Sneasler 91.5%, Incineroar, 7 mons): deterministic
+   first-turn disable (NOT the probabilistic-flinch policy). Needs first-turn-out tracking.
+3. **Resist-berry consumption** (17 mons! Chople Berry on Kingambit 52% etc.): the calc
+   bakes the first-hit ½ (root survival is right), but the search over-halves SUBSEQUENT
+   hits — track consumption + ensure inference offers resist berries.
+4. **Choice lock** (Band/Specs move-lock; Scarf speed already handled).
+5. **Aegislash Stance Change** (8.3%): Blade/Shield forme stat swap on attack.
+6. **Inference axis** (the *backward* half, untouched this arc): format-legal item filter,
+   item-permanence, joint nature/item/EV solve, ability inference.
+
+**DEPRIORITISED by the meta:** Perish Song + trap abilities (only Gengar-Mega ~6%);
+Substitute (3 mons); two-turn/Solar Beam (1-turn in sun); Disable/Torment; Magic Bounce;
+ability redirection — all near-zero usage. **Unaware** shipped but is 0% in this meta.
 
 Tiers 1–2 (live-engine effects) and the item/inference axes below remain the source of
 truth for the NON-search work.
