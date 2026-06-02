@@ -1510,6 +1510,41 @@ describe('sleep (Spore) + redirection (Rage Powder)', () => {
   });
 });
 
+describe('Unaware + dedicated debuff moves (Charm)', () => {
+  test('Unaware ignores the attacker’s boost (takes less than a non-Unaware mon)', () => {
+    const hpVs = (ability: string) => resolveOneTurn(
+      {
+        mine: [{ set: mon({ species: 'Dondozo', ability, nature: 'Impish', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Wave Crash'] }), hpPercent: 100, active: true }],
+        opp: [{ entry: oppOf(mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Earthquake'] })), hpPercent: 100, active: true, boosts: { atk: 2 } }],
+        field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+      },
+      new Map(), new Map([[0, { kind: 'attack', target: 0 } as const]]),
+    ).mine[0]!.hpPct;
+    expect(hpVs('Unaware')).toBeGreaterThan(hpVs('Oblivious'));   // +2 Atk ignored vs Unaware
+  });
+
+  test('Charm lowers the foe Atk by 2', () => {
+    const out = resolveOneTurn(
+      {
+        mine: [{ set: mon({ species: 'Clefable', ability: 'Magic Guard', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Charm'] }), hpPercent: 100, active: true }],
+        opp: [{ entry: oppOf(mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Seismic Toss'] })), hpPercent: 100, active: true }],
+        field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+      },
+      new Map([[0, { kind: 'debuff', target: 0 } as const]]), new Map(),
+    );
+    expect(out.opp[0]!.boosts.atk).toBe(-2);
+  });
+
+  test('debuff is offered as an action class', () => {
+    const r = searchToDepth({
+      mine: [{ set: mon({ species: 'Clefable', ability: 'Magic Guard', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Charm', 'Moonblast'] }), hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Seismic Toss'] })), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 1);
+    expect(r.explored!.actionClasses).toContain('debuff');
+  });
+});
+
 describe('pivot moves (U-turn / Parting Shot)', () => {
   test('U-turn chips the foe and the user switches out (bench takes the incoming hit)', () => {
     const out = resolveOneTurn(
@@ -1680,7 +1715,7 @@ describe('unmodeled-mechanics detector (self-flagging)', () => {
       field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
     });
     expect(searchToDepth(make(['Hurricane']), 1).unmodeled?.some(u => u.kind === 'foedebuff')).toBeFalsy();
-    expect(searchToDepth(make(['Eerie Impulse']), 1).unmodeled?.some(u => u.kind === 'foedebuff')).toBe(true);
+    expect(searchToDepth(make(['Growl']), 1).unmodeled?.some(u => u.kind === 'foedebuff')).toBe(true);
   });
 });
 

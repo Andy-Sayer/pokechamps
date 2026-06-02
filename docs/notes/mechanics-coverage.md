@@ -69,7 +69,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Setup (self-boost) | Swords Dance/Calm Mind/Dragon Dance/Shell Smash/… | – | ✅ | ✅ | `SETUP_MOVES` table |
 | Self stat-drop | Draco Meteor/Overheat/Leaf Storm/Make It Rain/Close Combat/Superpower/V-create | ✅(dmg) | ✅ | ✅ | `Cell.selfDrop` from `move.self.boosts`; applied to the user's boosts (Contrary inverts). **Evidence-ranked #1 gap — closed first via the sim diff-harness** |
 | Foe stat-drop (damaging 2ndary) | Icy Wind/Electroweb/Bulldoze −Spe, Snarl/Struggle Bug −SpA, Breaking Swipe −Atk, Low Sweep | ✅(dmg) | ✅ | ✅ | `Cell.foeDrop` from 100%-chance `secondary.boosts`; applied to the target's boosts (Clear Body/Clear Amulet immune, Contrary inverts). Probabilistic 10–30% drops left out by policy (flinch rule) |
-| Foe stat-drop (dedicated move) | Charm, Scary Face, Eerie Impulse | – | ✅ | **GAP** | 0-damage debuff moves — search has no `SET_DEBUFF` action yet (Parting Shot's debuff IS modelled via the pivot action; flagged by `unmodeled.ts`) |
+| Foe stat-drop (dedicated move) | Charm, Scary Face, Eerie Impulse, Feather Dance, Screech, Tickle | – | ✅ | ✅ | `SET_DEBUFF` action → the foe-drop path (Clear Body immune, Defiant reacts). Single-target only; spread debuffs (Growl/Leer) + acc/eva drops still GAP |
 | Status moves | Will-O-Wisp/Thunder Wave/Toxic/Glare/Poison Powder | – | ✅ | ✅ | SET_STATUS; **sleep/freeze NOT** |
 | Sleep-inducing | Spore/Sleep Powder/Hypnosis | – | ✅ | ✅ | status 'slp' = can't-act + wake counter (init 2; Gen 9 1-3); powder/Insomnia/Electric-Terrain immunities. Yawn (delayed) still GAP |
 | Leech / drain HP | Leech Seed; Giga Drain (heal) | ✅(dmg) | ✅ | ✅ | Leech Seed ✅; drain-move self-heal added (`Cell.drain`) |
@@ -101,6 +101,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 |---|---|---|---|
 | Damage-scaling (own hit) | Huge Power, Technician, Sheer Force, Protosynthesis, Adaptability… | ✅ calc (baked) | — |
 | Damage-taken | Multiscale, Filter, Thick Fat, Fluffy, Heatproof, Ice Scales | ✅ calc | — |
+| Ignore stat stages | Unaware | ✅ calc (baked) | ✅ search — `boostDamageScale` skips the foe's DYNAMIC offensive/defensive stages too (Dondozo/Clefable vs a setup sweep) |
 | Type immunity / absorb | Levitate, Flash Fire, Water Absorb, Volt Absorb, Storm Drain, Lightning Rod, Sap Sipper, Dry Skin | ✅ calc; ✅ live | search: absorb-heal not added; redirection (Storm Drain/Lightning Rod) **GAP** |
 | Speed in weather | Chlorophyll, Swift Swim, Sand Rush, Slush Rush | ✅ search | — (done Phase 4) |
 | EOT stat gain | Speed Boost | ✅ search | — |

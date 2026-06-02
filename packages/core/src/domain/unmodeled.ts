@@ -56,10 +56,11 @@ const RULES: GapRule[] = [
   // Bug/Breaking Swipe/Low Sweep/Bulldoze/Lunge/Acid Spray/Mystical Fire/…) are now
   // MODELLED (Cell.foeDrop). Only the dedicated 0-damage stat-lowering moves remain
   // a gap — the search has no SET_DEBUFF action for them yet.
-  { kind: 'foedebuff', label: 'stat-lowering move (Charm / Scary Face / Eerie Impulse)',
-    moves: ['charm', 'featherdance', 'eerieimpulse', 'scaryface', 'cottonspore', 'stringshot', 'tickle',
-      'growl', 'leer', 'screech', 'metalsound', 'faketears', 'confide', 'playnice', 'nobleroar',
-      'tearfullook', 'sandattack', 'babydolleyes', 'venomdrench'] },
+  // Single-target stat-lowering moves (Charm/Scary Face/Eerie Impulse/…) are now
+  // MODELLED via the SET_DEBUFF action. Only spread debuffs (Growl/Leer/String Shot),
+  // accuracy/evasion drops, and situational ones remain a gap.
+  { kind: 'foedebuff', label: 'spread/acc stat-lowering move (Growl / Leer / Sand Attack)',
+    moves: ['growl', 'leer', 'stringshot', 'tearfullook', 'sandattack', 'venomdrench', 'flash', 'kinesis'] },
   { kind: 'twoturn', label: 'two-turn / charge move',
     moves: ['solarbeam', 'solarblade', 'fly', 'dig', 'dive', 'bounce', 'phantomforce', 'shadowforce',
       'skyattack', 'meteorbeam', 'electroshot', 'geomancy', 'skullbash', 'razorwind', 'freezeshock', 'iceburn'] },

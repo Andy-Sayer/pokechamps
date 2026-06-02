@@ -266,6 +266,7 @@ const LEECH_BASE = -30;   // Leech Seed → foe idx `LEECH_BASE - target`
 const BATON_BASE = -40;   // Baton Pass → bench idx `BATON_BASE - target`
 const STATUS_BASE = -50;  // status move → foe idx `STATUS_BASE - target`
 const PIVOT_BASE = -60;   // pivot move (U-turn/…) → foe idx; user auto-switches out
+const DEBUFF_BASE = -70;  // dedicated stat-lowering move (Charm/Scary Face/…) → foe idx
 function isSwitchTarget(t: number): boolean { return t <= SWITCH_BASE && t > LEECH_BASE; }
 function switchBenchIdx(t: number): number { return SWITCH_BASE - t; }
 function switchCode(benchIdx: number): number { return SWITCH_BASE - benchIdx; }
@@ -278,9 +279,12 @@ function batonCode(benchIdx: number): number { return BATON_BASE - benchIdx; }
 function isStatusTarget(t: number): boolean { return t <= STATUS_BASE && t > PIVOT_BASE; }
 function statusFoeIdx(t: number): number { return STATUS_BASE - t; }
 function statusCode(foeIdx: number): number { return STATUS_BASE - foeIdx; }
-function isPivotTarget(t: number): boolean { return t <= PIVOT_BASE; }
+function isPivotTarget(t: number): boolean { return t <= PIVOT_BASE && t > DEBUFF_BASE; }
 function pivotFoeIdx(t: number): number { return PIVOT_BASE - t; }
 function pivotCode(foeIdx: number): number { return PIVOT_BASE - foeIdx; }
+function isDebuffTarget(t: number): boolean { return t <= DEBUFF_BASE; }
+function debuffFoeIdx(t: number): number { return DEBUFF_BASE - t; }
+function debuffCode(foeIdx: number): number { return DEBUFF_BASE - foeIdx; }
 function isFieldTarget(t: number): boolean { return t === SET_TAILWIND || t === SET_TRICKROOM; }
 // Benched live team-indices a side can switch INTO (not on the field, hp > 0).
 function benchSwitchTargets(active: number[], hp: number[], n: number): number[] {
@@ -550,6 +554,8 @@ interface Tables {
   // and the Defiant/Competitive reaction stat (+2 on any opponent-caused drop).
   myStatDropImmune: boolean[]; oppStatDropImmune: boolean[];
   myDefiantStat: ('atk' | 'spa' | null)[]; oppDefiantStat: ('atk' | 'spa' | null)[];
+  // Unaware: ignores the opponent's stat stages when computing damage (both ways).
+  myUnaware: boolean[]; oppUnaware: boolean[];
   // On-KO ability boost (Moxie/Beast Boost/Grim Neigh/…): the stage map a mon gains
   // each time it KOes a foe, or null.
   myOnKo: (BoostMap | null)[]; oppOnKo: (BoostMap | null)[];
@@ -563,6 +569,8 @@ interface Tables {
   myPivotMove: (string | null)[]; oppPivotMove: (string | null)[];
   myPivotCell: (Cell[] | null)[]; oppPivotCell: (Cell[] | null)[];
   myPivotDebuff: (BoostMap | null)[]; oppPivotDebuff: (BoostMap | null)[];
+  // Dedicated debuff move (Charm/Scary Face/…): move + the foe boost-drop it applies.
+  myDebuffMove: ({ move: string; boosts: BoostMap } | null)[]; oppDebuffMove: ({ move: string; boosts: BoostMap } | null)[];
   // Regenerator: heals 1/3 max HP when the mon switches OUT.
   myRegen: boolean[]; oppRegen: boolean[];
   // Rock Head: negates a recoil move's self-damage (Magic Guard does too, via myResidual).
@@ -1032,6 +1040,20 @@ function findPivotMove(moves: string[]): string | null {
 function pivotDebuff(move: string): BoostMap | null {
   return toId(move) === 'partingshot' ? { atk: -1, spa: -1 } : null;
 }
+// Dedicated 0-damage stat-lowering STATUS moves the user can cast on a foe. Keyed by
+// name (acc/eva drops omitted — we don't track those). Spread debuffs (Growl/Leer)
+// and acc-droppers stay a gap (flagged by unmodeled.ts).
+const DEBUFF_MOVES: Record<string, BoostMap> = {
+  charm: { atk: -2 }, featherdance: { atk: -2 }, playnice: { atk: -1 }, babydolleyes: { atk: -1 },
+  eerieimpulse: { spa: -2 }, confide: { spa: -1 }, captivate: { spa: -2 },
+  scaryface: { spe: -2 }, cottonspore: { spe: -2 },
+  screech: { def: -2 }, metalsound: { spd: -2 }, faketears: { spd: -2 },
+  tickle: { atk: -1, def: -1 }, nobleroar: { atk: -1, spa: -1 },
+};
+function findDebuffMove(moves: string[]): { move: string; boosts: BoostMap } | null {
+  for (const m of moves) { const b = DEBUFF_MOVES[toId(m)]; if (b) return { move: m, boosts: b }; }
+  return null;
+}
 // Can `status` (via `move`) actually land on the target? Honors type immunities,
 // the matching ability immunities, and Misty Terrain on grounded mons. We ignore
 // already-statused / substitute (checked at apply time).
@@ -1142,11 +1164,15 @@ function boostDamageScale(
   attacker: BoostMap | undefined, attackerBaked: BoostMap | undefined,
   defender: BoostMap | undefined, defenderBaked: BoostMap | undefined,
   physical: boolean,
+  // Unaware: a defender with it ignores the ATTACKER's offensive boosts; an attacker
+  // with it ignores the DEFENDER's defensive boosts. The calc already bakes Unaware
+  // for the input boosts, so the dynamic scale must match (offScale/defScale = 1).
+  defenderUnaware = false, attackerUnaware = false,
 ): number {
   const off = physical ? 'atk' : 'spa';
   const def = physical ? 'def' : 'spd';
-  const offScale = statStageMult(attacker?.[off]) / statStageMult(attackerBaked?.[off]);
-  const defScale = statStageMult(defenderBaked?.[def]) / statStageMult(defender?.[def]);
+  const offScale = defenderUnaware ? 1 : statStageMult(attacker?.[off]) / statStageMult(attackerBaked?.[off]);
+  const defScale = attackerUnaware ? 1 : statStageMult(defenderBaked?.[def]) / statStageMult(defender?.[def]);
   return offScale * defScale;
 }
 
@@ -1347,6 +1373,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppStatDropImmune: opp.map(o => statDropImmune(o.entry.ability, o.entry.item)),
     myDefiantStat: mine.map(m => defiantStat(m.set.ability)),
     oppDefiantStat: opp.map(o => defiantStat(o.entry.ability)),
+    myUnaware: mine.map(m => toId(m.set.ability ?? '') === 'unaware'),
+    oppUnaware: opp.map(o => toId(o.entry.ability ?? '') === 'unaware'),
     myOnKo: mine.map(m => onKoBoost(m.set, m.set.ability)),
     oppOnKo: opp.map(o => onKoBoost(o.entry.candidates?.[0] ?? defaultOpponentSet(o.entry, 50), o.entry.ability)),
     myLifeOrb: mine.map(m => takesLifeOrbRecoil(m.set.item, m.set.ability)),
@@ -1358,6 +1386,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     myPivotCell, oppPivotCell,
     myPivotDebuff: myPivotMoveArr.map(pm => pm ? pivotDebuff(pm) : null),
     oppPivotDebuff: oppPivotMoveArr.map(pm => pm ? pivotDebuff(pm) : null),
+    myDebuffMove: mine.map(m => findDebuffMove(m.set.moves ?? [])),
+    oppDebuffMove: opp.map(o => findDebuffMove(o.entry.knownMoves)),
     myIntimImmune: mine.map(m => intimidateImmune(m.set.ability, m.set.item)),
     oppIntimImmune: opp.map(o => intimidateImmune(o.entry.ability, o.entry.item)),
     myRockHead: mine.map(m => hasRockHead(m.set.ability)),
@@ -1595,9 +1625,9 @@ function resolveTurn(
   // Scale a precomputed roll by the live-vs-baked boost, screen, weather AND terrain
   // ratios (each 1 when unchanged → positions without dynamic effects are unaffected).
   const myDmg = (actor: number, tgt: number, raw: number, physical: boolean, type: string, gm: boolean) =>
-    raw * boostDamageScale(s.myBoost[actor], t.myBaked[actor], s.oppBoost[tgt], t.oppBaked[tgt], physical) * myScreenScale(physical) * myWeatherScale(type, physical, tgt) * myTerrainScale(type, gm, actor, tgt) * myBurnScale(actor, physical);
+    raw * boostDamageScale(s.myBoost[actor], t.myBaked[actor], s.oppBoost[tgt], t.oppBaked[tgt], physical, t.oppUnaware[tgt], t.myUnaware[actor]) * myScreenScale(physical) * myWeatherScale(type, physical, tgt) * myTerrainScale(type, gm, actor, tgt) * myBurnScale(actor, physical);
   const oppDmg = (actor: number, tgt: number, raw: number, physical: boolean, type: string, gm: boolean) =>
-    raw * boostDamageScale(s.oppBoost[actor], t.oppBaked[actor], s.myBoost[tgt], t.myBaked[tgt], physical) * oppScreenScale(physical) * oppWeatherScale(type, physical, tgt) * oppTerrainScale(type, gm, actor, tgt) * oppBurnScale(actor, physical);
+    raw * boostDamageScale(s.oppBoost[actor], t.oppBaked[actor], s.myBoost[tgt], t.myBaked[tgt], physical, t.myUnaware[tgt], t.oppUnaware[actor]) * oppScreenScale(physical) * oppWeatherScale(type, physical, tgt) * oppTerrainScale(type, gm, actor, tgt) * oppBurnScale(actor, physical);
   // Psychic Terrain makes priority moves FAIL against a grounded target.
   const psychicBlocked = (priority: number, defenderGrounded: boolean) => s.terrain === 'Psychic' && priority > 0 && defenderGrounded;
 
@@ -1650,7 +1680,7 @@ function resolveTurn(
   const nonAttack = (target: number) =>
     isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isStatusTarget(target) || isFieldTarget(target)
     || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN || target === RECOVER || target === SET_HAZARD
-    || target === REDIRECT || target === SLEEP_SKIP || isPivotTarget(target);
+    || target === REDIRECT || target === SLEEP_SKIP || isPivotTarget(target) || isDebuffTarget(target);
   const actings: Acting[] = [];
   for (const [actor, target] of myTargets) {
     if (nonAttack(target) || myAsleep(actor)) continue;
@@ -1978,6 +2008,20 @@ function resolveTurn(
       if (sm.status === 'slp' && myStatus[foe] === 'slp') mySleepTurns[foe] = 2;
     }
   }
+  // Dedicated debuff moves (Charm/Scary Face/…): lower the (post-switch) foe's stats,
+  // routed through the foe-drop accumulator below so Clear Body immunity + Defiant apply.
+  for (const [actor, target] of myTargets) {
+    if (!isDebuffTarget(target)) continue;
+    const dm = t.myDebuffMove[actor]; if (!dm) continue;
+    const foe = redirect(debuffFoeIdx(target), oppSwitchIn);
+    if ((oppHp[foe] ?? 0) > 0) accDrop(myToFoeDrop, foe, dm.boosts);
+  }
+  for (const [actor, target] of oppTargets) {
+    if (!isDebuffTarget(target)) continue;
+    const dm = t.oppDebuffMove[actor]; if (!dm) continue;
+    const foe = redirect(debuffFoeIdx(target), mySwitchIn);
+    if ((myHp[foe] ?? 0) > 0) accDrop(oppToFoeDrop, foe, dm.boosts);
+  }
 
   // Boost bookkeeping. A mon that LEAVES the field clears its stages; a switch-in
   // arrives fresh — EXCEPT Baton Pass, which passes the outgoing mon's current
@@ -2160,6 +2204,8 @@ function jointActions(
   // Pivot capability (root only): per-actor pivot move + the foe indices it can hit
   // (empty when the side has no bench to switch into → no pivot offered).
   pivot?: { move: (string | null)[]; foes: number[] },
+  // Dedicated debuff capability (root only): per-actor move + the foe indices to debuff.
+  debuff?: { move: ({ move: string; boosts: BoostMap } | null)[]; foes: number[] },
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -2188,6 +2234,7 @@ function jointActions(
     const canHazard = hazardSet?.[actor] === true;
     const statusCodes = (status && status.move[actor] != null) ? status.foes.map(statusCode) : [];
     const pivotCodes = (pivot && pivot.move[actor] != null) ? pivot.foes.map(pivotCode) : [];
+    const debuffCodes = (debuff && debuff.move[actor] != null) ? debuff.foes.map(debuffCode) : [];
     const batonCodes = (baton && baton.move[actor] != null) ? baton.targets.map(batonCode) : [];
     // SPREAD first so a spread that ties a single-target line is kept. PROTECT /
     // field / setup / screen / weather / Leech / SWITCH / Baton last — only chosen
@@ -2208,6 +2255,7 @@ function jointActions(
       ...leechCodes,
       ...statusCodes,
       ...pivotCodes,
+      ...debuffCodes,
       ...switchCodes,
       ...batonCodes,
     ];
@@ -2424,7 +2472,8 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     myHazardCap,
     s.myStatus.map((st, i) => st === 'slp' && (s.mySleepTurns[i] ?? 0) > 0),
     t.myRedirectMove,
-    { move: t.myPivotMove, foes: myBench.length > 0 ? s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) : [] });
+    { move: t.myPivotMove, foes: myBench.length > 0 ? s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) : [] },
+    { move: t.myDebuffMove, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) });
 }
 function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
@@ -2448,7 +2497,8 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     oppHazardCap,
     s.oppStatus.map((st, j) => st === 'slp' && (s.oppSleepTurns[j] ?? 0) > 0),
     t.oppRedirectMove,
-    { move: t.oppPivotMove, foes: oppBench.length > 0 ? s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) : [] });
+    { move: t.oppPivotMove, foes: oppBench.length > 0 ? s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) : [] },
+    { move: t.oppDebuffMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) });
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -2486,7 +2536,9 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
   const plays: SearchPlay[] = [];
   if (!joint) return plays;
   for (const [actor, target] of joint) {
-    if (isPivotTarget(target)) {
+    if (isDebuffTarget(target)) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myDebuffMove[actor]?.move ?? 'Charm', targetSpecies: t.oppSpecies[debuffFoeIdx(target)]! });
+    } else if (isPivotTarget(target)) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myPivotMove[actor] ?? 'U-turn', targetSpecies: t.oppSpecies[pivotFoeIdx(target)]!, switch: true });
     } else if (isStatusTarget(target)) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myStatusMove[actor]?.move ?? 'status', targetSpecies: t.oppSpecies[statusFoeIdx(target)]! });
@@ -2534,7 +2586,9 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): Search
   const plays: SearchPlay[] = [];
   if (!joint) return plays;
   for (const [actor, target] of joint) {
-    if (isPivotTarget(target)) {
+    if (isDebuffTarget(target)) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppDebuffMove[actor]?.move ?? 'Charm', targetSpecies: t.mySpecies[debuffFoeIdx(target)]! });
+    } else if (isPivotTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppPivotMove[actor] ?? 'U-turn', targetSpecies: t.mySpecies[pivotFoeIdx(target)]!, switch: true });
     } else if (isStatusTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppStatusMove[actor]?.move ?? 'status', targetSpecies: t.mySpecies[statusFoeIdx(target)]! });
@@ -3082,6 +3136,8 @@ export function createSearch(input: SearchInput): PositionSearch {
       const myBenchNow2 = benchSwitchTargets(s0.myActive, s0.myHp, expected.table.myN).length > 0;
       const oppBenchNow2 = benchSwitchTargets(s0.oppActive, s0.oppHp, expected.table.oppN).length > 0;
       if ((myBenchNow2 && canRedirect(expected.table.myPivotMove, s0.myActive)) || (oppBenchNow2 && canRedirect(expected.table.oppPivotMove, s0.oppActive))) actionClasses.push('pivot');
+      const canDebuff = (moves: ({ move: string } | null)[], active: number[]) => active.some(i => moves[i] != null);
+      if (canDebuff(expected.table.myDebuffMove, s0.myActive) || canDebuff(expected.table.oppDebuffMove, s0.oppActive)) actionClasses.push('debuff');
       const explored: SearchExplored = {
         depth,
         myActions: myRootJoints.length,
@@ -3161,7 +3217,8 @@ export type TurnAction =
   | { kind: 'protect' }
   | { kind: 'status'; target: number }   // inflict a status move on the foe at `target`
   | { kind: 'redirect' }                  // Follow Me / Rage Powder
-  | { kind: 'pivot'; target: number };    // U-turn/Volt Switch/Parting Shot at `target`, then switch out
+  | { kind: 'pivot'; target: number }     // U-turn/Volt Switch/Parting Shot at `target`, then switch out
+  | { kind: 'debuff'; target: number };   // Charm/Scary Face/… on the foe at `target`
 
 /** Post-turn structural state of one mon (by team-index). HP is our coarse
  *  representative value — the harness compares the DISCRETE fields (fainted /
@@ -3207,6 +3264,7 @@ export function resolveOneTurn(
     else if (a.kind === 'status') { myTargets.set(actor, statusCode(a.target)); myMove.set(actor, t.myStatusMove[actor]?.move ?? ''); }
     else if (a.kind === 'redirect') { myTargets.set(actor, REDIRECT); myMove.set(actor, t.myRedirectMove[actor] ?? ''); }
     else if (a.kind === 'pivot') { myTargets.set(actor, pivotCode(a.target)); myMove.set(actor, t.myPivotMove[actor] ?? ''); }
+    else if (a.kind === 'debuff') { myTargets.set(actor, debuffCode(a.target)); myMove.set(actor, t.myDebuffMove[actor]?.move ?? ''); }
     else { myTargets.set(actor, PROTECT); }
   }
   for (const [actor, a] of oppActions) {
@@ -3215,6 +3273,7 @@ export function resolveOneTurn(
     else if (a.kind === 'status') { oppTargets.set(actor, statusCode(a.target)); oppMove.set(actor, t.oppStatusMove[actor]?.move ?? ''); }
     else if (a.kind === 'redirect') { oppTargets.set(actor, REDIRECT); oppMove.set(actor, t.oppRedirectMove[actor] ?? ''); }
     else if (a.kind === 'pivot') { oppTargets.set(actor, pivotCode(a.target)); oppMove.set(actor, t.oppPivotMove[actor] ?? ''); }
+    else if (a.kind === 'debuff') { oppTargets.set(actor, debuffCode(a.target)); oppMove.set(actor, t.oppDebuffMove[actor]?.move ?? ''); }
     else { oppTargets.set(actor, PROTECT); }
   }
   const pass: Pass = {
