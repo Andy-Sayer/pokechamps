@@ -1739,6 +1739,16 @@ describe('priority moves (Bullet Punch / Sucker Punch / Aqua Jet …)', () => {
     expect(out.mine[0]!.hpPct).toBe(100);     // moved first via terrain priority → Flutter Mane never acted
   });
 
+  test('Triage gives a draining move +3 priority (Comfey Draining Kiss moves first)', () => {
+    const comfey = mon({ species: 'Comfey', ability: 'Triage', nature: 'Modest', evs: { ...ZERO_EVS, spa: 252 }, moves: ['Draining Kiss'] });
+    const out = resolveOneTurn(
+      { mine: [{ set: comfey, hpPercent: 100, active: true }], opp: [{ entry: oppOf(mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Earthquake'] })), hpPercent: 20, active: true }], field: { ...NEUTRAL_FIELD }, allOppRevealed: true },
+      new Map([[0, { kind: 'prio', target: 0 } as const]]), new Map([[0, { kind: 'attack', target: 0 } as const]]),
+    );
+    expect(out.opp[0]!.fainted).toBe(true);   // Draining Kiss (SE vs Dragon) KOs the weakened Garchomp
+    expect(out.mine[0]!.hpPct).toBe(100);     // Triage +3 → Comfey moved before the faster Garchomp
+  });
+
   test('Grassy Glide is a priority option ONLY in Grassy Terrain', () => {
     const classes = (terrain: 'Grassy' | null) => searchToDepth({
       mine: [{ set: mon({ species: 'Rillaboom', ability: 'Grassy Surge', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Grassy Glide', 'Wood Hammer'] }), hpPercent: 100, active: true }],

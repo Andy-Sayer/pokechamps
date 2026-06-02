@@ -1145,8 +1145,12 @@ const FIRST_TURN_MOVE_IDS = new Set(['fakeout', 'firstimpression', 'matblock']);
 // heal moves, which aren't damaging attacks, so they don't reach the prio cell.
 function effectiveAttackPriority(move: string, ability: string | null | undefined, hpPercent: number, terrain: Terrain | null): number {
   let p = movePriority(move);
+  const ab = toId(ability ?? '');
   if (toId(move) === 'grassyglide' && terrain === 'Grassy') p += 1;
-  if (toId(ability ?? '') === 'galewings' && hpPercent >= 100 && (getMove(move) as { type?: string } | undefined)?.type === 'Flying') p += 1;
+  if (ab === 'galewings' && hpPercent >= 100 && (getMove(move) as { type?: string } | undefined)?.type === 'Flying') p += 1;
+  // Triage: +3 to draining moves (Giga Drain / Drain Punch / Draining Kiss …) — a
+  // damaging priority attack. Pure heal moves are Status (excluded upstream).
+  if (ab === 'triage' && moveDrain(move) > 0) p += 3;
   return p;
 }
 function hasUnburden(ability: string | null | undefined): boolean { return toId(ability ?? '') === 'unburden'; }
