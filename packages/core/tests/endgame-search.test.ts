@@ -1510,6 +1510,37 @@ describe('sleep (Spore) + redirection (Rage Powder)', () => {
   });
 });
 
+describe('Taunt + Encore (option restriction)', () => {
+  const grass = (moves: string[]) => mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves });
+  const blissey = (): OpponentEntry => oppOf(mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Seismic Toss'] }));
+
+  test('Taunt is applied to the target (3 turns)', () => {
+    const out = resolveOneTurn(
+      { mine: [{ set: grass(['Earthquake']), hpPercent: 100, active: true }], opp: [{ entry: oppOf(mon({ species: 'Whimsicott', ability: 'Prankster', nature: 'Timid', evs: { ...ZERO_EVS, spe: 252 }, moves: ['Taunt'] })), hpPercent: 100, active: true }], field: { ...NEUTRAL_FIELD }, allOppRevealed: true },
+      new Map(), new Map([[0, { kind: 'taunt', target: 0 } as const]]),
+    );
+    expect(out.mine[0]!.taunt).toBe(3);
+  });
+
+  test('Encore locks the target that just attacked (3 turns)', () => {
+    const out = resolveOneTurn(
+      { mine: [{ set: grass(['Earthquake']), hpPercent: 100, active: true }], opp: [{ entry: oppOf(mon({ species: 'Whimsicott', ability: 'Prankster', nature: 'Timid', evs: { ...ZERO_EVS, spe: 252 }, moves: ['Encore'] })), hpPercent: 100, active: true }], field: { ...NEUTRAL_FIELD }, allOppRevealed: true },
+      new Map([[0, { kind: 'attack', target: 0 } as const]]), new Map([[0, { kind: 'encore', target: 0 } as const]]),
+    );
+    expect(out.mine[0]!.encore).toBe(3);
+  });
+
+  test('taunt + encore action classes are offered', () => {
+    const r = searchToDepth({
+      mine: [{ set: mon({ species: 'Whimsicott', ability: 'Prankster', nature: 'Timid', evs: { ...ZERO_EVS, spe: 252 }, moves: ['Taunt', 'Encore', 'Moonblast'] }), hpPercent: 100, active: true }],
+      opp: [{ entry: blissey(), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 1);
+    expect(r.explored!.actionClasses).toContain('taunt');
+    expect(r.explored!.actionClasses).toContain('encore');
+  });
+});
+
 describe('Unaware + dedicated debuff moves (Charm)', () => {
   test('Unaware ignores the attacker’s boost (takes less than a non-Unaware mon)', () => {
     const hpVs = (ability: string) => resolveOneTurn(

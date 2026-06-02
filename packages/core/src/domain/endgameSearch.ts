@@ -267,6 +267,8 @@ const BATON_BASE = -40;   // Baton Pass → bench idx `BATON_BASE - target`
 const STATUS_BASE = -50;  // status move → foe idx `STATUS_BASE - target`
 const PIVOT_BASE = -60;   // pivot move (U-turn/…) → foe idx; user auto-switches out
 const DEBUFF_BASE = -70;  // dedicated stat-lowering move (Charm/Scary Face/…) → foe idx
+const TAUNT_BASE = -80;   // Taunt → foe idx (foe can't use status moves for a few turns)
+const ENCORE_BASE = -90;  // Encore → foe idx (foe locked into its last move)
 function isSwitchTarget(t: number): boolean { return t <= SWITCH_BASE && t > LEECH_BASE; }
 function switchBenchIdx(t: number): number { return SWITCH_BASE - t; }
 function switchCode(benchIdx: number): number { return SWITCH_BASE - benchIdx; }
@@ -282,9 +284,15 @@ function statusCode(foeIdx: number): number { return STATUS_BASE - foeIdx; }
 function isPivotTarget(t: number): boolean { return t <= PIVOT_BASE && t > DEBUFF_BASE; }
 function pivotFoeIdx(t: number): number { return PIVOT_BASE - t; }
 function pivotCode(foeIdx: number): number { return PIVOT_BASE - foeIdx; }
-function isDebuffTarget(t: number): boolean { return t <= DEBUFF_BASE; }
+function isDebuffTarget(t: number): boolean { return t <= DEBUFF_BASE && t > TAUNT_BASE; }
 function debuffFoeIdx(t: number): number { return DEBUFF_BASE - t; }
 function debuffCode(foeIdx: number): number { return DEBUFF_BASE - foeIdx; }
+function isTauntTarget(t: number): boolean { return t <= TAUNT_BASE && t > ENCORE_BASE; }
+function tauntFoeIdx(t: number): number { return TAUNT_BASE - t; }
+function tauntCode(foeIdx: number): number { return TAUNT_BASE - foeIdx; }
+function isEncoreTarget(t: number): boolean { return t <= ENCORE_BASE; }
+function encoreFoeIdx(t: number): number { return ENCORE_BASE - t; }
+function encoreCode(foeIdx: number): number { return ENCORE_BASE - foeIdx; }
 function isFieldTarget(t: number): boolean { return t === SET_TAILWIND || t === SET_TRICKROOM; }
 // Benched live team-indices a side can switch INTO (not on the field, hp > 0).
 function benchSwitchTargets(active: number[], hp: number[], n: number): number[] {
@@ -571,6 +579,9 @@ interface Tables {
   myPivotDebuff: (BoostMap | null)[]; oppPivotDebuff: (BoostMap | null)[];
   // Dedicated debuff move (Charm/Scary Face/…): move + the foe boost-drop it applies.
   myDebuffMove: ({ move: string; boosts: BoostMap } | null)[]; oppDebuffMove: ({ move: string; boosts: BoostMap } | null)[];
+  // Taunt / Encore moves (option-restriction), or null.
+  myTauntMove: (string | null)[]; oppTauntMove: (string | null)[];
+  myEncoreMove: (string | null)[]; oppEncoreMove: (string | null)[];
   // Regenerator: heals 1/3 max HP when the mon switches OUT.
   myRegen: boolean[]; oppRegen: boolean[];
   // Rock Head: negates a recoil move's self-damage (Magic Guard does too, via myResidual).
@@ -860,7 +871,17 @@ interface State {
    *  Inflicted sleep starts at 2 (Gen 9 is 1-3 turns; the middle is a fair model). */
   mySleepTurns: number[];
   oppSleepTurns: number[];
+  /** Taunt turns remaining per mon (>0 = can't use status moves). */
+  myTaunt: number[];
+  oppTaunt: number[];
+  /** Encore turns remaining per mon (>0 = locked into `myEncoreAct`); the locked
+   *  action code (the target/sentinel it must repeat), or NONE when not encored. */
+  myEncore: number[];
+  oppEncore: number[];
+  myEncoreAct: number[];
+  oppEncoreAct: number[];
 }
+const NONE = 99;   // "no locked action" sentinel for encoreAct (not a valid target)
 
 // Doubles screen damage reduction (2732/4096 ≈ 0.667), matching @smogon/calc's
 // gameType:'Doubles' modifier. A screen on the DEFENDER's side reduces incoming
@@ -1054,6 +1075,10 @@ function findDebuffMove(moves: string[]): { move: string; boosts: BoostMap } | n
   for (const m of moves) { const b = DEBUFF_MOVES[toId(m)]; if (b) return { move: m, boosts: b }; }
   return null;
 }
+// Taunt (target can't use status moves for ~3 turns) / Encore (target locked into
+// its last move for ~3 turns) — common option-restriction moves.
+function findTauntMove(moves: string[]): string | null { return moves.find(m => toId(m) === 'taunt') ?? null; }
+function findEncoreMove(moves: string[]): string | null { return moves.find(m => toId(m) === 'encore') ?? null; }
 // Can `status` (via `move`) actually land on the target? Honors type immunities,
 // the matching ability immunities, and Misty Terrain on grounded mons. We ignore
 // already-statused / substitute (checked at apply time).
@@ -1388,6 +1413,10 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppPivotDebuff: oppPivotMoveArr.map(pm => pm ? pivotDebuff(pm) : null),
     myDebuffMove: mine.map(m => findDebuffMove(m.set.moves ?? [])),
     oppDebuffMove: opp.map(o => findDebuffMove(o.entry.knownMoves)),
+    myTauntMove: mine.map(m => findTauntMove(m.set.moves ?? [])),
+    oppTauntMove: opp.map(o => findTauntMove(o.entry.knownMoves)),
+    myEncoreMove: mine.map(m => findEncoreMove(m.set.moves ?? [])),
+    oppEncoreMove: opp.map(o => findEncoreMove(o.entry.knownMoves)),
     myIntimImmune: mine.map(m => intimidateImmune(m.set.ability, m.set.item)),
     oppIntimImmune: opp.map(o => intimidateImmune(o.entry.ability, o.entry.item)),
     myRockHead: mine.map(m => hasRockHead(m.set.ability)),
@@ -1478,6 +1507,13 @@ function initialState(input: SearchInput): State {
     // ~2 turns (the middle of Gen 9's 1-3).
     mySleepTurns: input.mine.map(m => (m.status === 'slp' ? 2 : 0)),
     oppSleepTurns: input.opp.map(o => (o.status === 'slp' ? 2 : 0)),
+    // Taunt/Encore volatiles aren't carried on SearchInput yet → start clear.
+    myTaunt: input.mine.map(() => 0),
+    oppTaunt: input.opp.map(() => 0),
+    myEncore: input.mine.map(() => 0),
+    oppEncore: input.opp.map(() => 0),
+    myEncoreAct: input.mine.map(() => NONE),
+    oppEncoreAct: input.opp.map(() => NONE),
   };
 }
 
@@ -1680,7 +1716,8 @@ function resolveTurn(
   const nonAttack = (target: number) =>
     isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isStatusTarget(target) || isFieldTarget(target)
     || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN || target === RECOVER || target === SET_HAZARD
-    || target === REDIRECT || target === SLEEP_SKIP || isPivotTarget(target) || isDebuffTarget(target);
+    || target === REDIRECT || target === SLEEP_SKIP || isPivotTarget(target) || isDebuffTarget(target)
+    || isTauntTarget(target) || isEncoreTarget(target);
   const actings: Acting[] = [];
   for (const [actor, target] of myTargets) {
     if (nonAttack(target) || myAsleep(actor)) continue;
@@ -2023,6 +2060,31 @@ function resolveTurn(
     if ((myHp[foe] ?? 0) > 0) accDrop(oppToFoeDrop, foe, dm.boosts);
   }
 
+  // Taunt / Encore (option restriction). Tick down what was active at the start
+  // (clearing at 0), reset on switch-in, then apply this turn's casts.
+  const myTaunt = s.myTaunt.slice(); const oppTaunt = s.oppTaunt.slice();
+  const myEncore = s.myEncore.slice(); const oppEncore = s.oppEncore.slice();
+  const myEncoreAct = s.myEncoreAct.slice(); const oppEncoreAct = s.oppEncoreAct.slice();
+  const tickRestrict = (i: number, taunt: number[], enc: number[], encAct: number[]) => {
+    if (taunt[i]! > 0) taunt[i]!--;
+    if (enc[i]! > 0) { enc[i]!--; if (enc[i] === 0) encAct[i] = NONE; }
+  };
+  for (const i of myActiveNow) tickRestrict(i, myTaunt, myEncore, myEncoreAct);
+  for (const j of oppActiveNow) tickRestrict(j, oppTaunt, oppEncore, oppEncoreAct);
+  for (const inn of mySwitchIn.values()) { myTaunt[inn] = 0; myEncore[inn] = 0; myEncoreAct[inn] = NONE; }
+  for (const inn of oppSwitchIn.values()) { oppTaunt[inn] = 0; oppEncore[inn] = 0; oppEncoreAct[inn] = NONE; }
+  // Inflict (lasts ~3 turns). Encore locks the foe into the move it used THIS turn
+  // (any non-switch action), so it repeats it next ply.
+  const lockable = (act: number | undefined): act is number => act != null && !isSwitchTarget(act) && !isBatonTarget(act) && !isPivotTarget(act) && act !== SLEEP_SKIP;
+  for (const [actor, target] of myTargets) {
+    if (isTauntTarget(target) && t.myTauntMove[actor]) { const foe = redirect(tauntFoeIdx(target), oppSwitchIn); if ((oppHp[foe] ?? 0) > 0) oppTaunt[foe] = 3; }
+    else if (isEncoreTarget(target) && t.myEncoreMove[actor]) { const foe = redirect(encoreFoeIdx(target), oppSwitchIn); const la = oppTargets.get(foe); if ((oppHp[foe] ?? 0) > 0 && lockable(la)) { oppEncore[foe] = 3; oppEncoreAct[foe] = la; } }
+  }
+  for (const [actor, target] of oppTargets) {
+    if (isTauntTarget(target) && t.oppTauntMove[actor]) { const foe = redirect(tauntFoeIdx(target), mySwitchIn); if ((myHp[foe] ?? 0) > 0) myTaunt[foe] = 3; }
+    else if (isEncoreTarget(target) && t.oppEncoreMove[actor]) { const foe = redirect(encoreFoeIdx(target), mySwitchIn); const la = myTargets.get(foe); if ((myHp[foe] ?? 0) > 0 && lockable(la)) { myEncore[foe] = 3; myEncoreAct[foe] = la; } }
+  }
+
   // Boost bookkeeping. A mon that LEAVES the field clears its stages; a switch-in
   // arrives fresh — EXCEPT Baton Pass, which passes the outgoing mon's current
   // stages to the incoming mon. Then setup moves apply their self-boost, and
@@ -2118,6 +2180,7 @@ function resolveTurn(
     myReflectTurns, myLightScreenTurns, theirReflectTurns, theirLightScreenTurns,
     weather, weatherTurns, terrain, terrainTurns, myToxicN, oppToxicN, myStatus, oppStatus,
     myBerryUsed, oppBerryUsed, myHazards, oppHazards, mySleepTurns, oppSleepTurns,
+    myTaunt, oppTaunt, myEncore, oppEncore, myEncoreAct, oppEncoreAct,
   };
 }
 
@@ -2206,6 +2269,11 @@ function jointActions(
   pivot?: { move: (string | null)[]; foes: number[] },
   // Dedicated debuff capability (root only): per-actor move + the foe indices to debuff.
   debuff?: { move: ({ move: string; boosts: BoostMap } | null)[]; foes: number[] },
+  // Option-restriction state (all plies): a taunted mon may only attack/spread/switch;
+  // an encored mon may only repeat `encoreAct`.
+  restrict?: { taunt: boolean[]; encore: boolean[]; encoreAct: number[] },
+  // Taunt/Encore CAST capability (root only): per-actor move + foe indices.
+  tauntEncore?: { taunt: (string | null)[]; encore: (string | null)[]; foes: number[] },
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -2218,6 +2286,13 @@ function jointActions(
     if (asleep?.[actor]) {
       const next: Array<Map<number, number>> = [];
       for (const combo of combos) { const m = new Map(combo); m.set(actor, SLEEP_SKIP); next.push(m); }
+      combos = next;
+      continue;
+    }
+    // Encored → forced to repeat the locked move.
+    if (restrict?.encore[actor]) {
+      const next: Array<Map<number, number>> = [];
+      for (const combo of combos) { const m = new Map(combo); m.set(actor, restrict.encoreAct[actor]!); next.push(m); }
       combos = next;
       continue;
     }
@@ -2235,6 +2310,8 @@ function jointActions(
     const statusCodes = (status && status.move[actor] != null) ? status.foes.map(statusCode) : [];
     const pivotCodes = (pivot && pivot.move[actor] != null) ? pivot.foes.map(pivotCode) : [];
     const debuffCodes = (debuff && debuff.move[actor] != null) ? debuff.foes.map(debuffCode) : [];
+    const tauntCodes = (tauntEncore && tauntEncore.taunt[actor] != null) ? tauntEncore.foes.map(tauntCode) : [];
+    const encoreCodes = (tauntEncore && tauntEncore.encore[actor] != null) ? tauntEncore.foes.map(encoreCode) : [];
     const batonCodes = (baton && baton.move[actor] != null) ? baton.targets.map(batonCode) : [];
     // SPREAD first so a spread that ties a single-target line is kept. PROTECT /
     // field / setup / screen / weather / Leech / SWITCH / Baton last — only chosen
@@ -2256,12 +2333,16 @@ function jointActions(
       ...statusCodes,
       ...pivotCodes,
       ...debuffCodes,
+      ...tauntCodes,
+      ...encoreCodes,
       ...switchCodes,
       ...batonCodes,
     ];
+    // Taunted → only attacking/spread/switch options survive (no status moves).
+    const usable = restrict?.taunt[actor] ? options.filter(o => o >= 0 || o === SPREAD || isSwitchTarget(o)) : options;
     const next: Array<Map<number, number>> = [];
     for (const combo of combos) {
-      for (const opt of options) {
+      for (const opt of usable) {
         // Doubles legality: two actives can't switch/Baton-Pass into the SAME mon.
         if (isSwitchTarget(opt) || isBatonTarget(opt)) {
           const bench = benchOf(opt);
@@ -2318,8 +2399,14 @@ function value(t: Tables, s: State, depth: number, alpha: number, pass: Pass): n
   if (term !== null) return term;
   if (depth === 0) return leafScore(s);
 
-  const myJoints = jointActions(s.myActive, s.oppActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak);
-  const oppJoints = jointActions(s.oppActive, s.myActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak);
+  // Deeper plies: no root-only actions (switch/field/setup/…), but Taunt/Encore
+  // RESTRICTIONS persist, so pass the restrict mask (param 22; the intervening
+  // root-only params are undefined). Sleep is handled by the in-loop guard.
+  const U = undefined;
+  const myRestrict = { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct };
+  const oppRestrict = { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct };
+  const myJoints = jointActions(s.myActive, s.oppActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak, U, U, U, U, U, U, U, U, U, U, U, U, U, U, U, myRestrict);
+  const oppJoints = jointActions(s.oppActive, s.myActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak, U, U, U, U, U, U, U, U, U, U, U, U, U, U, U, oppRestrict);
   if (myJoints.length === 0) return leafScore(s);
 
   let best = -Infinity;
@@ -2473,7 +2560,9 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     s.myStatus.map((st, i) => st === 'slp' && (s.mySleepTurns[i] ?? 0) > 0),
     t.myRedirectMove,
     { move: t.myPivotMove, foes: myBench.length > 0 ? s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) : [] },
-    { move: t.myDebuffMove, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) });
+    { move: t.myDebuffMove, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
+    { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct },
+    { taunt: t.myTauntMove, encore: t.myEncoreMove, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) });
 }
 function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
@@ -2498,7 +2587,9 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     s.oppStatus.map((st, j) => st === 'slp' && (s.oppSleepTurns[j] ?? 0) > 0),
     t.oppRedirectMove,
     { move: t.oppPivotMove, foes: oppBench.length > 0 ? s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) : [] },
-    { move: t.oppDebuffMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) });
+    { move: t.oppDebuffMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
+    { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct },
+    { taunt: t.oppTauntMove, encore: t.oppEncoreMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) });
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -2536,7 +2627,11 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
   const plays: SearchPlay[] = [];
   if (!joint) return plays;
   for (const [actor, target] of joint) {
-    if (isDebuffTarget(target)) {
+    if (isTauntTarget(target)) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myTauntMove[actor] ?? 'Taunt', targetSpecies: t.oppSpecies[tauntFoeIdx(target)]! });
+    } else if (isEncoreTarget(target)) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myEncoreMove[actor] ?? 'Encore', targetSpecies: t.oppSpecies[encoreFoeIdx(target)]! });
+    } else if (isDebuffTarget(target)) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myDebuffMove[actor]?.move ?? 'Charm', targetSpecies: t.oppSpecies[debuffFoeIdx(target)]! });
     } else if (isPivotTarget(target)) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myPivotMove[actor] ?? 'U-turn', targetSpecies: t.oppSpecies[pivotFoeIdx(target)]!, switch: true });
@@ -2586,7 +2681,11 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): Search
   const plays: SearchPlay[] = [];
   if (!joint) return plays;
   for (const [actor, target] of joint) {
-    if (isDebuffTarget(target)) {
+    if (isTauntTarget(target)) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppTauntMove[actor] ?? 'Taunt', targetSpecies: t.mySpecies[tauntFoeIdx(target)]! });
+    } else if (isEncoreTarget(target)) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppEncoreMove[actor] ?? 'Encore', targetSpecies: t.mySpecies[encoreFoeIdx(target)]! });
+    } else if (isDebuffTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppDebuffMove[actor]?.move ?? 'Charm', targetSpecies: t.mySpecies[debuffFoeIdx(target)]! });
     } else if (isPivotTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppPivotMove[actor] ?? 'U-turn', targetSpecies: t.mySpecies[pivotFoeIdx(target)]!, switch: true });
@@ -3138,6 +3237,8 @@ export function createSearch(input: SearchInput): PositionSearch {
       if ((myBenchNow2 && canRedirect(expected.table.myPivotMove, s0.myActive)) || (oppBenchNow2 && canRedirect(expected.table.oppPivotMove, s0.oppActive))) actionClasses.push('pivot');
       const canDebuff = (moves: ({ move: string } | null)[], active: number[]) => active.some(i => moves[i] != null);
       if (canDebuff(expected.table.myDebuffMove, s0.myActive) || canDebuff(expected.table.oppDebuffMove, s0.oppActive)) actionClasses.push('debuff');
+      if (canRedirect(expected.table.myTauntMove, s0.myActive) || canRedirect(expected.table.oppTauntMove, s0.oppActive)) actionClasses.push('taunt');
+      if (canRedirect(expected.table.myEncoreMove, s0.myActive) || canRedirect(expected.table.oppEncoreMove, s0.oppActive)) actionClasses.push('encore');
       const explored: SearchExplored = {
         depth,
         myActions: myRootJoints.length,
@@ -3218,7 +3319,9 @@ export type TurnAction =
   | { kind: 'status'; target: number }   // inflict a status move on the foe at `target`
   | { kind: 'redirect' }                  // Follow Me / Rage Powder
   | { kind: 'pivot'; target: number }     // U-turn/Volt Switch/Parting Shot at `target`, then switch out
-  | { kind: 'debuff'; target: number };   // Charm/Scary Face/… on the foe at `target`
+  | { kind: 'debuff'; target: number }    // Charm/Scary Face/… on the foe at `target`
+  | { kind: 'taunt'; target: number }     // Taunt the foe at `target`
+  | { kind: 'encore'; target: number };   // Encore the foe at `target`
 
 /** Post-turn structural state of one mon (by team-index). HP is our coarse
  *  representative value — the harness compares the DISCRETE fields (fainted /
@@ -3232,6 +3335,9 @@ export interface ResolvedSlot {
   status: string;
   boosts: Partial<Record<'atk' | 'def' | 'spa' | 'spd' | 'spe', number>>;
   moveUsed?: string;
+  /** Taunt / Encore turns remaining after the turn (for diff-harness / tests). */
+  taunt?: number;
+  encore?: number;
 }
 export interface ResolvedTurn {
   mine: ResolvedSlot[];
@@ -3265,6 +3371,8 @@ export function resolveOneTurn(
     else if (a.kind === 'redirect') { myTargets.set(actor, REDIRECT); myMove.set(actor, t.myRedirectMove[actor] ?? ''); }
     else if (a.kind === 'pivot') { myTargets.set(actor, pivotCode(a.target)); myMove.set(actor, t.myPivotMove[actor] ?? ''); }
     else if (a.kind === 'debuff') { myTargets.set(actor, debuffCode(a.target)); myMove.set(actor, t.myDebuffMove[actor]?.move ?? ''); }
+    else if (a.kind === 'taunt') { myTargets.set(actor, tauntCode(a.target)); myMove.set(actor, t.myTauntMove[actor] ?? ''); }
+    else if (a.kind === 'encore') { myTargets.set(actor, encoreCode(a.target)); myMove.set(actor, t.myEncoreMove[actor] ?? ''); }
     else { myTargets.set(actor, PROTECT); }
   }
   for (const [actor, a] of oppActions) {
@@ -3274,6 +3382,8 @@ export function resolveOneTurn(
     else if (a.kind === 'redirect') { oppTargets.set(actor, REDIRECT); oppMove.set(actor, t.oppRedirectMove[actor] ?? ''); }
     else if (a.kind === 'pivot') { oppTargets.set(actor, pivotCode(a.target)); oppMove.set(actor, t.oppPivotMove[actor] ?? ''); }
     else if (a.kind === 'debuff') { oppTargets.set(actor, debuffCode(a.target)); oppMove.set(actor, t.oppDebuffMove[actor]?.move ?? ''); }
+    else if (a.kind === 'taunt') { oppTargets.set(actor, tauntCode(a.target)); oppMove.set(actor, t.oppTauntMove[actor] ?? ''); }
+    else if (a.kind === 'encore') { oppTargets.set(actor, encoreCode(a.target)); oppMove.set(actor, t.oppEncoreMove[actor] ?? ''); }
     else { oppTargets.set(actor, PROTECT); }
   }
   const pass: Pass = {
@@ -3287,8 +3397,8 @@ export function resolveOneTurn(
     status: status[i] ?? '', boosts: { ...boost[i] }, moveUsed: move,
   });
   return {
-    mine: input.mine.map((_, i) => slot(i, s.myHp, s.myStatus, s.myBoost, t.mySpecies, myMove.get(i))),
-    opp: input.opp.map((_, j) => slot(j, s.oppHp, s.oppStatus, s.oppBoost, t.oppSpecies, oppMove.get(j))),
+    mine: input.mine.map((_, i) => ({ ...slot(i, s.myHp, s.myStatus, s.myBoost, t.mySpecies, myMove.get(i)), taunt: s.myTaunt[i], encore: s.myEncore[i] })),
+    opp: input.opp.map((_, j) => ({ ...slot(j, s.oppHp, s.oppStatus, s.oppBoost, t.oppSpecies, oppMove.get(j)), taunt: s.oppTaunt[j], encore: s.oppEncore[j] })),
     weather: s.weather ?? '',
     terrain: s.terrain ?? '',
   };

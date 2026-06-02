@@ -90,7 +90,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Item manipulation | Knock Off, Trick, Switcheroo, Thief, Covet | ✅(KO dmg) | ✅ | **PARTIAL** | live tracks item removal/swap; search uses static items |
 | Hazard SET | Stealth Rock/Spikes/Toxic Spikes/Sticky Web (dedicated) + Stone Axe→SR / Ceaseless Edge→Spikes (secondary) | – | ✅ | ✅ | search lays hazards on the foe's side (`SET_HAZARD` action + `Cell.setsHazard`); dynamic `State.my/oppHazards`; refill-ins eat the chip. Freshly-set hazards are correctly dodgeable in a short horizon (opp pre-switches) → payoff is the FORCED-refill case |
 | Hazard CLEAR | Defog/Rapid Spin/Mortal Spin/Court Change/Tidy Up | – | ✅ | **GAP** | live clears via `applyHazardClear`; search doesn't model removal yet |
-| Encore/Taunt/Disable/Torment | — | – | ✅(counters) | **GAP** | restrict opp options; not in search |
+| Taunt / Encore | — | – | ✅(counters) | ✅ | **Taunt**: target can't use status moves (jointActions filters to attack/spread/switch) for ~3 turns. **Encore**: target locked into the move it just used for ~3 turns. `State.my/oppTaunt`, `my/oppEncore(+Act)`. Disable/Torment/Imprison still GAP (root taunt/encore not yet carried from live match) |
 | Substitute | — | ✅(partial) | ✅(limited) | **PARTIAL** | sub-HP tracking is limited (see `project_sub_hp_tracking`) |
 | Self-destruct | Explosion, Final Gambit, Misty/Healing Wish | ✅ | ? | **GAP** | user faints; special semantics |
 | Weather/terrain-typed | Weather Ball, Terrain Pulse, Rising Voltage, Expanding Force | ✅ | ✅ | ✅ | calc handles the type/BP change |

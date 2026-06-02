@@ -73,8 +73,10 @@ const RULES: GapRule[] = [
   { kind: 'wish', label: 'delayed heal (Wish)', moves: ['wish'] },
   { kind: 'damagereflect', label: 'damage reflect (Counter / Mirror Coat)',
     moves: ['counter', 'mirrorcoat', 'metalburst'] },
-  { kind: 'restriction', label: 'move restriction (Taunt / Encore / Disable)',
-    moves: ['taunt', 'encore', 'disable', 'torment', 'imprison', 'spite'] },
+  // Taunt + Encore are now MODELLED (option restriction). Disable/Torment/Imprison
+  // /Spite remain a gap.
+  { kind: 'restriction', label: 'move restriction (Disable / Torment / Imprison)',
+    moves: ['disable', 'torment', 'imprison', 'spite'] },
   { kind: 'substitute', label: 'Substitute', moves: ['substitute'] },
   { kind: 'selffaint', label: 'self-faint move (Explosion / Final Gambit)',
     moves: ['explosion', 'selfdestruct', 'mistyexplosion', 'finalgambit', 'healingwish', 'lunardance', 'memento'] },
