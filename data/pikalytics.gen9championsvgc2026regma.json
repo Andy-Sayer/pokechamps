@@ -1976,89 +1976,85 @@
       "moves": [
         {
           "name": "Rock Slide",
-          "pct": 99.123
+          "pct": 98.945
         },
         {
           "name": "Tailwind",
-          "pct": 97.838
+          "pct": 98.505
         },
         {
           "name": "Protect",
-          "pct": 88.06
+          "pct": 78.136
         },
         {
           "name": "Dual Wingbeat",
-          "pct": 84.138
+          "pct": 58.358
         },
         {
           "name": "Wide Guard",
-          "pct": 21.012
+          "pct": 50.256
         },
         {
           "name": "Other",
-          "pct": 9.829
+          "pct": 15.8
         }
       ],
       "abilities": [
         {
           "name": "Unnerve",
-          "pct": 92.571
+          "pct": 93.296
         },
         {
           "name": "Rock Head",
-          "pct": 5.533
+          "pct": 4.692
         },
         {
           "name": "Pressure",
-          "pct": 1.895
+          "pct": 2.013
         }
       ],
       "items": [
         {
           "name": "Focus Sash",
-          "pct": 87.066
+          "pct": 90.955
         },
         {
           "name": "Sitrus Berry",
-          "pct": 4.232
-        },
-        {
-          "name": "Lum Berry",
-          "pct": 3.382
+          "pct": 3.769
         },
         {
           "name": "Hard Stone",
-          "pct": 2.115
+          "pct": 2.001
         },
         {
           "name": "Other",
-          "pct": 3.204
+          "pct": 3.275
         }
       ],
       "teammates": [
         {
           "name": "Garchomp",
-          "pct": 52.892
-        },
-        {
-          "name": "Sneasler",
-          "pct": 46.965
+          "pct": 58.456
         },
         {
           "name": "Kingambit",
-          "pct": 41.954
+          "pct": 54.467
         },
         {
-          "name": "Floette-Mega",
-          "pct": 39.461
-        },
-        {
-          "name": "Incineroar",
-          "pct": 33.98
+          "name": "Charizard-Mega-Y",
+          "pct": 49.551
         },
         {
           "name": "Basculegion",
-          "pct": 31.432
+          "pct": 46.155
+        },
+        {
+          "name": "Floette-Mega",
+          "pct": 45.17
+        },
+        {
+          "name": "Sneasler",
+          "pct": 28.998
         }
       ],
       "topSpread": {
@@ -2071,7 +2067,7 @@
           0,
           32
         ],
-        "pct": 55.117
+        "pct": 47.168
       },
       "featuredSets": [
         {
@@ -2123,18 +2119,6 @@
           ]
         },
         {
-          "player": "QuantumSlack",
-          "record": "9-2",
-          "item": "Focus Sash",
-          "ability": "Unnerve",
-          "moves": [
-            "Rock Slide",
-            "Protect",
-            "Tailwind",
-            "Dual Wingbeat"
-          ]
-        },
-        {
           "player": "Samuel T",
           "record": "8-2",
           "item": "Focus Sash",
@@ -2144,6 +2128,18 @@
             "Dual Wingbeat",
             "Tailwind",
             "Protect"
+          ]
+        },
+        {
+          "player": "OgreVGC",
+          "record": "5-0",
+          "item": "Focus Sash",
+          "ability": "Unnerve",
+          "moves": [
+            "Tailwind",
+            "Rock Slide",
+            "Protect",
+            "Dual Wingbeat"
           ]
         },
         {
@@ -2171,15 +2167,15 @@
           ]
         },
         {
-          "player": "Carlos Espí",
-          "record": "3-0",
+          "player": "Samuel T",
+          "record": "10-1",
           "item": "Focus Sash",
           "ability": "Unnerve",
           "moves": [
-            "Protect",
-            "Tailwind",
+            "Rock Slide",
             "Dual Wingbeat",
-            "Rock Slide"
+            "Tailwind",
+            "Protect"
           ]
         },
         {
@@ -3524,44 +3520,36 @@
       },
       "moves": [
         {
-          "name": "King's Shield",
-          "pct": 90.668
-        },
-        {
           "name": "Shadow Sneak",
-          "pct": 75.875
+          "pct": 89.758
         },
         {
           "name": "Poltergeist",
-          "pct": 73.194
+          "pct": 88.688
+        },
+        {
+          "name": "King's Shield",
+          "pct": 75.278
         },
         {
           "name": "Iron Head",
-          "pct": 40.872
+          "pct": 35.842
         },
         {
           "name": "Close Combat",
-          "pct": 26.011
-        },
-        {
-          "name": "Sacred Sword",
-          "pct": 25.525
+          "pct": 34.207
         },
         {
           "name": "Wide Guard",
-          "pct": 22.885
+          "pct": 31.228
         },
         {
-          "name": "Shadow Ball",
-          "pct": 18.342
-        },
-        {
-          "name": "Flash Cannon",
-          "pct": 15.22
+          "name": "Sacred Sword",
+          "pct": 28.332
         },
         {
           "name": "Other",
-          "pct": 11.407
+          "pct": 16.666
         }
       ],
       "abilities": [
@@ -3573,69 +3561,53 @@
       "items": [
         {
           "name": "Spell Tag",
-          "pct": 50.333
-        },
-        {
-          "name": "Leftovers",
-          "pct": 14.675
+          "pct": 43.76
         },
         {
           "name": "Focus Sash",
-          "pct": 13.614
+          "pct": 36.126
         },
         {
           "name": "Colbur Berry",
-          "pct": 4.362
+          "pct": 7.912
         },
         {
-          "name": "White Herb",
-          "pct": 4.123
-        },
-        {
-          "name": "Sitrus Berry",
-          "pct": 2.799
+          "name": "Leftovers",
+          "pct": 5.252
         },
         {
           "name": "Kasib Berry",
-          "pct": 2.187
-        },
-        {
-          "name": "Metal Coat",
-          "pct": 2.077
-        },
-        {
-          "name": "Occa Berry",
-          "pct": 1.813
+          "pct": 2.121
         },
         {
           "name": "Other",
-          "pct": 4.016
+          "pct": 4.83
         }
       ],
       "teammates": [
         {
           "name": "Garchomp",
-          "pct": 50.622
+          "pct": 68.918
         },
         {
-          "name": "Floette-Mega",
-          "pct": 31.804
-        },
-        {
-          "name": "Sneasler",
-          "pct": 27.445
+          "name": "Charizard-Mega-Y",
+          "pct": 51.382
         },
         {
           "name": "Incineroar",
-          "pct": 26.651
+          "pct": 47.679
         },
         {
-          "name": "Rotom-Wash",
-          "pct": 26.281
+          "name": "Floette-Mega",
+          "pct": 36.906
         },
         {
-          "name": "Basculegion",
-          "pct": 21.96
+          "name": "Sinistcha",
+          "pct": 28.248
+        },
+        {
+          "name": "Aerodactyl-Mega",
+          "pct": 19.438
         }
       ],
       "topSpread": {
@@ -3648,7 +3620,7 @@
           0,
           32
         ],
-        "pct": 10.217
+        "pct": 29.109
       },
       "featuredSets": [
         {
@@ -3685,6 +3657,18 @@
             "Sacred Sword",
             "Poltergeist",
             "Wide Guard"
+          ]
+        },
+        {
+          "player": "megacisco",
+          "record": "3-0",
+          "item": "Spell Tag",
+          "ability": "Stance Change",
+          "moves": [
+            "Poltergeist",
+            "Iron Head",
+            "Shadow Sneak",
+            "King's Shield"
           ]
         },
         {
@@ -3756,18 +3740,6 @@
             "Poltergeist",
             "Shadow Sneak",
             "Sacred Sword",
-            "King's Shield"
-          ]
-        },
-        {
-          "player": "GielBakker",
-          "record": "8-2",
-          "item": "Leftovers",
-          "ability": "Stance Change",
-          "moves": [
-            "Flash Cannon",
-            "Shadow Ball",
-            "Substitute",
             "King's Shield"
           ]
         }
