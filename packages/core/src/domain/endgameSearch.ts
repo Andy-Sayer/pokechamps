@@ -36,6 +36,7 @@ import { statusBerryFor, isStatusBerry } from './statusBerries.js';
 import { applyHazardsToSwitchIn, type HazardEffect } from './hazards.js';
 import { unmodeledMechanics, type UnmodeledMechanic } from './unmodeled.js';
 import { effectiveness } from './typechart.js';
+import { firstTurnOut } from './itemSignals.js';
 
 // ---------------------------------------------------------------------------
 // Input
@@ -600,6 +601,7 @@ interface Tables {
   myChoice: boolean[]; oppChoice: boolean[];
   myHasFakeOut: boolean[]; oppHasFakeOut: boolean[];
   myFakeOutCell: (Cell[] | null)[]; oppFakeOutCell: (Cell[] | null)[];
+  myFlinchImmune: boolean[]; oppFlinchImmune: boolean[];
   // Regenerator: heals 1/3 max HP when the mon switches OUT.
   myRegen: boolean[]; oppRegen: boolean[];
   // Rock Head: negates a recoil move's self-damage (Magic Guard does too, via myResidual).
@@ -1121,6 +1123,10 @@ function hasUnburden(ability: string | null | undefined): boolean { return toId(
 function isWhiteHerb(item: string | null | undefined): boolean { return toId(item ?? '') === 'whiteherb'; }
 function isChoiceItem(item: string | null | undefined): boolean { const i = toId(item ?? ''); return i === 'choiceband' || i === 'choicespecs' || i === 'choicescarf'; }
 function hasFakeOut(moves: string[]): boolean { return moves.some(m => toId(m) === 'fakeout'); }
+// Flinch immunity: Inner Focus (ability) or Covert Cloak (item) — common in VGC.
+function flinchImmune(ability: string | null | undefined, item: string | null | undefined): boolean {
+  return toId(ability ?? '') === 'innerfocus' || /covert\s*cloak/i.test(item ?? '');
+}
 // Aegislash swaps to its Blade forme (offensive stats) when it uses a damaging move;
 // build its OFFENSIVE cells from Blade so its attacks aren't underrated. (Defensive
 // forme is action-dependent — left as Shield, a documented simplification.)
@@ -1499,6 +1505,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     myHasFakeOut: mine.map(m => hasFakeOut(m.set.moves ?? [])),
     oppHasFakeOut: opp.map(o => hasFakeOut(o.entry.knownMoves)),
     myFakeOutCell, oppFakeOutCell,
+    myFlinchImmune: mine.map(m => flinchImmune(m.set.ability, m.set.item)),
+    oppFlinchImmune: opp.map(o => flinchImmune(o.entry.ability, o.entry.item)),
     myIntimImmune: mine.map(m => intimidateImmune(m.set.ability, m.set.item)),
     oppIntimImmune: opp.map(o => intimidateImmune(o.entry.ability, o.entry.item)),
     myRockHead: mine.map(m => hasRockHead(m.set.ability)),
@@ -1878,7 +1886,7 @@ function resolveTurn(
         if ((oppHp[f] ?? 0) > 0 && !oppProtected.has(f)) {
           const fc = t.myFakeOutCell[act.actor]?.[f];
           if (fc) apply(oppHp, f, myDmg(act.actor, f, myRoll(fc, r), fc.physical, fc.type, fc.groundMove), oppSurv, fc.multiHit);
-          oppFlinched.add(f);
+          if (!t.oppFlinchImmune[f]) oppFlinched.add(f);   // Inner Focus / Covert Cloak block the flinch
         }
         continue;
       }
@@ -1933,7 +1941,7 @@ function resolveTurn(
         if ((myHp[f] ?? 0) > 0 && !myProtected.has(f)) {
           const fc = t.oppFakeOutCell[act.actor]?.[f];
           if (fc) apply(myHp, f, oppDmg(act.actor, f, oppRoll(fc, r), fc.physical, fc.type, fc.groundMove), mySurv, fc.multiHit);
-          myFlinched.add(f);
+          if (!t.myFlinchImmune[f]) myFlinched.add(f);
         }
         continue;
       }
@@ -2639,6 +2647,8 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
     mine.push({
       set, hpPercent, active: myActive.has(idx), megaActive: match.myMegaUsed?.includes(idx),
       boosts: match.myBoosts?.[idx], status: match.myStatus?.[idx], survival: mySurvival(set),
+      // Fake Out / First Impression eligibility — true until the mon moves after entry.
+      firstTurnOut: myActive.has(idx) && firstTurnOut(match, 'mine', idx),
     });
     myTeamIdx.push(idx);
   }
@@ -2652,6 +2662,7 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
     opp.push({
       entry, hpPercent, active: oppActive.has(idx), megaActive: entry.megaUsed,
       boosts: entry.currentBoosts, status: entry.status, survival: oppSurvival(entry),
+      firstTurnOut: oppActive.has(idx) && firstTurnOut(match, 'theirs', idx),
     });
     oppTeamIdx.push(idx);
   }

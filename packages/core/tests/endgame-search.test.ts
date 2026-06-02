@@ -4,7 +4,7 @@
 // sign to be robust to exact rolls.
 import { describe, test, expect } from 'vitest';
 import { searchToDepth, searchIterative, searchInputFromMatch, megaMaxSpeed, resolveOneTurn, type SearchInput } from '../src/domain/endgameSearch.js';
-import type { PokemonSet, OpponentEntry, Match } from '../src/domain/types.js';
+import type { PokemonSet, OpponentEntry, Match, MoveAction } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } from '../src/domain/types.js';
 import { maxHpFor } from '../src/domain/damage.js';
 
@@ -308,6 +308,16 @@ describe('searchInputFromMatch', () => {
     // Only the 2 seen opponents.
     expect(input.opp.map(x => x.entry.species)).toEqual(['Incineroar', 'Amoonguss']);
     expect(input.opp[1]!.hpPercent).toBe(30);
+  });
+
+  test('threads firstTurnOut — true for a fresh lead, false after it moves', () => {
+    const m = freshMatch();
+    let input = searchInputFromMatch(m, { mine: [0, 1], theirs: [0, 1] });
+    expect(input.mine.find(x => x.set.species === 'Flutter Mane')!.firstTurnOut).toBe(true);
+    // Flutter Mane (team idx 0) makes a move → no longer first-turn-out.
+    m.turns = [{ index: 1, actions: [{ side: 'mine', kind: 'move', attackerTeamIndex: 0 } as MoveAction] }];
+    input = searchInputFromMatch(m, { mine: [0, 1], theirs: [0, 1] });
+    expect(input.mine.find(x => x.set.species === 'Flutter Mane')!.firstTurnOut).toBe(false);
   });
 
   test('threads live boosts + status onto both sides', () => {
@@ -1533,6 +1543,19 @@ describe('meta gaps: Unburden/White Herb, Fake Out, Aegislash Stance Change', ()
     );
     expect(out.mine[0]!.hpPct).toBe(100);            // Garchomp flinched → no Dragon Claw
     expect(out.opp[0]!.hpPct).toBeLessThan(100);     // Fake Out chip
+  });
+
+  test('Covert Cloak blocks the Fake Out flinch (target still acts)', () => {
+    // My Garchomp holds Covert Cloak (set.item is read directly); the opp Fake Outs it.
+    const out = resolveOneTurn(
+      {
+        mine: [{ set: mon({ species: 'Garchomp', item: 'Covert Cloak', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Dragon Claw'] }), hpPercent: 100, active: true }],
+        opp: [{ entry: { species: 'Incineroar', knownMoves: ['Fake Out'], candidates: [mon({ species: 'Incineroar', ability: 'Intimidate', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Fake Out'] })] }, hpPercent: 100, active: true, firstTurnOut: true }],
+        field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+      },
+      new Map([[0, { kind: 'attack', target: 0 } as const]]), new Map([[0, { kind: 'fakeout', target: 0 } as const]]),
+    );
+    expect(out.opp[0]!.hpPct).toBeLessThan(100);    // Covert Cloak → Garchomp not flinched → Dragon Claw lands
   });
 
   test('Aegislash hits harder in its Blade forme (Stance Change)', () => {
