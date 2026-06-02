@@ -1,6 +1,39 @@
 # Accuracy roadmap
 
-**Last updated 2026-05-29.** A tactical breakdown of correctness gaps and the order to close them. Complements [`roadmap.md`](roadmap.md) (strategic / pillars) — this doc is purely about **damage / state / prediction fidelity**.
+**Last updated 2026-05-29** (status note 2026-06-01 below). A tactical breakdown of correctness gaps and the order to close them. Complements [`roadmap.md`](roadmap.md) (strategic / pillars) — this doc is purely about **damage / state / prediction fidelity**.
+
+## STATUS UPDATE 2026-06-01 — the search-lookahead tier is largely DONE
+
+Most of **Tier 3 (search expansion)** below has since shipped in `endgameSearch.ts`,
+driven by the `@pkmn/sim` diff-harness (see [`sim-divergences.md`](sim-divergences.md)
++ [`mechanics-coverage.md`](mechanics-coverage.md)). Now modelled in the lookahead:
+Protect (consecutive-fail), **speed control** (Icy Wind/Electroweb/Snarl/Low Sweep foe
+stat-drops, Tailwind, Trick Room), **redirection** (Follow Me/Rage Powder), **opponent
+switching** (root-ply, phantom bench), **HP-triggered points** (Sitrus/pinch/status
+berries), setup + self-stat-drops + Defiant/Competitive + on-KO boosts + recoil + Life
+Orb recoil + Unaware + dedicated debuffs (Charm/Scary Face), **sleep**, **pivot moves**
+(U-turn/Volt Switch/Parting Shot), **Taunt + Encore**, hazard SET (incl. Stone Axe),
+weather/terrain/screens with durations, EOT residuals, inflicted status, Regenerator,
+Intimidate, contact-chip, drain. Hail-Mary outs analysis shipped. **The remaining
+high-value items, re-prioritised:**
+
+1. **Perish Song + trap abilities (Shadow Tag / Arena Trap / Magnet Pull)** — a
+   DETERMINISTIC win-con in this league (Perish + trap). Not yet modelled. Highest value.
+2. **Resist berries in the search** (Yache/Occa/Passho/… — heavy use this format): a
+   one-time ½-damage on a super-effective hit of the matching type, then consumed. Big
+   swing (OHKO → survival). Live engine has `resistBerries.ts`; thread into the search.
+3. **Thread live-match volatiles into the search input** — Taunt/Encore/sleep counters,
+   Perish, trapping, Substitute, leech tracked live but `SearchInput` starts them clear;
+   carry them so the recommender reasons from the REAL current state.
+4. **Substitute** (search): 25% HP, blocks damage/status until broken.
+5. **Recoil KO-boundary** (the one empirical harness residual): per-move damage cells /
+   a KO-probability envelope so the ~10 unanimous-faint divergences close.
+6. **Inference** (the *backward* axis, still the original backlog): format-legal item
+   filter, item-permanence model, joint nature/item/EV solve, ability inference.
+7. Lower: Magic Bounce (reflect), two-turn/charge in search (niche), Choice-lock gating.
+
+Tiers 1–2 (live-engine effects) and the item/inference axes below remain the source of
+truth for the NON-search work.
 
 ## What we mean by "accurate"
 

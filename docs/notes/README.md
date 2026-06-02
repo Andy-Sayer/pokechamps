@@ -8,5 +8,6 @@ Long-form notes that don't belong in CLAUDE.md (which stays a tight, always-load
 - [spread-modifier.md](spread-modifier.md) — auto `isSpread` for `allAdjacent` / `allAdjacentFoes` targets
 - [roadmap.md](roadmap.md) — pillar-grouped backlog with "recently shipped" + priority ordering
 - [mechanics-coverage.md](mechanics-coverage.md) — full audit of every move/ability/item/weather/terrain across the 3 layers (calc / live engine / lookahead) + the prioritized gap backlog; the single source of truth for "what's left to model"
+- [sim-divergences.md](sim-divergences.md) — the EMPIRICAL gap list: where our search disagrees with the real `@pkmn/sim` engine, measured by the diff-harness (run `npx tsx packages/core/src/scripts/sim-diff-report.ts`)
 
 Update these alongside the code that backs them. A note that disagrees with the code is worse than no note at all.
