@@ -35,6 +35,7 @@ import { hpItemTriggerFor, isHpItemTriggerItem } from './hpItemTriggers.js';
 import { statusBerryFor, isStatusBerry } from './statusBerries.js';
 import { applyHazardsToSwitchIn, type HazardEffect } from './hazards.js';
 import { unmodeledMechanics, type UnmodeledMechanic } from './unmodeled.js';
+import { effectiveness } from './typechart.js';
 
 // ---------------------------------------------------------------------------
 // Input
@@ -61,6 +62,9 @@ export interface SearchMyMon {
   survival?: Survival;
   /** Already under Leech Seed — the OPP search-index of the seeder (heals it). */
   seededBy?: number;
+  /** True if this mon is on its FIRST turn out (just switched in / battle start) —
+   *  gates Fake Out's guaranteed flinch. Threaded from the live match's tracking. */
+  firstTurnOut?: boolean;
 }
 export interface SearchOppMon {
   entry: OpponentEntry;
@@ -77,6 +81,8 @@ export interface SearchOppMon {
   phantom?: boolean;
   /** Already under Leech Seed — the MY search-index of the seeder (heals it). */
   seededBy?: number;
+  /** On its first turn out (gates Fake Out's flinch). */
+  firstTurnOut?: boolean;
 }
 export interface SearchInput {
   mine: SearchMyMon[];
@@ -269,6 +275,7 @@ const PIVOT_BASE = -60;   // pivot move (U-turn/…) → foe idx; user auto-swit
 const DEBUFF_BASE = -70;  // dedicated stat-lowering move (Charm/Scary Face/…) → foe idx
 const TAUNT_BASE = -80;   // Taunt → foe idx (foe can't use status moves for a few turns)
 const ENCORE_BASE = -90;  // Encore → foe idx (foe locked into its last move)
+const FAKEOUT_BASE = -100; // Fake Out → foe idx (chip + guaranteed flinch, first turn out only)
 function isSwitchTarget(t: number): boolean { return t <= SWITCH_BASE && t > LEECH_BASE; }
 function switchBenchIdx(t: number): number { return SWITCH_BASE - t; }
 function switchCode(benchIdx: number): number { return SWITCH_BASE - benchIdx; }
@@ -290,9 +297,12 @@ function debuffCode(foeIdx: number): number { return DEBUFF_BASE - foeIdx; }
 function isTauntTarget(t: number): boolean { return t <= TAUNT_BASE && t > ENCORE_BASE; }
 function tauntFoeIdx(t: number): number { return TAUNT_BASE - t; }
 function tauntCode(foeIdx: number): number { return TAUNT_BASE - foeIdx; }
-function isEncoreTarget(t: number): boolean { return t <= ENCORE_BASE; }
+function isEncoreTarget(t: number): boolean { return t <= ENCORE_BASE && t > FAKEOUT_BASE; }
 function encoreFoeIdx(t: number): number { return ENCORE_BASE - t; }
 function encoreCode(foeIdx: number): number { return ENCORE_BASE - foeIdx; }
+function isFakeOutTarget(t: number): boolean { return t <= FAKEOUT_BASE; }
+function fakeOutFoeIdx(t: number): number { return FAKEOUT_BASE - t; }
+function fakeOutCode(foeIdx: number): number { return FAKEOUT_BASE - foeIdx; }
 function isFieldTarget(t: number): boolean { return t === SET_TAILWIND || t === SET_TRICKROOM; }
 // Benched live team-indices a side can switch INTO (not on the field, hp > 0).
 function benchSwitchTargets(active: number[], hp: number[], n: number): number[] {
@@ -582,6 +592,14 @@ interface Tables {
   // Taunt / Encore moves (option-restriction), or null.
   myTauntMove: (string | null)[]; oppTauntMove: (string | null)[];
   myEncoreMove: (string | null)[]; oppEncoreMove: (string | null)[];
+  // Meta items/abilities: resist-berry type (halves one SE hit of it), Unburden +
+  // White Herb (item-consume → ×2 Spe / restore drops), Choice lock, Fake Out.
+  myResistBerryType: (string | null)[]; oppResistBerryType: (string | null)[];
+  myHasUnburden: boolean[]; oppHasUnburden: boolean[];
+  myWhiteHerb: boolean[]; oppWhiteHerb: boolean[];
+  myChoice: boolean[]; oppChoice: boolean[];
+  myHasFakeOut: boolean[]; oppHasFakeOut: boolean[];
+  myFakeOutCell: (Cell[] | null)[]; oppFakeOutCell: (Cell[] | null)[];
   // Regenerator: heals 1/3 max HP when the mon switches OUT.
   myRegen: boolean[]; oppRegen: boolean[];
   // Rock Head: negates a recoil move's self-damage (Magic Guard does too, via myResidual).
@@ -880,6 +898,15 @@ interface State {
   oppEncore: number[];
   myEncoreAct: number[];
   oppEncoreAct: number[];
+  /** Unburden active (item consumed → ×2 Spe). */
+  myUnburden: boolean[];
+  oppUnburden: boolean[];
+  /** Resist berry already spent (so a 2nd matching SE hit isn't halved again). */
+  myResistBerryUsed: boolean[];
+  oppResistBerryUsed: boolean[];
+  /** On its first turn out this ply (Fake Out flinch). */
+  myFirstTurn: boolean[];
+  oppFirstTurn: boolean[];
 }
 const NONE = 99;   // "no locked action" sentinel for encoreAct (not a valid target)
 
@@ -1079,6 +1106,27 @@ function findDebuffMove(moves: string[]): { move: string; boosts: BoostMap } | n
 // its last move for ~3 turns) — common option-restriction moves.
 function findTauntMove(moves: string[]): string | null { return moves.find(m => toId(m) === 'taunt') ?? null; }
 function findEncoreMove(moves: string[]): string | null { return moves.find(m => toId(m) === 'encore') ?? null; }
+
+// --- Meta-driven items/abilities (Champions Reg M-A) -------------------------
+// Resist berry → the type it halves a SUPER-EFFECTIVE hit of (once, then consumed).
+const RESIST_BERRY_TYPE: Record<string, string> = {
+  chopleberry: 'Fighting', yacheberry: 'Ice', occaberry: 'Fire', passhoberry: 'Water',
+  wacanberry: 'Electric', rindoberry: 'Grass', kebiaberry: 'Poison', shucaberry: 'Ground',
+  cobaberry: 'Flying', payapaberry: 'Psychic', tangaberry: 'Bug', chartiberry: 'Rock',
+  kasibberry: 'Ghost', habanberry: 'Dragon', colburberry: 'Dark', babiriberry: 'Steel',
+  roseliberry: 'Fairy', chilanberry: 'Normal',
+};
+function resistBerryType(item: string | null | undefined): string | null { return RESIST_BERRY_TYPE[toId(item ?? '')] ?? null; }
+function hasUnburden(ability: string | null | undefined): boolean { return toId(ability ?? '') === 'unburden'; }
+function isWhiteHerb(item: string | null | undefined): boolean { return toId(item ?? '') === 'whiteherb'; }
+function isChoiceItem(item: string | null | undefined): boolean { const i = toId(item ?? ''); return i === 'choiceband' || i === 'choicespecs' || i === 'choicescarf'; }
+function hasFakeOut(moves: string[]): boolean { return moves.some(m => toId(m) === 'fakeout'); }
+// Aegislash swaps to its Blade forme (offensive stats) when it uses a damaging move;
+// build its OFFENSIVE cells from Blade so its attacks aren't underrated. (Defensive
+// forme is action-dependent — left as Shield, a documented simplification.)
+function bladeForme(species: string, ability: string | null | undefined): string | null {
+  return (toId(species) === 'aegislash' && toId(ability ?? '') === 'stancechange') ? 'Aegislash-Blade' : null;
+}
 // Can `status` (via `move`) actually land on the target? Honors type immunities,
 // the matching ability immunities, and Misty Terrain on grounded mons. We ignore
 // already-statused / substitute (checked at apply time).
@@ -1301,15 +1349,21 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
   const oppHypoMega = (oj: number) => oj === plan.oppMega;
   // Megaify only the hypothetical opp; already-mega'd opps are used as-is.
   const oppEntries = opp.map((o, j) => (j === plan.oppMega ? megaifyOppEntry(o.entry) : o.entry));
+  // Aegislash Stance Change: an attacking Aegislash is in its Blade forme (high
+  // offense). Swap the ATTACKER's species to Aegislash-Blade for the damage cells so
+  // its attacks aren't underrated by Shield's 50 base offenses.
+  const bladeSet = (set: PokemonSet): PokemonSet => bladeForme(set.species, set.ability) ? { ...set, species: 'Aegislash-Blade' } : set;
+  const bladeEntry = (e: OpponentEntry): OpponentEntry => bladeForme(e.species, e.ability)
+    ? { ...e, species: 'Aegislash-Blade', candidates: (e.candidates ?? []).map(c => ({ ...c, species: 'Aegislash-Blade' })) } : e;
   const off: Cell[][] = mine.map((m, mi) => oppEntries.map((oe, oj) =>
-    cellFromOffense(m.set, oe, input.field, {
+    cellFromOffense(bladeSet(m.set), oe, input.field, {
       attackerGimmickActive: myMega(mi),
       defenderGimmickActive: oppHypoMega(oj),
       attackerBoosts: m.boosts, attackerStatus: m.status,
       defenderBoosts: opp[oj]!.boosts, defenderStatus: opp[oj]!.status,
     })));
   const thr: Cell[][] = oppEntries.map((oe, oj) => mine.map((m, mi) =>
-    cellFromThreat(oe, m.set, input.field, {
+    cellFromThreat(bladeEntry(oe), m.set, input.field, {
       attackerGimmickActive: oppHypoMega(oj),
       defenderGimmickActive: myMega(mi),
       attackerBoosts: opp[oj]!.boosts, attackerStatus: opp[oj]!.status,
@@ -1348,6 +1402,23 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
       attackerGimmickActive: oppHypoMega(oj), defenderGimmickActive: myMega(mi),
       attackerBoosts: o.boosts, attackerStatus: o.status,
       defenderBoosts: m.boosts, defenderStatus: m.status,
+    }));
+  });
+  // Fake Out damage cells (the chip dealt alongside the flinch).
+  const myFakeOutCell: (Cell[] | null)[] = mine.map((m, mi) => {
+    if (!hasFakeOut(m.set.moves ?? [])) return null;
+    const atk: PokemonSet = { ...m.set, moves: ['Fake Out'] };
+    return oppEntries.map((oe, oj) => cellFromOffense(atk, oe, input.field, {
+      attackerGimmickActive: myMega(mi), defenderGimmickActive: oppHypoMega(oj),
+      attackerBoosts: m.boosts, attackerStatus: m.status, defenderBoosts: opp[oj]!.boosts, defenderStatus: opp[oj]!.status,
+    }));
+  });
+  const oppFakeOutCell: (Cell[] | null)[] = opp.map((o, oj) => {
+    if (!hasFakeOut(oppEntries[oj]!.knownMoves)) return null;
+    const synth: OpponentEntry = { ...oppEntries[oj]!, knownMoves: ['Fake Out'] };
+    return mine.map((m, mi) => cellFromThreat(synth, m.set, input.field, {
+      attackerGimmickActive: oppHypoMega(oj), defenderGimmickActive: myMega(mi),
+      attackerBoosts: o.boosts, attackerStatus: o.status, defenderBoosts: m.boosts, defenderStatus: m.status,
     }));
   });
   return {
@@ -1417,6 +1488,17 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppTauntMove: opp.map(o => findTauntMove(o.entry.knownMoves)),
     myEncoreMove: mine.map(m => findEncoreMove(m.set.moves ?? [])),
     oppEncoreMove: opp.map(o => findEncoreMove(o.entry.knownMoves)),
+    myResistBerryType: mine.map(m => resistBerryType(m.set.item)),
+    oppResistBerryType: opp.map(o => resistBerryType(o.entry.item)),
+    myHasUnburden: mine.map(m => hasUnburden(m.set.ability)),
+    oppHasUnburden: opp.map(o => hasUnburden(o.entry.ability)),
+    myWhiteHerb: mine.map(m => isWhiteHerb(m.set.item)),
+    oppWhiteHerb: opp.map(o => isWhiteHerb(o.entry.item)),
+    myChoice: mine.map(m => isChoiceItem(m.set.item)),
+    oppChoice: opp.map(o => isChoiceItem(o.entry.item)),
+    myHasFakeOut: mine.map(m => hasFakeOut(m.set.moves ?? [])),
+    oppHasFakeOut: opp.map(o => hasFakeOut(o.entry.knownMoves)),
+    myFakeOutCell, oppFakeOutCell,
     myIntimImmune: mine.map(m => intimidateImmune(m.set.ability, m.set.item)),
     oppIntimImmune: opp.map(o => intimidateImmune(o.entry.ability, o.entry.item)),
     myRockHead: mine.map(m => hasRockHead(m.set.ability)),
@@ -1514,6 +1596,12 @@ function initialState(input: SearchInput): State {
     oppEncore: input.opp.map(() => 0),
     myEncoreAct: input.mine.map(() => NONE),
     oppEncoreAct: input.opp.map(() => NONE),
+    myUnburden: input.mine.map(() => false),
+    oppUnburden: input.opp.map(() => false),
+    myResistBerryUsed: input.mine.map(() => false),
+    oppResistBerryUsed: input.opp.map(() => false),
+    myFirstTurn: input.mine.map(m => !!m.firstTurnOut),
+    oppFirstTurn: input.opp.map(o => !!o.firstTurnOut),
   };
 }
 
@@ -1554,6 +1642,12 @@ function resolveTurn(
   // START-of-turn hazards (s.my/oppHazards) below.
   let myHazards = { ...s.myHazards };
   let oppHazards = { ...s.oppHazards };
+  // Resist-berry-spent + Unburden flags (mutated this turn, read NEXT ply by the
+  // damage/speed helpers above — consistent with the apply-next-ply pattern).
+  const myResistBerryUsed = s.myResistBerryUsed.slice();
+  const oppResistBerryUsed = s.oppResistBerryUsed.slice();
+  const myUnburden = s.myUnburden.slice();
+  const oppUnburden = s.oppUnburden.slice();
   // Self-stat-drops a mon's own move inflicts on it this turn (Draco Meteor −2 SpA
   // …), applied to the user's boosts at end of turn. actor index → drop map.
   const mySelfDrop = new Map<number, BoostMap>();
@@ -1632,8 +1726,8 @@ function resolveTurn(
   const nw = normWeather(s.weather);
   const myWeatherSpe = (i: number) => (t.mySpeedWeather[i] && t.mySpeedWeather[i] === nw ? 2 : 1);
   const oppWeatherSpe = (j: number) => (t.oppSpeedWeather[j] && t.oppSpeedWeather[j] === nw ? 2 : 1);
-  const mySpe = (i: number) => t.mySpeed[i]! * (statStageMult(s.myBoost[i]?.spe) / statStageMult(t.myBaked[i]?.spe)) * myWeatherSpe(i);
-  const oppSpe = (j: number) => t.oppSpeed[j]! * (statStageMult(s.oppBoost[j]?.spe) / statStageMult(t.oppBaked[j]?.spe)) * oppWeatherSpe(j);
+  const mySpe = (i: number) => t.mySpeed[i]! * (statStageMult(s.myBoost[i]?.spe) / statStageMult(t.myBaked[i]?.spe)) * myWeatherSpe(i) * (s.myUnburden[i] ? 2 : 1);
+  const oppSpe = (j: number) => t.oppSpeed[j]! * (statStageMult(s.oppBoost[j]?.spe) / statStageMult(t.oppBaked[j]?.spe)) * oppWeatherSpe(j) * (s.oppUnburden[j] ? 2 : 1);
   // Dynamic paralysis (a status MOVE may have inflicted it mid-search).
   const myPar = (i: number) => s.myStatus[i] === 'par';
   const oppPar = (j: number) => s.oppStatus[j] === 'par';
@@ -1660,10 +1754,20 @@ function resolveTurn(
     terrainDamageFactor(type, gm, t.oppGrounded[actor]!, t.myGrounded[tgt]!, s.terrain) / terrainDamageFactor(type, gm, t.oppGrounded[actor]!, t.myGrounded[tgt]!, t.field.terrain);
   // Scale a precomputed roll by the live-vs-baked boost, screen, weather AND terrain
   // ratios (each 1 when unchanged → positions without dynamic effects are unaffected).
+  // Resist-berry scale: once the berry is SPENT, a later hit of its (SE) type is no
+  // longer halved → ×2 vs the baked cell. (1 until the berry is used.)
+  const myResistScale = (tgt: number, type: string) => (s.oppResistBerryUsed[tgt] && type === t.oppResistBerryType[tgt]) ? 2 : 1;
+  const oppResistScale = (tgt: number, type: string) => (s.myResistBerryUsed[tgt] && type === t.myResistBerryType[tgt]) ? 2 : 1;
+  // Spend the resist berry the FIRST time a matching super-effective hit lands.
+  const markResist = (used: boolean[], berryType: (string | null)[], tgt: number, moveType: string, defSpecies: string) => {
+    if (used[tgt] || !moveType || berryType[tgt] !== moveType) return;
+    const types = (getSpecies(defSpecies) as { types?: string[] } | undefined)?.types ?? [];
+    if (effectiveness(moveType, types) > 1) used[tgt] = true;
+  };
   const myDmg = (actor: number, tgt: number, raw: number, physical: boolean, type: string, gm: boolean) =>
-    raw * boostDamageScale(s.myBoost[actor], t.myBaked[actor], s.oppBoost[tgt], t.oppBaked[tgt], physical, t.oppUnaware[tgt], t.myUnaware[actor]) * myScreenScale(physical) * myWeatherScale(type, physical, tgt) * myTerrainScale(type, gm, actor, tgt) * myBurnScale(actor, physical);
+    raw * boostDamageScale(s.myBoost[actor], t.myBaked[actor], s.oppBoost[tgt], t.oppBaked[tgt], physical, t.oppUnaware[tgt], t.myUnaware[actor]) * myScreenScale(physical) * myWeatherScale(type, physical, tgt) * myTerrainScale(type, gm, actor, tgt) * myBurnScale(actor, physical) * myResistScale(tgt, type);
   const oppDmg = (actor: number, tgt: number, raw: number, physical: boolean, type: string, gm: boolean) =>
-    raw * boostDamageScale(s.oppBoost[actor], t.oppBaked[actor], s.myBoost[tgt], t.myBaked[tgt], physical, t.myUnaware[tgt], t.oppUnaware[actor]) * oppScreenScale(physical) * oppWeatherScale(type, physical, tgt) * oppTerrainScale(type, gm, actor, tgt) * oppBurnScale(actor, physical);
+    raw * boostDamageScale(s.oppBoost[actor], t.oppBaked[actor], s.myBoost[tgt], t.myBaked[tgt], physical, t.myUnaware[tgt], t.oppUnaware[actor]) * oppScreenScale(physical) * oppWeatherScale(type, physical, tgt) * oppTerrainScale(type, gm, actor, tgt) * oppBurnScale(actor, physical) * oppResistScale(tgt, type);
   // Psychic Terrain makes priority moves FAIL against a grounded target.
   const psychicBlocked = (priority: number, defenderGrounded: boolean) => s.terrain === 'Psychic' && priority > 0 && defenderGrounded;
 
@@ -1718,11 +1822,16 @@ function resolveTurn(
     || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN || target === RECOVER || target === SET_HAZARD
     || target === REDIRECT || target === SLEEP_SKIP || isPivotTarget(target) || isDebuffTarget(target)
     || isTauntTarget(target) || isEncoreTarget(target);
+  // Fake Out flinches: a mon hit by Fake Out (resolved at +3 before it acts) skips
+  // its action this turn.
+  const myFlinched = new Set<number>();
+  const oppFlinched = new Set<number>();
   const actings: Acting[] = [];
   for (const [actor, target] of myTargets) {
     if (nonAttack(target) || myAsleep(actor)) continue;
     const priority = target === SPREAD ? t.mySpread[actor]!.priority
       : target === PROTECT ? movePriority(t.myProtectMove[actor] ?? 'Protect')
+      : isFakeOutTarget(target) ? 3
       : t.off[actor]![target]!.priority;
     actings.push({ side: 'mine', actor, target, priority, speed: effSpeed(mySpe(actor), s.myTailwind, myPar(actor)) });
   }
@@ -1730,6 +1839,7 @@ function resolveTurn(
     if (nonAttack(target) || oppAsleep(actor)) continue;
     const priority = target === SPREAD ? t.oppSpread[actor]!.priority
       : target === PROTECT ? movePriority(t.oppProtectMove[actor] ?? 'Protect')
+      : isFakeOutTarget(target) ? 3
       : t.thr[actor]![target]!.priority;
     actings.push({ side: 'opp', actor, target, priority, speed: effSpeed(oppSpe(actor), s.theirTailwind, oppPar(actor)) });
   }
@@ -1761,7 +1871,17 @@ function resolveTurn(
   for (const act of actings) {
     if (act.side === 'mine') {
       if (myHp[act.actor]! <= 0) continue;          // KO'd before acting
+      if (myFlinched.has(act.actor)) continue;        // flinched by Fake Out
       if (act.target === PROTECT) continue;           // mon uses Protect — no damage dealt
+      if (isFakeOutTarget(act.target)) {              // Fake Out: chip + flinch the target
+        const f = redirect(fakeOutFoeIdx(act.target), oppSwitchIn);
+        if ((oppHp[f] ?? 0) > 0 && !oppProtected.has(f)) {
+          const fc = t.myFakeOutCell[act.actor]?.[f];
+          if (fc) apply(oppHp, f, myDmg(act.actor, f, myRoll(fc, r), fc.physical, fc.type, fc.groundMove), oppSurv, fc.multiHit);
+          oppFlinched.add(f);
+        }
+        continue;
+      }
       if (act.target === SPREAD) {
         // Spread move — hit every live, unprotected foe ON THE FIELD AFTER switches
         // (oppActiveNow; a benched mon isn't in range of a spread move).
@@ -1776,6 +1896,7 @@ function resolveTurn(
           if (oppHp[foe]! < koBefore) spreadDealt = true;
           if (sp.foeDrop && (sp.dmgMax[foe] ?? 0) > 0) accDrop(myToFoeDrop, foe, sp.foeDrop); // Icy Wind etc. (skip type-immune)
           if (koBefore > 0 && oppHp[foe]! <= 0 && t.myOnKo[act.actor]) myKoCount.set(act.actor, (myKoCount.get(act.actor) ?? 0) + 1);
+          markResist(oppResistBerryUsed, t.oppResistBerryType, foe, sp.type, t.oppSpecies[foe]!);
         }
         if (sp.selfDrop) mySelfDrop.set(act.actor, sp.selfDrop);
         if (t.myLifeOrb[act.actor] && spreadDealt) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10);
@@ -1795,6 +1916,7 @@ function resolveTurn(
       if (oc.selfDrop) mySelfDrop.set(act.actor, oc.selfDrop);       // Draco Meteor −2 SpA etc.
       if (oc.foeDrop && oc.dmgMax > 0) accDrop(myToFoeDrop, oTgt, oc.foeDrop); // Low Sweep −1 Spe etc.
       if (oBefore > 0 && oppHp[oTgt]! <= 0 && t.myOnKo[act.actor]) myKoCount.set(act.actor, (myKoCount.get(act.actor) ?? 0) + 1); // Moxie/Beast Boost
+      markResist(oppResistBerryUsed, t.oppResistBerryType, oTgt, oc.type, t.oppSpecies[oTgt]!);
       // Drain heal + contact punish (Rocky Helmet / Rough Skin) on my attacker.
       if (oDealt > 0 && (myHp[act.actor] ?? 0) > 0) {
         if (oc.drain > 0) myHp[act.actor] = Math.min(100, myHp[act.actor]! + oc.drain * oDealt * (t.oppMaxHp[oTgt]! / (t.myMaxHp[act.actor] || 1)));
@@ -1804,7 +1926,17 @@ function resolveTurn(
       }
     } else {
       if (oppHp[act.actor]! <= 0) continue;
+      if (oppFlinched.has(act.actor)) continue;       // flinched by Fake Out
       if (act.target === PROTECT) continue;           // opp mon uses Protect
+      if (isFakeOutTarget(act.target)) {              // opp Fake Out: chip + flinch my mon
+        const f = redirect(fakeOutFoeIdx(act.target), mySwitchIn);
+        if ((myHp[f] ?? 0) > 0 && !myProtected.has(f)) {
+          const fc = t.oppFakeOutCell[act.actor]?.[f];
+          if (fc) apply(myHp, f, oppDmg(act.actor, f, oppRoll(fc, r), fc.physical, fc.type, fc.groundMove), mySurv, fc.multiHit);
+          myFlinched.add(f);
+        }
+        continue;
+      }
       if (act.target === SPREAD) {
         // Opp spread move — hit every live, unprotected mon of mine ON THE FIELD
         // AFTER switches (myActiveNow; my bench isn't in range).
@@ -1819,6 +1951,7 @@ function resolveTurn(
           if (myHp[me]! < koBefore) spreadDealt = true;
           if (sp.foeDrop && (sp.dmgMax[me] ?? 0) > 0) accDrop(oppToFoeDrop, me, sp.foeDrop);
           if (koBefore > 0 && myHp[me]! <= 0 && t.oppOnKo[act.actor]) oppKoCount.set(act.actor, (oppKoCount.get(act.actor) ?? 0) + 1);
+          markResist(myResistBerryUsed, t.myResistBerryType, me, sp.type, t.mySpecies[me]!);
         }
         if (sp.selfDrop) oppSelfDrop.set(act.actor, sp.selfDrop);
         if (t.oppLifeOrb[act.actor] && spreadDealt) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
@@ -1836,6 +1969,7 @@ function resolveTurn(
       if (tc.selfDrop) oppSelfDrop.set(act.actor, tc.selfDrop);
       if (tc.foeDrop && tc.dmgMax > 0) accDrop(oppToFoeDrop, mTgt, tc.foeDrop);
       if (mBefore > 0 && myHp[mTgt]! <= 0 && t.oppOnKo[act.actor]) oppKoCount.set(act.actor, (oppKoCount.get(act.actor) ?? 0) + 1);
+      markResist(myResistBerryUsed, t.myResistBerryType, mTgt, tc.type, t.mySpecies[mTgt]!);
       if (mDealt > 0 && (oppHp[act.actor] ?? 0) > 0) {
         if (tc.drain > 0) oppHp[act.actor] = Math.min(100, oppHp[act.actor]! + tc.drain * mDealt * (t.myMaxHp[mTgt]! / (t.oppMaxHp[act.actor] || 1)));
         if (tc.contact && t.myContactChip[mTgt]! > 0 && !t.oppResidual[act.actor]!.magicGuard) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - t.myContactChip[mTgt]!);
@@ -2124,6 +2258,18 @@ function resolveTurn(
   for (const inMon of oppSwitchIn.values()) if (t.oppIntimidate[inMon]) {
     for (const mi of myActiveNow) if ((myHp[mi] ?? 0) > 0) applyDrop(myBoost, mi, { atk: -1 }, t.myIntimImmune[mi]!, t.myAbility[mi], t.myDefiantStat[mi]!);
   }
+  // White Herb: once the holder has any lowered stat, restore all negatives to 0 and
+  // consume the item (marked in berryUsed → triggers Unburden via the check below).
+  const hasNeg = (b: BoostMap) => (['atk', 'def', 'spa', 'spd', 'spe'] as const).some(k => (b[k] ?? 0) < 0);
+  const whiteHerb = (boost: BoostMap[], wh: boolean[], used: boolean[], active: number[], hp: number[]) => {
+    for (const i of active) {
+      if (!wh[i] || used[i] || (hp[i] ?? 0) <= 0 || !hasNeg(boost[i]!)) continue;
+      for (const k of ['atk', 'def', 'spa', 'spd', 'spe'] as const) if ((boost[i]![k] ?? 0) < 0) boost[i]![k] = 0;
+      used[i] = true;
+    }
+  };
+  whiteHerb(myBoost, t.myWhiteHerb, myBerryUsed, myActiveNow, myHp);
+  whiteHerb(oppBoost, t.oppWhiteHerb, oppBerryUsed, oppActiveNow, oppHp);
   // Regenerator: a mon that switched OUT heals 1/3 of its max HP (it left before
   // this turn's hits, so its HP is its start-of-turn value). Makes pivoting heal.
   for (const outMon of mySwitchIn.keys()) if (t.myRegen[outMon] && (myHp[outMon] ?? 0) > 0) myHp[outMon] = Math.min(100, myHp[outMon]! + 100 / 3);
@@ -2158,6 +2304,10 @@ function resolveTurn(
   };
   berryHp(s.myHp, myHp, myBoost, myBerryUsed, t.myItem, myActiveNow);
   berryHp(s.oppHp, oppHp, oppBoost, oppBerryUsed, t.oppItem, oppActiveNow);
+  // Unburden: any item consumed THIS turn (White Herb / berry; berryUsed went
+  // false→true) on an Unburden holder doubles its Speed from next ply.
+  for (const i of myActiveNow) if (t.myHasUnburden[i] && !s.myBerryUsed[i] && myBerryUsed[i]) myUnburden[i] = true;
+  for (const j of oppActiveNow) if (t.oppHasUnburden[j] && !s.oppBerryUsed[j] && oppBerryUsed[j]) oppUnburden[j] = true;
 
   // Start from the post-switch slots, then refill from bench after KOs. The opp
   // only auto-refills with ALREADY-REVEALED mons — an unrevealed phantom enters
@@ -2172,6 +2322,14 @@ function resolveTurn(
     applyHazard(inMon, myHp, hazardEffectFor(myHazards, t.mySpecies[inMon]!, t.myAbility[inMon], t.myItem[inMon]), myStatus, myToxicN, myBoost);
   for (const inMon of oppActive) if (!oppActiveNow.includes(inMon))
     applyHazard(inMon, oppHp, hazardEffectFor(oppHazards, t.oppSpecies[inMon]!, t.oppAbility[inMon], t.oppItem[inMon]), oppStatus, oppToxicN, oppBoost);
+  // First-turn-out next ply: every mon that switched/refilled in this turn (gates
+  // Fake Out's flinch).
+  const myFirstTurn = s.myFirstTurn.map(() => false);
+  const oppFirstTurn = s.oppFirstTurn.map(() => false);
+  for (const inn of mySwitchIn.values()) myFirstTurn[inn] = true;
+  for (const inn of oppSwitchIn.values()) oppFirstTurn[inn] = true;
+  for (const inn of myActive) if (!myActiveNow.includes(inn)) myFirstTurn[inn] = true;
+  for (const inn of oppActive) if (!oppActiveNow.includes(inn)) oppFirstTurn[inn] = true;
   return {
     myHp, oppHp, myActive, oppActive, myProtectStreak, oppProtectStreak, oppSeen,
     trickRoom, myTailwind, theirTailwind, trickRoomTurns, myTailwindTurns, theirTailwindTurns,
@@ -2181,6 +2339,7 @@ function resolveTurn(
     weather, weatherTurns, terrain, terrainTurns, myToxicN, oppToxicN, myStatus, oppStatus,
     myBerryUsed, oppBerryUsed, myHazards, oppHazards, mySleepTurns, oppSleepTurns,
     myTaunt, oppTaunt, myEncore, oppEncore, myEncoreAct, oppEncoreAct,
+    myUnburden, oppUnburden, myResistBerryUsed, oppResistBerryUsed, myFirstTurn, oppFirstTurn,
   };
 }
 
@@ -2269,11 +2428,14 @@ function jointActions(
   pivot?: { move: (string | null)[]; foes: number[] },
   // Dedicated debuff capability (root only): per-actor move + the foe indices to debuff.
   debuff?: { move: ({ move: string; boosts: BoostMap } | null)[]; foes: number[] },
-  // Option-restriction state (all plies): a taunted mon may only attack/spread/switch;
-  // an encored mon may only repeat `encoreAct`.
-  restrict?: { taunt: boolean[]; encore: boolean[]; encoreAct: number[] },
+  // Option-restriction state (all plies): a taunted (or Choice-locked) mon may only
+  // attack/spread/switch; an encored mon may only repeat `encoreAct`. (Choice's true
+  // single-move lock needs per-move cells — this is the tractable subset.)
+  restrict?: { taunt: boolean[]; encore: boolean[]; encoreAct: number[]; choice?: boolean[] },
   // Taunt/Encore CAST capability (root only): per-actor move + foe indices.
   tauntEncore?: { taunt: (string | null)[]; encore: (string | null)[]; foes: number[] },
+  // Fake Out (root only): offered when the mon knows it AND is on its first turn out.
+  fakeOut?: { has: boolean[]; firstTurn: boolean[]; foes: number[] },
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -2312,6 +2474,7 @@ function jointActions(
     const debuffCodes = (debuff && debuff.move[actor] != null) ? debuff.foes.map(debuffCode) : [];
     const tauntCodes = (tauntEncore && tauntEncore.taunt[actor] != null) ? tauntEncore.foes.map(tauntCode) : [];
     const encoreCodes = (tauntEncore && tauntEncore.encore[actor] != null) ? tauntEncore.foes.map(encoreCode) : [];
+    const fakeOutCodes = (fakeOut && fakeOut.has[actor] && fakeOut.firstTurn[actor]) ? fakeOut.foes.map(fakeOutCode) : [];
     const batonCodes = (baton && baton.move[actor] != null) ? baton.targets.map(batonCode) : [];
     // SPREAD first so a spread that ties a single-target line is kept. PROTECT /
     // field / setup / screen / weather / Leech / SWITCH / Baton last — only chosen
@@ -2335,11 +2498,12 @@ function jointActions(
       ...debuffCodes,
       ...tauntCodes,
       ...encoreCodes,
+      ...fakeOutCodes,
       ...switchCodes,
       ...batonCodes,
     ];
-    // Taunted → only attacking/spread/switch options survive (no status moves).
-    const usable = restrict?.taunt[actor] ? options.filter(o => o >= 0 || o === SPREAD || isSwitchTarget(o)) : options;
+    // Taunted / Choice-locked → only attacking/spread/switch options survive.
+    const usable = (restrict?.taunt[actor] || restrict?.choice?.[actor]) ? options.filter(o => o >= 0 || o === SPREAD || isSwitchTarget(o)) : options;
     const next: Array<Map<number, number>> = [];
     for (const combo of combos) {
       for (const opt of usable) {
@@ -2403,8 +2567,8 @@ function value(t: Tables, s: State, depth: number, alpha: number, pass: Pass): n
   // RESTRICTIONS persist, so pass the restrict mask (param 22; the intervening
   // root-only params are undefined). Sleep is handled by the in-loop guard.
   const U = undefined;
-  const myRestrict = { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct };
-  const oppRestrict = { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct };
+  const myRestrict = { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct, choice: t.myChoice };
+  const oppRestrict = { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct, choice: t.oppChoice };
   const myJoints = jointActions(s.myActive, s.oppActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak, U, U, U, U, U, U, U, U, U, U, U, U, U, U, U, myRestrict);
   const oppJoints = jointActions(s.oppActive, s.myActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak, U, U, U, U, U, U, U, U, U, U, U, U, U, U, U, oppRestrict);
   if (myJoints.length === 0) return leafScore(s);
@@ -2561,8 +2725,9 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     t.myRedirectMove,
     { move: t.myPivotMove, foes: myBench.length > 0 ? s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) : [] },
     { move: t.myDebuffMove, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
-    { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct },
-    { taunt: t.myTauntMove, encore: t.myEncoreMove, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) });
+    { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct, choice: t.myChoice },
+    { taunt: t.myTauntMove, encore: t.myEncoreMove, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
+    { has: t.myHasFakeOut, firstTurn: s.myFirstTurn, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) });
 }
 function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
@@ -2588,8 +2753,9 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     t.oppRedirectMove,
     { move: t.oppPivotMove, foes: oppBench.length > 0 ? s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) : [] },
     { move: t.oppDebuffMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
-    { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct },
-    { taunt: t.oppTauntMove, encore: t.oppEncoreMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) });
+    { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct, choice: t.oppChoice },
+    { taunt: t.oppTauntMove, encore: t.oppEncoreMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
+    { has: t.oppHasFakeOut, firstTurn: s.oppFirstTurn, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) });
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -2627,7 +2793,9 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
   const plays: SearchPlay[] = [];
   if (!joint) return plays;
   for (const [actor, target] of joint) {
-    if (isTauntTarget(target)) {
+    if (isFakeOutTarget(target)) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Fake Out', targetSpecies: t.oppSpecies[fakeOutFoeIdx(target)]! });
+    } else if (isTauntTarget(target)) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myTauntMove[actor] ?? 'Taunt', targetSpecies: t.oppSpecies[tauntFoeIdx(target)]! });
     } else if (isEncoreTarget(target)) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myEncoreMove[actor] ?? 'Encore', targetSpecies: t.oppSpecies[encoreFoeIdx(target)]! });
@@ -2681,7 +2849,9 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): Search
   const plays: SearchPlay[] = [];
   if (!joint) return plays;
   for (const [actor, target] of joint) {
-    if (isTauntTarget(target)) {
+    if (isFakeOutTarget(target)) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: 'Fake Out', targetSpecies: t.mySpecies[fakeOutFoeIdx(target)]! });
+    } else if (isTauntTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppTauntMove[actor] ?? 'Taunt', targetSpecies: t.mySpecies[tauntFoeIdx(target)]! });
     } else if (isEncoreTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppEncoreMove[actor] ?? 'Encore', targetSpecies: t.mySpecies[encoreFoeIdx(target)]! });
@@ -3321,7 +3491,8 @@ export type TurnAction =
   | { kind: 'pivot'; target: number }     // U-turn/Volt Switch/Parting Shot at `target`, then switch out
   | { kind: 'debuff'; target: number }    // Charm/Scary Face/… on the foe at `target`
   | { kind: 'taunt'; target: number }     // Taunt the foe at `target`
-  | { kind: 'encore'; target: number };   // Encore the foe at `target`
+  | { kind: 'encore'; target: number }    // Encore the foe at `target`
+  | { kind: 'fakeout'; target: number };  // Fake Out the foe at `target`
 
 /** Post-turn structural state of one mon (by team-index). HP is our coarse
  *  representative value — the harness compares the DISCRETE fields (fainted /
@@ -3338,6 +3509,8 @@ export interface ResolvedSlot {
   /** Taunt / Encore turns remaining after the turn (for diff-harness / tests). */
   taunt?: number;
   encore?: number;
+  /** Unburden active (item consumed → ×2 Spe). */
+  unburden?: boolean;
 }
 export interface ResolvedTurn {
   mine: ResolvedSlot[];
@@ -3373,6 +3546,7 @@ export function resolveOneTurn(
     else if (a.kind === 'debuff') { myTargets.set(actor, debuffCode(a.target)); myMove.set(actor, t.myDebuffMove[actor]?.move ?? ''); }
     else if (a.kind === 'taunt') { myTargets.set(actor, tauntCode(a.target)); myMove.set(actor, t.myTauntMove[actor] ?? ''); }
     else if (a.kind === 'encore') { myTargets.set(actor, encoreCode(a.target)); myMove.set(actor, t.myEncoreMove[actor] ?? ''); }
+    else if (a.kind === 'fakeout') { myTargets.set(actor, fakeOutCode(a.target)); myMove.set(actor, 'Fake Out'); }
     else { myTargets.set(actor, PROTECT); }
   }
   for (const [actor, a] of oppActions) {
@@ -3384,6 +3558,7 @@ export function resolveOneTurn(
     else if (a.kind === 'debuff') { oppTargets.set(actor, debuffCode(a.target)); oppMove.set(actor, t.oppDebuffMove[actor]?.move ?? ''); }
     else if (a.kind === 'taunt') { oppTargets.set(actor, tauntCode(a.target)); oppMove.set(actor, t.oppTauntMove[actor] ?? ''); }
     else if (a.kind === 'encore') { oppTargets.set(actor, encoreCode(a.target)); oppMove.set(actor, t.oppEncoreMove[actor] ?? ''); }
+    else if (a.kind === 'fakeout') { oppTargets.set(actor, fakeOutCode(a.target)); oppMove.set(actor, 'Fake Out'); }
     else { oppTargets.set(actor, PROTECT); }
   }
   const pass: Pass = {
@@ -3397,8 +3572,8 @@ export function resolveOneTurn(
     status: status[i] ?? '', boosts: { ...boost[i] }, moveUsed: move,
   });
   return {
-    mine: input.mine.map((_, i) => ({ ...slot(i, s.myHp, s.myStatus, s.myBoost, t.mySpecies, myMove.get(i)), taunt: s.myTaunt[i], encore: s.myEncore[i] })),
-    opp: input.opp.map((_, j) => ({ ...slot(j, s.oppHp, s.oppStatus, s.oppBoost, t.oppSpecies, oppMove.get(j)), taunt: s.oppTaunt[j], encore: s.oppEncore[j] })),
+    mine: input.mine.map((_, i) => ({ ...slot(i, s.myHp, s.myStatus, s.myBoost, t.mySpecies, myMove.get(i)), taunt: s.myTaunt[i], encore: s.myEncore[i], unburden: s.myUnburden[i] })),
+    opp: input.opp.map((_, j) => ({ ...slot(j, s.oppHp, s.oppStatus, s.oppBoost, t.oppSpecies, oppMove.get(j)), taunt: s.oppTaunt[j], encore: s.oppEncore[j], unburden: s.oppUnburden[j] })),
     weather: s.weather ?? '',
     terrain: s.terrain ?? '',
   };

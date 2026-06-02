@@ -1510,6 +1510,42 @@ describe('sleep (Spore) + redirection (Rage Powder)', () => {
   });
 });
 
+describe('meta gaps: Unburden/White Herb, Fake Out, Aegislash Stance Change', () => {
+  const blissey = (): OpponentEntry => oppOf(mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Seismic Toss'] }));
+
+  test('White Herb restores Close Combat drops and activates Unburden', () => {
+    const out = resolveOneTurn(
+      { mine: [{ set: mon({ species: 'Sneasler', ability: 'Unburden', item: 'White Herb', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Close Combat'] }), hpPercent: 100, active: true }], opp: [{ entry: blissey(), hpPercent: 100, active: true }], field: { ...NEUTRAL_FIELD }, allOppRevealed: true },
+      new Map([[0, { kind: 'attack', target: 0 } as const]]), new Map(),
+    );
+    expect(out.mine[0]!.boosts.def ?? 0).toBe(0);    // White Herb restored the -1
+    expect(out.mine[0]!.unburden).toBe(true);        // item consumed → Unburden active
+  });
+
+  test('Fake Out flinches the target (first turn out) so it cannot act', () => {
+    const out = resolveOneTurn(
+      {
+        mine: [{ set: mon({ species: 'Incineroar', ability: 'Intimidate', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, atk: 252 }, moves: ['Fake Out'] }), hpPercent: 100, active: true, firstTurnOut: true }],
+        opp: [{ entry: oppOf(mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Dragon Claw'] })), hpPercent: 100, active: true }],
+        field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+      },
+      new Map([[0, { kind: 'fakeout', target: 0 } as const]]), new Map([[0, { kind: 'attack', target: 0 } as const]]),
+    );
+    expect(out.mine[0]!.hpPct).toBe(100);            // Garchomp flinched → no Dragon Claw
+    expect(out.opp[0]!.hpPct).toBeLessThan(100);     // Fake Out chip
+  });
+
+  test('Aegislash hits harder in its Blade forme (Stance Change)', () => {
+    // Garchomp (Dragon/Ground) takes neutral Ghost damage — Blissey is Ghost-immune.
+    const target = (): OpponentEntry => oppOf(mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Earthquake'] }));
+    const dmgVs = (ability: string) => resolveOneTurn(
+      { mine: [{ set: mon({ species: 'Aegislash', ability, nature: 'Quiet', evs: { ...ZERO_EVS, spa: 252 }, moves: ['Shadow Ball'] }), hpPercent: 100, active: true }], opp: [{ entry: target(), hpPercent: 100, active: true }], field: { ...NEUTRAL_FIELD }, allOppRevealed: true },
+      new Map([[0, { kind: 'attack', target: 0 } as const]]), new Map(),
+    ).opp[0]!.hpPct;
+    expect(dmgVs('Stance Change')).toBeLessThan(dmgVs('Battle Armor'));   // Blade (spa 150) > Shield (spa 50)
+  });
+});
+
 describe('Taunt + Encore (option restriction)', () => {
   const grass = (moves: string[]) => mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves });
   const blissey = (): OpponentEntry => oppOf(mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Seismic Toss'] }));

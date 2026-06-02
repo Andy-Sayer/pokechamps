@@ -85,7 +85,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Fixed / level damage | Seismic Toss, Night Shade, Super Fang, Endeavor | ✅ | ✅ | ✅ | calc gives the % |
 | Redirection | Follow Me, Rage Powder | – | ? | ✅ | a live user pulls the foes' single-target moves onto itself; Rage Powder (powder) ignored by Grass/Overcoat attackers. Storm Drain/Lightning Rod (ability) + Ally Switch still GAP |
 | Wide/Quick Guard | — | – | ✅(noted) | **GAP** | team-protect; not modelled |
-| Fake Out | — | ✅(dmg) | ✅ | **PARTIAL** | flinch is informational only; first-turn-only not enforced in search |
+| Fake Out | — | ✅(dmg) | ✅ | ✅ | guaranteed flinch (target can't act) when the user is first-turn-out (+3 priority); `FAKEOUT` action. Needs `firstTurnOut` threaded from the live match to fire at the root (switch-ins get it in-search) |
 | Counter / mirror | Counter, Mirror Coat, Metal Burst | ✅ | ? | **GAP** | reflects damage |
 | Item manipulation | Knock Off, Trick, Switcheroo, Thief, Covet | ✅(KO dmg) | ✅ | **PARTIAL** | live tracks item removal/swap; search uses static items |
 | Hazard SET | Stealth Rock/Spikes/Toxic Spikes/Sticky Web (dedicated) + Stone Axe→SR / Ceaseless Edge→Spikes (secondary) | – | ✅ | ✅ | search lays hazards on the foe's side (`SET_HAZARD` action + `Cell.setsHazard`); dynamic `State.my/oppHazards`; refill-ins eat the chip. Freshly-set hazards are correctly dodgeable in a short horizon (opp pre-switches) → payoff is the FORCED-refill case |
@@ -113,7 +113,8 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Survive-a-hit | Sturdy, (Focus Sash item) | ✅ search | — |
 | Contact punish | Rough Skin, Iron Barbs, Rocky Helmet (item) | ✅ live | ✅ search (contact hit chips the attacker; Magic Guard negates) |
 | Status/effect immunity | Limber, Water Veil, Immunity, Magic Guard, Overcoat, Magic Bounce | ✅ live; ✅ search (status-land + Magic Guard residual) | Magic Bounce reflecting status/hazards **GAP** |
-| Item-based | Unburden, Magician, Pickpocket, Klutz | ✅ live (partial) | search **GAP** |
+| Item-based | Unburden, Magician, Pickpocket, Klutz | ✅ live (partial) | **Unburden ✅ search** (item consumed → ×2 Spe; Sneasler #1 meta); rest GAP |
+| Stance Change | Aegislash Blade/Shield | ✅ calc(if forme set) | ✅ search (attacker cells use Aegislash-Blade offense; defensive forme = Shield simplification) |
 | Form/disguise | Disguise, Ice Face, Multiscale, Zero-to-Hero | ✅ live (partial) | search **GAP** (free hit absorb) |
 | Misc priority | Prankster, Gale Wings, Triage, Stall, Quick Draw | ✅ search (priority brackets + plausible-ability) | — |
 
@@ -126,7 +127,9 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | HP-trigger heal | Sitrus, Aguav/figy/… pinch berries | ✅ live (hpItemTriggers) | **search GAP** (heal at 50%/25% — big for stall lines) |
 | Status berries | Lum, Cheri, Pecha, … | ✅ live (statusBerries) | **search GAP** (cure on status) |
 | Leftovers / Black Sludge | — | ✅ live; ✅ search (Leftovers heal) | Black Sludge (poison-type heal / else hurt) **PARTIAL** in search |
-| Choice lock | Choice items | ✅ calc(dmg); ✅ live | **search GAP** (locked into one move after first use) |
+| Choice lock | Choice items | ✅ calc(dmg); ✅ live | **PARTIAL** search — a Choice holder is restricted to attacks/spread/switch (no setup/Protect/status); the true single-move lock still needs per-move cells |
+| Resist berries | Yache/Occa/Passho/Chople/… (17 in meta) | ✅ calc (first hit ½) | ✅ search — consumed after the first SE matching-type hit; a later same-type hit is no longer halved (×2 vs the baked cell) |
+| White Herb | — | ✅ calc(n/a) | ✅ search — restores lowered stats once, then consumed (triggers Unburden) |
 | Booster Energy | Protosynthesis/Quark Drive proc | ✅ calc(if active) | proc-on-switch **search GAP** |
 | Weakness Policy / berries that boost | — | ✅ live | **search GAP** |
 | Eject Button / Eject Pack / Red Card | — | ✅ live (partial) | forced switch **search GAP** |
