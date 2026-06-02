@@ -71,7 +71,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Foe stat-drop (damaging 2ndary) | Icy Wind/Electroweb/Bulldoze −Spe, Snarl/Struggle Bug −SpA, Breaking Swipe −Atk, Low Sweep | ✅(dmg) | ✅ | ✅ | `Cell.foeDrop` from 100%-chance `secondary.boosts`; applied to the target's boosts (Clear Body/Clear Amulet immune, Contrary inverts). Probabilistic 10–30% drops left out by policy (flinch rule) |
 | Foe stat-drop (dedicated move) | Charm, Scary Face, Eerie Impulse, Parting Shot | – | ✅ | **GAP** | 0-damage debuff moves — search has no `SET_DEBUFF` action yet (flagged by `unmodeled.ts`) |
 | Status moves | Will-O-Wisp/Thunder Wave/Toxic/Glare/Poison Powder | – | ✅ | ✅ | SET_STATUS; **sleep/freeze NOT** |
-| Sleep-inducing | Spore/Sleep Powder/Hypnosis/Yawn | – | ✅ | **GAP** | sleep = can't-act + wake counter; deferred |
+| Sleep-inducing | Spore/Sleep Powder/Hypnosis | – | ✅ | ✅ | status 'slp' = can't-act + wake counter (init 2; Gen 9 1-3); powder/Insomnia/Electric-Terrain immunities. Yawn (delayed) still GAP |
 | Leech / drain HP | Leech Seed; Giga Drain (heal) | ✅(dmg) | ✅ | ✅ | Leech Seed ✅; drain-move self-heal added (`Cell.drain`) |
 | Recovery | Recover/Roost/Slack Off/Synthesis/Moonlight | – | ✅ | **GAP** | a huge stall lever — search can't heal on demand |
 | Wish / delayed heal | Wish | – | ✅ | **GAP** | EOT heal to the slot |
@@ -83,7 +83,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Recoil | Brave Bird/Flare Blitz/Wave Crash 33%, Head Smash 50%, Take Down 25% | ✅(dmg) | ✅ | ✅ | `Cell.recoil` = recoil×damage-dealt to the attacker; Rock Head / Magic Guard negate. Found by the sim diff-harness (all residual faints were unmodelled recoil). Life Orb recoil (item) still a search GAP |
 | OHKO | Fissure, Guillotine, Sheer Cold | ✅ | ✅ | n/a | rare in format; accuracy-gated |
 | Fixed / level damage | Seismic Toss, Night Shade, Super Fang, Endeavor | ✅ | ✅ | ✅ | calc gives the % |
-| Redirection | Follow Me, Rage Powder | – | ? | **GAP** | pulls single-target hits to the user (doubles-critical) |
+| Redirection | Follow Me, Rage Powder | – | ? | ✅ | a live user pulls the foes' single-target moves onto itself; Rage Powder (powder) ignored by Grass/Overcoat attackers. Storm Drain/Lightning Rod (ability) + Ally Switch still GAP |
 | Wide/Quick Guard | — | – | ✅(noted) | **GAP** | team-protect; not modelled |
 | Fake Out | — | ✅(dmg) | ✅ | **PARTIAL** | flinch is informational only; first-turn-only not enforced in search |
 | Counter / mirror | Counter, Mirror Coat, Metal Burst | ✅ | ? | **GAP** | reflects damage |
@@ -150,7 +150,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Burn (½ phys, chip) | ✅ | ✅ | ✅ (scale + residual + infliction) |
 | Paralysis (½ Spe, 25% fail) | ✅(Spe) | ✅ | ✅ Spe; **25% full-para not modelled** (like flinch) |
 | Poison / Toxic (chip) | – | ✅ | ✅ (residual + infliction + escalation) |
-| Sleep (can't act, wake counter) | – | ✅ (sleepCounter) | **GAP** |
+| Sleep (can't act, wake counter) | – | ✅ (sleepCounter) | ✅ (`State.my/oppSleepTurns`; SLEEP_SKIP no-op) |
 | Freeze (can't act, thaw) | – | ✅ | **GAP** (rare) |
 | Confusion (33% self-hit) | – | ✅ | **GAP** (like flinch — informational candidate) |
 | Flinch | – | ✅ | ✅ informational (never auto-applied — by design) |

@@ -41,12 +41,14 @@ interface GapRule {
 // Each rule names a class the search approximates today. Keep in lockstep with the
 // GAP/PARTIAL rows of docs/notes/mechanics-coverage.md.
 const RULES: GapRule[] = [
-  { kind: 'sleep', label: 'sleep (skips turns)',
-    moves: ['spore', 'sleeppowder', 'hypnosis', 'yawn', 'lovelykiss', 'sing', 'grasswhistle', 'darkvoid'],
-    statuses: ['slp'] },
+  // Spore/Sleep Powder/Hypnosis sleep is now MODELLED (status 'slp' = can't-act +
+  // wake counter); only delayed Yawn remains unmodelled.
+  { kind: 'yawn', label: 'Yawn (delayed sleep)', moves: ['yawn'] },
   { kind: 'freeze', label: 'freeze (skips turns)', statuses: ['frz'] },
-  { kind: 'redirection', label: 'redirection (Follow Me / Rage Powder)',
-    moves: ['followme', 'ragepowder', 'spotlight', 'allyswitch'],
+  // Follow Me / Rage Powder redirection is now MODELLED; ability redirection
+  // (Storm Drain/Lightning Rod) and Ally Switch are not.
+  { kind: 'redirection', label: 'ability redirection / Ally Switch',
+    moves: ['allyswitch', 'spotlight'],
     abilities: ['stormdrain', 'lightningrod'] },
   { kind: 'teamprotect', label: 'Wide / Quick Guard',
     moves: ['wideguard', 'quickguard', 'matblock', 'craftyshield'] },

@@ -254,6 +254,8 @@ const SET_WEATHER = -7;   // weather move (Sunny Day / Rain Dance / …)
 const SET_TERRAIN = -8;   // terrain move (Electric / Grassy / Misty / Psychic)
 const RECOVER = -9;       // recovery move (Recover / Roost / Synthesis / …) — self-heal
 const SET_HAZARD = -10;   // dedicated hazard move (Stealth Rock / Spikes / …) — sets on the FOE's side
+const REDIRECT = -11;     // Follow Me / Rage Powder — pull the foes' single-target moves onto self
+const SLEEP_SKIP = -12;   // forced no-op for an asleep mon (can't act this turn)
 // Ranged sentinel blocks that each carry an index, kept disjoint so a code is
 // unambiguous. Switches: [-29,-20] → bench idx. Leech Seed: [-39,-30] → foe idx.
 // Baton Pass: [-49,-40] → bench idx (switch that passes boosts). Status: ≤ -50 →
@@ -549,6 +551,8 @@ interface Tables {
   myOnKo: (BoostMap | null)[]; oppOnKo: (BoostMap | null)[];
   // Life Orb recoil: this mon loses 10% max HP when it lands a damaging move.
   myLifeOrb: boolean[]; oppLifeOrb: boolean[];
+  // Redirection move (Follow Me / Rage Powder), or null.
+  myRedirectMove: (string | null)[]; oppRedirectMove: (string | null)[];
   // Regenerator: heals 1/3 max HP when the mon switches OUT.
   myRegen: boolean[]; oppRegen: boolean[];
   // Rock Head: negates a recoil move's self-damage (Magic Guard does too, via myResidual).
@@ -833,6 +837,11 @@ interface State {
    *  DEFENDER's side, so a later switch / refill-in eats the chip. */
   myHazards: HazardState;
   oppHazards: HazardState;
+  /** Turns of sleep remaining per mon (0 = awake). A mon with status 'slp' and a
+   *  positive count can't act; ticks down each turn it's on the field, waking at 0.
+   *  Inflicted sleep starts at 2 (Gen 9 is 1-3 turns; the middle is a fair model). */
+  mySleepTurns: number[];
+  oppSleepTurns: number[];
 }
 
 // Doubles screen damage reduction (2732/4096 ≈ 0.667), matching @smogon/calc's
@@ -989,9 +998,19 @@ function findStatusMove(moves: string[]): StatusMove | null {
       case 'glare': case 'stunspore': return { move: m, status: 'par' };
       case 'toxic': case 'toxicthread': return { move: m, status: 'tox' };
       case 'poisonpowder': case 'poisongas': return { move: m, status: 'psn' };
+      case 'spore': case 'sleeppowder': case 'hypnosis': case 'lovelykiss':
+      case 'sing': case 'grasswhistle': case 'darkvoid': return { move: m, status: 'slp' };
     }
   }
   return null;
+}
+// Powder moves are blocked by Grass-type / Overcoat / Safety Goggles (item check
+// omitted — ability only here). Spore / Sleep Powder / Cotton Spore are powders.
+const POWDER_MOVES = new Set(['spore', 'sleeppowder', 'cottonspore', 'poisonpowder', 'stunspore', 'ragepowder']);
+function isPowderMove(move: string): boolean { return POWDER_MOVES.has(toId(move)); }
+// A move that redirects the foes' single-target attacks onto the user this turn.
+function findRedirectMove(moves: string[]): string | null {
+  return moves.find(m => { const id = toId(m); return id === 'followme' || id === 'ragepowder'; }) ?? null;
 }
 // Can `status` (via `move`) actually land on the target? Honors type immunities,
 // the matching ability immunities, and Misty Terrain on grounded mons. We ignore
@@ -1006,6 +1025,12 @@ function statusLands(status: string, move: string, species: string, ability: str
     return true;
   }
   if (status === 'psn' || status === 'tox') return !isType(species, 'Poison') && !isType(species, 'Steel') && ab !== 'immunity';
+  if (status === 'slp') {
+    if (ab === 'insomnia' || ab === 'vitalspirit' || ab === 'comatose' || ab === 'sweetveil') return false;
+    if (ter === 'Electric' && grounded) return false;     // Electric Terrain blocks sleep on grounded mons
+    if (isPowderMove(move) && (isType(species, 'Grass') || ab === 'overcoat')) return false; // powder immunity
+    return true;
+  }
   return false;
 }
 // The weather that doubles a mon's Speed. Known ability wins; if the opp's
@@ -1285,6 +1310,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppOnKo: opp.map(o => onKoBoost(o.entry.candidates?.[0] ?? defaultOpponentSet(o.entry, 50), o.entry.ability)),
     myLifeOrb: mine.map(m => takesLifeOrbRecoil(m.set.item, m.set.ability)),
     oppLifeOrb: opp.map(o => takesLifeOrbRecoil(o.entry.item, o.entry.ability)),
+    myRedirectMove: mine.map(m => findRedirectMove(m.set.moves ?? [])),
+    oppRedirectMove: opp.map(o => findRedirectMove(o.entry.knownMoves)),
     myIntimImmune: mine.map(m => intimidateImmune(m.set.ability, m.set.item)),
     oppIntimImmune: opp.map(o => intimidateImmune(o.entry.ability, o.entry.item)),
     myRockHead: mine.map(m => hasRockHead(m.set.ability)),
@@ -1371,6 +1398,10 @@ function initialState(input: SearchInput): State {
     oppBerryUsed: input.opp.map(o => !!o.entry.itemConsumed || !o.entry.item),
     myHazards: { ...(input.field.myHazards ?? {}) },
     oppHazards: { ...(input.field.theirHazards ?? {}) },
+    // A mon already asleep at the root: we don't know the remaining count, so assume
+    // ~2 turns (the middle of Gen 9's 1-3).
+    mySleepTurns: input.mine.map(m => (m.status === 'slp' ? 2 : 0)),
+    oppSleepTurns: input.opp.map(o => (o.status === 'slp' ? 2 : 0)),
   };
 }
 
@@ -1497,11 +1528,40 @@ function resolveTurn(
   // Psychic Terrain makes priority moves FAIL against a grounded target.
   const psychicBlocked = (priority: number, defenderGrounded: boolean) => s.terrain === 'Psychic' && priority > 0 && defenderGrounded;
 
-  // Build protected sets: a mon using PROTECT is immune to all damage this turn.
+  // Asleep mons can't act (status 'slp' with turns left). Their joint action is the
+  // SLEEP_SKIP no-op, but guard here too so a sleeping mon never executes a move (the
+  // deeper-ply jointActions doesn't suppress them — this is the safety net).
+  const myAsleep = (i: number) => s.myStatus[i] === 'slp' && (s.mySleepTurns[i] ?? 0) > 0;
+  const oppAsleep = (j: number) => s.oppStatus[j] === 'slp' && (s.oppSleepTurns[j] ?? 0) > 0;
+
+  // Build protected sets: a mon using PROTECT is immune to all damage this turn (an
+  // asleep mon can't, even if a deep ply nominally offered it).
   const myProtected = new Set<number>();
   const oppProtected = new Set<number>();
-  for (const [actor, target] of myTargets) { if (target === PROTECT) myProtected.add(actor); }
-  for (const [actor, target] of oppTargets) { if (target === PROTECT) oppProtected.add(actor); }
+  for (const [actor, target] of myTargets) { if (target === PROTECT && !myAsleep(actor)) myProtected.add(actor); }
+  for (const [actor, target] of oppTargets) { if (target === PROTECT && !oppAsleep(actor)) oppProtected.add(actor); }
+
+  // Redirection (Follow Me / Rage Powder): a live user pulls the FOES' single-target
+  // moves onto itself this turn. Rage Powder (a powder) is ignored by Grass-type /
+  // Overcoat attackers. At most one redirector per side matters.
+  const findRedirector = (targets: Map<number, number>, hp: number[]): number | null => {
+    for (const [actor, tgt] of targets) if (tgt === REDIRECT && (hp[actor] ?? 0) > 0) return actor;
+    return null;
+  };
+  const myRedirector = findRedirector(myTargets, myHp);
+  const oppRedirector = findRedirector(oppTargets, oppHp);
+  // Does an attacker on `side` get its single-target move pulled to the foe's redirector?
+  const powderImmune = (species: string, ability: string | null | undefined) => isType(species, 'Grass') || toId(ability ?? '') === 'overcoat';
+  const myRedirTarget = (oppActor: number): number | null => {
+    if (myRedirector == null) return null;
+    if (toId(t.myRedirectMove[myRedirector] ?? '') === 'ragepowder' && powderImmune(t.oppSpecies[oppActor]!, t.oppAbility[oppActor])) return null;
+    return myRedirector;
+  };
+  const oppRedirTarget = (myActor: number): number | null => {
+    if (oppRedirector == null) return null;
+    if (toId(t.oppRedirectMove[oppRedirector] ?? '') === 'ragepowder' && powderImmune(t.mySpecies[myActor]!, t.myAbility[myActor])) return null;
+    return oppRedirector;
+  };
 
   // Apply `dmg` to hp[idx]; if it would be lethal FROM FULL HP and a survival
   // charge is available, clamp to 1 and consume it (Focus Sash / Sturdy). A
@@ -1516,17 +1576,18 @@ function resolveTurn(
   // Switch / field / Leech / setup / screen / weather / terrain / status / recover / Baton: no direct damage.
   const nonAttack = (target: number) =>
     isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isStatusTarget(target) || isFieldTarget(target)
-    || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN || target === RECOVER || target === SET_HAZARD;
+    || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN || target === RECOVER || target === SET_HAZARD
+    || target === REDIRECT || target === SLEEP_SKIP;
   const actings: Acting[] = [];
   for (const [actor, target] of myTargets) {
-    if (nonAttack(target)) continue;
+    if (nonAttack(target) || myAsleep(actor)) continue;
     const priority = target === SPREAD ? t.mySpread[actor]!.priority
       : target === PROTECT ? movePriority(t.myProtectMove[actor] ?? 'Protect')
       : t.off[actor]![target]!.priority;
     actings.push({ side: 'mine', actor, target, priority, speed: effSpeed(mySpe(actor), s.myTailwind, myPar(actor)) });
   }
   for (const [actor, target] of oppTargets) {
-    if (nonAttack(target)) continue;
+    if (nonAttack(target) || oppAsleep(actor)) continue;
     const priority = target === SPREAD ? t.oppSpread[actor]!.priority
       : target === PROTECT ? movePriority(t.oppProtectMove[actor] ?? 'Protect')
       : t.thr[actor]![target]!.priority;
@@ -1562,7 +1623,9 @@ function resolveTurn(
         if (t.myLifeOrb[act.actor] && spreadDealt) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10);
         continue;
       }
-      const oTgt = redirect(act.target, oppSwitchIn); // hit the replacement if the target switched
+      // Redirection (opp's Rage Powder / Follow Me) overrides targeting; else the
+      // switch-redirect (hit the replacement if the target switched).
+      const oTgt = oppRedirTarget(act.actor) ?? redirect(act.target, oppSwitchIn);
       if (oppProtected.has(oTgt)) continue;          // target protecting → fizzle
       if (oppHp[oTgt]! <= 0) continue;               // target already down → fizzle
       const oc = t.off[act.actor]![oTgt]!;
@@ -1603,7 +1666,7 @@ function resolveTurn(
         if (t.oppLifeOrb[act.actor] && spreadDealt) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
         continue;
       }
-      const mTgt = redirect(act.target, mySwitchIn);  // hit the replacement if my target switched
+      const mTgt = myRedirTarget(act.actor) ?? redirect(act.target, mySwitchIn);  // redirection, else switch-redirect
       if (myProtected.has(mTgt)) continue;            // my mon protecting → fizzle
       if (myHp[mTgt]! <= 0) continue;
       const tc = t.thr[act.actor]![mTgt]!;
@@ -1789,11 +1852,18 @@ function resolveTurn(
   // statused, immune by type/ability, or behind Misty Terrain.
   const myStatus = s.myStatus.slice();
   const oppStatus = s.oppStatus.slice();
+  const mySleepTurns = s.mySleepTurns.slice();
+  const oppSleepTurns = s.oppSleepTurns.slice();
   const myBerryUsed = s.myBerryUsed.slice();
   const oppBerryUsed = s.oppBerryUsed.slice();
-  // Status persists on a mon that switches out; a switch-in arrives clean.
-  for (const inn of mySwitchIn.values()) { myStatus[inn] = ''; myToxicN[inn] = 0; }
-  for (const inn of oppSwitchIn.values()) { oppStatus[inn] = ''; oppToxicN[inn] = 0; }
+  // Status persists on a mon that switches out; a switch-in arrives clean (awake).
+  for (const inn of mySwitchIn.values()) { myStatus[inn] = ''; myToxicN[inn] = 0; mySleepTurns[inn] = 0; }
+  for (const inn of oppSwitchIn.values()) { oppStatus[inn] = ''; oppToxicN[inn] = 0; oppSleepTurns[inn] = 0; }
+  // Wake: a mon that started the turn asleep ticks its counter down (it couldn't act
+  // this turn); it wakes when the counter hits 0. Runs BEFORE this turn's infliction
+  // so a freshly-slept mon keeps its full count.
+  for (const i of myActiveNow) if (myStatus[i] === 'slp') { mySleepTurns[i] = Math.max(0, (mySleepTurns[i] ?? 0) - 1); if (mySleepTurns[i] <= 0) myStatus[i] = ''; }
+  for (const j of oppActiveNow) if (oppStatus[j] === 'slp') { oppSleepTurns[j] = Math.max(0, (oppSleepTurns[j] ?? 0) - 1); if (oppSleepTurns[j] <= 0) oppStatus[j] = ''; }
   // Inflict a status — but a Lum/Cheri/… berry immediately cures it (and is eaten).
   const inflict = (foe: number, status: string, toxicN: number[], statusArr: string[], berryUsed: boolean[], item: (string | undefined)[]) => {
     statusArr[foe] = status; if (status === 'tox') toxicN[foe] = 1;
@@ -1805,6 +1875,7 @@ function resolveTurn(
     const foe = redirect(statusFoeIdx(target), oppSwitchIn);
     if ((oppHp[foe] ?? 0) > 0 && !oppStatus[foe] && statusLands(sm.status, sm.move, t.oppSpecies[foe]!, t.oppAbility[foe], t.oppGrounded[foe]!, s.terrain)) {
       inflict(foe, sm.status, oppToxicN, oppStatus, oppBerryUsed, t.oppItem);
+      if (sm.status === 'slp' && oppStatus[foe] === 'slp') oppSleepTurns[foe] = 2;
     }
   }
   for (const [actor, target] of oppTargets) {
@@ -1813,6 +1884,7 @@ function resolveTurn(
     const foe = redirect(statusFoeIdx(target), mySwitchIn);
     if ((myHp[foe] ?? 0) > 0 && !myStatus[foe] && statusLands(sm.status, sm.move, t.mySpecies[foe]!, t.myAbility[foe], t.myGrounded[foe]!, s.terrain)) {
       inflict(foe, sm.status, myToxicN, myStatus, myBerryUsed, t.myItem);
+      if (sm.status === 'slp' && myStatus[foe] === 'slp') mySleepTurns[foe] = 2;
     }
   }
 
@@ -1910,7 +1982,7 @@ function resolveTurn(
     myReflect, myLightScreen, theirReflect, theirLightScreen,
     myReflectTurns, myLightScreenTurns, theirReflectTurns, theirLightScreenTurns,
     weather, weatherTurns, terrain, terrainTurns, myToxicN, oppToxicN, myStatus, oppStatus,
-    myBerryUsed, oppBerryUsed, myHazards, oppHazards,
+    myBerryUsed, oppBerryUsed, myHazards, oppHazards, mySleepTurns, oppSleepTurns,
   };
 }
 
@@ -1989,6 +2061,11 @@ function jointActions(
   // Hazard-setting capability (root only): a true entry → the mon can usefully
   // lay a hazard on the foe's side (knows one + that layer isn't already maxed).
   hazardSet?: boolean[],
+  // Asleep mask (all plies): an asleep mon's ONLY action is the SLEEP_SKIP no-op.
+  asleep?: boolean[],
+  // Redirection capability (all plies): a non-null entry → the mon knows Follow Me /
+  // Rage Powder and can pull the foes' single-target moves onto itself.
+  redirectMove?: (string | null)[],
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -1997,6 +2074,14 @@ function jointActions(
   const benchOf = (code: number) => isSwitchTarget(code) ? switchBenchIdx(code) : isBatonTarget(code) ? batonBenchIdx(code) : -999;
   let combos: Array<Map<number, number>> = [new Map()];
   for (const actor of active) {
+    // Asleep → forced no-op; no other options this turn.
+    if (asleep?.[actor]) {
+      const next: Array<Map<number, number>> = [];
+      for (const combo of combos) { const m = new Map(combo); m.set(actor, SLEEP_SKIP); next.push(m); }
+      combos = next;
+      continue;
+    }
+    const canRedirect = redirectMove?.[actor] != null;
     const canProtect = (protectMoves?.[actor] != null) && (protectStreak?.[actor] ?? 0) === 0;
     const canTailwind = fieldMoves?.tailwind?.[actor] != null;
     const canTrickRoom = fieldMoves?.trickRoom?.[actor] != null;
@@ -2024,6 +2109,7 @@ function jointActions(
       ...(canTerrain ? [SET_TERRAIN] : []),
       ...(canRecover ? [RECOVER] : []),
       ...(canHazard ? [SET_HAZARD] : []),
+      ...(canRedirect ? [REDIRECT] : []),
       ...leechCodes,
       ...statusCodes,
       ...switchCodes,
@@ -2239,7 +2325,9 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     { move: t.myStatusMove, foes: myStatusFoes },
     // Recover only when the mon knows one AND is below full HP (mon-indexed).
     t.myRecover.map((rec, i) => !!rec && (s.myHp[i] ?? 100) < 100),
-    myHazardCap);
+    myHazardCap,
+    s.myStatus.map((st, i) => st === 'slp' && (s.mySleepTurns[i] ?? 0) > 0),
+    t.myRedirectMove);
 }
 function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
@@ -2260,7 +2348,9 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     oppTerrainCap,
     { move: t.oppStatusMove, foes: oppStatusFoes },
     t.oppRecover.map((rec, j) => !!rec && (s.oppHp[j] ?? 100) < 100),
-    oppHazardCap);
+    oppHazardCap,
+    s.oppStatus.map((st, j) => st === 'slp' && (s.oppSleepTurns[j] ?? 0) > 0),
+    t.oppRedirectMove);
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -2318,6 +2408,10 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myRecover[actor]?.move ?? 'Recover', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_HAZARD) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myHazardMove[actor]?.move ?? 'Stealth Rock', targetSpecies: 'their side' });
+    } else if (target === REDIRECT) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myRedirectMove[actor] ?? 'Rage Powder', targetSpecies: t.mySpecies[actor]!, self: true });
+    } else if (target === SLEEP_SKIP) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'asleep', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myTailwindMove[actor] ?? 'Tailwind', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_TRICKROOM) {
@@ -2360,6 +2454,10 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): Search
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppRecover[actor]?.move ?? 'Recover', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_HAZARD) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppHazardMove[actor]?.move ?? 'Stealth Rock', targetSpecies: 'my side' });
+    } else if (target === REDIRECT) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppRedirectMove[actor] ?? 'Rage Powder', targetSpecies: t.oppSpecies[actor]!, self: true });
+    } else if (target === SLEEP_SKIP) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: 'asleep', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppTailwindMove[actor] ?? 'Tailwind', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_TRICKROOM) {
@@ -2876,6 +2974,8 @@ export function createSearch(input: SearchInput): PositionSearch {
       const hazardable = (moves: ({ hazard: HazardKind } | null)[], active: number[], foeHazards: HazardState) =>
         active.some(i => { const hm = moves[i]; return !!hm && hazardRoom(foeHazards, hm.hazard); });
       if (hazardable(expected.table.myHazardMove, s0.myActive, s0.oppHazards) || hazardable(expected.table.oppHazardMove, s0.oppActive, s0.myHazards)) actionClasses.push('hazard');
+      const canRedirect = (moves: (string | null)[], active: number[]) => active.some(i => moves[i] != null);
+      if (canRedirect(expected.table.myRedirectMove, s0.myActive) || canRedirect(expected.table.oppRedirectMove, s0.oppActive)) actionClasses.push('redirect');
       const explored: SearchExplored = {
         depth,
         myActions: myRootJoints.length,
@@ -2952,7 +3052,9 @@ export function searchIterative(
 export type TurnAction =
   | { kind: 'attack'; target: number }
   | { kind: 'spread' }
-  | { kind: 'protect' };
+  | { kind: 'protect' }
+  | { kind: 'status'; target: number }   // inflict a status move on the foe at `target`
+  | { kind: 'redirect' };                // Follow Me / Rage Powder
 
 /** Post-turn structural state of one mon (by team-index). HP is our coarse
  *  representative value — the harness compares the DISCRETE fields (fainted /
@@ -2995,11 +3097,15 @@ export function resolveOneTurn(
   for (const [actor, a] of myActions) {
     if (a.kind === 'attack') { myTargets.set(actor, a.target); myMove.set(actor, t.off[actor]?.[a.target]?.move ?? ''); }
     else if (a.kind === 'spread') { myTargets.set(actor, SPREAD); myMove.set(actor, t.mySpread[actor]?.move ?? ''); }
+    else if (a.kind === 'status') { myTargets.set(actor, statusCode(a.target)); myMove.set(actor, t.myStatusMove[actor]?.move ?? ''); }
+    else if (a.kind === 'redirect') { myTargets.set(actor, REDIRECT); myMove.set(actor, t.myRedirectMove[actor] ?? ''); }
     else { myTargets.set(actor, PROTECT); }
   }
   for (const [actor, a] of oppActions) {
     if (a.kind === 'attack') { oppTargets.set(actor, a.target); oppMove.set(actor, t.thr[actor]?.[a.target]?.move ?? ''); }
     else if (a.kind === 'spread') { oppTargets.set(actor, SPREAD); oppMove.set(actor, t.oppSpread[actor]?.move ?? ''); }
+    else if (a.kind === 'status') { oppTargets.set(actor, statusCode(a.target)); oppMove.set(actor, t.oppStatusMove[actor]?.move ?? ''); }
+    else if (a.kind === 'redirect') { oppTargets.set(actor, REDIRECT); oppMove.set(actor, t.oppRedirectMove[actor] ?? ''); }
     else { oppTargets.set(actor, PROTECT); }
   }
   const pass: Pass = {

@@ -1464,6 +1464,52 @@ describe('self-stat-drop secondaries (Draco Meteor / Contrary / Close Combat)', 
   });
 });
 
+describe('sleep (Spore) + redirection (Rage Powder)', () => {
+  const garchomp = () => mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Earthquake'] });
+  const blissey = (): OpponentEntry => oppOf(mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Seismic Toss'] }));
+
+  test('Spore inflicts sleep on the target', () => {
+    const out = resolveOneTurn(
+      { mine: [{ set: garchomp(), hpPercent: 100, active: true }], opp: [{ entry: oppOf(mon({ species: 'Amoonguss', ability: 'Effect Spore', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252 }, moves: ['Spore'] })), hpPercent: 100, active: true }], field: { ...NEUTRAL_FIELD }, allOppRevealed: true },
+      new Map(), new Map([[0, { kind: 'status', target: 0 } as const]]),
+    );
+    expect(out.mine[0]!.status).toBe('slp');
+  });
+
+  test('an asleep mon cannot act (its attack does nothing)', () => {
+    const out = resolveOneTurn(
+      { mine: [{ set: garchomp(), hpPercent: 100, active: true, status: 'slp' }], opp: [{ entry: blissey(), hpPercent: 100, active: true }], field: { ...NEUTRAL_FIELD }, allOppRevealed: true },
+      new Map([[0, { kind: 'attack', target: 0 } as const]]), new Map(),
+    );
+    expect(out.opp[0]!.hpPct).toBe(100);     // asleep Garchomp didn't hit Blissey
+    expect(out.mine[0]!.status).toBe('slp');  // still asleep (counter ticked 2→1)
+  });
+
+  test('a Grass-type is immune to Spore (powder)', () => {
+    const out = resolveOneTurn(
+      { mine: [{ set: mon({ species: 'Amoonguss', ability: 'Regenerator', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252 }, moves: ['Sludge Bomb'] }), hpPercent: 100, active: true }], opp: [{ entry: oppOf(mon({ species: 'Breloom', ability: 'Technician', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Spore'] })), hpPercent: 100, active: true }], field: { ...NEUTRAL_FIELD }, allOppRevealed: true },
+      new Map(), new Map([[0, { kind: 'status', target: 0 } as const]]),
+    );
+    expect(out.mine[0]!.status ?? '').not.toBe('slp');   // Amoonguss is Grass → powder immune
+  });
+
+  test('Rage Powder pulls the opponent’s single-target attack onto the user', () => {
+    const out = resolveOneTurn(
+      {
+        mine: [
+          { set: mon({ species: 'Amoonguss', ability: 'Regenerator', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Rage Powder', 'Sludge Bomb'] }), hpPercent: 100, active: true },
+          { set: mon({ species: 'Flutter Mane', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Moonblast'] }), hpPercent: 100, active: true },
+        ],
+        opp: [{ entry: oppOf(mon({ species: 'Incineroar', ability: 'Intimidate', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Knock Off'] })), hpPercent: 100, active: true }],
+        field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+      },
+      new Map([[0, { kind: 'redirect' } as const]]), new Map([[0, { kind: 'attack', target: 1 } as const]]),  // opp aims at Flutter Mane (idx 1)
+    );
+    expect(out.mine[1]!.hpPct).toBe(100);           // Flutter Mane untouched — attack redirected
+    expect(out.mine[0]!.hpPct).toBeLessThan(100);   // Amoonguss took the hit
+  });
+});
+
 describe('on-KO boosts (Moxie / Beast Boost)', () => {
   // A frail foe at 12% HP is KO'd by any hit → the attacker's on-KO ability fires.
   const koFrailFoe = (set: PokemonSet) => resolveOneTurn(
@@ -1565,16 +1611,16 @@ describe('unmodeled-mechanics detector (self-flagging)', () => {
     expect(r.unmodeled).toBeUndefined();
   });
 
-  // My Amoonguss's Spore (sleep) is a known approximation → flagged with the source.
-  test('flags sleep from my own moveset with a concrete example', () => {
+  // A still-unmodelled mechanic (two-turn Solar Beam) is flagged with the source.
+  test('flags a two-turn move from my own moveset with a concrete example', () => {
     const r = searchToDepth({
-      mine: [{ set: mon({ species: 'Amoonguss', ability: 'Regenerator', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Spore', 'Sludge Bomb'] }), hpPercent: 100, active: true }],
+      mine: [{ set: mon({ species: 'Lilligant', ability: 'Chlorophyll', nature: 'Modest', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Solar Beam', 'Giga Drain'] }), hpPercent: 100, active: true }],
       opp: [{ entry: oppOf(mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Earthquake'] })), hpPercent: 100, active: true }],
       field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
     }, 1);
-    const sleep = r.unmodeled?.find(u => u.kind === 'sleep');
-    expect(sleep).toBeDefined();
-    expect(sleep!.examples).toContain('Amoonguss Spore');
+    const twoturn = r.unmodeled?.find(u => u.kind === 'twoturn');
+    expect(twoturn).toBeDefined();
+    expect(twoturn!.examples).toContain('Lilligant Solar Beam');
   });
 
   // Opponent scan is REVEALED-only: an unseen Icy Wind isn't warned about, a
