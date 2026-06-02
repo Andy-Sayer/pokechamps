@@ -265,6 +265,7 @@ const SWITCH_BASE = -20;  // switch → bench idx `SWITCH_BASE - target`
 const LEECH_BASE = -30;   // Leech Seed → foe idx `LEECH_BASE - target`
 const BATON_BASE = -40;   // Baton Pass → bench idx `BATON_BASE - target`
 const STATUS_BASE = -50;  // status move → foe idx `STATUS_BASE - target`
+const PIVOT_BASE = -60;   // pivot move (U-turn/…) → foe idx; user auto-switches out
 function isSwitchTarget(t: number): boolean { return t <= SWITCH_BASE && t > LEECH_BASE; }
 function switchBenchIdx(t: number): number { return SWITCH_BASE - t; }
 function switchCode(benchIdx: number): number { return SWITCH_BASE - benchIdx; }
@@ -274,9 +275,12 @@ function leechCode(foeIdx: number): number { return LEECH_BASE - foeIdx; }
 function isBatonTarget(t: number): boolean { return t <= BATON_BASE && t > STATUS_BASE; }
 function batonBenchIdx(t: number): number { return BATON_BASE - t; }
 function batonCode(benchIdx: number): number { return BATON_BASE - benchIdx; }
-function isStatusTarget(t: number): boolean { return t <= STATUS_BASE; }
+function isStatusTarget(t: number): boolean { return t <= STATUS_BASE && t > PIVOT_BASE; }
 function statusFoeIdx(t: number): number { return STATUS_BASE - t; }
 function statusCode(foeIdx: number): number { return STATUS_BASE - foeIdx; }
+function isPivotTarget(t: number): boolean { return t <= PIVOT_BASE; }
+function pivotFoeIdx(t: number): number { return PIVOT_BASE - t; }
+function pivotCode(foeIdx: number): number { return PIVOT_BASE - foeIdx; }
 function isFieldTarget(t: number): boolean { return t === SET_TAILWIND || t === SET_TRICKROOM; }
 // Benched live team-indices a side can switch INTO (not on the field, hp > 0).
 function benchSwitchTargets(active: number[], hp: number[], n: number): number[] {
@@ -553,6 +557,12 @@ interface Tables {
   myLifeOrb: boolean[]; oppLifeOrb: boolean[];
   // Redirection move (Follow Me / Rage Powder), or null.
   myRedirectMove: (string | null)[]; oppRedirectMove: (string | null)[];
+  // Pivot move (U-turn/Volt Switch/Flip Turn/Parting Shot/Teleport/…): the move
+  // name (null = none), the per-foe damage cell of THAT move, and the foe debuff it
+  // applies as it leaves (Parting Shot −1 Atk/SpA). The user auto-switches out.
+  myPivotMove: (string | null)[]; oppPivotMove: (string | null)[];
+  myPivotCell: (Cell[] | null)[]; oppPivotCell: (Cell[] | null)[];
+  myPivotDebuff: (BoostMap | null)[]; oppPivotDebuff: (BoostMap | null)[];
   // Regenerator: heals 1/3 max HP when the mon switches OUT.
   myRegen: boolean[]; oppRegen: boolean[];
   // Rock Head: negates a recoil move's self-damage (Magic Guard does too, via myResidual).
@@ -1012,6 +1022,16 @@ function isPowderMove(move: string): boolean { return POWDER_MOVES.has(toId(move
 function findRedirectMove(moves: string[]): string | null {
   return moves.find(m => { const id = toId(m); return id === 'followme' || id === 'ragepowder'; }) ?? null;
 }
+// Pivot moves: the user damages/debuffs a foe, then switches out to a bench mon.
+// Baton Pass is handled separately (it passes boosts); these don't.
+const PIVOT_MOVE_IDS = new Set(['uturn', 'voltswitch', 'flipturn', 'partingshot', 'teleport', 'chillyreception']);
+function findPivotMove(moves: string[]): string | null {
+  return moves.find(m => PIVOT_MOVE_IDS.has(toId(m))) ?? null;
+}
+// The foe stat-drop a pivot move applies as it leaves (Parting Shot −1 Atk/−1 SpA).
+function pivotDebuff(move: string): BoostMap | null {
+  return toId(move) === 'partingshot' ? { atk: -1, spa: -1 } : null;
+}
 // Can `status` (via `move`) actually land on the target? Honors type immunities,
 // the matching ability immunities, and Misty Terrain on grounded mons. We ignore
 // already-statused / substitute (checked at apply time).
@@ -1258,6 +1278,27 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
   }));
   const oppSpreadActors = new Set<number>();
   oppSpread.forEach((s, i) => { if (s) oppSpreadActors.add(i); });
+  // Pivot-move damage cells (U-turn etc.) — the pivot move specifically, vs each foe.
+  const myPivotMoveArr = mine.map(m => findPivotMove(m.set.moves ?? []));
+  const oppPivotMoveArr = opp.map(o => findPivotMove(o.entry.knownMoves));
+  const myPivotCell: (Cell[] | null)[] = mine.map((m, mi) => {
+    const pm = myPivotMoveArr[mi]; if (!pm) return null;
+    const atk: PokemonSet = { ...m.set, moves: [pm] };
+    return oppEntries.map((oe, oj) => cellFromOffense(atk, oe, input.field, {
+      attackerGimmickActive: myMega(mi), defenderGimmickActive: oppHypoMega(oj),
+      attackerBoosts: m.boosts, attackerStatus: m.status,
+      defenderBoosts: opp[oj]!.boosts, defenderStatus: opp[oj]!.status,
+    }));
+  });
+  const oppPivotCell: (Cell[] | null)[] = opp.map((o, oj) => {
+    const pm = oppPivotMoveArr[oj]; if (!pm) return null;
+    const synth: OpponentEntry = { ...oppEntries[oj]!, knownMoves: [pm] };
+    return mine.map((m, mi) => cellFromThreat(synth, m.set, input.field, {
+      attackerGimmickActive: oppHypoMega(oj), defenderGimmickActive: myMega(mi),
+      attackerBoosts: o.boosts, attackerStatus: o.status,
+      defenderBoosts: m.boosts, defenderStatus: m.status,
+    }));
+  });
   return {
     myN: mine.length,
     oppN: opp.length,
@@ -1312,6 +1353,11 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppLifeOrb: opp.map(o => takesLifeOrbRecoil(o.entry.item, o.entry.ability)),
     myRedirectMove: mine.map(m => findRedirectMove(m.set.moves ?? [])),
     oppRedirectMove: opp.map(o => findRedirectMove(o.entry.knownMoves)),
+    myPivotMove: myPivotMoveArr,
+    oppPivotMove: oppPivotMoveArr,
+    myPivotCell, oppPivotCell,
+    myPivotDebuff: myPivotMoveArr.map(pm => pm ? pivotDebuff(pm) : null),
+    oppPivotDebuff: oppPivotMoveArr.map(pm => pm ? pivotDebuff(pm) : null),
     myIntimImmune: mine.map(m => intimidateImmune(m.set.ability, m.set.item)),
     oppIntimImmune: opp.map(o => intimidateImmune(o.entry.ability, o.entry.item)),
     myRockHead: mine.map(m => hasRockHead(m.set.ability)),
@@ -1474,13 +1520,40 @@ function resolveTurn(
   const oppSwitchIn = new Map<number, number>();
   const myBaton = new Map<number, number>();   // out → in, only the Baton Pass ones
   const oppBaton = new Map<number, number>();
+  // Pivot moves (U-turn/…): the user chips/debuffs a foe, then auto-switches out to
+  // the best live bench mon (fast-pivot model — the bench mon is treated as in from
+  // the start, like a regular switch; the chip is dealt before the main attack loop).
+  const myPivotChip = new Map<number, number>();   // pivot user → foe to chip
+  const oppPivotChip = new Map<number, number>();
+  const pickBench = (taken: number[], hp: number[], n: number, dmgRows: Cell[][], foeHp: number[], eligible?: boolean[]): number | null => {
+    const onField = new Set(taken);
+    const liveFoes = foeHp.map((h, j) => (h > 0 ? j : -1)).filter(j => j >= 0);
+    let best = -1, bestDmg = -1;
+    for (let i = 0; i < n; i++) {
+      if ((hp[i] ?? 0) <= 0 || onField.has(i)) continue;
+      if (eligible && !eligible[i]) continue;
+      const total = liveFoes.reduce((a, j) => a + (dmgRows[i]?.[j]?.dmgMid ?? 0), 0);
+      if (total > bestDmg) { bestDmg = total; best = i; }
+    }
+    return best >= 0 ? best : null;
+  };
   for (const [actor, target] of myTargets) {
     if (isSwitchTarget(target)) mySwitchIn.set(actor, switchBenchIdx(target));
     else if (isBatonTarget(target)) { const b = batonBenchIdx(target); mySwitchIn.set(actor, b); myBaton.set(actor, b); }
+    else if (isPivotTarget(target)) {
+      const bench = pickBench([...s.myActive, ...mySwitchIn.values()], myHp, t.myN, t.off, oppHp);
+      if (bench != null) mySwitchIn.set(actor, bench);
+      myPivotChip.set(actor, pivotFoeIdx(target));
+    }
   }
   for (const [actor, target] of oppTargets) {
     if (isSwitchTarget(target)) oppSwitchIn.set(actor, switchBenchIdx(target));
     else if (isBatonTarget(target)) { const b = batonBenchIdx(target); oppSwitchIn.set(actor, b); oppBaton.set(actor, b); }
+    else if (isPivotTarget(target)) {
+      const bench = pickBench([...s.oppActive, ...oppSwitchIn.values()], oppHp, t.oppN, t.thr, myHp, s.oppSeen);
+      if (bench != null) oppSwitchIn.set(actor, bench);
+      oppPivotChip.set(actor, pivotFoeIdx(target));
+    }
   }
   const myActiveNow = s.myActive.map(i => mySwitchIn.get(i) ?? i);
   const oppActiveNow = s.oppActive.map(i => oppSwitchIn.get(i) ?? i);
@@ -1577,7 +1650,7 @@ function resolveTurn(
   const nonAttack = (target: number) =>
     isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isStatusTarget(target) || isFieldTarget(target)
     || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN || target === RECOVER || target === SET_HAZARD
-    || target === REDIRECT || target === SLEEP_SKIP;
+    || target === REDIRECT || target === SLEEP_SKIP || isPivotTarget(target);
   const actings: Acting[] = [];
   for (const [actor, target] of myTargets) {
     if (nonAttack(target) || myAsleep(actor)) continue;
@@ -1599,6 +1672,24 @@ function resolveTurn(
     if (a.priority !== b.priority) return b.priority - a.priority;
     return tr ? a.speed - b.speed : b.speed - a.speed;
   });
+
+  // Pivot chips (U-turn/Volt Switch/Parting Shot): the pivot user (already switched
+  // out via mySwitchIn) deals its move's damage + debuff to a foe as it leaves.
+  // Applied before the main loop — the fast-pivot model (chip can KO before the foe acts).
+  for (const [actor, foe0] of myPivotChip) {
+    const f = redirect(foe0, oppSwitchIn);
+    if ((oppHp[f] ?? 0) <= 0 || oppProtected.has(f)) continue;
+    const pc = t.myPivotCell[actor]?.[f]; if (!pc) continue;
+    if (pc.dmgMax > 0) apply(oppHp, f, myDmg(actor, f, myRoll(pc, r), pc.physical, pc.type, pc.groundMove), oppSurv, pc.multiHit);
+    if (t.myPivotDebuff[actor]) accDrop(myToFoeDrop, f, t.myPivotDebuff[actor]!);   // Parting Shot −1 Atk/SpA
+  }
+  for (const [actor, foe0] of oppPivotChip) {
+    const f = redirect(foe0, mySwitchIn);
+    if ((myHp[f] ?? 0) <= 0 || myProtected.has(f)) continue;
+    const pc = t.oppPivotCell[actor]?.[f]; if (!pc) continue;
+    if (pc.dmgMax > 0) apply(myHp, f, oppDmg(actor, f, oppRoll(pc, r), pc.physical, pc.type, pc.groundMove), mySurv, pc.multiHit);
+    if (t.oppPivotDebuff[actor]) accDrop(oppToFoeDrop, f, t.oppPivotDebuff[actor]!);
+  }
 
   for (const act of actings) {
     if (act.side === 'mine') {
@@ -2066,6 +2157,9 @@ function jointActions(
   // Redirection capability (all plies): a non-null entry → the mon knows Follow Me /
   // Rage Powder and can pull the foes' single-target moves onto itself.
   redirectMove?: (string | null)[],
+  // Pivot capability (root only): per-actor pivot move + the foe indices it can hit
+  // (empty when the side has no bench to switch into → no pivot offered).
+  pivot?: { move: (string | null)[]; foes: number[] },
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -2093,6 +2187,7 @@ function jointActions(
     const canRecover = recoverSet?.[actor] === true;
     const canHazard = hazardSet?.[actor] === true;
     const statusCodes = (status && status.move[actor] != null) ? status.foes.map(statusCode) : [];
+    const pivotCodes = (pivot && pivot.move[actor] != null) ? pivot.foes.map(pivotCode) : [];
     const batonCodes = (baton && baton.move[actor] != null) ? baton.targets.map(batonCode) : [];
     // SPREAD first so a spread that ties a single-target line is kept. PROTECT /
     // field / setup / screen / weather / Leech / SWITCH / Baton last — only chosen
@@ -2112,6 +2207,7 @@ function jointActions(
       ...(canRedirect ? [REDIRECT] : []),
       ...leechCodes,
       ...statusCodes,
+      ...pivotCodes,
       ...switchCodes,
       ...batonCodes,
     ];
@@ -2327,7 +2423,8 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     t.myRecover.map((rec, i) => !!rec && (s.myHp[i] ?? 100) < 100),
     myHazardCap,
     s.myStatus.map((st, i) => st === 'slp' && (s.mySleepTurns[i] ?? 0) > 0),
-    t.myRedirectMove);
+    t.myRedirectMove,
+    { move: t.myPivotMove, foes: myBench.length > 0 ? s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) : [] });
 }
 function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
@@ -2350,7 +2447,8 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     t.oppRecover.map((rec, j) => !!rec && (s.oppHp[j] ?? 100) < 100),
     oppHazardCap,
     s.oppStatus.map((st, j) => st === 'slp' && (s.oppSleepTurns[j] ?? 0) > 0),
-    t.oppRedirectMove);
+    t.oppRedirectMove,
+    { move: t.oppPivotMove, foes: oppBench.length > 0 ? s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) : [] });
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -2388,7 +2486,9 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
   const plays: SearchPlay[] = [];
   if (!joint) return plays;
   for (const [actor, target] of joint) {
-    if (isStatusTarget(target)) {
+    if (isPivotTarget(target)) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myPivotMove[actor] ?? 'U-turn', targetSpecies: t.oppSpecies[pivotFoeIdx(target)]!, switch: true });
+    } else if (isStatusTarget(target)) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myStatusMove[actor]?.move ?? 'status', targetSpecies: t.oppSpecies[statusFoeIdx(target)]! });
     } else if (isBatonTarget(target)) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myBatonMove[actor] ?? 'Baton Pass', targetSpecies: t.mySpecies[batonBenchIdx(target)]!, switch: true });
@@ -2434,7 +2534,9 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): Search
   const plays: SearchPlay[] = [];
   if (!joint) return plays;
   for (const [actor, target] of joint) {
-    if (isStatusTarget(target)) {
+    if (isPivotTarget(target)) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppPivotMove[actor] ?? 'U-turn', targetSpecies: t.mySpecies[pivotFoeIdx(target)]!, switch: true });
+    } else if (isStatusTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppStatusMove[actor]?.move ?? 'status', targetSpecies: t.mySpecies[statusFoeIdx(target)]! });
     } else if (isBatonTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppBatonMove[actor] ?? 'Baton Pass', targetSpecies: t.oppSpecies[batonBenchIdx(target)]!, switch: true });
@@ -2976,6 +3078,10 @@ export function createSearch(input: SearchInput): PositionSearch {
       if (hazardable(expected.table.myHazardMove, s0.myActive, s0.oppHazards) || hazardable(expected.table.oppHazardMove, s0.oppActive, s0.myHazards)) actionClasses.push('hazard');
       const canRedirect = (moves: (string | null)[], active: number[]) => active.some(i => moves[i] != null);
       if (canRedirect(expected.table.myRedirectMove, s0.myActive) || canRedirect(expected.table.oppRedirectMove, s0.oppActive)) actionClasses.push('redirect');
+      // Pivot offered when a mon on the field knows one AND its side has a live bench.
+      const myBenchNow2 = benchSwitchTargets(s0.myActive, s0.myHp, expected.table.myN).length > 0;
+      const oppBenchNow2 = benchSwitchTargets(s0.oppActive, s0.oppHp, expected.table.oppN).length > 0;
+      if ((myBenchNow2 && canRedirect(expected.table.myPivotMove, s0.myActive)) || (oppBenchNow2 && canRedirect(expected.table.oppPivotMove, s0.oppActive))) actionClasses.push('pivot');
       const explored: SearchExplored = {
         depth,
         myActions: myRootJoints.length,
@@ -3054,7 +3160,8 @@ export type TurnAction =
   | { kind: 'spread' }
   | { kind: 'protect' }
   | { kind: 'status'; target: number }   // inflict a status move on the foe at `target`
-  | { kind: 'redirect' };                // Follow Me / Rage Powder
+  | { kind: 'redirect' }                  // Follow Me / Rage Powder
+  | { kind: 'pivot'; target: number };    // U-turn/Volt Switch/Parting Shot at `target`, then switch out
 
 /** Post-turn structural state of one mon (by team-index). HP is our coarse
  *  representative value — the harness compares the DISCRETE fields (fainted /
@@ -3099,6 +3206,7 @@ export function resolveOneTurn(
     else if (a.kind === 'spread') { myTargets.set(actor, SPREAD); myMove.set(actor, t.mySpread[actor]?.move ?? ''); }
     else if (a.kind === 'status') { myTargets.set(actor, statusCode(a.target)); myMove.set(actor, t.myStatusMove[actor]?.move ?? ''); }
     else if (a.kind === 'redirect') { myTargets.set(actor, REDIRECT); myMove.set(actor, t.myRedirectMove[actor] ?? ''); }
+    else if (a.kind === 'pivot') { myTargets.set(actor, pivotCode(a.target)); myMove.set(actor, t.myPivotMove[actor] ?? ''); }
     else { myTargets.set(actor, PROTECT); }
   }
   for (const [actor, a] of oppActions) {
@@ -3106,6 +3214,7 @@ export function resolveOneTurn(
     else if (a.kind === 'spread') { oppTargets.set(actor, SPREAD); oppMove.set(actor, t.oppSpread[actor]?.move ?? ''); }
     else if (a.kind === 'status') { oppTargets.set(actor, statusCode(a.target)); oppMove.set(actor, t.oppStatusMove[actor]?.move ?? ''); }
     else if (a.kind === 'redirect') { oppTargets.set(actor, REDIRECT); oppMove.set(actor, t.oppRedirectMove[actor] ?? ''); }
+    else if (a.kind === 'pivot') { oppTargets.set(actor, pivotCode(a.target)); oppMove.set(actor, t.oppPivotMove[actor] ?? ''); }
     else { oppTargets.set(actor, PROTECT); }
   }
   const pass: Pass = {

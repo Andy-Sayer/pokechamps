@@ -1510,6 +1510,53 @@ describe('sleep (Spore) + redirection (Rage Powder)', () => {
   });
 });
 
+describe('pivot moves (U-turn / Parting Shot)', () => {
+  test('U-turn chips the foe and the user switches out (bench takes the incoming hit)', () => {
+    const out = resolveOneTurn(
+      {
+        mine: [
+          { set: mon({ species: 'Flutter Mane', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['U-turn'] }), hpPercent: 100, active: true },
+          { set: mon({ species: 'Dondozo', ability: 'Unaware', nature: 'Impish', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Wave Crash'] }), hpPercent: 100, active: false },
+        ],
+        opp: [{ entry: oppOf(mon({ species: 'Incineroar', ability: 'Blaze', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Knock Off'] })), hpPercent: 100, active: true }],
+        field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+      },
+      new Map([[0, { kind: 'pivot', target: 0 } as const]]), new Map([[0, { kind: 'attack', target: 0 } as const]]),
+    );
+    expect(out.opp[0]!.hpPct).toBeLessThan(100);    // U-turn chipped Incineroar
+    expect(out.mine[0]!.hpPct).toBe(100);           // Flutter Mane pivoted out → safe from the hit
+    expect(out.mine[1]!.hpPct).toBeLessThan(100);   // Dondozo came in and took the Knock Off
+  });
+
+  test('Parting Shot lowers the foe Atk and SpA as the user pivots out', () => {
+    const out = resolveOneTurn(
+      {
+        mine: [
+          { set: mon({ species: 'Incineroar', ability: 'Intimidate', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Parting Shot'] }), hpPercent: 100, active: true },
+          { set: mon({ species: 'Dondozo', ability: 'Unaware', nature: 'Impish', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Wave Crash'] }), hpPercent: 100, active: false },
+        ],
+        opp: [{ entry: oppOf(mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Seismic Toss'] })), hpPercent: 100, active: true }],
+        field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+      },
+      new Map([[0, { kind: 'pivot', target: 0 } as const]]), new Map(),
+    );
+    expect(out.opp[0]!.boosts.atk).toBe(-1);
+    expect(out.opp[0]!.boosts.spa).toBe(-1);
+  });
+
+  test('pivot is offered as an action class when the side has a bench', () => {
+    const r = searchToDepth({
+      mine: [
+        { set: mon({ species: 'Flutter Mane', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['U-turn', 'Moonblast'] }), hpPercent: 100, active: true },
+        { set: mon({ species: 'Dondozo', ability: 'Unaware', nature: 'Impish', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Wave Crash'] }), hpPercent: 100, active: false },
+      ],
+      opp: [{ entry: oppOf(mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Seismic Toss'] })), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 1);
+    expect(r.explored!.actionClasses).toContain('pivot');
+  });
+});
+
 describe('on-KO boosts (Moxie / Beast Boost)', () => {
   // A frail foe at 12% HP is KO'd by any hit → the attacker's on-KO ability fires.
   const koFrailFoe = (set: PokemonSet) => resolveOneTurn(
@@ -1633,7 +1680,7 @@ describe('unmodeled-mechanics detector (self-flagging)', () => {
       field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
     });
     expect(searchToDepth(make(['Hurricane']), 1).unmodeled?.some(u => u.kind === 'foedebuff')).toBeFalsy();
-    expect(searchToDepth(make(['Parting Shot']), 1).unmodeled?.some(u => u.kind === 'foedebuff')).toBe(true);
+    expect(searchToDepth(make(['Eerie Impulse']), 1).unmodeled?.some(u => u.kind === 'foedebuff')).toBe(true);
   });
 });
 

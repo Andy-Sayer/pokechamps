@@ -61,7 +61,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Spread | Rock Slide, Heat Wave, EQ | ✅ | ✅ | ✅ | SPREAD sentinel |
 | Priority | Aqua Jet, Sucker Punch | ✅ | ✅ | ✅ | bracket in turn order; Psychic-Terrain block ✅ |
 | Protect family | Protect/Detect/King's Shield/Spiky Shield/… | – | ✅ | ✅ | consecutive-use fail modelled |
-| Switch / pivot | U-turn, Volt Switch, Flip Turn, Parting Shot | ✅(dmg) | ✅ | **PARTIAL** | voluntary switch ✅ (root-ply); **pivot = forced mid-turn switch NOT modelled** |
+| Switch / pivot | U-turn, Volt Switch, Flip Turn, Parting Shot, Teleport, Chilly Reception | ✅(dmg) | ✅ | ✅ | voluntary switch + **pivot**: user chips/debuffs (Parting Shot −1 Atk/SpA) then auto-switches to the best bench mon (root-ply). Fast-pivot model (bench in from start; chip before the foe acts). `PIVOT_BASE` action + per-move pivot cells |
 | Field — order | Tailwind, Trick Room | – | ✅ | ✅ | + durations/stall-out |
 | Field — screens | Reflect/Light Screen/Aurora Veil | ✅ | ✅ | ✅ | + durations/stall-out |
 | Field — weather | Sunny Day/Rain Dance/Sandstorm/Snowscape | ✅ | ✅ | ✅ | + durations/stall-out |
@@ -69,7 +69,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Setup (self-boost) | Swords Dance/Calm Mind/Dragon Dance/Shell Smash/… | – | ✅ | ✅ | `SETUP_MOVES` table |
 | Self stat-drop | Draco Meteor/Overheat/Leaf Storm/Make It Rain/Close Combat/Superpower/V-create | ✅(dmg) | ✅ | ✅ | `Cell.selfDrop` from `move.self.boosts`; applied to the user's boosts (Contrary inverts). **Evidence-ranked #1 gap — closed first via the sim diff-harness** |
 | Foe stat-drop (damaging 2ndary) | Icy Wind/Electroweb/Bulldoze −Spe, Snarl/Struggle Bug −SpA, Breaking Swipe −Atk, Low Sweep | ✅(dmg) | ✅ | ✅ | `Cell.foeDrop` from 100%-chance `secondary.boosts`; applied to the target's boosts (Clear Body/Clear Amulet immune, Contrary inverts). Probabilistic 10–30% drops left out by policy (flinch rule) |
-| Foe stat-drop (dedicated move) | Charm, Scary Face, Eerie Impulse, Parting Shot | – | ✅ | **GAP** | 0-damage debuff moves — search has no `SET_DEBUFF` action yet (flagged by `unmodeled.ts`) |
+| Foe stat-drop (dedicated move) | Charm, Scary Face, Eerie Impulse | – | ✅ | **GAP** | 0-damage debuff moves — search has no `SET_DEBUFF` action yet (Parting Shot's debuff IS modelled via the pivot action; flagged by `unmodeled.ts`) |
 | Status moves | Will-O-Wisp/Thunder Wave/Toxic/Glare/Poison Powder | – | ✅ | ✅ | SET_STATUS; **sleep/freeze NOT** |
 | Sleep-inducing | Spore/Sleep Powder/Hypnosis | – | ✅ | ✅ | status 'slp' = can't-act + wake counter (init 2; Gen 9 1-3); powder/Insomnia/Electric-Terrain immunities. Yawn (delayed) still GAP |
 | Leech / drain HP | Leech Seed; Giga Drain (heal) | ✅(dmg) | ✅ | ✅ | Leech Seed ✅; drain-move self-heal added (`Cell.drain`) |
