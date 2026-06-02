@@ -1138,6 +1138,17 @@ function isSuckerLike(move: string | null | undefined): boolean { return SUCKER_
 // First-turn-only moves: have their own cell + first-turn-out gating, so they're
 // excluded from the generic priority-attack cell.
 const FIRST_TURN_MOVE_IDS = new Set(['fakeout', 'firstimpression', 'matblock']);
+// Effective priority of a DAMAGING move given live state: base dex priority plus
+// the conditional bumps that apply to ATTACKS — Grassy Glide (+1 in Grassy
+// Terrain) and Gale Wings (+1 on a Flying move at full HP). Quick Claw is random
+// (not a guaranteed bracket) so it's excluded; Prankster/Triage gate on status/
+// heal moves, which aren't damaging attacks, so they don't reach the prio cell.
+function effectiveAttackPriority(move: string, ability: string | null | undefined, hpPercent: number, terrain: Terrain | null): number {
+  let p = movePriority(move);
+  if (toId(move) === 'grassyglide' && terrain === 'Grassy') p += 1;
+  if (toId(ability ?? '') === 'galewings' && hpPercent >= 100 && (getMove(move) as { type?: string } | undefined)?.type === 'Flying') p += 1;
+  return p;
+}
 function hasUnburden(ability: string | null | undefined): boolean { return toId(ability ?? '') === 'unburden'; }
 function isWhiteHerb(item: string | null | undefined): boolean { return toId(item ?? '') === 'whiteherb'; }
 function isChoiceItem(item: string | null | undefined): boolean { const i = toId(item ?? ''); return i === 'choiceband' || i === 'choicespecs' || i === 'choicescarf'; }
@@ -1446,40 +1457,48 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
       attackerBoosts: o.boosts, attackerStatus: o.status, defenderBoosts: m.boosts, defenderStatus: m.status,
     }));
   });
-  // Priority-attack cells: the best base-priority (> 0) DAMAGING move vs each foe.
-  // The max-damage off/thr cell hides priority moves whenever a stronger normal
-  // move exists (Kingambit's Kowtow out-damages its Sucker Punch), so a priority
-  // KO would be invisible without this. Fake Out / First Impression are excluded
-  // (own cell + first-turn gating); status-priority moves (Protect/Detect) aren't
-  // attacks. Base priority only — Grassy Glide / Gale Wings ability-conditional
-  // bumps are not folded in yet (consistent with the search's `actings` ordering).
-  const isPrioAttack = (mv: string): boolean => {
-    if (movePriority(mv) <= 0) return false;
-    if (FIRST_TURN_MOVE_IDS.has(toId(mv))) return false;
-    return (getMove(mv) as { category?: string } | undefined)?.category !== 'Status';
-  };
+  // Priority-attack cells: the best EFFECTIVE-priority (> 0) DAMAGING move vs each
+  // foe. The max-damage off/thr cell hides priority moves whenever a stronger
+  // normal move exists (Kingambit's Kowtow out-damages its Sucker Punch), so a
+  // priority KO would be invisible without this. Fake Out / First Impression are
+  // excluded (own cell + first-turn gating); status-priority moves (Protect/Detect)
+  // aren't attacks. Effective priority folds in the conditional bumps —
+  // Grassy Glide (Grassy Terrain) and Gale Wings (Flying move, full HP) — and the
+  // chosen cell's stored priority is overridden to that effective value so the
+  // turn-order sort in resolveTurn uses it.
+  const isPrioCandidate = (mv: string): boolean =>
+    !FIRST_TURN_MOVE_IDS.has(toId(mv)) && (getMove(mv) as { category?: string } | undefined)?.category !== 'Status';
+  const ter: Terrain | null = input.field.terrain ?? null;
   const myPrioCell: (Cell | null)[][] = mine.map((m, mi) => {
-    const pri = (m.set.moves ?? []).filter(isPrioAttack);
+    const eff = (mv: string) => effectiveAttackPriority(mv, m.set.ability, m.hpPercent, ter);
+    const pri = (m.set.moves ?? []).filter(mv => isPrioCandidate(mv) && eff(mv) > 0);
     if (!pri.length) return oppEntries.map(() => null);
     const atk: PokemonSet = { ...bladeSet(m.set), moves: pri };
-    return oppEntries.map((oe, oj) => cellFromOffense(atk, oe, input.field, {
-      attackerGimmickActive: myMega(mi), defenderGimmickActive: oppHypoMega(oj),
-      attackerBoosts: m.boosts, attackerStatus: m.status,
-      defenderBoosts: opp[oj]!.boosts, defenderStatus: opp[oj]!.status,
-    }));
+    return oppEntries.map((oe, oj) => {
+      const c = cellFromOffense(atk, oe, input.field, {
+        attackerGimmickActive: myMega(mi), defenderGimmickActive: oppHypoMega(oj),
+        attackerBoosts: m.boosts, attackerStatus: m.status,
+        defenderBoosts: opp[oj]!.boosts, defenderStatus: opp[oj]!.status,
+      });
+      return c.dmgMax > 0 ? { ...c, priority: eff(c.move) } : null;
+    });
   });
   const oppPrioCell: (Cell | null)[][] = opp.map((o, oj) => {
+    const eff = (mv: string) => effectiveAttackPriority(mv, oppEntries[oj]!.ability, o.hpPercent, ter);
     // Same move source as the main threat cell: known moves, else the Pikalytics
     // likely pool (so a meta Sucker Punch is modelled before it's been revealed).
     const pool = oppEntries[oj]!.knownMoves.length ? oppEntries[oj]!.knownMoves : pikalyticsMoves(oppEntries[oj]!.species);
-    const pri = pool.filter(isPrioAttack);
+    const pri = pool.filter(mv => isPrioCandidate(mv) && eff(mv) > 0);
     if (!pri.length) return mine.map(() => null);
     const synth: OpponentEntry = { ...bladeEntry(oppEntries[oj]!), knownMoves: pri };
-    return mine.map((m, mi) => cellFromThreat(synth, m.set, input.field, {
-      attackerGimmickActive: oppHypoMega(oj), defenderGimmickActive: myMega(mi),
-      attackerBoosts: o.boosts, attackerStatus: o.status,
-      defenderBoosts: m.boosts, defenderStatus: m.status,
-    }));
+    return mine.map((m, mi) => {
+      const c = cellFromThreat(synth, m.set, input.field, {
+        attackerGimmickActive: oppHypoMega(oj), defenderGimmickActive: myMega(mi),
+        attackerBoosts: o.boosts, attackerStatus: o.status,
+        defenderBoosts: m.boosts, defenderStatus: m.status,
+      });
+      return c.dmgMax > 0 ? { ...c, priority: eff(c.move) } : null;
+    });
   });
   return {
     myN: mine.length,

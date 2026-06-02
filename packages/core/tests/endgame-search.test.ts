@@ -1726,6 +1726,28 @@ describe('priority moves (Bullet Punch / Sucker Punch / Aqua Jet …)', () => {
     }, 1);
     expect(r.explored!.actionClasses).toContain('priority');
   });
+
+  test('Grassy Glide gains +1 priority in Grassy Terrain and moves first', () => {
+    const rillaboom = mon({ species: 'Rillaboom', ability: 'Grassy Surge', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Grassy Glide', 'Wood Hammer'] });
+    // Flutter Mane (Spe 135) outspeeds Rillaboom (Spe 85) on raw speed; at 25% a
+    // Grassy-Glide chip KOs it — but only if Rillaboom moves FIRST via terrain priority.
+    const out = resolveOneTurn(
+      { mine: [{ set: rillaboom, hpPercent: 100, active: true }], opp: [{ entry: oppOf(mon({ species: 'Flutter Mane', ability: 'Protosynthesis', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Moonblast'] })), hpPercent: 25, active: true }], field: { ...NEUTRAL_FIELD, terrain: 'Grassy' }, allOppRevealed: true },
+      new Map([[0, { kind: 'prio', target: 0 } as const]]), new Map([[0, { kind: 'attack', target: 0 } as const]]),
+    );
+    expect(out.opp[0]!.fainted).toBe(true);   // Grassy Glide KOs the weakened foe
+    expect(out.mine[0]!.hpPct).toBe(100);     // moved first via terrain priority → Flutter Mane never acted
+  });
+
+  test('Grassy Glide is a priority option ONLY in Grassy Terrain', () => {
+    const classes = (terrain: 'Grassy' | null) => searchToDepth({
+      mine: [{ set: mon({ species: 'Rillaboom', ability: 'Grassy Surge', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Grassy Glide', 'Wood Hammer'] }), hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(mon({ species: 'Flutter Mane', ability: 'Protosynthesis', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Moonblast'] })), hpPercent: 20, active: true }],
+      field: { ...NEUTRAL_FIELD, terrain }, allOppRevealed: true,
+    }, 1).explored!.actionClasses;
+    expect(classes('Grassy')).toContain('priority');
+    expect(classes(null)).not.toContain('priority');
+  });
 });
 
 describe('on-KO boosts (Moxie / Beast Boost)', () => {
