@@ -59,7 +59,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 |---|---|---|---|---|---|
 | Standard damaging | most | ✅ | ✅ | ✅ | baked cell |
 | Spread | Rock Slide, Heat Wave, EQ | ✅ | ✅ | ✅ | SPREAD sentinel |
-| Priority | Aqua Jet, Sucker Punch | ✅ | ✅ | ✅ | bracket in turn order; Psychic-Terrain block ✅ |
+| Priority | Aqua Jet, Bullet Punch, Sucker Punch, Extreme Speed | ✅ | ✅ | ✅ | A *distinct* priority-attack option per actor×foe (`PRIO_BASE` sentinel, `my/oppPrioCell`): the max-damage `off`/`thr` cell hid priority moves whenever a stronger normal move existed (Kingambit's Kowtow out-damages its Sucker Punch), so a priority KO was invisible. Now the search can pick MY priority KO and prices the opp's (`scariestIncoming` flags it + marks it as moving first). Offered at the ROOT, gated to "can KO the foe at current HP" to bound branching. Sucker Punch / Thunderclap fail unless the target is using a damaging attack (`targetWillAttack`). **GAP:** base dex priority only — ability/terrain-conditional bumps (Grassy Glide in Grassy Terrain, Gale Wings at full HP) aren't folded in yet. Psychic-Terrain block ✅ |
 | Protect family | Protect/Detect/King's Shield/Spiky Shield/… | – | ✅ | ✅ | consecutive-use fail modelled |
 | Switch / pivot | U-turn, Volt Switch, Flip Turn, Parting Shot, Teleport, Chilly Reception | ✅(dmg) | ✅ | ✅ | voluntary switch + **pivot**: user chips/debuffs (Parting Shot −1 Atk/SpA) then auto-switches to the best bench mon (root-ply). Fast-pivot model (bench in from start; chip before the foe acts). `PIVOT_BASE` action + per-move pivot cells |
 | Field — order | Tailwind, Trick Room | – | ✅ | ✅ | + durations/stall-out |

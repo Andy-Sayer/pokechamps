@@ -277,6 +277,7 @@ const DEBUFF_BASE = -70;  // dedicated stat-lowering move (Charm/Scary Face/…)
 const TAUNT_BASE = -80;   // Taunt → foe idx (foe can't use status moves for a few turns)
 const ENCORE_BASE = -90;  // Encore → foe idx (foe locked into its last move)
 const FAKEOUT_BASE = -100; // Fake Out → foe idx (chip + guaranteed flinch, first turn out only)
+const PRIO_BASE = -110;   // priority attack (Sucker Punch/Grassy Glide/Aqua Jet/…) → foe idx
 function isSwitchTarget(t: number): boolean { return t <= SWITCH_BASE && t > LEECH_BASE; }
 function switchBenchIdx(t: number): number { return SWITCH_BASE - t; }
 function switchCode(benchIdx: number): number { return SWITCH_BASE - benchIdx; }
@@ -301,9 +302,12 @@ function tauntCode(foeIdx: number): number { return TAUNT_BASE - foeIdx; }
 function isEncoreTarget(t: number): boolean { return t <= ENCORE_BASE && t > FAKEOUT_BASE; }
 function encoreFoeIdx(t: number): number { return ENCORE_BASE - t; }
 function encoreCode(foeIdx: number): number { return ENCORE_BASE - foeIdx; }
-function isFakeOutTarget(t: number): boolean { return t <= FAKEOUT_BASE; }
+function isFakeOutTarget(t: number): boolean { return t <= FAKEOUT_BASE && t > PRIO_BASE; }
 function fakeOutFoeIdx(t: number): number { return FAKEOUT_BASE - t; }
 function fakeOutCode(foeIdx: number): number { return FAKEOUT_BASE - foeIdx; }
+function isPrioTarget(t: number): boolean { return t <= PRIO_BASE && t > PRIO_BASE - 10; }
+function prioFoeIdx(t: number): number { return PRIO_BASE - t; }
+function prioCode(foeIdx: number): number { return PRIO_BASE - foeIdx; }
 function isFieldTarget(t: number): boolean { return t === SET_TAILWIND || t === SET_TRICKROOM; }
 // Benched live team-indices a side can switch INTO (not on the field, hp > 0).
 function benchSwitchTargets(active: number[], hp: number[], n: number): number[] {
@@ -602,6 +606,11 @@ interface Tables {
   myHasFakeOut: boolean[]; oppHasFakeOut: boolean[];
   myFakeOutCell: (Cell[] | null)[]; oppFakeOutCell: (Cell[] | null)[];
   myFlinchImmune: boolean[]; oppFlinchImmune: boolean[];
+  // Best PRIORITY move per attacker×target (priority > 0; null = the mon has none).
+  // The max-damage `off`/`thr` cell hides priority moves whenever they aren't the
+  // hardest hit, so these are offered as a SEPARATE attack option — a priority KO
+  // is endgame-decisive. Indexed like off/thr: myPrioCell[mi][oj], oppPrioCell[oj][mi].
+  myPrioCell: (Cell | null)[][]; oppPrioCell: (Cell | null)[][];
   // Regenerator: heals 1/3 max HP when the mon switches OUT.
   myRegen: boolean[]; oppRegen: boolean[];
   // Rock Head: negates a recoil move's self-damage (Magic Guard does too, via myResidual).
@@ -1119,6 +1128,16 @@ const RESIST_BERRY_TYPE: Record<string, string> = {
   roseliberry: 'Fairy', chilanberry: 'Normal',
 };
 function resistBerryType(item: string | null | undefined): string | null { return RESIST_BERRY_TYPE[toId(item ?? '')] ?? null; }
+// Sucker Punch / Thunderclap: a priority attack that FAILS unless the target is
+// using a damaging move this turn (and hasn't already moved). Kingambit's Sucker
+// Punch is meta-defining (~38% mon, near-universal on it), so modelling the fail
+// lets the search find the "switch out / go status to dodge it" line instead of
+// assuming a free priority KO. Detected by move name on the cell.
+const SUCKER_LIKE = new Set(['suckerpunch', 'thunderclap']);
+function isSuckerLike(move: string | null | undefined): boolean { return SUCKER_LIKE.has(toId(move ?? '')); }
+// First-turn-only moves: have their own cell + first-turn-out gating, so they're
+// excluded from the generic priority-attack cell.
+const FIRST_TURN_MOVE_IDS = new Set(['fakeout', 'firstimpression', 'matblock']);
 function hasUnburden(ability: string | null | undefined): boolean { return toId(ability ?? '') === 'unburden'; }
 function isWhiteHerb(item: string | null | undefined): boolean { return toId(item ?? '') === 'whiteherb'; }
 function isChoiceItem(item: string | null | undefined): boolean { const i = toId(item ?? ''); return i === 'choiceband' || i === 'choicespecs' || i === 'choicescarf'; }
@@ -1427,6 +1446,41 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
       attackerBoosts: o.boosts, attackerStatus: o.status, defenderBoosts: m.boosts, defenderStatus: m.status,
     }));
   });
+  // Priority-attack cells: the best base-priority (> 0) DAMAGING move vs each foe.
+  // The max-damage off/thr cell hides priority moves whenever a stronger normal
+  // move exists (Kingambit's Kowtow out-damages its Sucker Punch), so a priority
+  // KO would be invisible without this. Fake Out / First Impression are excluded
+  // (own cell + first-turn gating); status-priority moves (Protect/Detect) aren't
+  // attacks. Base priority only — Grassy Glide / Gale Wings ability-conditional
+  // bumps are not folded in yet (consistent with the search's `actings` ordering).
+  const isPrioAttack = (mv: string): boolean => {
+    if (movePriority(mv) <= 0) return false;
+    if (FIRST_TURN_MOVE_IDS.has(toId(mv))) return false;
+    return (getMove(mv) as { category?: string } | undefined)?.category !== 'Status';
+  };
+  const myPrioCell: (Cell | null)[][] = mine.map((m, mi) => {
+    const pri = (m.set.moves ?? []).filter(isPrioAttack);
+    if (!pri.length) return oppEntries.map(() => null);
+    const atk: PokemonSet = { ...bladeSet(m.set), moves: pri };
+    return oppEntries.map((oe, oj) => cellFromOffense(atk, oe, input.field, {
+      attackerGimmickActive: myMega(mi), defenderGimmickActive: oppHypoMega(oj),
+      attackerBoosts: m.boosts, attackerStatus: m.status,
+      defenderBoosts: opp[oj]!.boosts, defenderStatus: opp[oj]!.status,
+    }));
+  });
+  const oppPrioCell: (Cell | null)[][] = opp.map((o, oj) => {
+    // Same move source as the main threat cell: known moves, else the Pikalytics
+    // likely pool (so a meta Sucker Punch is modelled before it's been revealed).
+    const pool = oppEntries[oj]!.knownMoves.length ? oppEntries[oj]!.knownMoves : pikalyticsMoves(oppEntries[oj]!.species);
+    const pri = pool.filter(isPrioAttack);
+    if (!pri.length) return mine.map(() => null);
+    const synth: OpponentEntry = { ...bladeEntry(oppEntries[oj]!), knownMoves: pri };
+    return mine.map((m, mi) => cellFromThreat(synth, m.set, input.field, {
+      attackerGimmickActive: oppHypoMega(oj), defenderGimmickActive: myMega(mi),
+      attackerBoosts: o.boosts, attackerStatus: o.status,
+      defenderBoosts: m.boosts, defenderStatus: m.status,
+    }));
+  });
   return {
     myN: mine.length,
     oppN: opp.length,
@@ -1505,6 +1559,7 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     myHasFakeOut: mine.map(m => hasFakeOut(m.set.moves ?? [])),
     oppHasFakeOut: opp.map(o => hasFakeOut(o.entry.knownMoves)),
     myFakeOutCell, oppFakeOutCell,
+    myPrioCell, oppPrioCell,
     myFlinchImmune: mine.map(m => flinchImmune(m.set.ability, m.set.item)),
     oppFlinchImmune: opp.map(o => flinchImmune(o.entry.ability, o.entry.item)),
     myIntimImmune: mine.map(m => intimidateImmune(m.set.ability, m.set.item)),
@@ -1840,6 +1895,7 @@ function resolveTurn(
     const priority = target === SPREAD ? t.mySpread[actor]!.priority
       : target === PROTECT ? movePriority(t.myProtectMove[actor] ?? 'Protect')
       : isFakeOutTarget(target) ? 3
+      : isPrioTarget(target) ? (t.myPrioCell[actor]?.[prioFoeIdx(target)]?.priority ?? 1)
       : t.off[actor]![target]!.priority;
     actings.push({ side: 'mine', actor, target, priority, speed: effSpeed(mySpe(actor), s.myTailwind, myPar(actor)) });
   }
@@ -1848,6 +1904,7 @@ function resolveTurn(
     const priority = target === SPREAD ? t.oppSpread[actor]!.priority
       : target === PROTECT ? movePriority(t.oppProtectMove[actor] ?? 'Protect')
       : isFakeOutTarget(target) ? 3
+      : isPrioTarget(target) ? (t.oppPrioCell[actor]?.[prioFoeIdx(target)]?.priority ?? 1)
       : t.thr[actor]![target]!.priority;
     actings.push({ side: 'opp', actor, target, priority, speed: effSpeed(oppSpe(actor), s.theirTailwind, oppPar(actor)) });
   }
@@ -1876,7 +1933,22 @@ function resolveTurn(
     if (t.oppPivotDebuff[actor]) accDrop(oppToFoeDrop, f, t.oppPivotDebuff[actor]!);
   }
 
+  // Sucker Punch / Thunderclap fail unless the target is using a damaging attack
+  // this turn and hasn't already moved. `acted` accrues as we walk `actings` in
+  // order, so "already moved" = the target appears earlier in the order.
+  const acted = new Set<string>();
+  const targetWillAttack = (side: 'mine' | 'opp', idx: number): boolean => {
+    if (acted.has(`${side}:${idx}`)) return false;        // already moved → Sucker Punch fails
+    const plan = side === 'mine' ? myTargets : oppTargets;
+    if (!plan.has(idx)) return false;                     // freshly switched-in / no action
+    const tgt = plan.get(idx)!;
+    if (tgt === PROTECT || nonAttack(tgt)) return false;  // protect / switch / status / setup / pivot…
+    if (side === 'mine' ? myAsleep(idx) : oppAsleep(idx)) return false; // can't move → no attack
+    return true;                                          // single-target / spread / Fake Out = an attack
+  };
+
   for (const act of actings) {
+    acted.add(`${act.side}:${act.actor}`);
     if (act.side === 'mine') {
       if (myHp[act.actor]! <= 0) continue;          // KO'd before acting
       if (myFlinched.has(act.actor)) continue;        // flinched by Fake Out
@@ -1910,13 +1982,17 @@ function resolveTurn(
         if (t.myLifeOrb[act.actor] && spreadDealt) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10);
         continue;
       }
-      // Redirection (opp's Rage Powder / Follow Me) overrides targeting; else the
-      // switch-redirect (hit the replacement if the target switched).
-      const oTgt = oppRedirTarget(act.actor) ?? redirect(act.target, oppSwitchIn);
+      // Priority-attack option (Sucker Punch/Aqua Jet/…) uses the prio cell; else
+      // the max-damage off cell. Redirection (opp Rage Powder/Follow Me) overrides
+      // targeting; else the switch-redirect (hit the replacement if it switched).
+      const myPrio = isPrioTarget(act.target);
+      const oTgt = oppRedirTarget(act.actor) ?? redirect(myPrio ? prioFoeIdx(act.target) : act.target, oppSwitchIn);
       if (oppProtected.has(oTgt)) continue;          // target protecting → fizzle
       if (oppHp[oTgt]! <= 0) continue;               // target already down → fizzle
-      const oc = t.off[act.actor]![oTgt]!;
+      const oc = myPrio ? t.myPrioCell[act.actor]?.[oTgt] : t.off[act.actor]![oTgt]!;
+      if (!oc) continue;                              // no priority move vs this foe
       if (psychicBlocked(oc.priority, t.oppGrounded[oTgt]!)) continue; // Psychic Terrain blocks priority
+      if (isSuckerLike(oc.move) && !targetWillAttack('opp', oTgt)) continue; // Sucker Punch whiffs vs a non-attacker
       const oBefore = oppHp[oTgt]!;
       apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r), oc.physical, oc.type, oc.groundMove), oppSurv, oc.multiHit);
       const oDealt = oBefore - oppHp[oTgt]!;
@@ -1965,11 +2041,15 @@ function resolveTurn(
         if (t.oppLifeOrb[act.actor] && spreadDealt) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
         continue;
       }
-      const mTgt = myRedirTarget(act.actor) ?? redirect(act.target, mySwitchIn);  // redirection, else switch-redirect
+      // Priority-attack option uses the opp prio cell; else the max-damage thr cell.
+      const oppPrio = isPrioTarget(act.target);
+      const mTgt = myRedirTarget(act.actor) ?? redirect(oppPrio ? prioFoeIdx(act.target) : act.target, mySwitchIn);  // redirection, else switch-redirect
       if (myProtected.has(mTgt)) continue;            // my mon protecting → fizzle
       if (myHp[mTgt]! <= 0) continue;
-      const tc = t.thr[act.actor]![mTgt]!;
+      const tc = oppPrio ? t.oppPrioCell[act.actor]?.[mTgt] : t.thr[act.actor]![mTgt]!;
+      if (!tc) continue;                              // no priority move vs this foe
       if (psychicBlocked(tc.priority, t.myGrounded[mTgt]!)) continue; // Psychic Terrain blocks priority
+      if (isSuckerLike(tc.move) && !targetWillAttack('mine', mTgt)) continue; // Sucker Punch whiffs vs a non-attacker
       const mBefore = myHp[mTgt]!;
       apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r), tc.physical, tc.type, tc.groundMove), mySurv, tc.multiHit);
       const mDealt = mBefore - myHp[mTgt]!;
@@ -2444,6 +2524,10 @@ function jointActions(
   tauntEncore?: { taunt: (string | null)[]; encore: (string | null)[]; foes: number[] },
   // Fake Out (root only): offered when the mon knows it AND is on its first turn out.
   fakeOut?: { has: boolean[]; firstTurn: boolean[]; foes: number[] },
+  // Priority attack (all plies): the prio cell per actor×foe. Offered as a distinct
+  // option (vs the max-damage cell) only when it can KO the foe at current HP — the
+  // case where the priority turn-order actually matters. cell indexed [actor][foe].
+  prio?: { cell: (Cell | null)[][]; foes: number[] },
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -2483,6 +2567,12 @@ function jointActions(
     const tauntCodes = (tauntEncore && tauntEncore.taunt[actor] != null) ? tauntEncore.foes.map(tauntCode) : [];
     const encoreCodes = (tauntEncore && tauntEncore.encore[actor] != null) ? tauntEncore.foes.map(encoreCode) : [];
     const fakeOutCodes = (fakeOut && fakeOut.has[actor] && fakeOut.firstTurn[actor]) ? fakeOut.foes.map(fakeOutCode) : [];
+    // Priority attack: only when it can KO the foe at current HP (otherwise the
+    // max-damage cell already dominates — priority adds nothing but branching).
+    const prioCodes = prio ? prio.foes.filter(j => {
+      const pc = prio.cell[actor]?.[j];
+      return !!pc && pc.dmgMax > 0 && pc.dmgMax >= (foeHp[j] ?? 0);
+    }).map(prioCode) : [];
     const batonCodes = (baton && baton.move[actor] != null) ? baton.targets.map(batonCode) : [];
     // SPREAD first so a spread that ties a single-target line is kept. PROTECT /
     // field / setup / screen / weather / Leech / SWITCH / Baton last — only chosen
@@ -2507,11 +2597,12 @@ function jointActions(
       ...tauntCodes,
       ...encoreCodes,
       ...fakeOutCodes,
+      ...prioCodes,
       ...switchCodes,
       ...batonCodes,
     ];
     // Taunted / Choice-locked → only attacking/spread/switch options survive.
-    const usable = (restrict?.taunt[actor] || restrict?.choice?.[actor]) ? options.filter(o => o >= 0 || o === SPREAD || isSwitchTarget(o)) : options;
+    const usable = (restrict?.taunt[actor] || restrict?.choice?.[actor]) ? options.filter(o => o >= 0 || o === SPREAD || isSwitchTarget(o) || isPrioTarget(o)) : options;
     const next: Array<Map<number, number>> = [];
     for (const combo of combos) {
       for (const opt of usable) {
@@ -2738,7 +2829,8 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     { move: t.myDebuffMove, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
     { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct, choice: t.myChoice },
     { taunt: t.myTauntMove, encore: t.myEncoreMove, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
-    { has: t.myHasFakeOut, firstTurn: s.myFirstTurn, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) });
+    { has: t.myHasFakeOut, firstTurn: s.myFirstTurn, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
+    { cell: t.myPrioCell, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) });
 }
 function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
@@ -2766,7 +2858,8 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     { move: t.oppDebuffMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
     { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct, choice: t.oppChoice },
     { taunt: t.oppTauntMove, encore: t.oppEncoreMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
-    { has: t.oppHasFakeOut, firstTurn: s.oppFirstTurn, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) });
+    { has: t.oppHasFakeOut, firstTurn: s.oppFirstTurn, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
+    { cell: t.oppPrioCell, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) });
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -2806,6 +2899,8 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
   for (const [actor, target] of joint) {
     if (isFakeOutTarget(target)) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Fake Out', targetSpecies: t.oppSpecies[fakeOutFoeIdx(target)]! });
+    } else if (isPrioTarget(target)) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myPrioCell[actor]?.[prioFoeIdx(target)]?.move ?? 'priority', targetSpecies: t.oppSpecies[prioFoeIdx(target)]! });
     } else if (isTauntTarget(target)) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myTauntMove[actor] ?? 'Taunt', targetSpecies: t.oppSpecies[tauntFoeIdx(target)]! });
     } else if (isEncoreTarget(target)) {
@@ -2862,6 +2957,8 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): Search
   for (const [actor, target] of joint) {
     if (isFakeOutTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: 'Fake Out', targetSpecies: t.mySpecies[fakeOutFoeIdx(target)]! });
+    } else if (isPrioTarget(target)) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppPrioCell[actor]?.[prioFoeIdx(target)]?.move ?? 'priority', targetSpecies: t.mySpecies[prioFoeIdx(target)]! });
     } else if (isTauntTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppTauntMove[actor] ?? 'Taunt', targetSpecies: t.mySpecies[tauntFoeIdx(target)]! });
     } else if (isEncoreTarget(target)) {
@@ -3087,7 +3184,7 @@ export function createSearch(input: SearchInput): PositionSearch {
           const myHp = s0.myHp[mi] ?? 0;
           if (myHp <= 0) return null;
           let worst: { oppName: string; koProb: number; outspeeds: boolean } | null = null;
-          const consider = (dmgMin: number, dmgMid: number, dmgMax: number, koRolls: number[], oj: number, oppMega: number | null, tbl: Tables) => {
+          const consider = (dmgMin: number, dmgMid: number, dmgMax: number, koRolls: number[], oj: number, oppMega: number | null, tbl: Tables, priorityMove = false) => {
             if (dmgMax < myHp || dmgMid >= myHp) return; // can't KO, or already lethal at median (not contingent)
             const koProb = koRolls.length
               ? koRolls.filter(r => r >= myHp).length / koRolls.length
@@ -3095,7 +3192,9 @@ export function createSearch(input: SearchInput): PositionSearch {
             if (koProb <= 0 || koProb >= 1) return;
             const base = tbl.oppSpecies[oj] ?? 'foe';
             const oppName = oppMega === oj ? (oppMegaInfo(base)?.forme ?? base) : base;
-            if (!worst || koProb > worst.koProb) worst = { oppName, koProb, outspeeds: oppOutspeeds(tbl, s0, oj, mi) };
+            // A priority move strikes first regardless of Speed (Sucker Punch etc.).
+            const outspeeds = priorityMove || oppOutspeeds(tbl, s0, oj, mi);
+            if (!worst || koProb > worst.koProb) worst = { oppName, koProb, outspeeds };
           };
           for (const oppMega of oppPlans) {
             const tbl = tables.get(`${myMegaChosen},${oppMega}`);
@@ -3106,6 +3205,10 @@ export function createSearch(input: SearchInput): PositionSearch {
               if (c) consider(c.dmgMin, c.dmgMid, c.dmgMax, c.koRolls, oj, oppMega, tbl);
               const sp = tbl.oppSpread[oj];
               if (sp) consider(sp.dmgMin[mi] ?? 0, sp.dmgMid[mi] ?? 0, sp.dmgMax[mi] ?? 0, [], oj, oppMega, tbl);
+              // Priority KO (Sucker Punch / Aqua Jet / …): hidden from the max-damage
+              // thr cell, but a contingent priority KO is a real reason a line fails.
+              const pc = tbl.oppPrioCell[oj]?.[mi];
+              if (pc) consider(pc.dmgMin, pc.dmgMid, pc.dmgMax, pc.koRolls, oj, oppMega, tbl, true);
             }
           }
           return worst;
@@ -3144,6 +3247,10 @@ export function createSearch(input: SearchInput): PositionSearch {
               for (const foe of s0.oppActive) {
                 consider({ dmgMin: sp.dmgMin[foe] ?? 0, dmgMid: sp.dmgMid[foe] ?? 0, dmgMax: sp.dmgMax[foe] ?? 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false, drain: 0, contact: false, recoil: 0, setsHazard: null, selfDrop: null, foeDrop: null }, s0.oppHp[foe] ?? 0, expected.table.oppSpecies[foe] ?? 'foe');
               }
+            } else if (isPrioTarget(target)) {
+              const fo = prioFoeIdx(target);
+              const c = expected.table.myPrioCell[actor]?.[fo];
+              if (c) consider(c, s0.oppHp[fo] ?? 0, expected.table.oppSpecies[fo] ?? 'foe');
             } else if (target >= 0) {       // skip PROTECT / SWITCH (no attack)
               consider(expected.table.off[actor]![target]!, s0.oppHp[target] ?? 0, expected.table.oppSpecies[target] ?? 'foe');
             }
@@ -3226,14 +3333,15 @@ export function createSearch(input: SearchInput): PositionSearch {
                 hmOuts.push({ label: `${opt.table.oppSpecies[foe] ?? 'foe'} KO needs top roll`, prob: p });
                 hmCombined *= p;
               }
-            } else if (target >= 0) {        // skip PROTECT / SWITCH (no KO this turn)
-              const c = opt.table.off[actor]?.[target];
+            } else if (target >= 0 || isPrioTarget(target)) {        // direct or priority attack (skip PROTECT / SWITCH)
+              const foe = isPrioTarget(target) ? prioFoeIdx(target) : target;
+              const c = isPrioTarget(target) ? opt.table.myPrioCell[actor]?.[foe] : opt.table.off[actor]?.[foe];
               if (!c) continue;
-              const h = s0.oppHp[target] ?? 0;
+              const h = s0.oppHp[foe] ?? 0;
               if (h <= 0 || c.dmgMax < h || c.dmgMid >= h) continue;
               const p = rollKoProb(c, h);
               if (p <= 0 || p >= 1) continue;
-              hmOuts.push({ label: `${opt.table.oppSpecies[target] ?? 'foe'} KO needs top roll`, prob: p });
+              hmOuts.push({ label: `${opt.table.oppSpecies[foe] ?? 'foe'} KO needs top roll`, prob: p });
               hmCombined *= p;
             }
           }
@@ -3420,6 +3528,12 @@ export function createSearch(input: SearchInput): PositionSearch {
       if (canDebuff(expected.table.myDebuffMove, s0.myActive) || canDebuff(expected.table.oppDebuffMove, s0.oppActive)) actionClasses.push('debuff');
       if (canRedirect(expected.table.myTauntMove, s0.myActive) || canRedirect(expected.table.oppTauntMove, s0.oppActive)) actionClasses.push('taunt');
       if (canRedirect(expected.table.myEncoreMove, s0.myActive) || canRedirect(expected.table.oppEncoreMove, s0.oppActive)) actionClasses.push('encore');
+      // Priority attack is offered only when it can KO a live foe at current HP
+      // (same gate as jointActions) — match that so the class reflects the tree.
+      const prioKO = (cells: (Cell | null)[][], attackers: number[], foes: number[], foeHp: number[]): boolean =>
+        attackers.some(a => foes.some(j => { const pc = cells[a]?.[j]; return !!pc && pc.dmgMax > 0 && (foeHp[j] ?? 0) > 0 && pc.dmgMax >= (foeHp[j] ?? 0); }));
+      if (prioKO(expected.table.myPrioCell, s0.myActive, s0.oppActive, s0.oppHp)
+        || prioKO(expected.table.oppPrioCell, s0.oppActive, s0.myActive, s0.myHp)) actionClasses.push('priority');
       const explored: SearchExplored = {
         depth,
         myActions: myRootJoints.length,
@@ -3503,7 +3617,8 @@ export type TurnAction =
   | { kind: 'debuff'; target: number }    // Charm/Scary Face/… on the foe at `target`
   | { kind: 'taunt'; target: number }     // Taunt the foe at `target`
   | { kind: 'encore'; target: number }    // Encore the foe at `target`
-  | { kind: 'fakeout'; target: number };  // Fake Out the foe at `target`
+  | { kind: 'fakeout'; target: number }   // Fake Out the foe at `target`
+  | { kind: 'prio'; target: number };     // best priority move (Sucker Punch/Aqua Jet/…) at `target`
 
 /** Post-turn structural state of one mon (by team-index). HP is our coarse
  *  representative value — the harness compares the DISCRETE fields (fainted /
@@ -3558,6 +3673,7 @@ export function resolveOneTurn(
     else if (a.kind === 'taunt') { myTargets.set(actor, tauntCode(a.target)); myMove.set(actor, t.myTauntMove[actor] ?? ''); }
     else if (a.kind === 'encore') { myTargets.set(actor, encoreCode(a.target)); myMove.set(actor, t.myEncoreMove[actor] ?? ''); }
     else if (a.kind === 'fakeout') { myTargets.set(actor, fakeOutCode(a.target)); myMove.set(actor, 'Fake Out'); }
+    else if (a.kind === 'prio') { myTargets.set(actor, prioCode(a.target)); myMove.set(actor, t.myPrioCell[actor]?.[a.target]?.move ?? ''); }
     else { myTargets.set(actor, PROTECT); }
   }
   for (const [actor, a] of oppActions) {
@@ -3570,6 +3686,7 @@ export function resolveOneTurn(
     else if (a.kind === 'taunt') { oppTargets.set(actor, tauntCode(a.target)); oppMove.set(actor, t.oppTauntMove[actor] ?? ''); }
     else if (a.kind === 'encore') { oppTargets.set(actor, encoreCode(a.target)); oppMove.set(actor, t.oppEncoreMove[actor] ?? ''); }
     else if (a.kind === 'fakeout') { oppTargets.set(actor, fakeOutCode(a.target)); oppMove.set(actor, 'Fake Out'); }
+    else if (a.kind === 'prio') { oppTargets.set(actor, prioCode(a.target)); oppMove.set(actor, t.oppPrioCell[actor]?.[a.target]?.move ?? ''); }
     else { oppTargets.set(actor, PROTECT); }
   }
   const pass: Pass = {

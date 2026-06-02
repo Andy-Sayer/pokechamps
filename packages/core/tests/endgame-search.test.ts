@@ -1682,6 +1682,52 @@ describe('pivot moves (U-turn / Parting Shot)', () => {
   });
 });
 
+describe('priority moves (Bullet Punch / Sucker Punch / Aqua Jet …)', () => {
+  test('a slow mon’s priority move strikes first and KOs before the faster foe acts', () => {
+    const scizor = mon({ species: 'Scizor', ability: 'Technician', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Bullet Punch', 'U-turn'] });
+    const out = resolveOneTurn(
+      {
+        mine: [{ set: scizor, hpPercent: 100, active: true }],
+        opp: [{ entry: oppOf(mon({ species: 'Flutter Mane', ability: 'Protosynthesis', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Moonblast'] })), hpPercent: 100, active: true }],
+        field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+      },
+      new Map([[0, { kind: 'prio', target: 0 } as const]]),    // Scizor: Bullet Punch (+1), though it's slower
+      new Map([[0, { kind: 'attack', target: 0 } as const]]),  // Flutter Mane: Moonblast (faster, 0 priority)
+    );
+    expect(out.opp[0]!.fainted).toBe(true);     // Bullet Punch (Technician, SE vs Fairy) OHKOs
+    expect(out.mine[0]!.hpPct).toBe(100);       // foe fainted before it could act → Scizor untouched
+  });
+
+  test('Sucker Punch (the priority cell) whiffs when the target isn’t attacking', () => {
+    const kingambit = (): OpponentEntry => ({
+      species: 'Kingambit', knownMoves: ['Sucker Punch', 'Kowtow Cleave'],
+      candidates: [mon({ species: 'Kingambit', ability: 'Defiant', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Sucker Punch', 'Kowtow Cleave'] })],
+    });
+    // Garchomp knows a status move so the 'status' action is a real non-attack.
+    const garc = mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Earthquake', 'Thunder Wave'] });
+    const base = {
+      mine: [{ set: garc, hpPercent: 100, active: true }],
+      opp: [{ entry: kingambit(), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    };
+    // Garchomp goes for Thunder Wave (status) → not attacking → Sucker Punch fails.
+    const whiff = resolveOneTurn(base, new Map([[0, { kind: 'status', target: 0 } as const]]), new Map([[0, { kind: 'prio', target: 0 } as const]]));
+    expect(whiff.mine[0]!.hpPct).toBe(100);
+    // Garchomp attacks → Sucker Punch connects first (priority).
+    const land = resolveOneTurn(base, new Map([[0, { kind: 'attack', target: 0 } as const]]), new Map([[0, { kind: 'prio', target: 0 } as const]]));
+    expect(land.mine[0]!.hpPct).toBeLessThan(100);
+  });
+
+  test('priority is offered as an action class when a priority move can KO', () => {
+    const r = searchToDepth({
+      mine: [{ set: mon({ species: 'Scizor', ability: 'Technician', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Bullet Punch', 'Close Combat'] }), hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(mon({ species: 'Flutter Mane', ability: 'Protosynthesis', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Moonblast'] })), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 1);
+    expect(r.explored!.actionClasses).toContain('priority');
+  });
+});
+
 describe('on-KO boosts (Moxie / Beast Boost)', () => {
   // A frail foe at 12% HP is KO'd by any hit → the attacker's on-KO ability fires.
   const koFrailFoe = (set: PokemonSet) => resolveOneTurn(
