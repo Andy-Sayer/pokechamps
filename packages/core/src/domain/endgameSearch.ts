@@ -2688,11 +2688,17 @@ function value(t: Tables, s: State, depth: number, alpha: number, pass: Pass): n
   // Deeper plies: no root-only actions (switch/field/setup/…), but Taunt/Encore
   // RESTRICTIONS persist, so pass the restrict mask (param 22; the intervening
   // root-only params are undefined). Sleep is handled by the in-loop guard.
+  // Priority attacks ARE offered at depth (param 25) — gated to "can KO the foe
+  // at current HP" inside jointActions, so the lookahead value foresees a
+  // priority revenge-KO (e.g. Sucker Punch punishing my setup) without exploding
+  // branching. Damaging-move only, consistent with the rest of the deep model.
   const U = undefined;
   const myRestrict = { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct, choice: t.myChoice };
   const oppRestrict = { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct, choice: t.oppChoice };
-  const myJoints = jointActions(s.myActive, s.oppActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak, U, U, U, U, U, U, U, U, U, U, U, U, U, U, U, myRestrict);
-  const oppJoints = jointActions(s.oppActive, s.myActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak, U, U, U, U, U, U, U, U, U, U, U, U, U, U, U, oppRestrict);
+  const myPrio = { cell: t.myPrioCell, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) };
+  const oppPrio = { cell: t.oppPrioCell, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) };
+  const myJoints = jointActions(s.myActive, s.oppActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak, U, U, U, U, U, U, U, U, U, U, U, U, U, U, U, myRestrict, U, U, myPrio);
+  const oppJoints = jointActions(s.oppActive, s.myActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak, U, U, U, U, U, U, U, U, U, U, U, U, U, U, U, oppRestrict, U, U, oppPrio);
   if (myJoints.length === 0) return leafScore(s);
 
   let best = -Infinity;
