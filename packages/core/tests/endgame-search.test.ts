@@ -1829,6 +1829,47 @@ describe('Wide Guard / Quick Guard (team protect)', () => {
   });
 });
 
+describe('Strength Sap + Protect-variant punishes', () => {
+  test('Strength Sap heals the user and drops the foe’s Attack', () => {
+    const out = resolveOneTurn(
+      {
+        mine: [{ set: mon({ species: 'Sinistcha', ability: 'Hospitality', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Strength Sap', 'Matcha Gotcha'] }), hpPercent: 40, active: true }],
+        opp: [{ entry: oppOf(mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Earthquake'] })), hpPercent: 100, active: true }],
+        field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+      },
+      new Map([[0, { kind: 'strengthsap' } as const]]), new Map(),
+    );
+    expect(out.mine[0]!.hpPct).toBeGreaterThan(40);   // healed by Garchomp's (high) Attack stat
+    expect(out.opp[0]!.boosts.atk).toBe(-1);          // and Garchomp's Attack dropped
+  });
+
+  test('King’s Shield drops a contacting attacker’s Attack', () => {
+    const out = resolveOneTurn(
+      {
+        mine: [{ set: mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Dragon Claw'] }), hpPercent: 100, active: true }],
+        opp: [{ entry: { species: 'Aegislash', knownMoves: ["King's Shield"], candidates: [mon({ species: 'Aegislash', ability: 'Stance Change', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ["King's Shield", 'Shadow Ball'] })] }, hpPercent: 100, active: true }],
+        field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+      },
+      new Map([[0, { kind: 'attack', target: 0 } as const]]),   // Dragon Claw (contact) into the shield
+      new Map([[0, { kind: 'protect' } as const]]),             // Aegislash uses King's Shield
+    );
+    expect(out.mine[0]!.boosts.atk).toBe(-1);
+  });
+
+  test('Spiky Shield chips a contacting attacker', () => {
+    const out = resolveOneTurn(
+      {
+        mine: [{ set: mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Dragon Claw'] }), hpPercent: 100, active: true }],
+        opp: [{ entry: { species: 'Decidueye', knownMoves: ['Spiky Shield'], candidates: [mon({ species: 'Decidueye', ability: 'Overgrow', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Spiky Shield', 'Leaf Blade'] })] }, hpPercent: 100, active: true }],
+        field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+      },
+      new Map([[0, { kind: 'attack', target: 0 } as const]]),
+      new Map([[0, { kind: 'protect' } as const]]),
+    );
+    expect(out.mine[0]!.hpPct).toBeLessThan(100);   // 1/8 Spiky Shield chip
+  });
+});
+
 describe('on-KO boosts (Moxie / Beast Boost)', () => {
   // A frail foe at 12% HP is KO'd by any hit → the attacker's on-KO ability fires.
   const koFrailFoe = (set: PokemonSet) => resolveOneTurn(

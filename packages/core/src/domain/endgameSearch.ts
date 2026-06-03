@@ -25,7 +25,7 @@
 import type { PokemonSet, OpponentEntry, FieldState, Match, HazardState } from './types.js';
 import { ZERO_EVS, MAX_IVS } from './types.js';
 import { predictOffense, predictThreat, pikalyticsMoves } from './predictions.js';
-import { actualSpeed, effectiveSpeedRange } from './speed.js';
+import { actualSpeed, actualStat, effectiveSpeedRange } from './speed.js';
 import { getMove, getSpecies, getNature, toId, isSpreadMove, moveFlinchChance } from './data.js';
 import { getMegaOptions } from './gimmicks/mega.js';
 import { defaultOpponentSet } from './bring.js';
@@ -266,6 +266,7 @@ const SLEEP_SKIP = -12;   // forced no-op for an asleep mon (can't act this turn
 const HELP_HAND = -13;    // Helping Hand (+5) — the ally's move deals ×1.5 this turn
 const WIDE_GUARD = -14;   // Wide Guard (+3) — blocks the foes' SPREAD moves this turn (whole side)
 const QUICK_GUARD = -15;  // Quick Guard (+3) — blocks the foes' PRIORITY moves this turn (whole side)
+const SAP = -16;          // Strength Sap — heal by the (highest-Atk) foe's Attack stat + drop its Atk −1
 // Ranged sentinel blocks that each carry an index, kept disjoint so a code is
 // unambiguous. Switches: [-29,-20] → bench idx. Leech Seed: [-39,-30] → foe idx.
 // Baton Pass: [-49,-40] → bench idx (switch that passes boosts). Status: ≤ -50 →
@@ -614,6 +615,9 @@ interface Tables {
   // which actives know each (team-protect for the turn).
   myWideGuard: boolean[]; oppWideGuard: boolean[];
   myQuickGuard: boolean[]; oppQuickGuard: boolean[];
+  // Strength Sap: who knows it + each mon's Attack stat (heal = target's Atk stat).
+  myStrengthSap: boolean[]; oppStrengthSap: boolean[];
+  myAtkStat: number[]; oppAtkStat: number[];
   myFlinchImmune: boolean[]; oppFlinchImmune: boolean[];
   // Best PRIORITY move per attacker×target (priority > 0; null = the mon has none).
   // The max-damage `off`/`thr` cell hides priority moves whenever they aren't the
@@ -746,7 +750,7 @@ function isGrassType(species: string): boolean {
 
 // Single-user protection moves (user fully blocks incoming damage for one turn).
 // Wide Guard / Quick Guard / Mat Block protect the TEAM and are not modelled here.
-const PROTECT_MOVE_IDS = new Set(['protect', 'detect', 'kingsshield', 'banefulbunker', 'spikyshield', 'obstruct', 'silktrap']);
+const PROTECT_MOVE_IDS = new Set(['protect', 'detect', 'kingsshield', 'banefulbunker', 'spikyshield', 'obstruct', 'silktrap', 'burningbulwark']);
 function isProtectMove(move: string): boolean {
   return PROTECT_MOVE_IDS.has(toId(move));
 }
@@ -1169,6 +1173,22 @@ function hasFakeOut(moves: string[]): boolean { return moves.some(m => toId(m) =
 function hasHelpingHand(moves: string[]): boolean { return moves.some(m => toId(m) === 'helpinghand'); }
 function hasWideGuard(moves: string[]): boolean { return moves.some(m => toId(m) === 'wideguard'); }
 function hasQuickGuard(moves: string[]): boolean { return moves.some(m => toId(m) === 'quickguard'); }
+function hasStrengthSap(moves: string[]): boolean { return moves.some(m => toId(m) === 'strengthsap'); }
+// On-contact punish from a Protect-variant, applied to an attacker whose CONTACT
+// move is blocked by the protecting mon. King's Shield −1 Atk (Aegislash, Gen 9),
+// Spiky Shield 1/8 chip, Silk Trap −1 Spe, Obstruct −2 Def, Baneful Bunker poison,
+// Burning Bulwark burn. Plain Protect/Detect/Wide/Quick Guard have none.
+function protectPunish(move: string | null | undefined): { drop?: BoostMap; chip?: number; status?: string } | null {
+  switch (toId(move ?? '')) {
+    case 'kingsshield': return { drop: { atk: -1 } };
+    case 'spikyshield': return { chip: 12.5 };
+    case 'silktrap': return { drop: { spe: -1 } };
+    case 'obstruct': return { drop: { def: -2 } };
+    case 'banefulbunker': return { status: 'psn' };
+    case 'burningbulwark': return { status: 'brn' };
+    default: return null;
+  }
+}
 // Flinch immunity: Inner Focus (ability) or Covert Cloak (item) — common in VGC.
 function flinchImmune(ability: string | null | undefined, item: string | null | undefined): boolean {
   return toId(ability ?? '') === 'innerfocus' || /covert\s*cloak/i.test(item ?? '');
@@ -1600,6 +1620,10 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppWideGuard: opp.map((o, oj) => hasWideGuard(oppEntries[oj]!.knownMoves)),
     myQuickGuard: mine.map(m => hasQuickGuard(m.set.moves ?? [])),
     oppQuickGuard: opp.map((o, oj) => hasQuickGuard(oppEntries[oj]!.knownMoves)),
+    myStrengthSap: mine.map(m => hasStrengthSap(m.set.moves ?? [])),
+    oppStrengthSap: opp.map((o, oj) => hasStrengthSap(oppEntries[oj]!.knownMoves)),
+    myAtkStat: mine.map(m => actualStat(m.set, 'atk')),
+    oppAtkStat: opp.map(o => actualStat(o.entry.candidates?.[0] ?? defaultOpponentSet(o.entry, 50), 'atk')),
     myPrioCell, oppPrioCell,
     myFlinchImmune: mine.map(m => flinchImmune(m.set.ability, m.set.item)),
     oppFlinchImmune: opp.map(o => flinchImmune(o.entry.ability, o.entry.item)),
@@ -1761,6 +1785,22 @@ function resolveTurn(
   const myToFoeDrop = new Map<number, BoostMap>();   // drops I put on opp mons (opp index → drop)
   const oppToFoeDrop = new Map<number, BoostMap>();   // drops opp puts on my mons (my index → drop)
   const accDrop = (m: Map<number, BoostMap>, idx: number, d: BoostMap) => m.set(idx, addBoosts(m.get(idx) ?? {}, d));
+  // Protect-variant on-contact punish deferred to the status pass (poison/burn).
+  const myPunishStatus = new Map<number, string>();   // my attacker statused by an OPP protect
+  const oppPunishStatus = new Map<number, string>();  // opp attacker statused by MY protect
+  // Apply a Protect-variant's on-contact punish to `attacker` on `side` (its CONTACT
+  // move was blocked by the protecting foe). Drops route through the foe-drop
+  // accumulators (Defiant / immunity apply); chip is direct; status is deferred.
+  const applyProtectPunish = (move: string | null | undefined, side: 'mine' | 'opp', attacker: number) => {
+    const p = protectPunish(move); if (!p) return;
+    if (p.drop) accDrop(side === 'mine' ? oppToFoeDrop : myToFoeDrop, attacker, p.drop);
+    if (p.chip != null) {
+      const hp = side === 'mine' ? myHp : oppHp;
+      const mg = (side === 'mine' ? t.myResidual[attacker] : t.oppResidual[attacker])?.magicGuard;
+      if (!mg) hp[attacker] = Math.max(0, (hp[attacker] ?? 0) - p.chip);
+    }
+    if (p.status) (side === 'mine' ? myPunishStatus : oppPunishStatus).set(attacker, p.status);
+  };
   // KOs each attacker scored this turn → on-KO ability boost (Moxie/Beast Boost),
   // applied ×count at end of turn. actor index → KO count.
   const myKoCount = new Map<number, number>();
@@ -1948,7 +1988,7 @@ function resolveTurn(
   const nonAttack = (target: number) =>
     isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isStatusTarget(target) || isFieldTarget(target)
     || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN || target === RECOVER || target === SET_HAZARD
-    || target === REDIRECT || target === SLEEP_SKIP || target === HELP_HAND || target === WIDE_GUARD || target === QUICK_GUARD || isPivotTarget(target) || isDebuffTarget(target)
+    || target === REDIRECT || target === SLEEP_SKIP || target === HELP_HAND || target === WIDE_GUARD || target === QUICK_GUARD || target === SAP || isPivotTarget(target) || isDebuffTarget(target)
     || isTauntTarget(target) || isEncoreTarget(target);
   // Fake Out flinches: a mon hit by Fake Out (resolved at +3 before it acts) skips
   // its action this turn.
@@ -2054,9 +2094,12 @@ function resolveTurn(
       // targeting; else the switch-redirect (hit the replacement if it switched).
       const myPrio = isPrioTarget(act.target);
       const oTgt = oppRedirTarget(act.actor) ?? redirect(myPrio ? prioFoeIdx(act.target) : act.target, oppSwitchIn);
-      if (oppProtected.has(oTgt)) continue;          // target protecting → fizzle
-      if (oppHp[oTgt]! <= 0) continue;               // target already down → fizzle
       const oc = myPrio ? t.myPrioCell[act.actor]?.[oTgt] : t.off[act.actor]![oTgt]!;
+      if (oppProtected.has(oTgt)) {                  // target protecting → fizzle (+ King's Shield etc. punish)
+        if (oc?.contact) applyProtectPunish(t.oppProtectMove[oTgt], 'mine', act.actor);
+        continue;
+      }
+      if (oppHp[oTgt]! <= 0) continue;               // target already down → fizzle
       if (!oc) continue;                              // no priority move vs this foe
       if (psychicBlocked(oc.priority, t.oppGrounded[oTgt]!)) continue; // Psychic Terrain blocks priority
       if (oppQuickGuard && oc.priority > 0) continue;  // Quick Guard blocks priority moves
@@ -2114,9 +2157,12 @@ function resolveTurn(
       // Priority-attack option uses the opp prio cell; else the max-damage thr cell.
       const oppPrio = isPrioTarget(act.target);
       const mTgt = myRedirTarget(act.actor) ?? redirect(oppPrio ? prioFoeIdx(act.target) : act.target, mySwitchIn);  // redirection, else switch-redirect
-      if (myProtected.has(mTgt)) continue;            // my mon protecting → fizzle
-      if (myHp[mTgt]! <= 0) continue;
       const tc = oppPrio ? t.oppPrioCell[act.actor]?.[mTgt] : t.thr[act.actor]![mTgt]!;
+      if (myProtected.has(mTgt)) {                    // my mon protecting → fizzle (+ King's Shield etc. punish)
+        if (tc?.contact) applyProtectPunish(t.myProtectMove[mTgt], 'opp', act.actor);
+        continue;
+      }
+      if (myHp[mTgt]! <= 0) continue;
       if (!tc) continue;                              // no priority move vs this foe
       if (psychicBlocked(tc.priority, t.myGrounded[mTgt]!)) continue; // Psychic Terrain blocks priority
       if (myQuickGuard && tc.priority > 0) continue;  // Quick Guard blocks priority moves
@@ -2297,6 +2343,25 @@ function resolveTurn(
     if (target !== RECOVER) continue;
     if ((oppHp[actor] ?? 0) > 0 && t.oppRecover[actor]) oppHp[actor] = Math.min(100, oppHp[actor]! + recoverPct(t.oppRecover[actor]!.kind, s.weather));
   }
+  // Strength Sap: heal the caster by the target's Attack STAT (as % of the caster's
+  // max HP) and drop the target's Attack −1. Auto-targets the highest-Attack live
+  // foe — the dominant sap (most heal + neuters the biggest physical threat).
+  for (const [actor, target] of myTargets) {
+    if (target !== SAP || (myHp[actor] ?? 0) <= 0) continue;
+    let foe = -1, bestAtk = -1;
+    for (const j of oppActiveNow) if ((oppHp[j] ?? 0) > 0 && t.oppAtkStat[j]! > bestAtk) { bestAtk = t.oppAtkStat[j]!; foe = j; }
+    if (foe < 0) continue;
+    myHp[actor] = Math.min(100, myHp[actor]! + Math.min(100, (bestAtk / (t.myMaxHp[actor] || 1)) * 100));
+    accDrop(myToFoeDrop, foe, { atk: -1 });
+  }
+  for (const [actor, target] of oppTargets) {
+    if (target !== SAP || (oppHp[actor] ?? 0) <= 0) continue;
+    let foe = -1, bestAtk = -1;
+    for (const i of myActiveNow) if ((myHp[i] ?? 0) > 0 && t.myAtkStat[i]! > bestAtk) { bestAtk = t.myAtkStat[i]!; foe = i; }
+    if (foe < 0) continue;
+    oppHp[actor] = Math.min(100, oppHp[actor]! + Math.min(100, (bestAtk / (t.oppMaxHp[actor] || 1)) * 100));
+    accDrop(oppToFoeDrop, foe, { atk: -1 });
+  }
 
   // Inflict status this turn (applies from NEXT ply, like other set-effects): a
   // status MOVE lands on its (post-switch) target unless the target is already
@@ -2337,6 +2402,14 @@ function resolveTurn(
       inflict(foe, sm.status, myToxicN, myStatus, myBerryUsed, t.myItem);
       if (sm.status === 'slp' && myStatus[foe] === 'slp') mySleepTurns[foe] = 2;
     }
+  }
+  // Protect-variant contact punish that inflicts status (Baneful Bunker poison /
+  // Burning Bulwark burn) on the attacker — respects immunities like a status move.
+  for (const [atk, st] of oppPunishStatus) {
+    if ((oppHp[atk] ?? 0) > 0 && !oppStatus[atk] && statusLands(st, '', t.oppSpecies[atk]!, t.oppAbility[atk], t.oppGrounded[atk]!, s.terrain)) inflict(atk, st, oppToxicN, oppStatus, oppBerryUsed, t.oppItem);
+  }
+  for (const [atk, st] of myPunishStatus) {
+    if ((myHp[atk] ?? 0) > 0 && !myStatus[atk] && statusLands(st, '', t.mySpecies[atk]!, t.myAbility[atk], t.myGrounded[atk]!, s.terrain)) inflict(atk, st, myToxicN, myStatus, myBerryUsed, t.myItem);
   }
   // Dedicated debuff moves (Charm/Scary Face/…): lower the (post-switch) foe's stats,
   // routed through the foe-drop accumulator below so Clear Body immunity + Defiant apply.
@@ -2595,10 +2668,10 @@ function jointActions(
   tauntEncore?: { taunt: (string | null)[]; encore: (string | null)[]; foes: number[] },
   // Fake Out (root only): offered when the mon knows it AND is on its first turn out.
   fakeOut?: { has: boolean[]; firstTurn: boolean[]; foes: number[] },
-  // Priority attack (all plies): the prio cell per actor×foe. Offered as a distinct
-  // option (vs the max-damage cell) only when it can KO the foe at current HP — the
-  // case where the priority turn-order actually matters. cell indexed [actor][foe].
-  prio?: { cell: (Cell | null)[][]; foes: number[] },
+  // Priority attack (all plies): the prio cell per actor×foe. `koOnly` gates it to
+  // KO-securing priority (used at depth to bound branching); at the root it's
+  // offered for any damaging priority move. cell indexed [actor][foe].
+  prio?: { cell: (Cell | null)[][]; foes: number[]; koOnly?: boolean },
   // Helping Hand (root only): a true entry → the mon knows it AND has a live ally to
   // boost. The live-partner gate is computed by the caller (jointActions only sees
   // the foe's HP).
@@ -2606,6 +2679,8 @@ function jointActions(
   // Wide Guard / Quick Guard (root only): per-actor knows-it. Team-protect that
   // blocks the foes' spread / priority moves for the turn.
   guard?: { wide: boolean[]; quick: boolean[] },
+  // Strength Sap (root only): per-actor knows-it (heal + foe Atk −1).
+  strengthSap?: boolean[],
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -2645,15 +2720,18 @@ function jointActions(
     const tauntCodes = (tauntEncore && tauntEncore.taunt[actor] != null) ? tauntEncore.foes.map(tauntCode) : [];
     const encoreCodes = (tauntEncore && tauntEncore.encore[actor] != null) ? tauntEncore.foes.map(encoreCode) : [];
     const fakeOutCodes = (fakeOut && fakeOut.has[actor] && fakeOut.firstTurn[actor]) ? fakeOut.foes.map(fakeOutCode) : [];
-    // Priority attack: only when it can KO the foe at current HP (otherwise the
-    // max-damage cell already dominates — priority adds nothing but branching).
+    // Priority attack. At the ROOT (koOnly false) it's offered for any damaging
+    // priority move (the recommendation should see the chip-then-partner-KO line);
+    // at DEPTH (koOnly true) it's gated to "can KO the foe at current HP" so the
+    // lookahead branching stays sparse.
     const prioCodes = prio ? prio.foes.filter(j => {
       const pc = prio.cell[actor]?.[j];
-      return !!pc && pc.dmgMax > 0 && pc.dmgMax >= (foeHp[j] ?? 0);
+      return !!pc && pc.dmgMax > 0 && (!prio.koOnly || pc.dmgMax >= (foeHp[j] ?? 0));
     }).map(prioCode) : [];
     const canHelp = helpHand?.[actor] === true;
     const canWideGuard = guard?.wide[actor] === true;
     const canQuickGuard = guard?.quick[actor] === true;
+    const canSap = strengthSap?.[actor] === true;
     const batonCodes = (baton && baton.move[actor] != null) ? baton.targets.map(batonCode) : [];
     // SPREAD first so a spread that ties a single-target line is kept. PROTECT /
     // field / setup / screen / weather / Leech / SWITCH / Baton last — only chosen
@@ -2673,6 +2751,7 @@ function jointActions(
       ...(canHelp ? [HELP_HAND] : []),
       ...(canWideGuard ? [WIDE_GUARD] : []),
       ...(canQuickGuard ? [QUICK_GUARD] : []),
+      ...(canSap ? [SAP] : []),
       ...(canRedirect ? [REDIRECT] : []),
       ...leechCodes,
       ...statusCodes,
@@ -2756,10 +2835,16 @@ function value(t: Tables, s: State, depth: number, alpha: number, pass: Pass): n
   const U = undefined;
   const myRestrict = { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct, choice: t.myChoice };
   const oppRestrict = { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct, choice: t.oppChoice };
-  const myPrio = { cell: t.myPrioCell, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) };
-  const oppPrio = { cell: t.oppPrioCell, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) };
-  const myJoints = jointActions(s.myActive, s.oppActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak, U, U, U, U, U, U, U, U, U, U, U, U, U, U, U, myRestrict, U, U, myPrio);
-  const oppJoints = jointActions(s.oppActive, s.myActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak, U, U, U, U, U, U, U, U, U, U, U, U, U, U, U, oppRestrict, U, U, oppPrio);
+  const myPrio = { cell: t.myPrioCell, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0), koOnly: true };
+  const oppPrio = { cell: t.oppPrioCell, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0), koOnly: true };
+  // Support moves at depth too (Helping Hand / Wide Guard / Quick Guard): bounded
+  // because only the few mons that know them add an option.
+  const myHelp = t.myHelpingHand.map((kn, i) => kn && s.myActive.some(j => j !== i && (s.myHp[j] ?? 0) > 0));
+  const oppHelp = t.oppHelpingHand.map((kn, j) => kn && s.oppActive.some(i => i !== j && (s.oppHp[i] ?? 0) > 0));
+  const myGuard = { wide: t.myWideGuard, quick: t.myQuickGuard };
+  const oppGuard = { wide: t.oppWideGuard, quick: t.oppQuickGuard };
+  const myJoints = jointActions(s.myActive, s.oppActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak, U, U, U, U, U, U, U, U, U, U, U, U, U, U, U, myRestrict, U, U, myPrio, myHelp, myGuard);
+  const oppJoints = jointActions(s.oppActive, s.myActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak, U, U, U, U, U, U, U, U, U, U, U, U, U, U, U, oppRestrict, U, U, oppPrio, oppHelp, oppGuard);
   if (myJoints.length === 0) return leafScore(s);
 
   let best = -Infinity;
@@ -2923,7 +3008,8 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     { cell: t.myPrioCell, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
     // Helping Hand: only when a live ally is on the field to boost.
     t.myHelpingHand.map((kn, i) => kn && s.myActive.some(j => j !== i && (s.myHp[j] ?? 0) > 0)),
-    { wide: t.myWideGuard, quick: t.myQuickGuard });
+    { wide: t.myWideGuard, quick: t.myQuickGuard },
+    t.myStrengthSap);
 }
 function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
@@ -2954,7 +3040,8 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     { has: t.oppHasFakeOut, firstTurn: s.oppFirstTurn, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
     { cell: t.oppPrioCell, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
     t.oppHelpingHand.map((kn, j) => kn && s.oppActive.some(i => i !== j && (s.oppHp[i] ?? 0) > 0)),
-    { wide: t.oppWideGuard, quick: t.oppQuickGuard });
+    { wide: t.oppWideGuard, quick: t.oppQuickGuard },
+    t.oppStrengthSap);
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -3032,6 +3119,8 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Wide Guard', targetSpecies: 'my side', self: true });
     } else if (target === QUICK_GUARD) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Quick Guard', targetSpecies: 'my side', self: true });
+    } else if (target === SAP) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Strength Sap', targetSpecies: 'foe', self: true });
     } else if (target === SLEEP_SKIP) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'asleep', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
@@ -3096,6 +3185,8 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): Search
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: 'Wide Guard', targetSpecies: 'their side', self: true });
     } else if (target === QUICK_GUARD) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: 'Quick Guard', targetSpecies: 'their side', self: true });
+    } else if (target === SAP) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: 'Strength Sap', targetSpecies: 'foe', self: true });
     } else if (target === SLEEP_SKIP) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: 'asleep', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
@@ -3649,6 +3740,7 @@ export function createSearch(input: SearchInput): PositionSearch {
       const guardOffered = (knows: boolean[], actives: number[]): boolean => actives.some(i => knows[i]);
       if (guardOffered(expected.table.myWideGuard, s0.myActive) || guardOffered(expected.table.oppWideGuard, s0.oppActive)) actionClasses.push('wideguard');
       if (guardOffered(expected.table.myQuickGuard, s0.myActive) || guardOffered(expected.table.oppQuickGuard, s0.oppActive)) actionClasses.push('quickguard');
+      if (guardOffered(expected.table.myStrengthSap, s0.myActive) || guardOffered(expected.table.oppStrengthSap, s0.oppActive)) actionClasses.push('strengthsap');
       const explored: SearchExplored = {
         depth,
         myActions: myRootJoints.length,
@@ -3736,7 +3828,8 @@ export type TurnAction =
   | { kind: 'prio'; target: number }      // best priority move (Sucker Punch/Aqua Jet/…) at `target`
   | { kind: 'helpinghand' }               // Helping Hand — boost the ally ×1.5 this turn
   | { kind: 'wideguard' }                 // Wide Guard — block the foes' spread moves this turn
-  | { kind: 'quickguard' };               // Quick Guard — block the foes' priority moves this turn
+  | { kind: 'quickguard' }                // Quick Guard — block the foes' priority moves this turn
+  | { kind: 'strengthsap' };              // Strength Sap — heal by the foe's Atk + drop its Atk −1
 
 /** Post-turn structural state of one mon (by team-index). HP is our coarse
  *  representative value — the harness compares the DISCRETE fields (fainted /
@@ -3795,6 +3888,7 @@ export function resolveOneTurn(
     else if (a.kind === 'helpinghand') { myTargets.set(actor, HELP_HAND); myMove.set(actor, 'Helping Hand'); }
     else if (a.kind === 'wideguard') { myTargets.set(actor, WIDE_GUARD); myMove.set(actor, 'Wide Guard'); }
     else if (a.kind === 'quickguard') { myTargets.set(actor, QUICK_GUARD); myMove.set(actor, 'Quick Guard'); }
+    else if (a.kind === 'strengthsap') { myTargets.set(actor, SAP); myMove.set(actor, 'Strength Sap'); }
     else { myTargets.set(actor, PROTECT); }
   }
   for (const [actor, a] of oppActions) {
@@ -3811,6 +3905,7 @@ export function resolveOneTurn(
     else if (a.kind === 'helpinghand') { oppTargets.set(actor, HELP_HAND); oppMove.set(actor, 'Helping Hand'); }
     else if (a.kind === 'wideguard') { oppTargets.set(actor, WIDE_GUARD); oppMove.set(actor, 'Wide Guard'); }
     else if (a.kind === 'quickguard') { oppTargets.set(actor, QUICK_GUARD); oppMove.set(actor, 'Quick Guard'); }
+    else if (a.kind === 'strengthsap') { oppTargets.set(actor, SAP); oppMove.set(actor, 'Strength Sap'); }
     else { oppTargets.set(actor, PROTECT); }
   }
   const pass: Pass = {

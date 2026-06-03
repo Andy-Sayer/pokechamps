@@ -12,13 +12,19 @@ import { fieldMoveEffect } from './fieldMoves.js';
 // of the same set (e.g. the post-mega forme). EVs/nature stay; only the base
 // species changes — which is exactly what mega evolution does to stats.
 export function actualSpeed(set: PokemonSet, formeOverride?: string): number {
+  return actualStat(set, 'spe', formeOverride);
+}
+
+// A non-HP stat at L50 / 31 IVs (the format's fixed level), with EVs + nature.
+// Generalises actualSpeed; used for Strength Sap's heal (= target's Attack stat).
+export function actualStat(set: PokemonSet, stat: 'atk' | 'def' | 'spa' | 'spd' | 'spe', formeOverride?: string): number {
   const speciesName = formeOverride ?? set.species;
-  const sp = (getSpecies(speciesName) as any)?.baseStats?.spe ?? 0;
-  const ev = set.evs.spe;
-  const raw = Math.floor(((2 * sp + 31 + Math.floor(ev / 4)) * 50) / 100) + 5;
+  const base = (getSpecies(speciesName) as any)?.baseStats?.[stat] ?? 0;
+  const ev = (set.evs as any)?.[stat] ?? 0;
+  const raw = Math.floor(((2 * base + 31 + Math.floor(ev / 4)) * 50) / 100) + 5;
   const nat = (getNature(set.nature) as any) ?? null;
   // @pkmn/dex nature shape: { plus: 'spe', minus: 'atk' } for Timid.
-  const mult = nat?.plus === 'spe' ? 1.1 : nat?.minus === 'spe' ? 0.9 : 1.0;
+  const mult = nat?.plus === stat ? 1.1 : nat?.minus === stat ? 0.9 : 1.0;
   return Math.floor(raw * mult);
 }
 
