@@ -263,6 +263,7 @@ const RECOVER = -9;       // recovery move (Recover / Roost / Synthesis / …) �
 const SET_HAZARD = -10;   // dedicated hazard move (Stealth Rock / Spikes / …) — sets on the FOE's side
 const REDIRECT = -11;     // Follow Me / Rage Powder — pull the foes' single-target moves onto self
 const SLEEP_SKIP = -12;   // forced no-op for an asleep mon (can't act this turn)
+const HELP_HAND = -13;    // Helping Hand (+5) — the ally's move deals ×1.5 this turn
 // Ranged sentinel blocks that each carry an index, kept disjoint so a code is
 // unambiguous. Switches: [-29,-20] → bench idx. Leech Seed: [-39,-30] → foe idx.
 // Baton Pass: [-49,-40] → bench idx (switch that passes boosts). Status: ≤ -50 →
@@ -605,6 +606,8 @@ interface Tables {
   myChoice: boolean[]; oppChoice: boolean[];
   myHasFakeOut: boolean[]; oppHasFakeOut: boolean[];
   myFakeOutCell: (Cell[] | null)[]; oppFakeOutCell: (Cell[] | null)[];
+  // Helping Hand: which actives know it (the ally's move deals ×1.5 that turn).
+  myHelpingHand: boolean[]; oppHelpingHand: boolean[];
   myFlinchImmune: boolean[]; oppFlinchImmune: boolean[];
   // Best PRIORITY move per attacker×target (priority > 0; null = the mon has none).
   // The max-damage `off`/`thr` cell hides priority moves whenever they aren't the
@@ -1157,6 +1160,7 @@ function hasUnburden(ability: string | null | undefined): boolean { return toId(
 function isWhiteHerb(item: string | null | undefined): boolean { return toId(item ?? '') === 'whiteherb'; }
 function isChoiceItem(item: string | null | undefined): boolean { const i = toId(item ?? ''); return i === 'choiceband' || i === 'choicespecs' || i === 'choicescarf'; }
 function hasFakeOut(moves: string[]): boolean { return moves.some(m => toId(m) === 'fakeout'); }
+function hasHelpingHand(moves: string[]): boolean { return moves.some(m => toId(m) === 'helpinghand'); }
 // Flinch immunity: Inner Focus (ability) or Covert Cloak (item) — common in VGC.
 function flinchImmune(ability: string | null | undefined, item: string | null | undefined): boolean {
   return toId(ability ?? '') === 'innerfocus' || /covert\s*cloak/i.test(item ?? '');
@@ -1582,6 +1586,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     myHasFakeOut: mine.map(m => hasFakeOut(m.set.moves ?? [])),
     oppHasFakeOut: opp.map(o => hasFakeOut(o.entry.knownMoves)),
     myFakeOutCell, oppFakeOutCell,
+    myHelpingHand: mine.map(m => hasHelpingHand(m.set.moves ?? [])),
+    oppHelpingHand: opp.map((o, oj) => hasHelpingHand(oppEntries[oj]!.knownMoves)),
     myPrioCell, oppPrioCell,
     myFlinchImmune: mine.map(m => flinchImmune(m.set.ability, m.set.item)),
     oppFlinchImmune: opp.map(o => flinchImmune(o.entry.ability, o.entry.item)),
@@ -1850,10 +1856,24 @@ function resolveTurn(
     const types = (getSpecies(defSpecies) as { types?: string[] } | undefined)?.types ?? [];
     if (effectiveness(moveType, types) > 1) used[tgt] = true;
   };
+  // Helping Hand (+5, resolves before attacks): in doubles one partner is helped,
+  // so a HELP_HAND action boosts the OTHER active on that side ×1.5 for the turn.
+  // Folded into myDmg/oppDmg so it covers single-target, spread, priority and the
+  // Fake Out chip uniformly. No live ally → no boost.
+  const myHelped = new Set<number>();
+  const oppHelped = new Set<number>();
+  for (const [actor, target] of myTargets) {
+    if (target !== HELP_HAND) continue;
+    for (const ally of s.myActive) { if (ally === actor) continue; const occ = mySwitchIn.get(ally) ?? ally; if ((myHp[occ] ?? 0) > 0) myHelped.add(occ); }
+  }
+  for (const [actor, target] of oppTargets) {
+    if (target !== HELP_HAND) continue;
+    for (const ally of s.oppActive) { if (ally === actor) continue; const occ = oppSwitchIn.get(ally) ?? ally; if ((oppHp[occ] ?? 0) > 0) oppHelped.add(occ); }
+  }
   const myDmg = (actor: number, tgt: number, raw: number, physical: boolean, type: string, gm: boolean) =>
-    raw * boostDamageScale(s.myBoost[actor], t.myBaked[actor], s.oppBoost[tgt], t.oppBaked[tgt], physical, t.oppUnaware[tgt], t.myUnaware[actor]) * myScreenScale(physical) * myWeatherScale(type, physical, tgt) * myTerrainScale(type, gm, actor, tgt) * myBurnScale(actor, physical) * myResistScale(tgt, type);
+    raw * boostDamageScale(s.myBoost[actor], t.myBaked[actor], s.oppBoost[tgt], t.oppBaked[tgt], physical, t.oppUnaware[tgt], t.myUnaware[actor]) * myScreenScale(physical) * myWeatherScale(type, physical, tgt) * myTerrainScale(type, gm, actor, tgt) * myBurnScale(actor, physical) * myResistScale(tgt, type) * (myHelped.has(actor) ? 1.5 : 1);
   const oppDmg = (actor: number, tgt: number, raw: number, physical: boolean, type: string, gm: boolean) =>
-    raw * boostDamageScale(s.oppBoost[actor], t.oppBaked[actor], s.myBoost[tgt], t.myBaked[tgt], physical, t.myUnaware[tgt], t.oppUnaware[actor]) * oppScreenScale(physical) * oppWeatherScale(type, physical, tgt) * oppTerrainScale(type, gm, actor, tgt) * oppBurnScale(actor, physical) * oppResistScale(tgt, type);
+    raw * boostDamageScale(s.oppBoost[actor], t.oppBaked[actor], s.myBoost[tgt], t.myBaked[tgt], physical, t.myUnaware[tgt], t.oppUnaware[actor]) * oppScreenScale(physical) * oppWeatherScale(type, physical, tgt) * oppTerrainScale(type, gm, actor, tgt) * oppBurnScale(actor, physical) * oppResistScale(tgt, type) * (oppHelped.has(actor) ? 1.5 : 1);
   // Psychic Terrain makes priority moves FAIL against a grounded target.
   const psychicBlocked = (priority: number, defenderGrounded: boolean) => s.terrain === 'Psychic' && priority > 0 && defenderGrounded;
 
@@ -1906,7 +1926,7 @@ function resolveTurn(
   const nonAttack = (target: number) =>
     isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isStatusTarget(target) || isFieldTarget(target)
     || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN || target === RECOVER || target === SET_HAZARD
-    || target === REDIRECT || target === SLEEP_SKIP || isPivotTarget(target) || isDebuffTarget(target)
+    || target === REDIRECT || target === SLEEP_SKIP || target === HELP_HAND || isPivotTarget(target) || isDebuffTarget(target)
     || isTauntTarget(target) || isEncoreTarget(target);
   // Fake Out flinches: a mon hit by Fake Out (resolved at +3 before it acts) skips
   // its action this turn.
@@ -2551,6 +2571,10 @@ function jointActions(
   // option (vs the max-damage cell) only when it can KO the foe at current HP — the
   // case where the priority turn-order actually matters. cell indexed [actor][foe].
   prio?: { cell: (Cell | null)[][]; foes: number[] },
+  // Helping Hand (root only): a true entry → the mon knows it AND has a live ally to
+  // boost. The live-partner gate is computed by the caller (jointActions only sees
+  // the foe's HP).
+  helpHand?: boolean[],
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -2596,6 +2620,7 @@ function jointActions(
       const pc = prio.cell[actor]?.[j];
       return !!pc && pc.dmgMax > 0 && pc.dmgMax >= (foeHp[j] ?? 0);
     }).map(prioCode) : [];
+    const canHelp = helpHand?.[actor] === true;
     const batonCodes = (baton && baton.move[actor] != null) ? baton.targets.map(batonCode) : [];
     // SPREAD first so a spread that ties a single-target line is kept. PROTECT /
     // field / setup / screen / weather / Leech / SWITCH / Baton last — only chosen
@@ -2612,6 +2637,7 @@ function jointActions(
       ...(canTerrain ? [SET_TERRAIN] : []),
       ...(canRecover ? [RECOVER] : []),
       ...(canHazard ? [SET_HAZARD] : []),
+      ...(canHelp ? [HELP_HAND] : []),
       ...(canRedirect ? [REDIRECT] : []),
       ...leechCodes,
       ...statusCodes,
@@ -2859,7 +2885,9 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct, choice: t.myChoice },
     { taunt: t.myTauntMove, encore: t.myEncoreMove, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
     { has: t.myHasFakeOut, firstTurn: s.myFirstTurn, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
-    { cell: t.myPrioCell, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) });
+    { cell: t.myPrioCell, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
+    // Helping Hand: only when a live ally is on the field to boost.
+    t.myHelpingHand.map((kn, i) => kn && s.myActive.some(j => j !== i && (s.myHp[j] ?? 0) > 0)));
 }
 function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
@@ -2888,7 +2916,8 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct, choice: t.oppChoice },
     { taunt: t.oppTauntMove, encore: t.oppEncoreMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
     { has: t.oppHasFakeOut, firstTurn: s.oppFirstTurn, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
-    { cell: t.oppPrioCell, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) });
+    { cell: t.oppPrioCell, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
+    t.oppHelpingHand.map((kn, j) => kn && s.oppActive.some(i => i !== j && (s.oppHp[i] ?? 0) > 0)));
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -2960,6 +2989,8 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myHazardMove[actor]?.move ?? 'Stealth Rock', targetSpecies: 'their side' });
     } else if (target === REDIRECT) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myRedirectMove[actor] ?? 'Rage Powder', targetSpecies: t.mySpecies[actor]!, self: true });
+    } else if (target === HELP_HAND) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Helping Hand', targetSpecies: 'ally', self: true });
     } else if (target === SLEEP_SKIP) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'asleep', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
@@ -3018,6 +3049,8 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): Search
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppHazardMove[actor]?.move ?? 'Stealth Rock', targetSpecies: 'my side' });
     } else if (target === REDIRECT) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppRedirectMove[actor] ?? 'Rage Powder', targetSpecies: t.oppSpecies[actor]!, self: true });
+    } else if (target === HELP_HAND) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: 'Helping Hand', targetSpecies: 'ally', self: true });
     } else if (target === SLEEP_SKIP) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: 'asleep', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
@@ -3563,6 +3596,11 @@ export function createSearch(input: SearchInput): PositionSearch {
         attackers.some(a => foes.some(j => { const pc = cells[a]?.[j]; return !!pc && pc.dmgMax > 0 && (foeHp[j] ?? 0) > 0 && pc.dmgMax >= (foeHp[j] ?? 0); }));
       if (prioKO(expected.table.myPrioCell, s0.myActive, s0.oppActive, s0.oppHp)
         || prioKO(expected.table.oppPrioCell, s0.oppActive, s0.myActive, s0.myHp)) actionClasses.push('priority');
+      // Helping Hand: offered when a knower has a live ally on the field.
+      const helpOffered = (knows: boolean[], actives: number[], hp: number[]): boolean =>
+        actives.some(i => knows[i] && actives.some(j => j !== i && (hp[j] ?? 0) > 0));
+      if (helpOffered(expected.table.myHelpingHand, s0.myActive, s0.myHp)
+        || helpOffered(expected.table.oppHelpingHand, s0.oppActive, s0.oppHp)) actionClasses.push('helpinghand');
       const explored: SearchExplored = {
         depth,
         myActions: myRootJoints.length,
@@ -3647,7 +3685,8 @@ export type TurnAction =
   | { kind: 'taunt'; target: number }     // Taunt the foe at `target`
   | { kind: 'encore'; target: number }    // Encore the foe at `target`
   | { kind: 'fakeout'; target: number }   // Fake Out the foe at `target`
-  | { kind: 'prio'; target: number };     // best priority move (Sucker Punch/Aqua Jet/…) at `target`
+  | { kind: 'prio'; target: number }      // best priority move (Sucker Punch/Aqua Jet/…) at `target`
+  | { kind: 'helpinghand' };              // Helping Hand — boost the ally ×1.5 this turn
 
 /** Post-turn structural state of one mon (by team-index). HP is our coarse
  *  representative value — the harness compares the DISCRETE fields (fainted /
@@ -3703,6 +3742,7 @@ export function resolveOneTurn(
     else if (a.kind === 'encore') { myTargets.set(actor, encoreCode(a.target)); myMove.set(actor, t.myEncoreMove[actor] ?? ''); }
     else if (a.kind === 'fakeout') { myTargets.set(actor, fakeOutCode(a.target)); myMove.set(actor, 'Fake Out'); }
     else if (a.kind === 'prio') { myTargets.set(actor, prioCode(a.target)); myMove.set(actor, t.myPrioCell[actor]?.[a.target]?.move ?? ''); }
+    else if (a.kind === 'helpinghand') { myTargets.set(actor, HELP_HAND); myMove.set(actor, 'Helping Hand'); }
     else { myTargets.set(actor, PROTECT); }
   }
   for (const [actor, a] of oppActions) {
@@ -3716,6 +3756,7 @@ export function resolveOneTurn(
     else if (a.kind === 'encore') { oppTargets.set(actor, encoreCode(a.target)); oppMove.set(actor, t.oppEncoreMove[actor] ?? ''); }
     else if (a.kind === 'fakeout') { oppTargets.set(actor, fakeOutCode(a.target)); oppMove.set(actor, 'Fake Out'); }
     else if (a.kind === 'prio') { oppTargets.set(actor, prioCode(a.target)); oppMove.set(actor, t.oppPrioCell[actor]?.[a.target]?.move ?? ''); }
+    else if (a.kind === 'helpinghand') { oppTargets.set(actor, HELP_HAND); oppMove.set(actor, 'Helping Hand'); }
     else { oppTargets.set(actor, PROTECT); }
   }
   const pass: Pass = {

@@ -1760,6 +1760,38 @@ describe('priority moves (Bullet Punch / Sucker Punch / Aqua Jet …)', () => {
   });
 });
 
+describe('Helping Hand (doubles support)', () => {
+  const base = () => ({
+    mine: [
+      { set: mon({ species: 'Incineroar', ability: 'Intimidate', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Helping Hand', 'Fake Out'] }), hpPercent: 100, active: true },
+      { set: mon({ species: 'Flutter Mane', ability: 'Protosynthesis', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Moonblast'] }), hpPercent: 100, active: true },
+    ],
+    opp: [{ entry: oppOf(mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Seismic Toss'] })), hpPercent: 100, active: true }],
+    field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+  });
+
+  test('boosts the ally’s damage ×1.5', () => {
+    const without = resolveOneTurn(base(), new Map([[1, { kind: 'attack', target: 0 } as const]]), new Map());
+    const withHH = resolveOneTurn(base(), new Map([[0, { kind: 'helpinghand' } as const], [1, { kind: 'attack', target: 0 } as const]]), new Map());
+    const dmgWithout = 100 - without.opp[0]!.hpPct;
+    const dmgWith = 100 - withHH.opp[0]!.hpPct;
+    expect(dmgWithout).toBeGreaterThan(0);
+    expect(dmgWith / dmgWithout).toBeCloseTo(1.5, 1);
+  });
+
+  test('helpinghand is an action class when a knower has a live ally', () => {
+    const r = searchToDepth(base(), 1);
+    expect(r.explored!.actionClasses).toContain('helpinghand');
+  });
+
+  test('not offered with no live ally (single active)', () => {
+    const solo = base();
+    solo.mine = [solo.mine[0]!];   // only the Helping Hand user, no partner
+    const r = searchToDepth(solo, 1);
+    expect(r.explored!.actionClasses).not.toContain('helpinghand');
+  });
+});
+
 describe('on-KO boosts (Moxie / Beast Boost)', () => {
   // A frail foe at 12% HP is KO'd by any hit → the attacker's on-KO ability fires.
   const koFrailFoe = (set: PokemonSet) => resolveOneTurn(
