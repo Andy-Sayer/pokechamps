@@ -1792,6 +1792,43 @@ describe('Helping Hand (doubles support)', () => {
   });
 });
 
+describe('Wide Guard / Quick Guard (team protect)', () => {
+  test('Wide Guard blocks the opponent’s spread move for the whole side', () => {
+    const out = resolveOneTurn(
+      {
+        mine: [
+          { set: mon({ species: 'Hitmontop', ability: 'Intimidate', nature: 'Impish', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Wide Guard', 'Fake Out'] }), hpPercent: 100, active: true },
+          { set: mon({ species: 'Flutter Mane', ability: 'Protosynthesis', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Moonblast'] }), hpPercent: 100, active: true },
+        ],
+        opp: [{ entry: oppOf(mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Earthquake'] })), hpPercent: 100, active: true }],
+        field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+      },
+      new Map([[0, { kind: 'wideguard' } as const]]),
+      new Map([[0, { kind: 'spread' } as const]]),
+    );
+    expect(out.mine[0]!.hpPct).toBe(100);   // Hitmontop protected
+    expect(out.mine[1]!.hpPct).toBe(100);   // Flutter Mane protected too — Wide Guard is side-wide
+  });
+
+  test('Quick Guard blocks the opponent’s priority move', () => {
+    const out = resolveOneTurn(
+      {
+        mine: [
+          { set: mon({ species: 'Hitmontop', ability: 'Intimidate', nature: 'Impish', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Quick Guard'] }), hpPercent: 100, active: true },
+          { set: mon({ species: 'Flutter Mane', ability: 'Protosynthesis', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Moonblast'] }), hpPercent: 100, active: true },
+        ],
+        opp: [{ entry: { species: 'Kingambit', knownMoves: ['Sucker Punch'], candidates: [mon({ species: 'Kingambit', ability: 'Defiant', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Sucker Punch'] })] }, hpPercent: 100, active: true }],
+        field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+      },
+      // Flutter Mane attacks (so Sucker Punch wouldn't whiff on the fail condition);
+      // Hitmontop's Quick Guard is what blocks the priority KO.
+      new Map([[0, { kind: 'quickguard' } as const], [1, { kind: 'attack', target: 0 } as const]]),
+      new Map([[0, { kind: 'prio', target: 1 } as const]]),
+    );
+    expect(out.mine[1]!.hpPct).toBe(100);   // Sucker Punch (SE vs Flutter Mane) blocked by Quick Guard
+  });
+});
+
 describe('on-KO boosts (Moxie / Beast Boost)', () => {
   // A frail foe at 12% HP is KO'd by any hit → the attacker's on-KO ability fires.
   const koFrailFoe = (set: PokemonSet) => resolveOneTurn(

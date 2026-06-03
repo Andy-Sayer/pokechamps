@@ -264,6 +264,8 @@ const SET_HAZARD = -10;   // dedicated hazard move (Stealth Rock / Spikes / …)
 const REDIRECT = -11;     // Follow Me / Rage Powder — pull the foes' single-target moves onto self
 const SLEEP_SKIP = -12;   // forced no-op for an asleep mon (can't act this turn)
 const HELP_HAND = -13;    // Helping Hand (+5) — the ally's move deals ×1.5 this turn
+const WIDE_GUARD = -14;   // Wide Guard (+3) — blocks the foes' SPREAD moves this turn (whole side)
+const QUICK_GUARD = -15;  // Quick Guard (+3) — blocks the foes' PRIORITY moves this turn (whole side)
 // Ranged sentinel blocks that each carry an index, kept disjoint so a code is
 // unambiguous. Switches: [-29,-20] → bench idx. Leech Seed: [-39,-30] → foe idx.
 // Baton Pass: [-49,-40] → bench idx (switch that passes boosts). Status: ≤ -50 →
@@ -608,6 +610,10 @@ interface Tables {
   myFakeOutCell: (Cell[] | null)[]; oppFakeOutCell: (Cell[] | null)[];
   // Helping Hand: which actives know it (the ally's move deals ×1.5 that turn).
   myHelpingHand: boolean[]; oppHelpingHand: boolean[];
+  // Wide Guard (blocks foe spread moves) / Quick Guard (blocks foe priority moves):
+  // which actives know each (team-protect for the turn).
+  myWideGuard: boolean[]; oppWideGuard: boolean[];
+  myQuickGuard: boolean[]; oppQuickGuard: boolean[];
   myFlinchImmune: boolean[]; oppFlinchImmune: boolean[];
   // Best PRIORITY move per attacker×target (priority > 0; null = the mon has none).
   // The max-damage `off`/`thr` cell hides priority moves whenever they aren't the
@@ -1161,6 +1167,8 @@ function isWhiteHerb(item: string | null | undefined): boolean { return toId(ite
 function isChoiceItem(item: string | null | undefined): boolean { const i = toId(item ?? ''); return i === 'choiceband' || i === 'choicespecs' || i === 'choicescarf'; }
 function hasFakeOut(moves: string[]): boolean { return moves.some(m => toId(m) === 'fakeout'); }
 function hasHelpingHand(moves: string[]): boolean { return moves.some(m => toId(m) === 'helpinghand'); }
+function hasWideGuard(moves: string[]): boolean { return moves.some(m => toId(m) === 'wideguard'); }
+function hasQuickGuard(moves: string[]): boolean { return moves.some(m => toId(m) === 'quickguard'); }
 // Flinch immunity: Inner Focus (ability) or Covert Cloak (item) — common in VGC.
 function flinchImmune(ability: string | null | undefined, item: string | null | undefined): boolean {
   return toId(ability ?? '') === 'innerfocus' || /covert\s*cloak/i.test(item ?? '');
@@ -1588,6 +1596,10 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     myFakeOutCell, oppFakeOutCell,
     myHelpingHand: mine.map(m => hasHelpingHand(m.set.moves ?? [])),
     oppHelpingHand: opp.map((o, oj) => hasHelpingHand(oppEntries[oj]!.knownMoves)),
+    myWideGuard: mine.map(m => hasWideGuard(m.set.moves ?? [])),
+    oppWideGuard: opp.map((o, oj) => hasWideGuard(oppEntries[oj]!.knownMoves)),
+    myQuickGuard: mine.map(m => hasQuickGuard(m.set.moves ?? [])),
+    oppQuickGuard: opp.map((o, oj) => hasQuickGuard(oppEntries[oj]!.knownMoves)),
     myPrioCell, oppPrioCell,
     myFlinchImmune: mine.map(m => flinchImmune(m.set.ability, m.set.item)),
     oppFlinchImmune: opp.map(o => flinchImmune(o.entry.ability, o.entry.item)),
@@ -1889,6 +1901,16 @@ function resolveTurn(
   const oppProtected = new Set<number>();
   for (const [actor, target] of myTargets) { if (target === PROTECT && !myAsleep(actor)) myProtected.add(actor); }
   for (const [actor, target] of oppTargets) { if (target === PROTECT && !oppAsleep(actor)) oppProtected.add(actor); }
+  // Wide Guard / Quick Guard are side-wide for the turn (a +3 protect that blocks the
+  // FOES' spread / priority moves respectively). Active if any non-asleep mon used it.
+  const sideUsed = (targets: Map<number, number>, code: number, asleep: (i: number) => boolean) => {
+    for (const [a, tg] of targets) if (tg === code && !asleep(a)) return true;
+    return false;
+  };
+  const myWideGuard = sideUsed(myTargets, WIDE_GUARD, myAsleep);
+  const oppWideGuard = sideUsed(oppTargets, WIDE_GUARD, oppAsleep);
+  const myQuickGuard = sideUsed(myTargets, QUICK_GUARD, myAsleep);
+  const oppQuickGuard = sideUsed(oppTargets, QUICK_GUARD, oppAsleep);
 
   // Redirection (Follow Me / Rage Powder): a live user pulls the FOES' single-target
   // moves onto itself this turn. Rage Powder (a powder) is ignored by Grass-type /
@@ -1926,7 +1948,7 @@ function resolveTurn(
   const nonAttack = (target: number) =>
     isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isStatusTarget(target) || isFieldTarget(target)
     || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN || target === RECOVER || target === SET_HAZARD
-    || target === REDIRECT || target === SLEEP_SKIP || target === HELP_HAND || isPivotTarget(target) || isDebuffTarget(target)
+    || target === REDIRECT || target === SLEEP_SKIP || target === HELP_HAND || target === WIDE_GUARD || target === QUICK_GUARD || isPivotTarget(target) || isDebuffTarget(target)
     || isTauntTarget(target) || isEncoreTarget(target);
   // Fake Out flinches: a mon hit by Fake Out (resolved at +3 before it acts) skips
   // its action this turn.
@@ -1997,6 +2019,7 @@ function resolveTurn(
       if (myFlinched.has(act.actor)) continue;        // flinched by Fake Out
       if (act.target === PROTECT) continue;           // mon uses Protect — no damage dealt
       if (isFakeOutTarget(act.target)) {              // Fake Out: chip + flinch the target
+        if (oppQuickGuard) continue;                  // Quick Guard blocks Fake Out (+3 priority)
         const f = redirect(fakeOutFoeIdx(act.target), oppSwitchIn);
         if ((oppHp[f] ?? 0) > 0 && !oppProtected.has(f)) {
           const fc = t.myFakeOutCell[act.actor]?.[f];
@@ -2006,6 +2029,7 @@ function resolveTurn(
         continue;
       }
       if (act.target === SPREAD) {
+        if (oppWideGuard) continue;                  // Wide Guard blocks the spread for the whole foe side
         // Spread move — hit every live, unprotected foe ON THE FIELD AFTER switches
         // (oppActiveNow; a benched mon isn't in range of a spread move).
         const sp = t.mySpread[act.actor]!;
@@ -2035,6 +2059,7 @@ function resolveTurn(
       const oc = myPrio ? t.myPrioCell[act.actor]?.[oTgt] : t.off[act.actor]![oTgt]!;
       if (!oc) continue;                              // no priority move vs this foe
       if (psychicBlocked(oc.priority, t.oppGrounded[oTgt]!)) continue; // Psychic Terrain blocks priority
+      if (oppQuickGuard && oc.priority > 0) continue;  // Quick Guard blocks priority moves
       if (isSuckerLike(oc.move) && !targetWillAttack('opp', oTgt)) continue; // Sucker Punch whiffs vs a non-attacker
       const oBefore = oppHp[oTgt]!;
       apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r), oc.physical, oc.type, oc.groundMove), oppSurv, oc.multiHit);
@@ -2056,6 +2081,7 @@ function resolveTurn(
       if (oppFlinched.has(act.actor)) continue;       // flinched by Fake Out
       if (act.target === PROTECT) continue;           // opp mon uses Protect
       if (isFakeOutTarget(act.target)) {              // opp Fake Out: chip + flinch my mon
+        if (myQuickGuard) continue;                   // Quick Guard blocks Fake Out (+3 priority)
         const f = redirect(fakeOutFoeIdx(act.target), mySwitchIn);
         if ((myHp[f] ?? 0) > 0 && !myProtected.has(f)) {
           const fc = t.oppFakeOutCell[act.actor]?.[f];
@@ -2065,6 +2091,7 @@ function resolveTurn(
         continue;
       }
       if (act.target === SPREAD) {
+        if (myWideGuard) continue;                    // Wide Guard blocks the spread for my whole side
         // Opp spread move — hit every live, unprotected mon of mine ON THE FIELD
         // AFTER switches (myActiveNow; my bench isn't in range).
         const sp = t.oppSpread[act.actor]!;
@@ -2092,6 +2119,7 @@ function resolveTurn(
       const tc = oppPrio ? t.oppPrioCell[act.actor]?.[mTgt] : t.thr[act.actor]![mTgt]!;
       if (!tc) continue;                              // no priority move vs this foe
       if (psychicBlocked(tc.priority, t.myGrounded[mTgt]!)) continue; // Psychic Terrain blocks priority
+      if (myQuickGuard && tc.priority > 0) continue;  // Quick Guard blocks priority moves
       if (isSuckerLike(tc.move) && !targetWillAttack('mine', mTgt)) continue; // Sucker Punch whiffs vs a non-attacker
       const mBefore = myHp[mTgt]!;
       apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r), tc.physical, tc.type, tc.groundMove), mySurv, tc.multiHit);
@@ -2575,6 +2603,9 @@ function jointActions(
   // boost. The live-partner gate is computed by the caller (jointActions only sees
   // the foe's HP).
   helpHand?: boolean[],
+  // Wide Guard / Quick Guard (root only): per-actor knows-it. Team-protect that
+  // blocks the foes' spread / priority moves for the turn.
+  guard?: { wide: boolean[]; quick: boolean[] },
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -2621,6 +2652,8 @@ function jointActions(
       return !!pc && pc.dmgMax > 0 && pc.dmgMax >= (foeHp[j] ?? 0);
     }).map(prioCode) : [];
     const canHelp = helpHand?.[actor] === true;
+    const canWideGuard = guard?.wide[actor] === true;
+    const canQuickGuard = guard?.quick[actor] === true;
     const batonCodes = (baton && baton.move[actor] != null) ? baton.targets.map(batonCode) : [];
     // SPREAD first so a spread that ties a single-target line is kept. PROTECT /
     // field / setup / screen / weather / Leech / SWITCH / Baton last — only chosen
@@ -2638,6 +2671,8 @@ function jointActions(
       ...(canRecover ? [RECOVER] : []),
       ...(canHazard ? [SET_HAZARD] : []),
       ...(canHelp ? [HELP_HAND] : []),
+      ...(canWideGuard ? [WIDE_GUARD] : []),
+      ...(canQuickGuard ? [QUICK_GUARD] : []),
       ...(canRedirect ? [REDIRECT] : []),
       ...leechCodes,
       ...statusCodes,
@@ -2887,7 +2922,8 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     { has: t.myHasFakeOut, firstTurn: s.myFirstTurn, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
     { cell: t.myPrioCell, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
     // Helping Hand: only when a live ally is on the field to boost.
-    t.myHelpingHand.map((kn, i) => kn && s.myActive.some(j => j !== i && (s.myHp[j] ?? 0) > 0)));
+    t.myHelpingHand.map((kn, i) => kn && s.myActive.some(j => j !== i && (s.myHp[j] ?? 0) > 0)),
+    { wide: t.myWideGuard, quick: t.myQuickGuard });
 }
 function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
@@ -2917,7 +2953,8 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     { taunt: t.oppTauntMove, encore: t.oppEncoreMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
     { has: t.oppHasFakeOut, firstTurn: s.oppFirstTurn, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
     { cell: t.oppPrioCell, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
-    t.oppHelpingHand.map((kn, j) => kn && s.oppActive.some(i => i !== j && (s.oppHp[i] ?? 0) > 0)));
+    t.oppHelpingHand.map((kn, j) => kn && s.oppActive.some(i => i !== j && (s.oppHp[i] ?? 0) > 0)),
+    { wide: t.oppWideGuard, quick: t.oppQuickGuard });
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -2991,6 +3028,10 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myRedirectMove[actor] ?? 'Rage Powder', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === HELP_HAND) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Helping Hand', targetSpecies: 'ally', self: true });
+    } else if (target === WIDE_GUARD) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Wide Guard', targetSpecies: 'my side', self: true });
+    } else if (target === QUICK_GUARD) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Quick Guard', targetSpecies: 'my side', self: true });
     } else if (target === SLEEP_SKIP) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'asleep', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
@@ -3051,6 +3092,10 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): Search
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppRedirectMove[actor] ?? 'Rage Powder', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === HELP_HAND) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: 'Helping Hand', targetSpecies: 'ally', self: true });
+    } else if (target === WIDE_GUARD) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: 'Wide Guard', targetSpecies: 'their side', self: true });
+    } else if (target === QUICK_GUARD) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: 'Quick Guard', targetSpecies: 'their side', self: true });
     } else if (target === SLEEP_SKIP) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: 'asleep', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
@@ -3601,6 +3646,9 @@ export function createSearch(input: SearchInput): PositionSearch {
         actives.some(i => knows[i] && actives.some(j => j !== i && (hp[j] ?? 0) > 0));
       if (helpOffered(expected.table.myHelpingHand, s0.myActive, s0.myHp)
         || helpOffered(expected.table.oppHelpingHand, s0.oppActive, s0.oppHp)) actionClasses.push('helpinghand');
+      const guardOffered = (knows: boolean[], actives: number[]): boolean => actives.some(i => knows[i]);
+      if (guardOffered(expected.table.myWideGuard, s0.myActive) || guardOffered(expected.table.oppWideGuard, s0.oppActive)) actionClasses.push('wideguard');
+      if (guardOffered(expected.table.myQuickGuard, s0.myActive) || guardOffered(expected.table.oppQuickGuard, s0.oppActive)) actionClasses.push('quickguard');
       const explored: SearchExplored = {
         depth,
         myActions: myRootJoints.length,
@@ -3686,7 +3734,9 @@ export type TurnAction =
   | { kind: 'encore'; target: number }    // Encore the foe at `target`
   | { kind: 'fakeout'; target: number }   // Fake Out the foe at `target`
   | { kind: 'prio'; target: number }      // best priority move (Sucker Punch/Aqua Jet/…) at `target`
-  | { kind: 'helpinghand' };              // Helping Hand — boost the ally ×1.5 this turn
+  | { kind: 'helpinghand' }               // Helping Hand — boost the ally ×1.5 this turn
+  | { kind: 'wideguard' }                 // Wide Guard — block the foes' spread moves this turn
+  | { kind: 'quickguard' };               // Quick Guard — block the foes' priority moves this turn
 
 /** Post-turn structural state of one mon (by team-index). HP is our coarse
  *  representative value — the harness compares the DISCRETE fields (fainted /
@@ -3743,6 +3793,8 @@ export function resolveOneTurn(
     else if (a.kind === 'fakeout') { myTargets.set(actor, fakeOutCode(a.target)); myMove.set(actor, 'Fake Out'); }
     else if (a.kind === 'prio') { myTargets.set(actor, prioCode(a.target)); myMove.set(actor, t.myPrioCell[actor]?.[a.target]?.move ?? ''); }
     else if (a.kind === 'helpinghand') { myTargets.set(actor, HELP_HAND); myMove.set(actor, 'Helping Hand'); }
+    else if (a.kind === 'wideguard') { myTargets.set(actor, WIDE_GUARD); myMove.set(actor, 'Wide Guard'); }
+    else if (a.kind === 'quickguard') { myTargets.set(actor, QUICK_GUARD); myMove.set(actor, 'Quick Guard'); }
     else { myTargets.set(actor, PROTECT); }
   }
   for (const [actor, a] of oppActions) {
@@ -3757,6 +3809,8 @@ export function resolveOneTurn(
     else if (a.kind === 'fakeout') { oppTargets.set(actor, fakeOutCode(a.target)); oppMove.set(actor, 'Fake Out'); }
     else if (a.kind === 'prio') { oppTargets.set(actor, prioCode(a.target)); oppMove.set(actor, t.oppPrioCell[actor]?.[a.target]?.move ?? ''); }
     else if (a.kind === 'helpinghand') { oppTargets.set(actor, HELP_HAND); oppMove.set(actor, 'Helping Hand'); }
+    else if (a.kind === 'wideguard') { oppTargets.set(actor, WIDE_GUARD); oppMove.set(actor, 'Wide Guard'); }
+    else if (a.kind === 'quickguard') { oppTargets.set(actor, QUICK_GUARD); oppMove.set(actor, 'Quick Guard'); }
     else { oppTargets.set(actor, PROTECT); }
   }
   const pass: Pass = {
