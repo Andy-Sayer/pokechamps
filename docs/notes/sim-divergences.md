@@ -16,7 +16,20 @@ for the faint check (only flags a faint when the sim is unanimous 0/8 or 8/8 AND
 disagree), so roll-boundary noise is filtered out. Damage-roll differences within the
 envelope are expected and ignored — only discrete, roll-independent disagreements count.
 
-## Latest run (2026-06-01, N=400 → 277 valid positions)
+## Latest run (2026-06-03, N=200 → 138 valid positions)
+
+**24/138 diverged (≈17%, same rate + composition as the prior 43/277).** Run AFTER
+the move-options arc (priority / Helping Hand / Wide-Quick Guard / Strength Sap /
+Protect punishes) — which heavily touched the attack-resolution branches. **No new
+divergence category appeared**, confirming those changes are damage-resolution-
+regression-free (the harness drives plain attacks, so it exercises exactly that path).
+By field: `status` 8, `boost:spa` 6, `fainted` 5, `boost:spd` 4, `boost:atk` 2,
+`boost:def` 2 — all either probabilistic secondaries (policy) or the recoil KO-boundary.
+**Note:** the `fainted` recoil-boundary residual is a mid-roll-vs-exact-roll artifact at
+KO thresholds; the live search already handles boundary uncertainty via its
+pessimistic/optimistic regimes, so it is not a decision-correctness bug.
+
+## Prior run (2026-06-01, N=400 → 277 valid positions)
 
 **43/277 positions diverged.** By field:
 
