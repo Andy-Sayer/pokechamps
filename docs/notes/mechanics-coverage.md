@@ -76,7 +76,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Recovery | Recover/Roost/Slack Off/Synthesis/Moonlight | – | ✅ | ✅ | `RECOVER` action heals the caster (weather-scaled for Synthesis/Moonlight/Shore Up), offered when below full HP |
 | Wish / delayed heal | Wish | – | ✅ | **GAP** | EOT heal to the slot |
 | Delayed damage | Future Sight, Doom Desire | ✅(dmg) | ? | **GAP** | hits 2 turns later |
-| Two-turn / charge | Solar Beam, Fly, Phantom Force, Meteor Beam, Electro Shot | ✅(dmg) | ✅(charge flag) | **GAP** | search treats as 1-turn full-power |
+| Two-turn / charge | Solar Beam, Fly, Phantom Force, Meteor Beam, Electro Shot | ✅(dmg) | ✅(charge flag) | **GAP (low value)** | search treats as 1-turn full-power — which is **correct** for the common VGC case (charge moves are run with Power Herb, or Solar Beam in sun / Electro Shot in rain = instant). Only wrong for a *bare* charge move out of its weather (rare in play). Deferred as low-value. |
 | Recharge | Hyper Beam, Giga Impact | ✅ | ? | **GAP** | must recharge next turn |
 | Locked multi-turn | Outrage, Petal Dance, Thrash | ✅ | ? | **GAP** | lock + confusion after |
 | Multi-hit | Bullet Seed, Rock Blast, Population Bomb | ✅ | ✅ | ✅ | ×hits; breaks Sash ✅ |
