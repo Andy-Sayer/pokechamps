@@ -4,7 +4,7 @@ import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
 import type { Match, FieldState, DamageObservation, MoveAction, OpponentEntry, PokemonSet } from '@pokechamps/core/domain/types.js';
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
-import { scoreSpread, scoreOffensiveSpread, mostLikely } from '@pokechamps/core/domain/inference.js';
+import { scoreSpread, scoreOffensiveSpread, mostLikely, recoilDrainHpEvs } from '@pokechamps/core/domain/inference.js';
 import { maxHpFor } from '@pokechamps/core/domain/damage.js';
 import { endOfTurn } from '@pokechamps/core/domain/endOfTurn.js';
 import { inferOpponentSpeeds, applySpeedInference, actualSpeed, predictTurnOrder, effectiveSpeedRange } from '@pokechamps/core/domain/speed.js';
@@ -1079,6 +1079,17 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       const defMax = maxHpOf(a.target.side, tIdx);
       const atkMax = maxHpOf(a.side, a.attackerTeamIndex);
       if (!defMax || !atkMax) continue;
+      // Observed self-HP (`/ <hp>`) overrides the computed drain heal (ground truth).
+      if (a.side === 'mine' && a.selfRemainingHpRaw != null) {
+        next.myCurrentHp = next.myCurrentHp ?? {};
+        next.myCurrentHp[a.attackerTeamIndex] = Math.max(0, Math.min(100, (a.selfRemainingHpRaw / atkMax) * 100));
+        continue;
+      }
+      if (a.side === 'theirs' && a.selfRemainingHpPercent != null) {
+        const o = next.opponentTeam[a.attackerTeamIndex];
+        if (o) o.currentHpPercent = Math.max(0, Math.min(100, a.selfRemainingHpPercent));
+        continue;
+      }
       const dmgAbs = (a.damageHpPercent / 100) * defMax;
       const healPct = (dmgAbs * drain[0] / drain[1]) / atkMax * 100;
       // Liquid Ooze: drain deals damage to the attacker instead of healing.
@@ -1130,6 +1141,18 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         : next.opponentTeam[a.attackerTeamIndex]?.ability;
       const atkMax = maxHpOf(a.side, a.attackerTeamIndex);
       if (!atkMax) continue;
+      // Observed self-HP (`/ <hp>`) is ground truth — apply it (recoil + any contact
+      // chip already baked in) and skip the estimate.
+      if (a.side === 'mine' && a.selfRemainingHpRaw != null) {
+        next.myCurrentHp = next.myCurrentHp ?? {};
+        next.myCurrentHp[a.attackerTeamIndex] = Math.max(0, Math.min(100, (a.selfRemainingHpRaw / atkMax) * 100));
+        continue;
+      }
+      if (a.side === 'theirs' && a.selfRemainingHpPercent != null) {
+        const o = next.opponentTeam[a.attackerTeamIndex];
+        if (o) o.currentHpPercent = Math.max(0, Math.min(100, a.selfRemainingHpPercent));
+        continue;
+      }
       let recoilPct: number;
       const magicGuard = !!atkAbil && toId(atkAbil) === 'magicguard';
       if (magicGuard) continue;
@@ -1414,6 +1437,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
           startingCandidates: opp.candidates?.length
             ? opp.candidates.map(c => ({ evs: c.evs, nature: c.nature, item: c.item, ability: c.ability }))
             : undefined,
+          // A recoil/drain readout pins the HP EV defense-independently — honour it.
+          hpEvCandidates: opp.hpEvLock,
           // Skip the ~360k-candidate coarse-grid fallback when priors fail (it
           // blocks the UI for 10+ seconds). The Hybrid solver still returns a
           // best-effort, likelihood-ranked set (never empty).
@@ -1473,6 +1498,56 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         }));
         next.opponentTeam[oppIdx] = { ...next.opponentTeam[oppIdx]!, candidates: candidateSets, candidateLikelihoods: scored.map(s => s.likelihood) };
       } catch { /* keep prior belief */ }
+    }
+
+    // Recoil/drain HP readout: a `/ <hp>` self-HP on a recoil/drain move solves the
+    // opponent's max HP defense-independently → pin the HP EV(s). Mirror of engine.ts.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.attackerTeamIndex == null || a.targetTeamIndex == null || typeof a.target !== 'object') continue;
+      if (a.damageHpPercent == null) continue;
+      const selfAfter = a.side === 'mine' ? a.selfRemainingHpRaw : a.selfRemainingHpPercent;
+      if (selfAfter == null) continue;
+      const rm = getMove(a.move) as { recoil?: [number, number]; drain?: [number, number] } | undefined;
+      const effect: 'recoil' | 'drain' | null = rm?.recoil ? 'recoil' : rm?.drain ? 'drain' : null;
+      if (!effect) continue;
+      const frac = effect === 'recoil' ? rm!.recoil![0] / rm!.recoil![1] : rm!.drain![0] / rm!.drain![1];
+      const oppIsAttacker = a.side === 'theirs';
+      const oppIdx = oppIsAttacker ? a.attackerTeamIndex : a.targetTeamIndex;
+      const myIdx = oppIsAttacker ? a.targetTeamIndex : a.attackerTeamIndex;
+      const opp = next.opponentTeam[oppIdx];
+      const mySet = next.myTeam[myIdx];
+      if (!opp || !mySet) continue;
+      const knownMaxHp = maxHpFor(mySet);
+      const attackerBeforeFrac = (oppIsAttacker
+        ? (match.opponentTeam[a.attackerTeamIndex]?.currentHpPercent ?? 100)
+        : (match.myCurrentHp?.[a.attackerTeamIndex] ?? 100)) / 100;
+      const attackerAfterFrac = oppIsAttacker ? Math.min(100, selfAfter) / 100 : selfAfter / (knownMaxHp || 1);
+      const peelFrac = a.selfHpSource === 'helmet' ? 1 / 6 : a.selfHpSource === 'orb' ? 1 / 10 : a.selfHpSource === 'barbs' ? 1 / 8 : 0;
+      const attackerFainted = oppIsAttacker
+        ? !!next.opponentTeam[a.attackerTeamIndex]?.fainted || attackerAfterFrac <= 0
+        : !!next.myFainted?.includes(a.attackerTeamIndex) || attackerAfterFrac <= 0;
+      const hpEvs = recoilDrainHpEvs({
+        effect, frac, oppIsAttacker, oppSpecies: opp.species, oppLevel: mySet.level ?? 50,
+        attackerBeforeFrac, attackerAfterFrac, attackerFainted, peelFrac,
+        targetDropFrac: a.damageHpPercent / 100, knownMaxHp,
+      });
+      if (!hpEvs.length) continue;
+      opp.hpEvLock = hpEvs;
+      if (opp.candidates?.length) {
+        const seen = new Set<string>();
+        const pinnedCands: typeof opp.candidates = [];
+        for (const c of opp.candidates) for (const hp of hpEvs) {
+          if (hp + c.evs.def + c.evs.spd > 508) continue;
+          const evs = { ...c.evs, hp };
+          const key = `${hp}|${evs.def}|${evs.spd}|${c.nature}|${c.item}|${c.ability}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          pinnedCands.push({ ...c, evs });
+        }
+        if (pinnedCands.length) opp.candidates = pinnedCands;
+      }
+      inferenceNotes.push(`${opp.species}: HP pinned via ${effect} (EV ${hpEvs.join('/')})`);
     }
 
     // Speed inference uses the whole match history. Apply to opp team.

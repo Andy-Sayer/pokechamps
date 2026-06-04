@@ -34,6 +34,9 @@ export interface OpponentEntry {
   // Per-candidate likelihood (parallel to `candidates`), from the Hybrid
   // weighting solver. Lets `mostLikely` pick by score instead of the EV prior.
   candidateLikelihoods?: number[];
+  // HP EV(s) pinned by a recoil/drain readout (defense-independent max-HP solve).
+  // Once set, every inference pass restricts this mon's HP axis to these EVs.
+  hpEvLock?: number[];
   // Speed bounds inferred from turn ordering. Undefined = no constraint yet.
   speedFloor?: number;
   speedCeiling?: number;
@@ -176,6 +179,16 @@ export interface MoveAction {
   // these to damageHpPercent (which is what the inference solver consumes).
   targetRemainingHpPercent?: number; // for opp targets
   targetRemainingHpRaw?: number;     // for my targets
+  // The ATTACKER's own HP AFTER the move resolved — parsed from a trailing
+  // `/ <hp> [source]` clause (`m1 > Brave Bird > o1 > 50 / 90`). Unit dispatched
+  // by the attacker's side (raw for mine, % for opp). `selfHpSource` names an
+  // EXTRA fixed-fraction source on top of the move's intrinsic recoil/drain:
+  // 'helmet' (1/6 of the attacker's max), 'orb' (1/10), 'barbs' (1/8). Absent
+  // source ⇒ the drop is purely the move's recoil/drain. finalizeTurn uses this
+  // to read out the OPPONENT's max HP (recoil/drain are ∝ damage dealt).
+  selfRemainingHpPercent?: number;
+  selfRemainingHpRaw?: number;
+  selfHpSource?: 'recoil' | 'drain' | 'helmet' | 'orb' | 'barbs';
   // 1-based position within the turn — used by speed inference.
   order?: number;
   // True when the attacker mega-evolved this turn (before executing the move).

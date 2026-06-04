@@ -20,7 +20,7 @@ import type {
   Turn,
 } from '../domain/types.js';
 import { NEUTRAL_FIELD } from '../domain/types.js';
-import { scoreSpread, scoreOffensiveSpread } from '../domain/inference.js';
+import { scoreSpread, scoreOffensiveSpread, recoilDrainHpEvs } from '../domain/inference.js';
 import { maxHpFor } from '../domain/damage.js';
 import { endOfTurn } from '../domain/endOfTurn.js';
 import { inferOpponentSpeeds, applySpeedInference } from '../domain/speed.js';
@@ -815,6 +815,17 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     const defMax = maxHpOf(a.target.side, tIdx);
     const atkMax = maxHpOf(a.side, a.attackerTeamIndex);
     if (!defMax || !atkMax) continue;
+    // Observed self-HP overrides the computed drain heal (ground truth).
+    if (a.side === 'mine' && a.selfRemainingHpRaw != null) {
+      next.myCurrentHp = next.myCurrentHp ?? {};
+      next.myCurrentHp[a.attackerTeamIndex] = Math.max(0, Math.min(100, (a.selfRemainingHpRaw / atkMax) * 100));
+      continue;
+    }
+    if (a.side === 'theirs' && a.selfRemainingHpPercent != null) {
+      const o = next.opponentTeam[a.attackerTeamIndex];
+      if (o) o.currentHpPercent = Math.max(0, Math.min(100, a.selfRemainingHpPercent));
+      continue;
+    }
     const dmgAbs = (a.damageHpPercent / 100) * defMax;
     const healPct = (dmgAbs * drain[0] / drain[1]) / atkMax * 100;
     // Liquid Ooze: drain deals damage to the attacker instead of healing.
@@ -868,6 +879,18 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
       : next.opponentTeam[a.attackerTeamIndex]?.ability;
     const atkMax = maxHpOf(a.side, a.attackerTeamIndex);
     if (!atkMax) continue;
+    // Observed self-HP (`/ <hp>`) is ground truth — apply it (it already reflects
+    // recoil + any contact-item chip) and skip the estimate.
+    if (a.side === 'mine' && a.selfRemainingHpRaw != null) {
+      next.myCurrentHp = next.myCurrentHp ?? {};
+      next.myCurrentHp[a.attackerTeamIndex] = Math.max(0, Math.min(100, (a.selfRemainingHpRaw / atkMax) * 100));
+      continue;
+    }
+    if (a.side === 'theirs' && a.selfRemainingHpPercent != null) {
+      const o = next.opponentTeam[a.attackerTeamIndex];
+      if (o) o.currentHpPercent = Math.max(0, Math.min(100, a.selfRemainingHpPercent));
+      continue;
+    }
     let recoilPct: number;
     const magicGuard = !!atkAbil && toId(atkAbil) === 'magicguard';
     if (magicGuard) continue;
@@ -1173,6 +1196,8 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
         startingCandidates: opp.candidates?.length
           ? opp.candidates.map(c => ({ evs: c.evs, nature: c.nature, item: c.item, ability: c.ability }))
           : undefined,
+        // A recoil/drain readout pins the HP EV defense-independently — honour it.
+        hpEvCandidates: opp.hpEvLock,
         // Server keeps response latency bounded by skipping the ~360k-spread
         // coarse fallback. The Hybrid solver still returns a best-effort set
         // (never empty) so the client always has candidates to show.
@@ -1234,6 +1259,59 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
       }));
       next.opponentTeam[oppIdx] = { ...next.opponentTeam[oppIdx]!, candidates: candidateSets, candidateLikelihoods: scored.map(s => s.likelihood) };
     } catch { /* keep prior belief */ }
+  }
+
+  // Recoil/drain HP readout: a `/ <hp>` self-HP on a recoil/drain move solves the
+  // opponent's max HP defense-independently (recoil/drain ∝ damage dealt). Pin the
+  // opp's HP EV(s) and lock them for future inference. Both directions: the opp
+  // recoils into my mon, OR I recoil into the opp.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (a.attackerTeamIndex == null || a.targetTeamIndex == null || typeof a.target !== 'object') continue;
+    if (a.damageHpPercent == null) continue;
+    const selfAfter = a.side === 'mine' ? a.selfRemainingHpRaw : a.selfRemainingHpPercent;
+    if (selfAfter == null) continue;
+    const rm = getMove(a.move) as { recoil?: [number, number]; drain?: [number, number] } | undefined;
+    const effect: 'recoil' | 'drain' | null = rm?.recoil ? 'recoil' : rm?.drain ? 'drain' : null;
+    if (!effect) continue;
+    const frac = effect === 'recoil' ? rm!.recoil![0] / rm!.recoil![1] : rm!.drain![0] / rm!.drain![1];
+    const oppIsAttacker = a.side === 'theirs';
+    const oppIdx = oppIsAttacker ? a.attackerTeamIndex : a.targetTeamIndex;
+    const myIdx = oppIsAttacker ? a.targetTeamIndex : a.attackerTeamIndex;
+    const opp = next.opponentTeam[oppIdx];
+    const mySet = next.myTeam[myIdx];
+    if (!opp || !mySet) continue;
+    const knownMaxHp = maxHpFor(mySet);
+    const attackerBeforeFrac = (oppIsAttacker
+      ? (match.opponentTeam[a.attackerTeamIndex]?.currentHpPercent ?? 100)
+      : (match.myCurrentHp?.[a.attackerTeamIndex] ?? 100)) / 100;
+    const attackerAfterFrac = oppIsAttacker ? Math.min(100, selfAfter) / 100 : selfAfter / (knownMaxHp || 1);
+    const peelFrac = a.selfHpSource === 'helmet' ? 1 / 6 : a.selfHpSource === 'orb' ? 1 / 10 : a.selfHpSource === 'barbs' ? 1 / 8 : 0;
+    const attackerFainted = oppIsAttacker
+      ? !!next.opponentTeam[a.attackerTeamIndex]?.fainted || attackerAfterFrac <= 0
+      : !!next.myFainted?.includes(a.attackerTeamIndex) || attackerAfterFrac <= 0;
+    const hpEvs = recoilDrainHpEvs({
+      effect, frac, oppIsAttacker, oppSpecies: opp.species, oppLevel: mySet.level ?? 50,
+      attackerBeforeFrac, attackerAfterFrac, attackerFainted, peelFrac,
+      targetDropFrac: a.damageHpPercent / 100, knownMaxHp,
+    });
+    if (!hpEvs.length) continue;
+    opp.hpEvLock = hpEvs;
+    // Pin the current candidates' HP to the lock (override + budget filter + dedupe).
+    if (opp.candidates?.length) {
+      const seen = new Set<string>();
+      const pinnedCands: PokemonSet[] = [];
+      for (const c of opp.candidates) for (const hp of hpEvs) {
+        if (hp + c.evs.def + c.evs.spd > 508) continue;
+        const evs = { ...c.evs, hp };
+        const key = `${hp}|${evs.def}|${evs.spd}|${c.nature}|${c.item}|${c.ability}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        pinnedCands.push({ ...c, evs });
+      }
+      if (pinnedCands.length) opp.candidates = pinnedCands;
+    }
+    inferenceNotes.push(`${opp.species}: HP pinned via ${effect} (EV ${hpEvs.join('/')})`);
   }
 
   // Tag pivot-follow switches. A pivot move (U-turn etc.) executes, then

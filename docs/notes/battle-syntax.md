@@ -15,6 +15,10 @@ m1+quick > Sucker Punch > o1 > 40          ← Quick Claw proc (priority bracket
 m1+mega+crit > Flamethrower > o1 > 0       ← stacked modifiers
 m1 > Heat Wave > spread > o1:40, o2:35     ← spread → one MoveAction per target
 m1 > Beat Up > o1 > 99,98,97,96,90(crit)   ← multi-hit: comma = remaining HP per hit; (crit) per hit
+o1 > Brave Bird > m1 > 45 / 89             ← recoil: `/ <attackerHP>` = the attacker's HP after (o1 opp → 89%)
+m1 > Flare Blitz > o1 > 50 / 120           ← my recoil → my m1 at 120 (attacker unit follows its own side: raw for mine)
+m1 > Liquidation > o1 > 50 / 84 helmet     ← attacker chip is Rocky Helmet (1/6), not recoil: `helmet`/`orb`/`barbs`
+m1 > Giga Drain > o1 > 60 / 132            ← drain: the heal lands on the attacker; `/ <attackerHP>`
 m1 > Close Combat > o1 > 1 sash            ← Focus Sash: survives at sliver, item consumed, hit skipped for inference
 m1 > Close Combat > o1 > 50 sash           ← survived w/ HP to spare → Sash didn't proc: full dmg infers + item learned (held)
 m1 > switch > Garchomp                     ← switch by species name
@@ -23,6 +27,8 @@ o2 > switch > op3                          ← opp switch
 m1 mega                                    ← standalone mega declaration (separate action, +5 bracket)
 m1 mega y                                  ← mega variant disambiguator (Charizard X/Y, Lucario, etc.)
 ```
+
+**Attacker self-HP (`/ <attackerHP> [source]`).** A trailing `/ <hp>` after the target's damage slot records the **attacker's own HP after the move** — its bar's unit (raw for mine, % for opp). The engine knows which moves recoil/drain and that those hit the attacker, so a bare `/ <hp>` is attributed to the move's recoil/drain. The **only** thing that needs a word is a contact-item chip — `helmet` (1/6), `orb` (1/10), `barbs`/`rough` (1/8) — because the opponent's item is unknown; the engine peels that fixed fraction off before reading the recoil. Recoil and drain are `frac × damage-dealt`, which lives on the *other* mon's HP scale, so the reading **solves the opponent's max HP defense-independently** (`inference.ts` `recoilDrainHpEvs` → pins `OpponentEntry.hpEvLock` → the HP EV is fixed for all later inference). Works both directions (opp recoils into me / I recoil into them) and abstains when the attacker fainted or a drain overhealed. Contact-item chips (Helmet/Orb/Barbs) carry no HP-stat info — they're flat fractions of the attacker's own bar — so they're only used to keep the chip out of the defensive solve.
 
 Pivot moves (U-turn / Volt Switch / Flip Turn / Parting Shot / Teleport / Chilly Reception / Baton Pass / Shed Tail) are auto-detected via the dex `selfSwitch` field. After the pivot move log the switch as a normal next action — `finalizeTurn` tags it `pivot: true` so speed inference skips it (the switch happened inside the pivot move's bracket, not the natural +6 switch bracket).
 

@@ -1,5 +1,5 @@
 import type { DamageObservation, PokemonSet, Stats } from './types.js';
-import { damageRange, observationToAbsoluteDamage } from './damage.js';
+import { damageRange, observationToAbsoluteDamage, maxHpFor } from './damage.js';
 import { getSpecies, getMove, isLegalItem, toId } from './data.js';
 import { activeGimmick } from './gimmicks/index.js';
 import { getPikalytics, evFromSp } from './pikalytics.js';
@@ -116,6 +116,88 @@ export interface InferenceInput {
   quickOnly?: boolean;
   // Item signals: exclude Safety Goggles if the mon has taken sand chip damage.
   sandChipObserved?: boolean;
+  // Recoil/drain HP readout: the HP EV(s) whose max HP matches an observed
+  // recoil/drain reading. When set, the HP dimension is PINNED to these (the
+  // recoil maths give max HP defense-independently), collapsing the grid's HP
+  // axis so the solver only varies Def/SpD. Usually one EV, two at a bucket seam.
+  hpEvCandidates?: number[];
+}
+
+// --- Recoil/drain HP readout -------------------------------------------------
+// A recoil/drain effect is `frac × damageDealt`, and damage dealt lives on the
+// TARGET's HP scale — so observing the effect on the attacker bridges straight to
+// the opponent's max HP, with NO dependence on defense or the damage formula.
+// (Rocky Helmet/Life Orb/Rough Skin are fixed fractions of the attacker's OWN bar,
+// peeled off by the caller before this is called.)
+export function solveOppMaxHp(p: {
+  oppIsAttacker: boolean;        // is the OPP the one using the recoil/drain move?
+  recoilFrac: number;           // the move's recoil or drain fraction (>0, e.g. 0.33, 0.5)
+  attackerSelfFrac: number;     // recoil/drain magnitude as a fraction of the ATTACKER's bar, peeled of helmet/orb (>0)
+  targetDropFrac: number;       // damage dealt as a fraction of the TARGET's bar (>0)
+  knownMaxHp: number;           // max HP of the KNOWN (mine-side) mon: the target if oppIsAttacker, else the attacker
+}): number | null {
+  const { oppIsAttacker, recoilFrac, attackerSelfFrac, targetDropFrac, knownMaxHp } = p;
+  if (recoilFrac <= 0 || attackerSelfFrac <= 0 || targetDropFrac <= 0 || knownMaxHp <= 0) return null;
+  // oppIsAttacker: opp's self-frac is on the UNKNOWN bar → opp = recoilFrac·D / selfFrac, D = knownMaxHp·targetDrop.
+  // else (opp is target): attacker self-frac is on the KNOWN bar → recoilHP = knownMaxHp·selfFrac = recoilFrac·opp·targetDrop.
+  const oppMaxHp = oppIsAttacker
+    ? (recoilFrac * knownMaxHp * targetDropFrac) / attackerSelfFrac
+    : (knownMaxHp * attackerSelfFrac) / (recoilFrac * targetDropFrac);
+  return Number.isFinite(oppMaxHp) && oppMaxHp > 0 ? oppMaxHp : null;
+}
+
+// One-call orchestration shared by both finalizeTurn paths: peel the fixed
+// contact-item fraction, isolate the recoil/drain magnitude, solve the opponent's
+// max HP, and return the matching HP EV(s). Returns [] (abstain) when the attacker
+// fainted, the magnitude is non-positive, a drain overhealed (capped), or nothing
+// reconciles. `attacker*Frac`/`targetDropFrac` are 0..1 fractions of each bar.
+export function recoilDrainHpEvs(p: {
+  effect: 'recoil' | 'drain';
+  frac: number;                  // the move's recoil/drain fraction (e.g. 0.33, 0.5)
+  oppIsAttacker: boolean;
+  oppSpecies: string;
+  oppLevel: number;
+  attackerBeforeFrac: number;    // attacker's HP before the move (pre-turn), 0..1
+  attackerAfterFrac: number;     // OBSERVED self HP after, 0..1
+  attackerFainted: boolean;
+  peelFrac: number;              // helmet (1/6) / orb (1/10) / barbs (1/8) total, fraction of attacker bar
+  targetDropFrac: number;        // damage dealt, fraction of the target's bar
+  knownMaxHp: number;            // the mine-side mon's max HP
+}): number[] {
+  if (p.attackerFainted) return [];
+  // recoil: attacker dropped (recoil + peel) → recoil = drop − peel.
+  // drain:  attacker gained (drain − peel)  → drain  = gain + peel.
+  const selfFrac = p.effect === 'recoil'
+    ? (p.attackerBeforeFrac - p.attackerAfterFrac) - p.peelFrac
+    : (p.attackerAfterFrac - p.attackerBeforeFrac) + p.peelFrac;
+  if (selfFrac <= 1e-4 || p.targetDropFrac <= 1e-4) return [];          // nothing attributable → abstain
+  if (p.effect === 'drain' && p.attackerAfterFrac >= 0.999) return []; // overheal capped → can't read
+  const oppMaxHp = solveOppMaxHp({
+    oppIsAttacker: p.oppIsAttacker, recoilFrac: p.frac,
+    attackerSelfFrac: selfFrac, targetDropFrac: p.targetDropFrac, knownMaxHp: p.knownMaxHp,
+  });
+  if (oppMaxHp == null) return [];
+  // Propagate the ±0.5% rounding on each observed % into an HP tolerance (relative
+  // errors add: oppMaxHp ∝ targetDrop / selfFrac), + 1 HP for max-HP rounding. A
+  // small recoil drop ⇒ looser reading (more buckets), which is honest.
+  const tol = oppMaxHp * (0.005 / selfFrac + 0.005 / p.targetDropFrac) + 1.5;
+  return hpEvsForMaxHp(p.oppSpecies, p.oppLevel, oppMaxHp, tol);
+}
+
+// HP EVs (0..252, step 4) whose resulting max HP is within `tol` of `maxHp`.
+// Usually one; two at a bucket seam. Empty ⇒ nothing reconciles → the caller
+// should abstain rather than constrain on a bogus reading.
+export function hpEvsForMaxHp(species: string, level: number, maxHp: number, tol = 1.5): number[] {
+  const out: number[] = [];
+  for (let ev = 0; ev <= 252; ev += 4) {
+    const set: PokemonSet = {
+      species, level, nature: 'Hardy',
+      evs: { hp: ev, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
+      ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 }, moves: [],
+    };
+    if (Math.abs(maxHpFor(set) - maxHp) <= tol) out.push(ev);
+  }
+  return out;
 }
 
 // Plain candidate list (likelihood order preserved). Most callers want this.
@@ -166,6 +248,16 @@ export function scoreSpread(input: InferenceInput): ScoredCandidate[] {
     candidates = priorCandidates;
   } else {
     candidates = generateCoarseCandidates({ natures, items, abilities: possibleAbilities });
+  }
+
+  // Recoil/drain HP readout pins the HP EV (defense-independent), so override
+  // every candidate's HP with the solved value(s) and drop any that bust the EV
+  // budget. Collapses the HP axis — the solver then only varies Def/SpD.
+  if (input.hpEvCandidates?.length) {
+    const pinned = new Set(input.hpEvCandidates);
+    candidates = candidates
+      .flatMap(c => [...pinned].map(hp => ({ ...c, evs: { ...c.evs, hp } })))
+      .filter(c => c.evs.hp + c.evs.def + c.evs.spd <= 508);
   }
 
   // Score every candidate: predicted damage vs observed, keeping both the

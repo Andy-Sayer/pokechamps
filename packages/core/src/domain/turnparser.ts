@@ -650,6 +650,23 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
   // Sash. `o1 > 1 sash` (remaining 1), `o1 > 0 sash` / `o1 > sash` (no/￪zero
   // value → forced to a 1-sliver). Strip the flag, parse the rest as remaining.
   let dmgTok: string | undefined = parts[3];
+  // Trailing `/ <selfHP> [source]` clause: the ATTACKER's own HP after the move
+  // (recoil / drain / contact-item chip). `o1 > Brave Bird > m1 > 45 / 89`,
+  // `m1 > Flare Blitz > o1 > 50 / 78 helmet`. Split it off the damage slot first.
+  let selfHpTok: string | undefined;
+  let selfHpSource: MoveAction['selfHpSource'];
+  if (dmgTok && dmgTok.includes('/')) {
+    const slash = dmgTok.indexOf('/');
+    const selfPart = dmgTok.slice(slash + 1).trim();
+    dmgTok = dmgTok.slice(0, slash).trim() || undefined;
+    const sm = selfPart.match(/^(\d+(?:\.\d+)?)\s*(recoil|drain|helmet|orb|barbs|rough|roughskin|ironbarbs)?$/i);
+    if (sm) {
+      selfHpTok = sm[1];
+      const src = sm[2]?.toLowerCase();
+      if (src === 'rough' || src === 'roughskin' || src === 'ironbarbs') selfHpSource = 'barbs';
+      else if (src) selfHpSource = src as MoveAction['selfHpSource'];
+    }
+  }
   let sash = false;
   if (dmgTok) {
     const t = dmgTok.trim();
@@ -681,6 +698,17 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
     }
   }
 
+  // Self-HP (the attacker's bar): raw for mine, % for the opponent.
+  const selfHp: Pick<MoveAction, 'selfRemainingHpPercent' | 'selfRemainingHpRaw' | 'selfHpSource'> = {};
+  if (selfHpTok != null) {
+    const v = parseFloat(selfHpTok);
+    if (Number.isFinite(v)) {
+      if (actor.side === 'mine') selfHp.selfRemainingHpRaw = v;
+      else selfHp.selfRemainingHpPercent = v;
+      if (selfHpSource) selfHp.selfHpSource = selfHpSource;
+    }
+  }
+
   const target: MoveAction['target'] =
     typeof parsedTarget === 'string'
       ? parsedTarget
@@ -709,6 +737,7 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
       sash: sash || undefined,
       berry: berry || undefined,
       ...dmg,
+      ...selfHp,
     }],
   };
 }
