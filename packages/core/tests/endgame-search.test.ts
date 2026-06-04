@@ -1856,6 +1856,45 @@ describe('Strength Sap + Protect-variant punishes', () => {
     expect(out.mine[0]!.boosts.atk).toBe(-1);
   });
 
+  test('Explosion faints the user after dealing damage', () => {
+    const out = resolveOneTurn(
+      {
+        mine: [{ set: mon({ species: 'Gengar', ability: 'Cursed Body', nature: 'Modest', evs: { ...ZERO_EVS, spa: 252 }, moves: ['Explosion'] }), hpPercent: 100, active: true }],
+        opp: [{ entry: oppOf(mon({ species: 'Blissey', ability: 'Natural Cure', nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Seismic Toss'] })), hpPercent: 100, active: true }],
+        field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+      },
+      new Map([[0, { kind: 'attack', target: 0 } as const]]), new Map(),
+    );
+    expect(out.mine[0]!.fainted).toBe(true);   // Explosion → the user faints
+    expect(out.opp[0]!.hpPct).toBeLessThan(100);
+  });
+
+  test('Weakness Policy → +2 Atk/+2 SpA on a surviving super-effective hit', () => {
+    const out = resolveOneTurn(
+      {
+        mine: [{ set: mon({ species: 'Garchomp', item: 'Weakness Policy', ability: 'Rough Skin', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Earthquake'] }), hpPercent: 100, active: true }],
+        opp: [{ entry: oppOf(mon({ species: 'Flutter Mane', ability: 'Protosynthesis', nature: 'Timid', evs: { ...ZERO_EVS, spe: 252 }, moves: ['Moonblast'] })), hpPercent: 100, active: true }],
+        field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+      },
+      new Map(), new Map([[0, { kind: 'attack', target: 0 } as const]]),   // Moonblast (Fairy) is SE on Garchomp
+    );
+    expect(out.mine[0]!.fainted).toBe(false);   // survived
+    expect(out.mine[0]!.boosts.atk).toBe(2);
+    expect(out.mine[0]!.boosts.spa).toBe(2);
+  });
+
+  test('Weakness Policy does NOT proc on a neutral hit', () => {
+    const out = resolveOneTurn(
+      {
+        mine: [{ set: mon({ species: 'Garchomp', item: 'Weakness Policy', ability: 'Rough Skin', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Earthquake'] }), hpPercent: 100, active: true }],
+        opp: [{ entry: oppOf(mon({ species: 'Incineroar', ability: 'Intimidate', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Knock Off'] })), hpPercent: 100, active: true }],
+        field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+      },
+      new Map(), new Map([[0, { kind: 'attack', target: 0 } as const]]),   // Knock Off (Dark) neutral on Garchomp
+    );
+    expect(out.mine[0]!.boosts.atk ?? 0).toBe(0);
+  });
+
   test('Spiky Shield chips a contacting attacker', () => {
     const out = resolveOneTurn(
       {

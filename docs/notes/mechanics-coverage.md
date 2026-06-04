@@ -73,14 +73,14 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Status moves | Will-O-Wisp/Thunder Wave/Toxic/Glare/Poison Powder | – | ✅ | ✅ | SET_STATUS; **sleep/freeze NOT** |
 | Sleep-inducing | Spore/Sleep Powder/Hypnosis | – | ✅ | ✅ | status 'slp' = can't-act + wake counter (init 2; Gen 9 1-3); powder/Insomnia/Electric-Terrain immunities. Yawn (delayed) still GAP |
 | Leech / drain HP | Leech Seed; Giga Drain (heal) | ✅(dmg) | ✅ | ✅ | Leech Seed ✅; drain-move self-heal added (`Cell.drain`) |
-| Recovery | Recover/Roost/Slack Off/Synthesis/Moonlight | – | ✅ | **GAP** | a huge stall lever — search can't heal on demand |
+| Recovery | Recover/Roost/Slack Off/Synthesis/Moonlight | – | ✅ | ✅ | `RECOVER` action heals the caster (weather-scaled for Synthesis/Moonlight/Shore Up), offered when below full HP |
 | Wish / delayed heal | Wish | – | ✅ | **GAP** | EOT heal to the slot |
 | Delayed damage | Future Sight, Doom Desire | ✅(dmg) | ? | **GAP** | hits 2 turns later |
 | Two-turn / charge | Solar Beam, Fly, Phantom Force, Meteor Beam, Electro Shot | ✅(dmg) | ✅(charge flag) | **GAP** | search treats as 1-turn full-power |
 | Recharge | Hyper Beam, Giga Impact | ✅ | ? | **GAP** | must recharge next turn |
 | Locked multi-turn | Outrage, Petal Dance, Thrash | ✅ | ? | **GAP** | lock + confusion after |
 | Multi-hit | Bullet Seed, Rock Blast, Population Bomb | ✅ | ✅ | ✅ | ×hits; breaks Sash ✅ |
-| Recoil | Brave Bird/Flare Blitz/Wave Crash 33%, Head Smash 50%, Take Down 25% | ✅(dmg) | ✅ | ✅ | `Cell.recoil` = recoil×damage-dealt to the attacker; Rock Head / Magic Guard negate. Found by the sim diff-harness (all residual faints were unmodelled recoil). Life Orb recoil (item) still a search GAP |
+| Recoil | Brave Bird/Flare Blitz/Wave Crash 33%, Head Smash 50%, Take Down 25% | ✅(dmg) | ✅ | ✅ | `Cell.recoil` = recoil×damage-dealt to the attacker; Rock Head / Magic Guard negate. Found by the sim diff-harness (all residual faints were unmodelled recoil). Life Orb recoil (10% on a damaging hit) IS modelled in search (`myLifeOrb`). **Inference:** a `/ <hp>` recoil/drain reading solves the opponent's max HP defense-independently (see [battle-syntax.md](battle-syntax.md)) |
 | OHKO | Fissure, Guillotine, Sheer Cold | ✅ | ✅ | n/a | rare in format; accuracy-gated |
 | Fixed / level damage | Seismic Toss, Night Shade, Super Fang, Endeavor | ✅ | ✅ | ✅ | calc gives the % |
 | Redirection | Follow Me, Rage Powder | – | ? | ✅ | a live user pulls the foes' single-target moves onto itself; Rage Powder (powder) ignored by Grass/Overcoat attackers. Storm Drain/Lightning Rod (ability) + Ally Switch still GAP |
@@ -94,7 +94,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Hazard CLEAR | Defog/Rapid Spin/Mortal Spin/Court Change/Tidy Up | – | ✅ | **GAP** | live clears via `applyHazardClear`; search doesn't model removal yet |
 | Taunt / Encore | — | – | ✅(counters) | ✅ | **Taunt**: target can't use status moves (jointActions filters to attack/spread/switch) for ~3 turns. **Encore**: target locked into the move it just used for ~3 turns. `State.my/oppTaunt`, `my/oppEncore(+Act)`. Disable/Torment/Imprison still GAP (root taunt/encore not yet carried from live match) |
 | Substitute | — | ✅(partial) | ✅(limited) | **PARTIAL** | sub-HP tracking is limited (see `project_sub_hp_tracking`) |
-| Self-destruct | Explosion, Final Gambit, Misty/Healing Wish | ✅ | ? | **GAP** | user faints; special semantics |
+| Self-destruct | Explosion, Self-Destruct, Misty Explosion | ✅ | ? | ✅ | `isSelfdestruct` → the user faints after the move resolves (the search weighs the KO-for-my-mon trade). Final Gambit's HP-based damage + Memento/Healing/Lunar Dance semantics still GAP |
 | Weather/terrain-typed | Weather Ball, Terrain Pulse, Rising Voltage, Expanding Force | ✅ | ✅ | ✅ | calc handles the type/BP change |
 | Charge-cancel synergy | Solar Beam in sun, Electro Shot in rain | ✅ | ✅ | **GAP** | (tied to two-turn gap) |
 
@@ -124,16 +124,16 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | Class | Examples | Where | Gap |
 |---|---|---|---|
 | Damage-scaling | Choice Band/Specs, Life Orb, Expert Belt, plates/gems, Muscle Band | ✅ calc | Life Orb recoil ✅ search (10% max HP on a damaging hit; Magic Guard/Sheer Force negate) |
-| Defensive | Assault Vest, Eviolite, Rocky Helmet, type-resist berries | ✅ calc; ✅ live (resistBerries) | Rocky Helmet chip in search **GAP** |
+| Defensive | Assault Vest, Eviolite, Rocky Helmet, type-resist berries | ✅ calc; ✅ live (resistBerries) | ✅ search — Rocky Helmet / Rough Skin / Iron Barbs contact chip applied to the attacker (`Cell.contact` × `oppContactChip`) |
 | Survive | Focus Sash, (Sturdy) | ✅ search | — |
-| HP-trigger heal | Sitrus, Aguav/figy/… pinch berries | ✅ live (hpItemTriggers) | **search GAP** (heal at 50%/25% — big for stall lines) |
-| Status berries | Lum, Cheri, Pecha, … | ✅ live (statusBerries) | **search GAP** (cure on status) |
+| HP-trigger heal | Sitrus, Aguav/figy/… pinch berries | ✅ live (hpItemTriggers) | ✅ search — `hpItemTriggerFor` heals at the 50%/25% threshold (Sitrus, pinch berries), consumed once |
+| Status berries | Lum, Cheri, Pecha, … | ✅ live (statusBerries) | ✅ search — `statusBerryFor` cures the matching status on infliction, consumed once |
 | Leftovers / Black Sludge | — | ✅ live; ✅ search (Leftovers heal) | Black Sludge (poison-type heal / else hurt) **PARTIAL** in search |
 | Choice lock | Choice items | ✅ calc(dmg); ✅ live | **PARTIAL** search — a Choice holder is restricted to attacks/spread/switch (no setup/Protect/status); the true single-move lock still needs per-move cells |
 | Resist berries | Yache/Occa/Passho/Chople/… (17 in meta) | ✅ calc (first hit ½) | ✅ search — consumed after the first SE matching-type hit; a later same-type hit is no longer halved (×2 vs the baked cell) |
 | White Herb | — | ✅ calc(n/a) | ✅ search — restores lowered stats once, then consumed (triggers Unburden) |
 | Booster Energy | Protosynthesis/Quark Drive proc | ✅ calc(if active) | proc-on-switch **search GAP** |
-| Weakness Policy / berries that boost | — | ✅ live | **search GAP** |
+| Weakness Policy / berries that boost | — | ✅ live | ✅ search — a WP holder that SURVIVES a super-effective hit gets +2 Atk/+2 SpA (`procWp`, applied at end of turn → boosts next ply). Other boost-berries (Liechi/Petaya/…) still GAP |
 | Eject Button / Eject Pack / Red Card | — | ✅ live (partial) | forced switch **search GAP** |
 | Mega stones | — | ✅ all | done (mega gimmick) |
 | Utility | Mental Herb, White Herb, Covert Cloak, Clear Amulet, Safety Goggles | ✅ live (partial) | search **GAP** (mostly minor) |

@@ -618,6 +618,8 @@ interface Tables {
   // Strength Sap: who knows it + each mon's Attack stat (heal = target's Atk stat).
   myStrengthSap: boolean[]; oppStrengthSap: boolean[];
   myAtkStat: number[]; oppAtkStat: number[];
+  // Weakness Policy: holders get +2 Atk/+2 SpA on surviving a super-effective hit.
+  myWp: boolean[]; oppWp: boolean[];
   myFlinchImmune: boolean[]; oppFlinchImmune: boolean[];
   // Best PRIORITY move per attacker×target (priority > 0; null = the mon has none).
   // The max-damage `off`/`thr` cell hides priority moves whenever they aren't the
@@ -1148,6 +1150,18 @@ function resistBerryType(item: string | null | undefined): string | null { retur
 // assuming a free priority KO. Detected by move name on the cell.
 const SUCKER_LIKE = new Set(['suckerpunch', 'thunderclap']);
 function isSuckerLike(move: string | null | undefined): boolean { return SUCKER_LIKE.has(toId(move ?? '')); }
+// Self-destruct moves (Explosion / Self-Destruct / Misty Explosion / Final Gambit /
+// Memento / Healing Wish …): the user faints after the move resolves.
+function isSelfdestruct(move: string | null | undefined): boolean {
+  return !!(getMove(move ?? '') as { selfdestruct?: unknown } | undefined)?.selfdestruct;
+}
+function holdsWeaknessPolicy(item: string | null | undefined): boolean { return /weakness\s*policy/i.test(item ?? ''); }
+// Super-effective check for Weakness Policy (types from the live forme name).
+function isSuperEffectiveOn(species: string, moveType: string): boolean {
+  if (!moveType) return false;
+  const types = (getSpecies(species) as { types?: string[] } | undefined)?.types ?? [];
+  return effectiveness(moveType, types) > 1;
+}
 // First-turn-only moves: have their own cell + first-turn-out gating, so they're
 // excluded from the generic priority-attack cell.
 const FIRST_TURN_MOVE_IDS = new Set(['fakeout', 'firstimpression', 'matblock']);
@@ -1622,6 +1636,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppQuickGuard: opp.map((o, oj) => hasQuickGuard(oppEntries[oj]!.knownMoves)),
     myStrengthSap: mine.map(m => hasStrengthSap(m.set.moves ?? [])),
     oppStrengthSap: opp.map((o, oj) => hasStrengthSap(oppEntries[oj]!.knownMoves)),
+    myWp: mine.map(m => holdsWeaknessPolicy(m.set.item)),
+    oppWp: opp.map(o => holdsWeaknessPolicy(o.entry.item)),
     myAtkStat: mine.map(m => actualStat(m.set, 'atk')),
     oppAtkStat: opp.map(o => actualStat(o.entry.candidates?.[0] ?? defaultOpponentSet(o.entry, 50), 'atk')),
     myPrioCell, oppPrioCell,
@@ -1785,6 +1801,17 @@ function resolveTurn(
   const myToFoeDrop = new Map<number, BoostMap>();   // drops I put on opp mons (opp index → drop)
   const oppToFoeDrop = new Map<number, BoostMap>();   // drops opp puts on my mons (my index → drop)
   const accDrop = (m: Map<number, BoostMap>, idx: number, d: BoostMap) => m.set(idx, addBoosts(m.get(idx) ?? {}, d));
+  // Weakness Policy: a holder that SURVIVES a super-effective hit gets +2 Atk/+2 SpA
+  // (once, applied at end of turn → boosts NEXT ply, the search's main lever).
+  const myWpProc = new Set<number>();
+  const oppWpProc = new Set<number>();
+  const procWp = (side: 'mine' | 'opp', idx: number, moveType: string) => {
+    const hp = side === 'mine' ? myHp : oppHp;
+    if ((hp[idx] ?? 0) <= 0) return;                  // fainted → no proc
+    const has = side === 'mine' ? t.myWp[idx] : t.oppWp[idx];
+    const species = side === 'mine' ? t.mySpecies[idx]! : t.oppSpecies[idx]!;
+    if (has && isSuperEffectiveOn(species, moveType)) (side === 'mine' ? myWpProc : oppWpProc).add(idx);
+  };
   // Protect-variant on-contact punish deferred to the status pass (poison/burn).
   const myPunishStatus = new Map<number, string>();   // my attacker statused by an OPP protect
   const oppPunishStatus = new Map<number, string>();  // opp attacker statused by MY protect
@@ -2084,9 +2111,11 @@ function resolveTurn(
           if (sp.foeDrop && (sp.dmgMax[foe] ?? 0) > 0) accDrop(myToFoeDrop, foe, sp.foeDrop); // Icy Wind etc. (skip type-immune)
           if (koBefore > 0 && oppHp[foe]! <= 0 && t.myOnKo[act.actor]) myKoCount.set(act.actor, (myKoCount.get(act.actor) ?? 0) + 1);
           markResist(oppResistBerryUsed, t.oppResistBerryType, foe, sp.type, t.oppSpecies[foe]!);
+          procWp('opp', foe, sp.type);
         }
         if (sp.selfDrop) mySelfDrop.set(act.actor, sp.selfDrop);
         if (t.myLifeOrb[act.actor] && spreadDealt) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10);
+        if (isSelfdestruct(sp.move)) myHp[act.actor] = 0;   // Explosion / Self-Destruct: user faints
         continue;
       }
       // Priority-attack option (Sucker Punch/Aqua Jet/…) uses the prio cell; else
@@ -2112,6 +2141,7 @@ function resolveTurn(
       if (oc.foeDrop && oc.dmgMax > 0) accDrop(myToFoeDrop, oTgt, oc.foeDrop); // Low Sweep −1 Spe etc.
       if (oBefore > 0 && oppHp[oTgt]! <= 0 && t.myOnKo[act.actor]) myKoCount.set(act.actor, (myKoCount.get(act.actor) ?? 0) + 1); // Moxie/Beast Boost
       markResist(oppResistBerryUsed, t.oppResistBerryType, oTgt, oc.type, t.oppSpecies[oTgt]!);
+      procWp('opp', oTgt, oc.type);
       // Drain heal + contact punish (Rocky Helmet / Rough Skin) on my attacker.
       if (oDealt > 0 && (myHp[act.actor] ?? 0) > 0) {
         if (oc.drain > 0) myHp[act.actor] = Math.min(100, myHp[act.actor]! + oc.drain * oDealt * (t.oppMaxHp[oTgt]! / (t.myMaxHp[act.actor] || 1)));
@@ -2119,6 +2149,7 @@ function resolveTurn(
         if (oc.recoil > 0 && !t.myResidual[act.actor]!.magicGuard && !t.myRockHead[act.actor]) myHp[act.actor] = Math.max(0, myHp[act.actor]! - oc.recoil * oDealt * (t.oppMaxHp[oTgt]! / (t.myMaxHp[act.actor] || 1)));
         if (t.myLifeOrb[act.actor]) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10); // Life Orb recoil (10% max HP)
       }
+      if (isSelfdestruct(oc.move)) myHp[act.actor] = 0;   // Explosion / Self-Destruct: user faints
     } else {
       if (oppHp[act.actor]! <= 0) continue;
       if (oppFlinched.has(act.actor)) continue;       // flinched by Fake Out
@@ -2149,9 +2180,11 @@ function resolveTurn(
           if (sp.foeDrop && (sp.dmgMax[me] ?? 0) > 0) accDrop(oppToFoeDrop, me, sp.foeDrop);
           if (koBefore > 0 && myHp[me]! <= 0 && t.oppOnKo[act.actor]) oppKoCount.set(act.actor, (oppKoCount.get(act.actor) ?? 0) + 1);
           markResist(myResistBerryUsed, t.myResistBerryType, me, sp.type, t.mySpecies[me]!);
+          procWp('mine', me, sp.type);
         }
         if (sp.selfDrop) oppSelfDrop.set(act.actor, sp.selfDrop);
         if (t.oppLifeOrb[act.actor] && spreadDealt) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
+        if (isSelfdestruct(sp.move)) oppHp[act.actor] = 0;   // Explosion / Self-Destruct: user faints
         continue;
       }
       // Priority-attack option uses the opp prio cell; else the max-damage thr cell.
@@ -2175,12 +2208,14 @@ function resolveTurn(
       if (tc.foeDrop && tc.dmgMax > 0) accDrop(oppToFoeDrop, mTgt, tc.foeDrop);
       if (mBefore > 0 && myHp[mTgt]! <= 0 && t.oppOnKo[act.actor]) oppKoCount.set(act.actor, (oppKoCount.get(act.actor) ?? 0) + 1);
       markResist(myResistBerryUsed, t.myResistBerryType, mTgt, tc.type, t.mySpecies[mTgt]!);
+      procWp('mine', mTgt, tc.type);
       if (mDealt > 0 && (oppHp[act.actor] ?? 0) > 0) {
         if (tc.drain > 0) oppHp[act.actor] = Math.min(100, oppHp[act.actor]! + tc.drain * mDealt * (t.myMaxHp[mTgt]! / (t.oppMaxHp[act.actor] || 1)));
         if (tc.contact && t.myContactChip[mTgt]! > 0 && !t.oppResidual[act.actor]!.magicGuard) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - t.myContactChip[mTgt]!);
         if (tc.recoil > 0 && !t.oppResidual[act.actor]!.magicGuard && !t.oppRockHead[act.actor]) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - tc.recoil * mDealt * (t.myMaxHp[mTgt]! / (t.oppMaxHp[act.actor] || 1)));
         if (t.oppLifeOrb[act.actor]) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
       }
+      if (isSelfdestruct(tc.move)) oppHp[act.actor] = 0;   // Explosion / Self-Destruct: user faints
     }
   }
 
@@ -2482,6 +2517,9 @@ function resolveTurn(
   for (const [i, drop] of oppToFoeDrop) if ((myHp[i] ?? 0) > 0) applyDrop(myBoost, i, drop, t.myStatDropImmune[i]!, t.myAbility[i], t.myDefiantStat[i]!);
   for (const i of myActiveNow) if ((myHp[i] ?? 0) > 0 && t.mySpeedBoost[i]) myBoost[i] = addBoosts(myBoost[i]!, { spe: 1 });
   for (const j of oppActiveNow) if ((oppHp[j] ?? 0) > 0 && t.oppSpeedBoost[j]) oppBoost[j] = addBoosts(oppBoost[j]!, { spe: 1 });
+  // Weakness Policy: +2 Atk/+2 SpA to a holder that survived a super-effective hit.
+  for (const i of myWpProc) if ((myHp[i] ?? 0) > 0) myBoost[i] = addBoosts(myBoost[i]!, { atk: 2, spa: 2 });
+  for (const j of oppWpProc) if ((oppHp[j] ?? 0) > 0) oppBoost[j] = addBoosts(oppBoost[j]!, { atk: 2, spa: 2 });
   // Intimidate: a mon that switched IN drops the OPPOSING actives' Atk by 1 (through
   // applyDrop, so Intimidate immunity, Contrary, and Defiant all resolve correctly).
   for (const inMon of mySwitchIn.values()) if (t.myIntimidate[inMon]) {
