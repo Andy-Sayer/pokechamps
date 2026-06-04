@@ -267,6 +267,7 @@ const HELP_HAND = -13;    // Helping Hand (+5) — the ally's move deals ×1.5 t
 const WIDE_GUARD = -14;   // Wide Guard (+3) — blocks the foes' SPREAD moves this turn (whole side)
 const QUICK_GUARD = -15;  // Quick Guard (+3) — blocks the foes' PRIORITY moves this turn (whole side)
 const SAP = -16;          // Strength Sap — heal by the (highest-Atk) foe's Attack stat + drop its Atk −1
+const CLEAR_HAZARD = -17; // Rapid Spin / Defog / Court Change / Tidy Up — remove entry hazards
 // Ranged sentinel blocks that each carry an index, kept disjoint so a code is
 // unambiguous. Switches: [-29,-20] → bench idx. Leech Seed: [-39,-30] → foe idx.
 // Baton Pass: [-49,-40] → bench idx (switch that passes boosts). Status: ≤ -50 →
@@ -620,6 +621,9 @@ interface Tables {
   myAtkStat: number[]; oppAtkStat: number[];
   // Weakness Policy: holders get +2 Atk/+2 SpA on surviving a super-effective hit.
   myWp: boolean[]; oppWp: boolean[];
+  // Hazard-clear move per mon (Rapid Spin / Defog / Court Change / Tidy Up), or null.
+  myHazardClear: (ReturnType<typeof findHazardClear>)[];
+  oppHazardClear: (ReturnType<typeof findHazardClear>)[];
   myFlinchImmune: boolean[]; oppFlinchImmune: boolean[];
   // Best PRIORITY move per attacker×target (priority > 0; null = the mon has none).
   // The max-damage `off`/`thr` cell hides priority moves whenever they aren't the
@@ -1188,6 +1192,19 @@ function hasHelpingHand(moves: string[]): boolean { return moves.some(m => toId(
 function hasWideGuard(moves: string[]): boolean { return moves.some(m => toId(m) === 'wideguard'); }
 function hasQuickGuard(moves: string[]): boolean { return moves.some(m => toId(m) === 'quickguard'); }
 function hasStrengthSap(moves: string[]): boolean { return moves.some(m => toId(m) === 'strengthsap'); }
+// Hazard-clear move a mon knows (Rapid Spin / Mortal Spin / Defog / Court Change /
+// Tidy Up) + its effect kind + the user's stat boost. null = knows none.
+const HAZARD_CLEAR: Record<string, { kind: 'self' | 'both' | 'swap'; spe?: number; atk?: number }> = {
+  rapidspin: { kind: 'self', spe: 1 }, mortalspin: { kind: 'self' }, defog: { kind: 'both' },
+  courtchange: { kind: 'swap' }, tidyup: { kind: 'both', spe: 1, atk: 1 },
+};
+function findHazardClear(moves: string[]): { move: string; kind: 'self' | 'both' | 'swap'; spe?: number; atk?: number } | null {
+  for (const m of moves) { const e = HAZARD_CLEAR[toId(m)]; if (e) return { move: m, ...e }; }
+  return null;
+}
+function hasAnyHazard(h: HazardState): boolean {
+  return !!(h.rocks || (h.spikes ?? 0) > 0 || (h.toxicSpikes ?? 0) > 0 || h.stickyWeb);
+}
 // On-contact punish from a Protect-variant, applied to an attacker whose CONTACT
 // move is blocked by the protecting mon. King's Shield −1 Atk (Aegislash, Gen 9),
 // Spiky Shield 1/8 chip, Silk Trap −1 Spe, Obstruct −2 Def, Baneful Bunker poison,
@@ -1638,6 +1655,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppStrengthSap: opp.map((o, oj) => hasStrengthSap(oppEntries[oj]!.knownMoves)),
     myWp: mine.map(m => holdsWeaknessPolicy(m.set.item)),
     oppWp: opp.map(o => holdsWeaknessPolicy(o.entry.item)),
+    myHazardClear: mine.map(m => findHazardClear(m.set.moves ?? [])),
+    oppHazardClear: opp.map((o, oj) => findHazardClear(oppEntries[oj]!.knownMoves)),
     myAtkStat: mine.map(m => actualStat(m.set, 'atk')),
     oppAtkStat: opp.map(o => actualStat(o.entry.candidates?.[0] ?? defaultOpponentSet(o.entry, 50), 'atk')),
     myPrioCell, oppPrioCell,
@@ -2015,7 +2034,7 @@ function resolveTurn(
   const nonAttack = (target: number) =>
     isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isStatusTarget(target) || isFieldTarget(target)
     || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN || target === RECOVER || target === SET_HAZARD
-    || target === REDIRECT || target === SLEEP_SKIP || target === HELP_HAND || target === WIDE_GUARD || target === QUICK_GUARD || target === SAP || isPivotTarget(target) || isDebuffTarget(target)
+    || target === REDIRECT || target === SLEEP_SKIP || target === HELP_HAND || target === WIDE_GUARD || target === QUICK_GUARD || target === SAP || target === CLEAR_HAZARD || isPivotTarget(target) || isDebuffTarget(target)
     || isTauntTarget(target) || isEncoreTarget(target);
   // Fake Out flinches: a mon hit by Fake Out (resolved at +3 before it acts) skips
   // its action this turn.
@@ -2302,6 +2321,25 @@ function resolveTurn(
   // Web lay a layer on the OPPOSING side (my move → their side, and vice versa).
   for (const [actor, target] of myTargets) if (target === SET_HAZARD && t.myHazardMove[actor]) oppHazards = addHazard(oppHazards, t.myHazardMove[actor]!.hazard);
   for (const [actor, target] of oppTargets) if (target === SET_HAZARD && t.oppHazardMove[actor]) myHazards = addHazard(myHazards, t.oppHazardMove[actor]!.hazard);
+  // Hazard clearing (Rapid Spin clears own side; Defog/Tidy Up clear both; Court
+  // Change swaps). Rapid Spin/Tidy Up also boost the user (routed via selfDrop →
+  // applied at the boost step). Frees up switch lines the search otherwise taxes.
+  for (const [actor, target] of myTargets) {
+    if (target !== CLEAR_HAZARD) continue;
+    const hc = t.myHazardClear[actor]; if (!hc || (myHp[actor] ?? 0) <= 0) continue;
+    if (hc.kind === 'self') myHazards = {};
+    else if (hc.kind === 'both') { myHazards = {}; oppHazards = {}; }
+    else { const tmp = myHazards; myHazards = oppHazards; oppHazards = tmp; }
+    if (hc.spe || hc.atk) mySelfDrop.set(actor, { ...(hc.spe ? { spe: hc.spe } : {}), ...(hc.atk ? { atk: hc.atk } : {}) });
+  }
+  for (const [actor, target] of oppTargets) {
+    if (target !== CLEAR_HAZARD) continue;
+    const hc = t.oppHazardClear[actor]; if (!hc || (oppHp[actor] ?? 0) <= 0) continue;
+    if (hc.kind === 'self') oppHazards = {};
+    else if (hc.kind === 'both') { myHazards = {}; oppHazards = {}; }
+    else { const tmp = myHazards; myHazards = oppHazards; oppHazards = tmp; }
+    if (hc.spe || hc.atk) oppSelfDrop.set(actor, { ...(hc.spe ? { spe: hc.spe } : {}), ...(hc.atk ? { atk: hc.atk } : {}) });
+  }
 
   // Leech Seed. A seed is removed when the seeded mon leaves the field (switch);
   // a switched-in mon arrives unseeded. New seeds cast this turn land on the
@@ -2719,6 +2757,9 @@ function jointActions(
   guard?: { wide: boolean[]; quick: boolean[] },
   // Strength Sap (root only): per-actor knows-it (heal + foe Atk −1).
   strengthSap?: boolean[],
+  // Hazard clear (root only): a true entry → the mon knows Rapid Spin/Defog/etc.
+  // AND its own side has hazards worth removing.
+  hazardClear?: boolean[],
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -2770,6 +2811,7 @@ function jointActions(
     const canWideGuard = guard?.wide[actor] === true;
     const canQuickGuard = guard?.quick[actor] === true;
     const canSap = strengthSap?.[actor] === true;
+    const canClearHazard = hazardClear?.[actor] === true;
     const batonCodes = (baton && baton.move[actor] != null) ? baton.targets.map(batonCode) : [];
     // SPREAD first so a spread that ties a single-target line is kept. PROTECT /
     // field / setup / screen / weather / Leech / SWITCH / Baton last — only chosen
@@ -2790,6 +2832,7 @@ function jointActions(
       ...(canWideGuard ? [WIDE_GUARD] : []),
       ...(canQuickGuard ? [QUICK_GUARD] : []),
       ...(canSap ? [SAP] : []),
+      ...(canClearHazard ? [CLEAR_HAZARD] : []),
       ...(canRedirect ? [REDIRECT] : []),
       ...leechCodes,
       ...statusCodes,
@@ -3047,7 +3090,8 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     // Helping Hand: only when a live ally is on the field to boost.
     t.myHelpingHand.map((kn, i) => kn && s.myActive.some(j => j !== i && (s.myHp[j] ?? 0) > 0)),
     { wide: t.myWideGuard, quick: t.myQuickGuard },
-    t.myStrengthSap);
+    t.myStrengthSap,
+    t.myHazardClear.map(hc => !!hc && hasAnyHazard(s.myHazards)));
 }
 function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
@@ -3079,7 +3123,8 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     { cell: t.oppPrioCell, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
     t.oppHelpingHand.map((kn, j) => kn && s.oppActive.some(i => i !== j && (s.oppHp[i] ?? 0) > 0)),
     { wide: t.oppWideGuard, quick: t.oppQuickGuard },
-    t.oppStrengthSap);
+    t.oppStrengthSap,
+    t.oppHazardClear.map(hc => !!hc && hasAnyHazard(s.oppHazards)));
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -3159,6 +3204,8 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Quick Guard', targetSpecies: 'my side', self: true });
     } else if (target === SAP) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Strength Sap', targetSpecies: 'foe', self: true });
+    } else if (target === CLEAR_HAZARD) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myHazardClear[actor]?.move ?? 'Rapid Spin', targetSpecies: 'hazards', self: true });
     } else if (target === SLEEP_SKIP) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'asleep', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
@@ -3225,6 +3272,8 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): Search
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: 'Quick Guard', targetSpecies: 'their side', self: true });
     } else if (target === SAP) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: 'Strength Sap', targetSpecies: 'foe', self: true });
+    } else if (target === CLEAR_HAZARD) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppHazardClear[actor]?.move ?? 'Rapid Spin', targetSpecies: 'hazards', self: true });
     } else if (target === SLEEP_SKIP) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: 'asleep', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
@@ -3779,6 +3828,9 @@ export function createSearch(input: SearchInput): PositionSearch {
       if (guardOffered(expected.table.myWideGuard, s0.myActive) || guardOffered(expected.table.oppWideGuard, s0.oppActive)) actionClasses.push('wideguard');
       if (guardOffered(expected.table.myQuickGuard, s0.myActive) || guardOffered(expected.table.oppQuickGuard, s0.oppActive)) actionClasses.push('quickguard');
       if (guardOffered(expected.table.myStrengthSap, s0.myActive) || guardOffered(expected.table.oppStrengthSap, s0.oppActive)) actionClasses.push('strengthsap');
+      const clearOffered = (clears: (ReturnType<typeof findHazardClear>)[], actives: number[], haz: HazardState): boolean =>
+        hasAnyHazard(haz) && actives.some(i => !!clears[i]);
+      if (clearOffered(expected.table.myHazardClear, s0.myActive, s0.myHazards) || clearOffered(expected.table.oppHazardClear, s0.oppActive, s0.oppHazards)) actionClasses.push('hazardclear');
       const explored: SearchExplored = {
         depth,
         myActions: myRootJoints.length,
@@ -3867,7 +3919,8 @@ export type TurnAction =
   | { kind: 'helpinghand' }               // Helping Hand — boost the ally ×1.5 this turn
   | { kind: 'wideguard' }                 // Wide Guard — block the foes' spread moves this turn
   | { kind: 'quickguard' }                // Quick Guard — block the foes' priority moves this turn
-  | { kind: 'strengthsap' };              // Strength Sap — heal by the foe's Atk + drop its Atk −1
+  | { kind: 'strengthsap' }               // Strength Sap — heal by the foe's Atk + drop its Atk −1
+  | { kind: 'clearhazard' };              // Rapid Spin / Defog / … — remove entry hazards
 
 /** Post-turn structural state of one mon (by team-index). HP is our coarse
  *  representative value — the harness compares the DISCRETE fields (fainted /
@@ -3927,6 +3980,7 @@ export function resolveOneTurn(
     else if (a.kind === 'wideguard') { myTargets.set(actor, WIDE_GUARD); myMove.set(actor, 'Wide Guard'); }
     else if (a.kind === 'quickguard') { myTargets.set(actor, QUICK_GUARD); myMove.set(actor, 'Quick Guard'); }
     else if (a.kind === 'strengthsap') { myTargets.set(actor, SAP); myMove.set(actor, 'Strength Sap'); }
+    else if (a.kind === 'clearhazard') { myTargets.set(actor, CLEAR_HAZARD); myMove.set(actor, t.myHazardClear[actor]?.move ?? 'Rapid Spin'); }
     else { myTargets.set(actor, PROTECT); }
   }
   for (const [actor, a] of oppActions) {
@@ -3944,6 +3998,7 @@ export function resolveOneTurn(
     else if (a.kind === 'wideguard') { oppTargets.set(actor, WIDE_GUARD); oppMove.set(actor, 'Wide Guard'); }
     else if (a.kind === 'quickguard') { oppTargets.set(actor, QUICK_GUARD); oppMove.set(actor, 'Quick Guard'); }
     else if (a.kind === 'strengthsap') { oppTargets.set(actor, SAP); oppMove.set(actor, 'Strength Sap'); }
+    else if (a.kind === 'clearhazard') { oppTargets.set(actor, CLEAR_HAZARD); oppMove.set(actor, t.oppHazardClear[actor]?.move ?? 'Rapid Spin'); }
     else { oppTargets.set(actor, PROTECT); }
   }
   const pass: Pass = {

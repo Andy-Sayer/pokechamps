@@ -1909,6 +1909,19 @@ describe('Strength Sap + Protect-variant punishes', () => {
   });
 });
 
+describe('hazard clearing (Rapid Spin / Defog)', () => {
+  const base = (myHazards?: { rocks?: boolean; spikes?: 0 | 1 | 2 | 3 }) => ({
+    mine: [{ set: mon({ species: 'Great Tusk', ability: 'Protosynthesis', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Rapid Spin', 'Headlong Rush'] }), hpPercent: 100, active: true }],
+    opp: [{ entry: oppOf(mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Earthquake'] })), hpPercent: 100, active: true }],
+    field: { ...NEUTRAL_FIELD, ...(myHazards ? { myHazards } : {}) }, allOppRevealed: true,
+  });
+
+  test('Rapid Spin is offered as an action class only when own side has hazards', () => {
+    expect(searchToDepth(base({ rocks: true }), 1).explored!.actionClasses).toContain('hazardclear');
+    expect(searchToDepth(base(), 1).explored!.actionClasses).not.toContain('hazardclear');
+  });
+});
+
 describe('on-KO boosts (Moxie / Beast Boost)', () => {
   // A frail foe at 12% HP is KO'd by any hit → the attacker's on-KO ability fires.
   const koFrailFoe = (set: PokemonSet) => resolveOneTurn(
