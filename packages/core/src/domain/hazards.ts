@@ -22,7 +22,9 @@ export interface HazardEffect {
 // hazards apply (incoming mon hits the hazards on their OWN side).
 export function applyHazardsToSwitchIn(
   hazards: HazardState | undefined,
-  incoming: { species: string; ability?: string; item?: string },
+  // `gravity` (Gravity field active) grounds Flying / Levitate mons, so they then
+  // eat Spikes / Toxic Spikes / Sticky Web on entry.
+  incoming: { species: string; ability?: string; item?: string; gravity?: boolean },
 ): HazardEffect {
   const out: HazardEffect = { hpPctLoss: 0 };
   if (!hazards) return out;
@@ -37,7 +39,7 @@ export function applyHazardsToSwitchIn(
   const isHeavyDutyBoots = item?.name === 'Heavy-Duty Boots';
   const isLevitate = ability?.name === 'Levitate';
   const isFlying = types.includes('Flying');
-  const groundImmune = isLevitate || isFlying;
+  const groundImmune = (isLevitate || isFlying) && !incoming.gravity; // Gravity grounds everything
 
   // Stealth Rock
   if (hazards.rocks && !isMagicGuard && !isHeavyDutyBoots) {

@@ -4,7 +4,7 @@ import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
 import type { Match, FieldState, DamageObservation, MoveAction, OpponentEntry, PokemonSet } from '@pokechamps/core/domain/types.js';
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
-import { scoreSpread, scoreOffensiveSpread, mostLikely, recoilDrainHpEvs } from '@pokechamps/core/domain/inference.js';
+import { scoreSpread, scoreOffensiveSpread, mostLikely, recoilDrainHpEvs, reconcileCandidates } from '@pokechamps/core/domain/inference.js';
 import { maxHpFor } from '@pokechamps/core/domain/damage.js';
 import { endOfTurn } from '@pokechamps/core/domain/endOfTurn.js';
 import { inferOpponentSpeeds, applySpeedInference, actualSpeed, predictTurnOrder, effectiveSpeedRange } from '@pokechamps/core/domain/speed.js';
@@ -1439,6 +1439,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             : undefined,
           // A recoil/drain readout pins the HP EV defense-independently — honour it.
           hpEvCandidates: opp.hpEvLock,
+          // Item permanence: gone if consumed BEFORE this turn (pre-turn state, so
+          // a berry popping on THIS hit still applies). Mirror of engine.ts.
+          itemKnownGone: !!match.opponentTeam[oppIdx]?.itemConsumed,
           // Skip the ~360k-candidate coarse-grid fallback when priors fail (it
           // blocks the UI for 10+ seconds). The Hybrid solver still returns a
           // best-effort, likelihood-ranked set (never empty).
@@ -1454,7 +1457,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
           ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
           moves: opp.knownMoves,
         }));
-        next.opponentTeam[oppIdx] = { ...opp, candidates: candidateSets, candidateLikelihoods: scored.map(s => s.likelihood) };
+        const defEntry = { ...opp, candidates: candidateSets, candidateLikelihoods: scored.map(s => s.likelihood) };
+        defEntry.observations = [...(opp.observations ?? []), { oppIsAttacker: false, otherSet: attackerSet, observation: obs }].slice(-10);
+        next.opponentTeam[oppIdx] = defEntry;
         inferenceNotes.push(`${opp.species}: ${candidateSets.length} spread(s)`);
       } catch (e) {
         inferenceNotes.push(`${opp.species}: inference failed`);
@@ -1496,7 +1501,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
           item: s.candidate.item, ability: s.candidate.ability, nature: s.candidate.nature,
           evs: s.candidate.evs, ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 }, moves: opp.knownMoves,
         }));
-        next.opponentTeam[oppIdx] = { ...next.opponentTeam[oppIdx]!, candidates: candidateSets, candidateLikelihoods: scored.map(s => s.likelihood) };
+        const offEntry = { ...next.opponentTeam[oppIdx]!, candidates: candidateSets, candidateLikelihoods: scored.map(s => s.likelihood) };
+        offEntry.observations = [...(offEntry.observations ?? []), { oppIsAttacker: true, otherSet: defenderSet, observation: obs }].slice(-10);
+        next.opponentTeam[oppIdx] = offEntry;
       } catch { /* keep prior belief */ }
     }
 
@@ -1548,6 +1555,27 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         if (pinnedCands.length) opp.candidates = pinnedCands;
       }
       inferenceNotes.push(`${opp.species}: HP pinned via ${effect} (EV ${hpEvs.join('/')})`);
+    }
+
+    // Joint reconcile: keep candidates consistent with the FULL observation
+    // history on each mon (catches a nature promotion / Hybrid recovery that
+    // contradicts an earlier fit). Mirror of engine.ts.
+    for (let oi = 0; oi < next.opponentTeam.length; oi++) {
+      const opp = next.opponentTeam[oi];
+      if (!opp?.candidates?.length || (opp.observations?.length ?? 0) < 2) continue;
+      const level = opp.candidates[0]!.level;
+      const r = reconcileCandidates({
+        oppSpecies: opp.species, oppLevel: level, knownMoves: opp.knownMoves,
+        candidates: opp.candidates.map(c => ({ evs: c.evs, nature: c.nature, item: c.item, ability: c.ability })),
+        likelihoods: opp.candidateLikelihoods, history: opp.observations!,
+      });
+      if (r.candidates.length === opp.candidates.length) continue;
+      opp.candidates = r.candidates.map(c => ({
+        species: opp.species, level, item: c.item, ability: c.ability, nature: c.nature,
+        evs: c.evs, ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 }, moves: opp.knownMoves,
+      }));
+      opp.candidateLikelihoods = r.likelihoods;
+      inferenceNotes.push(`${opp.species}: reconciled to ${opp.candidates.length} spread(s)`);
     }
 
     // Speed inference uses the whole match history. Apply to opp team.

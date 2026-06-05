@@ -50,6 +50,27 @@ const COMMON_DEFENSIVE_ITEMS: (string | undefined)[] = [
   'Focus Sash',
 ];
 
+// Type-immunity / absorb abilities: holding one makes the mon take ZERO damage
+// from the keyed move type. So observing REAL (non-zero) damage from that type
+// rules the ability out — a clean, observation-driven ability narrowing that
+// needs no extra logging. Keyed by move type. (Dry Skin is immune to Water but
+// takes EXTRA from Fire, so it only sits under Water; a Fire hit doesn't rule it
+// out.) Wonder Guard etc. are absent in this format.
+const TYPE_IMMUNITY_ABILITIES: Record<string, string[]> = {
+  Ground: ['Levitate'],
+  Electric: ['Volt Absorb', 'Lightning Rod', 'Motor Drive'],
+  Water: ['Water Absorb', 'Storm Drain', 'Dry Skin'],
+  Fire: ['Flash Fire'],
+  Grass: ['Sap Sipper'],
+};
+
+// Abilities ruled out by a landed damaging hit of the given move type (empty if
+// the type has no immunity ability). Compared by id for name-spacing safety.
+export function abilitiesRuledOutByHit(moveType: string | undefined): Set<string> {
+  const names = moveType ? TYPE_IMMUNITY_ABILITIES[moveType] ?? [] : [];
+  return new Set(names.map(toId));
+}
+
 export interface SpreadCandidate {
   evs: Stats;
   nature: string;
@@ -116,6 +137,13 @@ export interface InferenceInput {
   quickOnly?: boolean;
   // Item signals: exclude Safety Goggles if the mon has taken sand chip damage.
   sandChipObserved?: boolean;
+  // Item permanence: the opponent's held item is known to have been consumed on
+  // a PRIOR turn (gone before this observation). Per the permanence model, a mon
+  // whose item was consumed can't still be holding a persistent item, so collapse
+  // the item axis to "no item" — inference stops proposing Leftovers/Choice/etc.
+  // The caller reads PRE-turn state, so a resist berry that pops on THIS hit is
+  // not yet "gone" and still applies its 0.5x. See itemPermanence.ts.
+  itemKnownGone?: boolean;
   // Recoil/drain HP readout: the HP EV(s) whose max HP matches an observed
   // recoil/drain reading. When set, the HP dimension is PINNED to these (the
   // recoil maths give max HP defense-independently), collapsing the grid's HP
@@ -211,8 +239,19 @@ export function inferSpread(input: InferenceInput): SpreadCandidate[] {
 export function scoreSpread(input: InferenceInput): ScoredCandidate[] {
   const species = getSpecies(input.defenderSpecies);
   const speciesName: string = species?.name ?? input.defenderSpecies;
-  const possibleAbilities: string[] = input.priorAbilities ??
+  let possibleAbilities: string[] = input.priorAbilities ??
     (species?.abilities ? Object.values(species.abilities) as string[] : ['']);
+
+  // Ability inference: a damaging hit that DEALT damage rules out the type-
+  // immunity ability for that move's type (a Levitate mon never takes Ground
+  // damage, etc.). Narrow both the coarse ability axis and any prior candidates.
+  const tookDamage = (input.observation.damageHpPercent ?? input.observation.damageRaw ?? 0) > 0;
+  const moveType = (getMove(input.observation.move) as { type?: string } | undefined)?.type;
+  const ruledOut = tookDamage ? abilitiesRuledOutByHit(moveType) : new Set<string>();
+  if (ruledOut.size) {
+    const narrowed = possibleAbilities.filter(a => !ruledOut.has(toId(a)));
+    if (narrowed.length) possibleAbilities = narrowed; // never empty the axis
+  }
 
   // Item search space: the standard defensive items + any gimmick-specific
   // variants (e.g. mega stones legal for this species). Filter against the
@@ -234,6 +273,9 @@ export function scoreSpread(input: InferenceInput): ScoredCandidate[] {
   if (input.sandChipObserved) {
     items = items.filter(i => i !== 'Safety Goggles');
   }
+  // Item permanence: if the held item was already consumed before this hit, the
+  // item axis is settled — collapse to "no item".
+  if (input.itemKnownGone) items = [''];
   const natures = input.priorNatures ?? NATURES_TO_TRY;
 
   // Pikalytics priors: if the species is in our cached top-N, build narrower
@@ -248,6 +290,23 @@ export function scoreSpread(input: InferenceInput): ScoredCandidate[] {
     candidates = priorCandidates;
   } else {
     candidates = generateCoarseCandidates({ natures, items, abilities: possibleAbilities });
+  }
+
+  // Apply the ability/item narrowing to whichever candidate set we picked —
+  // priors and chained startingCandidates carry their own item/ability that
+  // bypass the `items`/`possibleAbilities` arrays the coarse grid builds from.
+  if (ruledOut.size || input.itemKnownGone) {
+    const seen = new Set<string>();
+    const narrowed = candidates
+      .filter(c => !c.ability || !ruledOut.has(toId(c.ability)))
+      .map(c => (input.itemKnownGone ? { ...c, item: undefined } : c))
+      .filter(c => {
+        const key = `${c.evs.hp}|${c.evs.atk}|${c.evs.def}|${c.evs.spa}|${c.evs.spd}|${c.evs.spe}|${c.nature}|${c.item ?? ''}|${c.ability ?? ''}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    if (narrowed.length) candidates = narrowed; // never empty the set
   }
 
   // Recoil/drain HP readout pins the HP EV (defense-independent), so override
@@ -405,7 +464,9 @@ function priorsFromPikalytics(speciesName: string): SpreadCandidate[] {
     spd: evFromSp(spread.sp[4]),
     spe: evFromSp(spread.sp[5]),
   };
-  const topItems = pik.items.filter(i => i.name.toLowerCase() !== 'other').slice(0, 4).map(i => i.name);
+  const topItems = pik.items
+    .filter(i => i.name.toLowerCase() !== 'other' && isLegalItem(i.name))
+    .slice(0, 4).map(i => i.name);
   const topAbilities = pik.abilities.filter(a => a.name.toLowerCase() !== 'other').slice(0, 3).map(a => a.name);
   const items = topItems.length ? topItems : [''];
   const abilities = topAbilities.length ? topAbilities : [''];
@@ -469,4 +530,75 @@ export function mostLikelyIndex(candidates: SpreadCandidate[], likelihoods?: num
 export function mostLikely(candidates: SpreadCandidate[], likelihoods?: number[]): SpreadCandidate | null {
   const i = mostLikelyIndex(candidates, likelihoods);
   return i < 0 ? null : candidates[i]!;
+}
+
+// --- Joint solve -------------------------------------------------------------
+// The defensive (scoreSpread) and offensive (scoreOffensiveSpread) passes run on
+// DIFFERENT observations and chain through the candidate set — which keeps them
+// mostly joint already. But two things can break joint consistency: the
+// offensive pass's nature PROMOTION (it swaps a candidate's nature to reach an
+// extreme hit, possibly contradicting an earlier defensive fit) and the Hybrid
+// fallback (which keeps "least wrong" candidates to avoid an empty set). This is
+// the reconciliation: re-check every surviving candidate against the FULL
+// history of observations on this mon and keep only the ones consistent with ALL
+// of them — a true joint (nature × item × EV) solve. Guarded to never empty.
+export interface StoredObservation {
+  // Is the opponent the ATTACKER in this observation (offensive obs) or the
+  // defender (defensive obs)?
+  oppIsAttacker: boolean;
+  // The KNOWN (mine-side) mon: the defender when oppIsAttacker, else the attacker.
+  otherSet: PokemonSet;
+  observation: DamageObservation;
+}
+
+export function reconcileCandidates(p: {
+  oppSpecies: string;
+  oppLevel: number;
+  knownMoves: string[];
+  candidates: SpreadCandidate[];
+  likelihoods?: number[];
+  history: StoredObservation[];
+}): { candidates: SpreadCandidate[]; likelihoods: number[] } {
+  const fallback = {
+    candidates: p.candidates,
+    likelihoods: p.likelihoods ?? p.candidates.map(() => 0),
+  };
+  if (p.history.length < 2 || p.candidates.length <= 1) return fallback;
+  const kept: { c: SpreadCandidate; like: number }[] = [];
+  for (let i = 0; i < p.candidates.length; i++) {
+    const c = p.candidates[i]!;
+    let ok = true;
+    let scoreSum = 0;
+    for (const h of p.history) {
+      // Build the opp set from the forme the observation actually saw (mega
+      // forme if they'd mega'd), not the base species.
+      const oppSpeciesForObs = h.oppIsAttacker
+        ? h.observation.attackerSpecies
+        : h.observation.defenderSpecies;
+      const oppSet = fullSet(oppSpeciesForObs || p.oppSpecies, c, p.oppLevel, p.knownMoves);
+      const attacker = h.oppIsAttacker ? oppSet : h.otherSet;
+      const defender = h.oppIsAttacker ? h.otherSet : oppSet;
+      let predicted;
+      try {
+        predicted = damageRange({
+          attacker,
+          defender,
+          move: h.observation.move,
+          field: h.observation.field,
+          attackerSide: h.observation.attackerSide,
+          attackerOpts: { gimmickActive: h.observation.attackerGimmickActive, boosts: h.observation.attackerBoosts as any },
+          defenderOpts: { gimmickActive: h.observation.defenderGimmickActive, boosts: h.observation.defenderBoosts as any },
+          helpingHand: h.observation.helpingHand,
+          critical: h.observation.critical,
+        });
+      } catch { continue; } // unscorable obs → don't penalise the candidate
+      const obs = observationToAbsoluteDamage(h.observation, defender);
+      if (!(predicted.max >= obs.lo && predicted.min <= obs.hi)) { ok = false; break; }
+      scoreSum += candidateLikelihood(predicted.rolls, obs.lo, obs.hi);
+    }
+    if (ok) kept.push({ c, like: p.likelihoods?.[i] ?? scoreSum });
+  }
+  if (!kept.length) return fallback; // never empty — keep prior belief
+  kept.sort((a, b) => b.like - a.like);
+  return { candidates: kept.map(k => k.c), likelihoods: kept.map(k => k.like) };
 }

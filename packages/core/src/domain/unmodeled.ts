@@ -44,14 +44,15 @@ const RULES: GapRule[] = [
   // Spore/Sleep Powder/Hypnosis sleep is now MODELLED (status 'slp' = can't-act +
   // wake counter); only delayed Yawn remains unmodelled.
   { kind: 'yawn', label: 'Yawn (delayed sleep)', moves: ['yawn'] },
-  { kind: 'freeze', label: 'freeze (skips turns)', statuses: ['frz'] },
   // Follow Me / Rage Powder redirection is now MODELLED; ability redirection
   // (Storm Drain/Lightning Rod) and Ally Switch are not.
   { kind: 'redirection', label: 'ability redirection / Ally Switch',
     moves: ['allyswitch', 'spotlight'],
     abilities: ['stormdrain', 'lightningrod'] },
-  { kind: 'teamprotect', label: 'Wide / Quick Guard',
-    moves: ['wideguard', 'quickguard', 'matblock', 'craftyshield'] },
+  // Wide / Quick Guard are now MODELLED (side-wide protect actions). Mat Block /
+  // Crafty Shield remain a gap.
+  { kind: 'teamprotect', label: 'team protect (Mat Block / Crafty Shield)',
+    moves: ['matblock', 'craftyshield'] },
   // NOTE: the 100%-chance DAMAGING foe-drops (Icy Wind/Snarl/Electroweb/Struggle
   // Bug/Breaking Swipe/Low Sweep/Bulldoze/Lunge/Acid Spray/Mystical Fire/…) are now
   // MODELLED (Cell.foeDrop). Only the dedicated 0-damage stat-lowering moves remain
@@ -64,39 +65,24 @@ const RULES: GapRule[] = [
   { kind: 'twoturn', label: 'two-turn / charge move',
     moves: ['solarbeam', 'solarblade', 'fly', 'dig', 'dive', 'bounce', 'phantomforce', 'shadowforce',
       'skyattack', 'meteorbeam', 'electroshot', 'geomancy', 'skullbash', 'razorwind', 'freezeshock', 'iceburn'] },
-  { kind: 'recharge', label: 'recharge move',
-    moves: ['hyperbeam', 'gigaimpact', 'roaroftime', 'prismaticlaser', 'eternabeam', 'frenzyplant', 'hydrocannon', 'blastburn'] },
-  { kind: 'locked', label: 'locked multi-turn (Outrage)',
-    moves: ['outrage', 'petaldance', 'thrash', 'ragingfury'] },
-  { kind: 'delayeddamage', label: 'delayed damage (Future Sight)',
-    moves: ['futuresight', 'doomdesire'] },
-  { kind: 'wish', label: 'delayed heal (Wish)', moves: ['wish'] },
-  { kind: 'damagereflect', label: 'damage reflect (Counter / Mirror Coat)',
-    moves: ['counter', 'mirrorcoat', 'metalburst'] },
   // Taunt + Encore are now MODELLED (option restriction). Disable/Torment/Imprison
   // /Spite remain a gap.
   { kind: 'restriction', label: 'move restriction (Disable / Torment / Imprison)',
     moves: ['disable', 'torment', 'imprison', 'spite'] },
-  { kind: 'substitute', label: 'Substitute', moves: ['substitute'] },
-  { kind: 'selffaint', label: 'self-faint move (Explosion / Final Gambit)',
-    moves: ['explosion', 'selfdestruct', 'mistyexplosion', 'finalgambit', 'healingwish', 'lunardance', 'memento'] },
-  { kind: 'onkoboost', label: 'on-KO boost (Moxie / Beast Boost)',
-    abilities: ['moxie', 'beastboost', 'grimneigh', 'chillingneigh', 'asonespectrier', 'asoneglastrier'] },
-  { kind: 'hazardclear', label: 'hazard clear (Defog / Rapid Spin)',
-    moves: ['defog', 'rapidspin', 'mortalspin', 'courtchange', 'tidyup'] },
-  { kind: 'freehit', label: 'free-hit absorb (Disguise / Ice Face)',
-    abilities: ['disguise', 'iceface'] },
-  { kind: 'magicbounce', label: 'status/hazard reflect (Magic Bounce)',
-    abilities: ['magicbounce'] },
-  { kind: 'forcedswitchitem', label: 'forced-switch item (Eject Button / Red Card)',
-    items: ['ejectbutton', 'ejectpack', 'redcard'] },
-  { kind: 'reactiveitem', label: 'reactive item (Weakness Policy / Booster Energy)',
-    items: ['weaknesspolicy', 'blunderpolicy', 'throatspray', 'boosterenergy', 'roomservice', 'snowball', 'luminousmoss', 'cellbattery', 'absorbbulb'] },
+  // Explosion / Self-Destruct / Misty Explosion are MODELLED (isSelfdestruct → user
+  // faints). The HP-based / sacrifice-pivot ones are not.
+  { kind: 'selffaint', label: 'self-faint move (Final Gambit / Memento / Healing Wish)',
+    moves: ['finalgambit', 'healingwish', 'lunardance', 'memento'] },
+  // on-KO boost (Moxie/Beast Boost) and hazard clear (Defog/Rapid Spin) are MODELLED.
+  // Weakness Policy is MODELLED (procWp); the other reactive items are not.
+  { kind: 'reactiveitem', label: 'reactive item (Booster Energy / Throat Spray / …)',
+    items: ['blunderpolicy', 'throatspray', 'boosterenergy', 'roomservice', 'snowball', 'luminousmoss', 'cellbattery', 'absorbbulb'] },
   { kind: 'itemswap', label: 'item swap/loss (Trick / Knock Off)',
     moves: ['trick', 'switcheroo', 'bestow', 'knockoff', 'thief', 'covet', 'corrosivegas'] },
-  { kind: 'room', label: 'room effect (Gravity / Wonder Room)',
-    moves: ['gravity', 'wonderroom', 'magicroom'] },
-  { kind: 'confusion', label: 'confusion (33% self-hit)',
+  // Confusion is a PROBABILISTIC secondary (33% self-hit) — deliberately NOT
+  // auto-applied, the same policy as flinch and the 25% full-paralysis chance
+  // (sim-divergences.md). Flagged as informational so the user weighs the dice.
+  { kind: 'confusion', label: 'confusion (33% self-hit — informational)',
     moves: ['confuseray', 'swagger', 'flatter', 'sweetkiss', 'teeterdance'] },
 ];
 

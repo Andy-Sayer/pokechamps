@@ -20,7 +20,7 @@ import type {
   Turn,
 } from '../domain/types.js';
 import { NEUTRAL_FIELD } from '../domain/types.js';
-import { scoreSpread, scoreOffensiveSpread, recoilDrainHpEvs } from '../domain/inference.js';
+import { scoreSpread, scoreOffensiveSpread, recoilDrainHpEvs, reconcileCandidates } from '../domain/inference.js';
 import { maxHpFor } from '../domain/damage.js';
 import { endOfTurn } from '../domain/endOfTurn.js';
 import { inferOpponentSpeeds, applySpeedInference } from '../domain/speed.js';
@@ -1198,6 +1198,9 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
           : undefined,
         // A recoil/drain readout pins the HP EV defense-independently — honour it.
         hpEvCandidates: opp.hpEvLock,
+        // Item permanence: if the item was already consumed BEFORE this turn, it's
+        // gone — read pre-turn state so a berry popping on THIS hit still applies.
+        itemKnownGone: !!match.opponentTeam[oppIdx]?.itemConsumed,
         // Server keeps response latency bounded by skipping the ~360k-spread
         // coarse fallback. The Hybrid solver still returns a best-effort set
         // (never empty) so the client always has candidates to show.
@@ -1213,7 +1216,9 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
         ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
         moves: opp.knownMoves,
       }));
-      next.opponentTeam[oppIdx] = { ...opp, candidates: candidateSets, candidateLikelihoods: scored.map(s => s.likelihood) };
+      const defEntry = { ...opp, candidates: candidateSets, candidateLikelihoods: scored.map(s => s.likelihood) };
+      defEntry.observations = [...(opp.observations ?? []), { oppIsAttacker: false, otherSet: attackerSet, observation: obs }].slice(-10);
+      next.opponentTeam[oppIdx] = defEntry;
       inferenceNotes.push(`${opp.species}: ${candidateSets.length} spread(s)`);
     } catch {
       inferenceNotes.push(`${opp.species}: inference failed`);
@@ -1257,7 +1262,9 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
         item: s.candidate.item, ability: s.candidate.ability, nature: s.candidate.nature,
         evs: s.candidate.evs, ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 }, moves: opp.knownMoves,
       }));
-      next.opponentTeam[oppIdx] = { ...next.opponentTeam[oppIdx]!, candidates: candidateSets, candidateLikelihoods: scored.map(s => s.likelihood) };
+      const offEntry = { ...next.opponentTeam[oppIdx]!, candidates: candidateSets, candidateLikelihoods: scored.map(s => s.likelihood) };
+      offEntry.observations = [...(offEntry.observations ?? []), { oppIsAttacker: true, otherSet: defenderSet, observation: obs }].slice(-10);
+      next.opponentTeam[oppIdx] = offEntry;
     } catch { /* keep prior belief */ }
   }
 
@@ -1312,6 +1319,28 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
       if (pinnedCands.length) opp.candidates = pinnedCands;
     }
     inferenceNotes.push(`${opp.species}: HP pinned via ${effect} (EV ${hpEvs.join('/')})`);
+  }
+
+  // Joint reconcile: re-check each surviving candidate against the FULL history
+  // of observations on that mon and keep only the ones consistent with ALL of
+  // them (a true joint nature × item × EV solve; catches an offensive nature
+  // promotion or Hybrid recovery that contradicts an earlier defensive fit).
+  for (let oi = 0; oi < next.opponentTeam.length; oi++) {
+    const opp = next.opponentTeam[oi];
+    if (!opp?.candidates?.length || (opp.observations?.length ?? 0) < 2) continue;
+    const level = opp.candidates[0]!.level;
+    const r = reconcileCandidates({
+      oppSpecies: opp.species, oppLevel: level, knownMoves: opp.knownMoves,
+      candidates: opp.candidates.map(c => ({ evs: c.evs, nature: c.nature, item: c.item, ability: c.ability })),
+      likelihoods: opp.candidateLikelihoods, history: opp.observations!,
+    });
+    if (r.candidates.length === opp.candidates.length) continue; // unchanged
+    opp.candidates = r.candidates.map(c => ({
+      species: opp.species, level, item: c.item, ability: c.ability, nature: c.nature,
+      evs: c.evs, ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 }, moves: opp.knownMoves,
+    }));
+    opp.candidateLikelihoods = r.likelihoods;
+    inferenceNotes.push(`${opp.species}: reconciled to ${opp.candidates.length} spread(s)`);
   }
 
   // Tag pivot-follow switches. A pivot move (U-turn etc.) executes, then

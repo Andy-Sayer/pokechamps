@@ -189,6 +189,49 @@ EXACT oracle for the shown line; port real `sim/` logic to close the gaps below;
 GPU-ify later. The gaps here are still the work list — but now grounded in
 Showdown's source, not memory of the rules.
 
+## Session update 2026-06-05 — long-tail closeout
+
+A focused pass closed most of the remaining search GAPs (each with a no-regression
+property + a `search-mechanics.test.ts` unit test; full suite 913 green; the
+sim-diff harness unchanged, confirming the attack-resolution path is unaffected):
+
+- ✅ **Magic Bounce** — status moves / Taunt / Leech Seed / dedicated debuffs reflect
+  back at the caster; hazard-set moves bounce onto the setter's own side.
+- ✅ **Freeze** — folded into the "can't act" mask (frozen ⇒ no action for the search
+  horizon; conservative no-thaw, like a long sleep). `unmodeled` rule removed.
+- ✅ **Disguise / Ice Face** — first damaging hit absorbed (Disguise 1/8 break-chip,
+  Ice Face 0), restored on switch-in. `apply()` defense-context.
+- ✅ **Recharge** (Hyper Beam family) — user can't act the turn after; can't-act mask.
+- ✅ **Locked multi-turn** (Outrage family) — restricted to attack-only (no switch /
+  setup / protect) for 2 turns via the `restrict.locked` filter.
+- ✅ **Wish** — delayed self-heal (50% next-turn EOT) via the recover path (`kind:'wish'`).
+- ✅ **Substitute** — `SET_SUB` action (pay 25% HP) + sub-HP damage routing in
+  `apply()` + status block while the sub stands; a root sub is seeded from
+  `subHpPercent`.
+- ✅ **Future Sight / Doom Desire** — scheduled hit (no damage on cast; lands 2 turns
+  later on the targeted slot). `my/oppFutureTurns` + `my/oppFutureDmg`.
+- ✅ **Counter / Mirror Coat / Metal Burst** — a `COUNTER` action; resolves last
+  (−5 priority) reflecting `mult ×` the biggest matching-category hit taken (tracked
+  via `my/oppBigHit`) back into the attacker's HP bar. Single-target hits.
+- ✅ **Forced-switch items** (Red Card / Eject Button / Eject Pack) — a holder hit
+  this turn swaps to its side's best live bench mon (Eject = holder leaves; Red Card
+  = attacker leaves); the incoming mon eats hazards + arrives fresh. Single-target.
+- ✅ **Gravity / Wonder Room / Magic Room** — `SET_ROOM` action sets/toggles the room
+  (5 turns, stall-able). **Gravity** grounds Flying/Levitate mons for hazards live
+  (`applyHazardsToSwitchIn` gravity flag). **Caveat:** the rooms' pure-DAMAGE effects
+  (Wonder Room Def/SpD swap, Magic Room item suppression, Gravity's Ground-immunity
+  removal) are baked into the cells at ROOT — a mid-search cast doesn't retro-adjust
+  damage. Full recompute is the GPU phase; the action + tracking + Gravity-grounding
+  are modelled now, so the search no longer flags rooms as unmodelled.
+
+**Still policy-excluded (not a gap):** **Confusion** — a probabilistic secondary
+(33% self-hit), the same policy as flinch / 25% full-para; surfaced as an
+informational flag, never baked into maximin.
+
+`unmodeled.ts` is now empty of search-long-tail gaps for this meta (only the
+genuinely-out-of-scope classes — Disable/Torment, two-turn-bare, ability
+redirection, item-swap inference — remain, plus the confusion policy flag).
+
 ## Prioritized gap backlog (search lookahead)
 
 Ordered by *how often it changes a recommendation* in this doubles format. Each is
@@ -241,11 +284,13 @@ EOT residual, root-ply action, switch-in hook).
 12. **Redirection** (Follow Me/Rage Powder, Storm Drain/Lightning Rod) + **Wide/
     Quick Guard** — doubles-defining but complex (slot/targeting model).
 
-**P3 — long tail / niche**
-Wish, Future Sight, Counter/Mirror Coat, Substitute (improve), Encore/Taunt/
-Disable (restrict opp options), Eject Button/Red Card forced switch, Weakness
-Policy, Booster Energy proc, Gravity/Wonder/Magic Room, Magic Bounce, Disguise/
-Ice Face free-hit, Black Sludge, confusion/freeze, OHKO moves, self-destruct.
+**P3 — long tail / niche** *(closed 2026-06-05 — see the session block above)*
+Still open: Disable/Torment/Imprison, Booster Energy proc, Black Sludge (search),
+OHKO moves, ability redirection (Storm Drain/Lightning Rod) + Ally Switch. The
+rooms' pure-damage effects (Wonder/Magic Room) remain root-baked → the GPU/recompute
+phase. *(Counter/Mirror Coat, forced-switch items, room cast + Gravity-grounding,
+Wish, Future Sight, Substitute, Magic Bounce, Disguise/Ice Face, freeze,
+self-destruct, Weakness Policy, Taunt/Encore are now handled.)*
 
 **P4 — infrastructure (separate track)**
 **GPU parallel mode** (original Phase 5) — batch the per-spread forward-damage

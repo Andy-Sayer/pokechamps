@@ -69,6 +69,11 @@ export interface OpponentEntry {
   // If we've observed this mon consume a held item (e.g. Sitrus, Air Balloon).
   // Displayed as a strikethrough on the inferred item.
   itemConsumed?: string;
+  // Accumulated damage observations on this mon (capped, last-N). The joint
+  // reconcile pass (inference.reconcileCandidates) re-checks every surviving
+  // candidate against ALL of these so the spread stays consistent across the
+  // whole match — not just the latest hit. `otherSet` is the mine-side mon.
+  observations?: { oppIsAttacker: boolean; otherSet: PokemonSet; observation: DamageObservation }[];
   // Current non-volatile status. Used in damage calcs (burn halves Atk, etc.)
   // and end-of-turn ticks (burn/poison damage, toxic ramp).
   status?: 'brn' | 'par' | 'psn' | 'tox' | 'slp' | 'frz';
@@ -146,6 +151,15 @@ export interface FieldState {
   theirLightScreen: boolean;
   myHazards?: HazardState;
   theirHazards?: HazardState;
+  // Field "rooms" (order-irrelevant, item/stat-affecting). Gravity grounds
+  // everything + boosts accuracy; Wonder Room swaps Def/SpD; Magic Room
+  // suppresses held items. Damage effects are baked into the calc at root.
+  gravity?: boolean;
+  wonderRoom?: boolean;
+  magicRoom?: boolean;
+  gravityTurns?: number;
+  wonderRoomTurns?: number;
+  magicRoomTurns?: number;
 }
 
 export interface ActivePokemonState {
