@@ -226,6 +226,10 @@ export interface SearchResult {
   /** The opponent's minimizing reply to my recommended joint — "how they beat
    *  us". Populated whenever an opp reply exists (most useful when losing). */
   oppLine?: SearchPlay[];
+  /** "1D chess" — the opponent's FLAT, obvious greedy play per active (max-damage,
+   *  or the obvious disruption: a priority KO / turn-1 Fake Out / Protect-when-
+   *  doomed), independent of my move. A heuristic intent read, NOT the maximin. */
+  obviousOppPlay?: SearchPlay[];
   /** Pivotal assumptions behind the verdict (contingent speed, etc.). */
   assumptions?: SearchAssumption[];
   /** Concrete damage cutpoints that flip the verdict this turn. */
@@ -3663,6 +3667,56 @@ function oppBestReply(t: Tables, s0: State, myJoint: Map<number, number> | null,
 export interface PositionSearch {
   toDepth(depth: number): SearchResult;
 }
+// "1D chess" — the opponent's FLAT, obvious greedy play per active, independent of
+// my move (a heuristic intent read, NOT the maximin `oppLine`). Per opp active, in
+// precedence order: a priority KO (free kill) → turn-1 Fake Out (deny my biggest
+// threat) → Protect when it's guaranteed-KO'd this turn (stall) → the max-damage
+// move (spread if it out-totals the best single-target). Opp-conservative: it only
+// uses moves baked into the threat cells (seen / Pikalytics-expected).
+function obviousOppPlay(t: Tables, s0: State): SearchPlay[] {
+  const out: SearchPlay[] = [];
+  const liveMy = s0.myActive.filter(mi => (s0.myHp[mi] ?? 0) > 0);
+  if (!liveMy.length) return out;
+  for (const oj of s0.oppActive) {
+    if ((s0.oppHp[oj] ?? 0) <= 0) continue;
+    const oppName = t.oppSpecies[oj] ?? 'foe';
+    // a. Priority KO — a priority move that kills one of my actives at current HP.
+    let done = false;
+    for (const mi of liveMy) {
+      const pc = t.oppPrioCell[oj]?.[mi];
+      if (pc && pc.dmgMax >= (s0.myHp[mi] ?? 0) && pc.dmgMax > 0) {
+        out.push({ mySpecies: oppName, move: pc.move, targetSpecies: t.mySpecies[mi]! });
+        done = true; break;
+      }
+    }
+    if (done) continue;
+    // b. Fake Out on turn 1 — flinch my biggest threat to this opp.
+    if (s0.oppFirstTurn[oj] && t.oppHasFakeOut[oj]) {
+      let tgt = liveMy[0]!, best = -1;
+      for (const mi of liveMy) { const d = t.off[mi]?.[oj]?.dmgMid ?? 0; if (d > best) { best = d; tgt = mi; } }
+      out.push({ mySpecies: oppName, move: 'Fake Out', targetSpecies: t.mySpecies[tgt]! });
+      continue;
+    }
+    // c. Protect when it's guaranteed-KO'd this turn (stall).
+    const doomed = liveMy.some(mi => (t.off[mi]?.[oj]?.dmgMin ?? 0) >= (s0.oppHp[oj] ?? 0));
+    if (doomed && t.oppProtectMove[oj]) {
+      out.push({ mySpecies: oppName, move: t.oppProtectMove[oj]!, targetSpecies: oppName, self: true });
+      continue;
+    }
+    // d. Max damage — best single-target vs the spread (whichever does more total).
+    let bestMi = -1, bestDmg = -1;
+    for (const mi of liveMy) { const c = t.thr[oj]?.[mi]; if (c && c.dmgMid > bestDmg) { bestDmg = c.dmgMid; bestMi = mi; } }
+    const sp = t.oppSpread[oj];
+    const spreadTotal = sp ? liveMy.reduce((a, mi) => a + (sp.dmgMid[mi] ?? 0), 0) : 0;
+    if (sp && spreadTotal > bestDmg && spreadTotal > 0) {
+      out.push({ mySpecies: oppName, move: sp.move, targetSpecies: 'both', spread: true });
+    } else if (bestMi >= 0 && bestDmg > 0) {
+      out.push({ mySpecies: oppName, move: t.thr[oj]![bestMi]!.move, targetSpecies: t.mySpecies[bestMi]! });
+    }
+  }
+  return out;
+}
+
 // Representative spreads kept per opp mon for the lookahead (Step A). Fixed for
 // now; Step C makes it confidence-adaptive (smaller as inference narrows).
 const SEARCH_PROFILE_K = 3;
@@ -4233,6 +4287,7 @@ export function createSearch(input: SearchInput): PositionSearch {
         allOppRevealed,
         risks,
         oppLine: oppLine.length ? oppLine : undefined,
+        obviousOppPlay: (() => { const p = obviousOppPlay(expected.table, s0); return p.length ? p : undefined; })(),
         assumptions: assumptions.length ? assumptions : undefined,
         breakpoints: breakpoints.length ? breakpoints : undefined,
         explored,

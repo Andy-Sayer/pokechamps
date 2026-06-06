@@ -2551,6 +2551,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         }).join(' · ');
         // "How they beat us" — the opponent's minimizing reply (rendered losing).
         const oppLineText = v === 'losing' && bestSearch.oppLine ? fmtPlays(bestSearch.oppLine) : '';
+        // "1D chess" — the opponent's flat, obvious greedy play (always shown).
+        const oneDChessText = bestSearch.obviousOppPlay ? fmtPlays(bestSearch.obviousOppPlay) : '';
         // Compact risk breakdown: "label NN%", joined — labels are self-explanatory.
         const riskText = bestSearch.risks
           .map(r => `${r.label}${r.prob != null ? ` ${Math.round(r.prob * 100)}%` : ''}`)
@@ -2580,6 +2582,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             {watchText ? <Text dimColor>   watch: {watchText}</Text> : null}
             {whyText ? <Text dimColor>   why: {whyText}</Text> : null}
             {oppLineText ? <Text dimColor>   they win via: {oppLineText}</Text> : null}
+            {oneDChessText ? <Text dimColor>   1D chess (opp likely): {oneDChessText}</Text> : null}
             {bestSearch.adapted ? <Text dimColor>   spread refined from observed damage</Text> : null}
             {riskText ? <Text dimColor>   risks: {riskText}</Text> : null}
             {unmodeledText ? <Text color="yellow">   ⚠ approximating: {unmodeledText}</Text> : null}

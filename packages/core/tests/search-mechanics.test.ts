@@ -2,7 +2,7 @@
 // (mechanics-coverage.md). Each uses resolveOneTurn to drive a single turn with
 // chosen actions and asserts the discrete post-turn state.
 import { describe, test, expect } from 'vitest';
-import { resolveOneTurn, type SearchInput, type TurnAction } from '../src/domain/endgameSearch.js';
+import { resolveOneTurn, searchToDepth, type SearchInput, type TurnAction } from '../src/domain/endgameSearch.js';
 import { applyHazardsToSwitchIn } from '../src/domain/hazards.js';
 import type { PokemonSet, OpponentEntry } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } from '../src/domain/types.js';
@@ -21,6 +21,29 @@ function input1v1(my: PokemonSet, opp: PokemonSet, over: Partial<SearchInput> = 
   };
 }
 const A = (a: TurnAction): Map<number, TurnAction> => new Map([[0, a]]);
+
+describe('1D chess — opponent obvious play', () => {
+  test('greedy max-damage play is surfaced for the opp', () => {
+    const flutter = mon({ species: 'Flutter Mane', ability: 'Protosynthesis', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Moonblast'] });
+    const chomp = mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Earthquake', 'Dragon Claw'] });
+    const r = searchToDepth(input1v1(flutter, chomp), 1);
+    expect(r.obviousOppPlay?.length).toBe(1);
+    expect(r.obviousOppPlay![0]!.mySpecies).toBe('Garchomp');
+    expect(r.obviousOppPlay![0]!.move).toBeTruthy();
+  });
+
+  test('a turn-1 Fake Out user surfaces Fake Out as the obvious play', () => {
+    const flutter = mon({ species: 'Flutter Mane', ability: 'Protosynthesis', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Moonblast'] });
+    const incin = mon({ species: 'Incineroar', ability: 'Intimidate', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Fake Out', 'Flare Blitz'] });
+    const input: SearchInput = {
+      mine: [{ set: flutter, hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(incin), hpPercent: 100, active: true, firstTurnOut: true }],
+      field: { ...NEUTRAL_FIELD },
+    };
+    const r = searchToDepth(input, 1);
+    expect(r.obviousOppPlay?.some(p => p.move === 'Fake Out')).toBe(true);
+  });
+});
 
 describe('#17 Magic Bounce — status reflected at the caster', () => {
   test('Will-O-Wisp bounces back and burns the caster, not the Magic Bounce holder', () => {
