@@ -22,6 +22,30 @@ function input1v1(my: PokemonSet, opp: PokemonSet, over: Partial<SearchInput> = 
 }
 const A = (a: TurnAction): Map<number, TurnAction> => new Map([[0, a]]);
 
+describe('Step B — switches enumerated at depth', () => {
+  test('a 2v2 with live benches searches deep without blowing up', () => {
+    const flutter = mon({ species: 'Flutter Mane', ability: 'Protosynthesis', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Moonblast'] });
+    const corv = mon({ species: 'Corviknight', ability: 'Pressure', nature: 'Impish', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Brave Bird'] });
+    const chomp = mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Earthquake'] });
+    const incin = mon({ species: 'Incineroar', ability: 'Intimidate', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Flare Blitz'] });
+    const input: SearchInput = {
+      mine: [
+        { set: flutter, hpPercent: 100, active: true },
+        { set: corv, hpPercent: 100, active: false },
+      ],
+      opp: [
+        { entry: oppOf(chomp), hpPercent: 100, active: true },
+        { entry: oppOf(incin), hpPercent: 100, active: false },
+      ],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    };
+    const t0 = Date.now();
+    const r = searchToDepth(input, 3);
+    expect(r.plays.length).toBeGreaterThan(0);
+    expect(Date.now() - t0).toBeLessThan(5000); // perf gate: depth-switching stays bounded
+  });
+});
+
 describe('1D chess — opponent obvious play', () => {
   test('greedy max-damage play is surfaced for the opp', () => {
     const flutter = mon({ species: 'Flutter Mane', ability: 'Protosynthesis', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Moonblast'] });

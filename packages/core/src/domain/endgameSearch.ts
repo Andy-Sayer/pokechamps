@@ -3236,12 +3236,12 @@ function leafScore(s: State): number {
 // Maximin value of a state to the given depth. I maximise; opp replies worst-
 // case. `alpha` is the best value found so far at this level for the inner
 // prune.
-function value(t: Tables, s: State, depth: number, alpha: number, pass: Pass): number {
+function value(t: Tables, s: State, depth: number, alpha: number, pass: Pass, maxDepth: number): number {
   const term = terminal(s, depth);
   if (term !== null) return term;
   if (depth === 0) return leafScore(s);
 
-  // Deeper plies: no root-only actions (switch/field/setup/…), but Taunt/Encore
+  // Deeper plies: no root-only actions (field/setup/…), but Taunt/Encore
   // RESTRICTIONS persist, so pass the restrict mask (param 22; the intervening
   // root-only params are undefined). Sleep is handled by the in-loop guard.
   // Priority attacks ARE offered at depth (param 25) — gated to "can KO the foe
@@ -3249,6 +3249,15 @@ function value(t: Tables, s: State, depth: number, alpha: number, pass: Pass): n
   // priority revenge-KO (e.g. Sucker Punch punishing my setup) without exploding
   // branching. Damaging-move only, consistent with the rest of the deep model.
   const U = undefined;
+  // Switches at the first SWITCH_PLY_LIMIT deeper plies (Step B). Affordable now
+  // that each opp mon is a coarse K-spread profile (Step A) and the bench/phantom
+  // damage cells are already built at the root — so this only enables enumeration.
+  // Lets the lookahead see "I switch my wall in next turn" and "they pivot to their
+  // answer (incl. an unrevealed mon)", while the deep tail stays switch-free.
+  const plyFromRoot = maxDepth - depth;
+  const switchesAllowed = plyFromRoot < SWITCH_PLY_LIMIT;
+  const myBench = switchesAllowed ? benchSwitchTargets(s.myActive, s.myHp, t.myN) : U;
+  const oppBench = switchesAllowed ? benchSwitchTargets(s.oppActive, s.oppHp, t.oppN) : U;
   const myRestrict = { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct, choice: t.myChoice, locked: s.myLocked.map(x => x > 0) };
   const oppRestrict = { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct, choice: t.oppChoice, locked: s.oppLocked.map(x => x > 0) };
   const myPrio = { cell: t.myPrioCell, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0), koOnly: true };
@@ -3259,8 +3268,8 @@ function value(t: Tables, s: State, depth: number, alpha: number, pass: Pass): n
   const oppHelp = t.oppHelpingHand.map((kn, j) => kn && s.oppActive.some(i => i !== j && (s.oppHp[i] ?? 0) > 0));
   const myGuard = { wide: t.myWideGuard, quick: t.myQuickGuard };
   const oppGuard = { wide: t.oppWideGuard, quick: t.oppQuickGuard };
-  const myJoints = jointActions(s.myActive, s.oppActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak, U, U, U, U, U, U, U, U, U, U, U, U, U, U, U, myRestrict, U, U, myPrio, myHelp, myGuard);
-  const oppJoints = jointActions(s.oppActive, s.myActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak, U, U, U, U, U, U, U, U, U, U, U, U, U, U, U, oppRestrict, U, U, oppPrio, oppHelp, oppGuard);
+  const myJoints = jointActions(s.myActive, s.oppActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak, myBench, U, U, U, U, U, U, U, U, U, U, U, U, U, U, myRestrict, U, U, myPrio, myHelp, myGuard);
+  const oppJoints = jointActions(s.oppActive, s.myActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak, oppBench, U, U, U, U, U, U, U, U, U, U, U, U, U, U, oppRestrict, U, U, oppPrio, oppHelp, oppGuard);
   if (myJoints.length === 0) return leafScore(s);
 
   let best = -Infinity;
@@ -3269,7 +3278,7 @@ function value(t: Tables, s: State, depth: number, alpha: number, pass: Pass): n
     const replies = oppJoints.length ? oppJoints : [new Map<number, number>()];
     for (const opp of replies) {
       const child = resolveTurn(t, s, my, opp, pass);
-      const v = value(t, child, depth - 1, best, pass);
+      const v = value(t, child, depth - 1, best, pass, maxDepth);
       if (v < worst) worst = v;
       if (worst <= best) break;   // this my-action can't beat best — prune
     }
@@ -3485,7 +3494,7 @@ function rootSearch(t: Tables, s0: State, depth: number, pass: Pass): { score: n
     const replies = oppJoints.length ? oppJoints : [new Map<number, number>()];
     for (const opp of replies) {
       const child = resolveTurn(t, s0, my, opp, pass);
-      const v = value(t, child, depth - 1, bestScore, pass);
+      const v = value(t, child, depth - 1, bestScore, pass, depth - 1);
       if (v < worst) worst = v;
       if (worst <= bestScore) break;
     }
@@ -3655,7 +3664,7 @@ function oppBestReply(t: Tables, s0: State, myJoint: Map<number, number> | null,
   let arg: Map<number, number> | null = null;
   for (const opp of replies) {
     const child = resolveTurn(t, s0, myJoint, opp, pass);
-    const v = value(t, child, depth - 1, -Infinity, pass);
+    const v = value(t, child, depth - 1, -Infinity, pass, depth - 1);
     if (v < worst) { worst = v; arg = opp; }
   }
   return arg;
@@ -3720,6 +3729,11 @@ function obviousOppPlay(t: Tables, s0: State): SearchPlay[] {
 // Representative spreads kept per opp mon for the lookahead (Step A). Fixed for
 // now; Step C makes it confidence-adaptive (smaller as inference narrows).
 const SEARCH_PROFILE_K = 3;
+// Deeper plies (counting from the first lookahead ply = 0) that still enumerate
+// bench / phantom switches (Step B). Switches only matter near the top of the tree
+// ("next turn's switch"); the deep tail stays switch-free to bound branching.
+// Step C makes this grow as the position narrows (deeper win-con hunt).
+const SWITCH_PLY_LIMIT = 2;
 function coarseSearchProfile(entry: OpponentEntry, k: number): OpponentEntry {
   const cands = entry.candidates;
   if (!cands || cands.length <= k) return entry;
