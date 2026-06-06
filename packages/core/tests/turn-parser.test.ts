@@ -318,6 +318,18 @@ describe('parseTurnLine — state updates', () => {
     expect(r.update.namedHeal).toBe('leftovers');
   });
 
+  test('a partial move token resolves to the mon’s actual move (Tail → Tailwind)', () => {
+    // ctx.myTeam[active 0] must know Tailwind for the resolution to fire.
+    const tailwindCtx: ParseContext = {
+      ...ctx,
+      myTeam: ctx.myTeam.map((m, i) => i === ctx.myActiveTeamIndex[0] ? { ...m, moves: ['Tailwind', 'Hurricane'] } : m),
+    };
+    const r = parseTurnLine('m1 > Tail', tailwindCtx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    expect(r.actions[0]!.move).toBe('Tailwind');
+  });
+
   test('HP percent clamped to 0-100', () => {
     const r = parseTurnLine('o3 = 150', ctx, 1);
     expect(r.ok).toBe(true);

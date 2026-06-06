@@ -1,5 +1,31 @@
 import type { MoveAction, FieldSide, FieldSlot, PokemonSet, OpponentEntry } from './types.js';
 import { toId } from './data.js';
+import { pikalyticsMoves } from './predictions.js';
+
+// Resolve a typed move token to the actor's ACTUAL move name, using the same pool
+// the autocomplete shows (my mon's moveset; the opp's seen moves + Pikalytics), so
+// that typing "Tail" on a Tailwind user records "Tailwind" — not the literal "Tail".
+// Exact (normalised) match wins; else a UNIQUE prefix; else a UNIQUE substring;
+// else the raw token (the user may be logging an unexpected move — never block).
+function resolveMoveToken(token: string, side: FieldSide, teamIndex: number, ctx: ParseContext): string {
+  const pool = side === 'mine'
+    ? (ctx.myTeam[teamIndex]?.moves ?? [])
+    : Array.from(new Set([
+        ...(ctx.opponentTeam[teamIndex]?.knownMoves ?? []),
+        ...pikalyticsMoves(ctx.opponentTeam[teamIndex]?.species ?? ''),
+      ]));
+  if (!pool.length) return token;
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const nt = norm(token);
+  if (!nt) return token;
+  const exact = pool.find(m => norm(m) === nt);
+  if (exact) return exact;
+  const pre = pool.filter(m => norm(m).startsWith(nt));
+  if (pre.length === 1) return pre[0]!;
+  const sub = pool.filter(m => norm(m).includes(nt));
+  if (sub.length === 1) return sub[0]!;
+  return token;
+}
 
 // Single-line turn syntax (case-insensitive on the actor tokens):
 //
@@ -567,6 +593,8 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
   if (attackerIsFainted) {
     return { ok: false, error: `${parts[0]} is fainted and can't act` };
   }
+  // Normalise the move token to the mon's actual move (so "Tail" → "Tailwind").
+  const resolvedMove = resolveMoveToken(verb, actor.side, attackerTeamIndex, ctx);
 
   // Two-part: <actor> > <move> — field/self-only move with no target.
   // Synthesize target='self' so the action has a meaningful shape; the
@@ -579,7 +607,7 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
         side: actor.side,
         attackerSlot: actor.slot,
         kind: 'move',
-        move: verb,
+        move: resolvedMove,
         attackerTeamIndex,
         target: 'self',
         order,
@@ -605,7 +633,7 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
       side: actor.side,
       attackerSlot: actor.slot,
       kind: 'move',
-      move: verb,
+      move: resolvedMove,
       attackerTeamIndex,
       targetTeamIndex: e.targetTeamIndex,
       target: { side: e.targetSide, slot: e.targetSlot },
@@ -632,7 +660,7 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
       side: actor.side,
       attackerSlot: actor.slot,
       kind: 'move',
-      move: verb,
+      move: resolvedMove,
       attackerTeamIndex: attackerTeamIndex ?? undefined,
       targetTeamIndex: targetTeamIndex ?? undefined,
       target: { side: parsedTarget.side, slot: parsedTarget.slot },
@@ -728,7 +756,7 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
       side: actor.side,
       attackerSlot: actor.slot,
       kind: 'move',
-      move: verb,
+      move: resolvedMove,
       attackerTeamIndex: attackerTeamIndex ?? undefined,
       targetTeamIndex: targetTeamIndex ?? undefined,
       target,
