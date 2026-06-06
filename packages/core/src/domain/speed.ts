@@ -173,16 +173,20 @@ export function inferOpponentSpeeds(match: Match, myTeam: PokemonSet[]): SpeedIn
   // has narrowed one) or the bare 0/252-EV envelope. This is what we use to
   // bind opp-vs-opp constraints — we don't know either speed exactly, so we
   // pull from the most-constrained range we have.
+  // Envelope fallback keys off the ACTIVE forme (the mega forme once mega'd), so a
+  // mega'd mon with no candidates is bounded by its mega base speed — and because
+  // the bare max is non-scarf AND a mega holder can't carry a Choice Scarf (it
+  // holds the stone), this is a genuinely TIGHT cap for bounding other opps.
   const workMin: (number | null)[] = match.opponentTeam.map(e => {
     const c = candidateRange(e);
     if (c) return c.min;
-    const env = bareEnvelope(e.species);
+    const env = bareEnvelope(activeOppSpecies(e));
     return env?.min ?? null;
   });
   const workMax: (number | null)[] = match.opponentTeam.map(e => {
     const c = candidateRange(e);
     if (c) return c.max;
-    const env = bareEnvelope(e.species);
+    const env = bareEnvelope(activeOppSpecies(e));
     return env?.max ?? null;
   });
   // Both write-throughs accumulate observation-derived bounds on `out[]` AND
