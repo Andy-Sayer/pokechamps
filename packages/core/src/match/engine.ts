@@ -21,6 +21,7 @@ import type {
 } from '../domain/types.js';
 import { NEUTRAL_FIELD } from '../domain/types.js';
 import { scoreSpread, scoreOffensiveSpread, recoilDrainHpEvs, reconcileCandidates } from '../domain/inference.js';
+import { computeActionBoostContexts } from '../domain/turnBoosts.js';
 import { maxHpFor } from '../domain/damage.js';
 import { endOfTurn } from '../domain/endOfTurn.js';
 import { inferOpponentSpeeds, applySpeedInference } from '../domain/speed.js';
@@ -1160,6 +1161,17 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     }
   }
 
+  // Positional boost context per damaging action — the boosts in effect at that
+  // point in the turn (Helping Hand / Coaching / setup / earlier-logged boost lines),
+  // so a hit is inferred against the boosted state instead of an unboosted one.
+  const boostCtx = computeActionBoostContexts({
+    actions: draftActions,
+    myStartBoosts: match.myBoosts ?? {},
+    oppStartBoosts: Object.fromEntries(match.opponentTeam.map((o, i) => [i, o.currentBoosts ?? {}])),
+    myActive: [activeIdx.mine[0], activeIdx.mine[1]],
+    oppActive: [activeIdx.theirs[0], activeIdx.theirs[1]],
+  });
+
   // Damage inference for every mine→theirs damaging action.
   for (const a of draftActions) {
     if (a.kind === 'switch' || a.kind === 'mega') continue;
@@ -1173,6 +1185,7 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     if (!attackerSet || oppIdx == null) continue;
     const opp = next.opponentTeam[oppIdx];
     if (!opp) continue;
+    const bc = boostCtx.get(a);
     const obs: DamageObservation = {
       attackerSide: 'mine',
       attackerSpecies: attackerSet.species,
@@ -1185,6 +1198,9 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
       attackerGimmickActive: a.mega,
       defenderGimmickActive: opp.megaUsed,
       critical: a.critical,
+      attackerBoosts: bc?.attackerBoosts,
+      defenderBoosts: bc?.defenderBoosts,
+      helpingHand: bc?.helpingHand,
     };
     try {
       const scored = scoreSpread({
@@ -1244,12 +1260,16 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     if (!opp?.candidates?.length || !defenderSet) continue;
     // Use the opp's active forme (mega if they've mega'd) for the calc.
     const attackerSpecies = opp.megaUsed && opp.megaForme ? opp.megaForme : opp.species;
+    const obc = boostCtx.get(a);
     const obs: DamageObservation = {
       attackerSide: 'theirs', attackerSpecies, defenderSide: 'mine', defenderSpecies: defenderSet.species,
       move: a.move, field,
       damageHpPercent: a.damageHpPercent, damageRaw: a.damageRaw,
       defenderGimmickActive: next.myMegaUsed?.includes(myIdx),
       critical: a.critical,
+      attackerBoosts: obc?.attackerBoosts,
+      defenderBoosts: obc?.defenderBoosts,
+      helpingHand: obc?.helpingHand,
     };
     try {
       const scored = scoreOffensiveSpread({

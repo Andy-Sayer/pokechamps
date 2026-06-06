@@ -67,6 +67,11 @@ m4 in m1                ← my replacement
 o1 +2 atk               ← single stat boost
 m1 -1 def               ← negative
 o1 +2 atk +2 spa        ← multi-stat in one line
+   NOTE: a boost line logged WHILE a turn is in progress joins the turn's ordered
+   timeline (shown in the draft list) and applies at THAT point at finalize — so a
+   hit logged before it is inferred unboosted, and one after it sees the boost
+   (Helping Hand / Coaching are computed the same way, positionally). A boost typed
+   between turns (no draft open) still applies immediately — that's a correction.
 o1 wp                   ← Weakness Policy: +2 atk +2 spa + itemConsumed
 o1 sash                 ← Focus Sash: HP→1 + itemConsumed
 o1 balloon              ← Air Balloon: itemConsumed (no HP change)

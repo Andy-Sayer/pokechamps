@@ -5,6 +5,7 @@ import SelectInput from 'ink-select-input';
 import type { Match, FieldState, DamageObservation, MoveAction, OpponentEntry, PokemonSet } from '@pokechamps/core/domain/types.js';
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
 import { scoreSpread, scoreOffensiveSpread, mostLikely, recoilDrainHpEvs, reconcileCandidates } from '@pokechamps/core/domain/inference.js';
+import { computeActionBoostContexts } from '@pokechamps/core/domain/turnBoosts.js';
 import { maxHpFor } from '@pokechamps/core/domain/damage.js';
 import { endOfTurn } from '@pokechamps/core/domain/endOfTurn.js';
 import { inferOpponentSpeeds, applySpeedInference, actualSpeed, predictTurnOrder, effectiveSpeedRange } from '@pokechamps/core/domain/speed.js';
@@ -553,6 +554,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   const [match, setMatch] = useState<Match>(initial);
   const [input, setInput] = useState('');
   const [draftActions, setDraftActions] = useState<MoveAction[]>([]);
+  // Boost lines logged DURING a turn join the turn's ordered timeline (instead of
+  // applying immediately), so they take effect at their input position — a defense
+  // boost logged after a hit doesn't retroactively change that hit's inference, and
+  // one logged before a hit does. Applied at finalize; shown in the turn display.
+  const [draftBoostEvents, setDraftBoostEvents] = useState<{ order: number; update: StateUpdate; raw: string }[]>([]);
   const [activeIdx, setActiveIdx] = useState(() => initialActiveIndices(initial));
 
   // Spectator mode: the parent re-renders us with a fresh `match` prop on every
@@ -1414,6 +1420,16 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx2]: berryName2 };
       }
     }
+    // Positional boost context per damaging action (Helping Hand / Coaching / setup
+    // / earlier-logged boost lines in effect at that point). Mirror of engine.ts.
+    const boostCtx = computeActionBoostContexts({
+      actions: draftActions,
+      stateEvents: draftBoostEvents,
+      myStartBoosts: match.myBoosts ?? {},
+      oppStartBoosts: Object.fromEntries(match.opponentTeam.map((o, i) => [i, o.currentBoosts ?? {}])),
+      myActive: [activeIdx.mine[0], activeIdx.mine[1]],
+      oppActive: [activeIdx.theirs[0], activeIdx.theirs[1]],
+    });
     for (const a of draftActions) {
       if (a.kind === 'switch' || a.kind === 'mega') continue;
       if (a.side !== 'mine') continue;
@@ -1426,6 +1442,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (!attackerSet || oppIdx == null) continue;
       const opp = next.opponentTeam[oppIdx];
       if (!opp) continue;
+      const bc = boostCtx.get(a);
       const obs: DamageObservation = {
         attackerSide: 'mine',
         attackerSpecies: attackerSet.species,
@@ -1438,6 +1455,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         attackerGimmickActive: a.mega,
         defenderGimmickActive: opp.megaUsed,
         critical: a.critical,
+        attackerBoosts: bc?.attackerBoosts,
+        defenderBoosts: bc?.defenderBoosts,
+        helpingHand: bc?.helpingHand,
       };
       try {
         const scored = scoreSpread({
@@ -1495,12 +1515,16 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       const defenderSet = next.myTeam[myIdx];
       if (!opp?.candidates?.length || !defenderSet) continue;
       const attackerSpecies = opp.megaUsed && opp.megaForme ? opp.megaForme : opp.species;
+      const obc = boostCtx.get(a);
       const obs: DamageObservation = {
         attackerSide: 'theirs', attackerSpecies, defenderSide: 'mine', defenderSpecies: defenderSet.species,
         move: a.move, field,
         damageHpPercent: a.damageHpPercent, damageRaw: a.damageRaw,
         defenderGimmickActive: next.myMegaUsed?.includes(myIdx),
         critical: a.critical,
+        attackerBoosts: obc?.attackerBoosts,
+        defenderBoosts: obc?.defenderBoosts,
+        helpingHand: obc?.helpingHand,
       };
       try {
         const scored = scoreOffensiveSpread({
@@ -1643,10 +1667,27 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (tIdx != null && next.opponentTeam[tIdx]?.fainted) nextActive.theirs[slot] = null;
     }
 
+    // Apply this turn's queued boost lines onto the FINAL state at their position
+    // (sorted by order). They were held out of the inference so each hit was solved
+    // against the boosts in effect at its point; now they land on the post-turn state.
+    for (const ev of [...draftBoostEvents].sort((a, b) => a.order - b.order)) {
+      const u = ev.update;
+      if (!u.boosts) continue;
+      const clampStage = (n: number) => Math.max(-6, Math.min(6, n));
+      if (u.side === 'theirs') {
+        const o = next.opponentTeam[u.teamIndex];
+        if (o) { const cur = { ...(o.currentBoosts ?? {}) }; for (const [s, d] of Object.entries(u.boosts)) (cur as any)[s] = clampStage(((cur as any)[s] ?? 0) + (d ?? 0)); o.currentBoosts = cur; }
+      } else {
+        next.myBoosts = { ...(next.myBoosts ?? {}) };
+        const cur = { ...(next.myBoosts[u.teamIndex] ?? {}) }; for (const [s, d] of Object.entries(u.boosts)) (cur as any)[s] = clampStage(((cur as any)[s] ?? 0) + (d ?? 0)); next.myBoosts[u.teamIndex] = cur;
+      }
+    }
+
     next.outcome = detectOutcome(next);
     setMatch(next);
     setActiveIdx(nextActive);
     setDraftActions([]);
+    setDraftBoostEvents([]);
     setBoostedThisTurn(new Set());   // Moody nudge resets for the new turn
     setMoodyNagged(false);
     saveMatchAsync(stores, next, setMessage);
@@ -2894,12 +2935,17 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         {moodyPending.length > 0 && (
           <Text color="yellow">⚠ Moody EOT boost — log for {moodyPending.map(m => `${m.species} (${m.ref})`).join(', ')}: e.g. <Text color="white">{moodyPending[0]!.ref} +2 spe -1 def</Text></Text>
         )}
-        {draftActions.map((a, i) => {
-          const pivot = a.kind !== 'switch' && a.kind !== 'mega' && isPivotMove(a.move);
-          return (
-            <Text key={i} dimColor>  {i + 1}. {actionToLine(a, match)}{pivot ? <Text color="cyan"> ⟲ pivot — log the switch-in next</Text> : null}</Text>
-          );
-        })}
+        {(() => {
+          // Merge actions + queued boost lines into one ordered timeline so each
+          // shows at its input position (a boost logged after a hit sits after it).
+          const items = [
+            ...draftActions.map((a, i) => ({ order: a.order ?? i + 1, kind: 'action' as const, a })),
+            ...draftBoostEvents.map(e => ({ order: e.order, kind: 'boost' as const, raw: e.raw })),
+          ].sort((x, y) => x.order - y.order);
+          return items.map((it, i) => it.kind === 'boost'
+            ? <Text key={`e${i}`} color="yellow">  {i + 1}. {it.raw}  <Text dimColor>(applies here, end of turn)</Text></Text>
+            : <Text key={`a${i}`} dimColor>  {i + 1}. {actionToLine(it.a, match)}{it.a.kind !== 'switch' && it.a.kind !== 'mega' && isPivotMove(it.a.move) ? <Text color="cyan"> ⟲ pivot — log the switch-in next</Text> : null}</Text>);
+        })()}
         <Box marginTop={draftActions.length > 0 ? 1 : 0}>
           <Text>{'> '}</Text>
           <TextInput
@@ -2923,7 +2969,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
                 setInput('');
                 return;
               }
-              const r = parseTurnLine(trimmed, ctxWithDraft, draftActions.length + 1);
+              const r = parseTurnLine(trimmed, ctxWithDraft, draftActions.length + draftBoostEvents.length + 1);
               if (!r.ok) {
                 setMessage(`Couldn't parse: ${r.error}`);
                 return;
@@ -2949,9 +2995,18 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
                 setMessage(`Applied ${r.updates.length} HP updates.`);
                 return;
               }
-              // r.kind === 'state' — mutate immediately, no turn entry.
-              applyStateUpdate(r.update);
-              noteBoostLogged([r.update]);
+              // r.kind === 'state'. A BOOST line logged DURING a turn joins the
+              // turn's ordered timeline (applied at finalize at its input position);
+              // everything else (HP / status / corrections) mutates immediately.
+              if (r.update.boosts && draftActions.length > 0) {
+                const order = draftActions.length + draftBoostEvents.length + 1;
+                setDraftBoostEvents(prev => [...prev, { order, update: r.update, raw: trimmed }]);
+                noteBoostLogged([r.update]);
+                setMessage(`Queued: ${trimmed} (applies at this point in the turn)`);
+              } else {
+                applyStateUpdate(r.update);
+                noteBoostLogged([r.update]);
+              }
               setInput('');
             }}
           />
