@@ -2089,6 +2089,31 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     setMoodyNagged(false);
   };
 
+  // The turn as ONE ordered timeline: move actions + queued boost lines, sorted by
+  // `order`. Single source of truth for the draft display AND /undo + /edit, so the
+  // numbers the user sees always match what those commands act on. Each entry is
+  // uniformly removable (drop from its backing list) and editable (its `line`).
+  const turnTimeline = useMemo(() => {
+    const items: { order: number; line: string; action?: MoveAction; ev?: { order: number; update: StateUpdate; raw: string } }[] = [
+      ...draftActions.map((a, i) => ({ order: a.order ?? i + 1, line: actionToLine(a, match), action: a })),
+      ...draftBoostEvents.map(ev => ({ order: ev.order, line: ev.raw, ev })),
+    ];
+    items.sort((x, y) => x.order - y.order);
+    return items;
+  }, [draftActions, draftBoostEvents, match]);
+  const removeTimelineItem = (item: { action?: MoveAction; ev?: { order: number } }) => {
+    if (item.action) setDraftActions(prev => prev.filter(a => a !== item.action));
+    else if (item.ev) setDraftBoostEvents(prev => prev.filter(e => e !== item.ev));
+  };
+  // Next sequence number for a newly-logged turn event — max existing + 1 (NOT a
+  // count, so removing a middle item via /undo never collides a later insert).
+  const nextTurnOrder = () => {
+    let mx = 0;
+    for (const a of draftActions) mx = Math.max(mx, a.order ?? 0);
+    for (const e of draftBoostEvents) mx = Math.max(mx, e.order);
+    return mx + 1;
+  };
+
   // ---------------- global hotkeys ----------------
 
   // Dispatch a parsed slash command. Returns true when handled (the caller
@@ -2142,42 +2167,42 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         }, 0);
         return true;
       case 'undo': {
-        if (draftActions.length === 0) {
-          setMessage('Nothing to undo — no drafted actions this turn.');
+        // Operates on the WHOLE turn timeline (moves + queued boost lines), so the
+        // numbers match the draft list. `/undo` removes the last; `/undo N` the Nth.
+        if (turnTimeline.length === 0) {
+          setMessage('Nothing to undo — no events this turn.');
           return true;
         }
-        // `/undo` removes the last; `/undo N` removes the Nth (1-based, as shown
-        // in the drafted-this-turn list).
         const arg = args.trim();
-        let idx = draftActions.length - 1;
+        let idx = turnTimeline.length - 1;
         if (arg) {
           const n = parseInt(arg, 10);
-          if (!Number.isInteger(n) || n < 1 || n > draftActions.length) {
-            setMessage(`No drafted action #${arg} — there are ${draftActions.length}.`);
+          if (!Number.isInteger(n) || n < 1 || n > turnTimeline.length) {
+            setMessage(`No turn event #${arg} — there are ${turnTimeline.length}.`);
             return true;
           }
           idx = n - 1;
         }
-        const removed = draftActions[idx]!;
-        setDraftActions(prev => prev.filter((_, i) => i !== idx));
-        setMessage(`Removed: ${actionToLine(removed, match)}`);
+        const item = turnTimeline[idx]!;
+        removeTimelineItem(item);
+        setMessage(`Removed: ${item.line}`);
         return true;
       }
       case 'edit': {
-        // `/edit N` removes drafted action N and drops its line back into the
-        // input box so the user can tweak + re-submit it (instead of remove + retype).
+        // `/edit N` removes turn event N (move OR boost line) and drops its line back
+        // into the input box to tweak + re-submit (instead of remove + retype).
+        if (turnTimeline.length === 0) {
+          setMessage('Nothing to edit — no events this turn.');
+          return true;
+        }
         const n = parseInt(args.trim(), 10);
-        if (draftActions.length === 0) {
-          setMessage('Nothing to edit — no drafted actions this turn.');
+        if (!Number.isInteger(n) || n < 1 || n > turnTimeline.length) {
+          setMessage(`Usage: /edit N (1-${turnTimeline.length}).`);
           return true;
         }
-        if (!Number.isInteger(n) || n < 1 || n > draftActions.length) {
-          setMessage(`Usage: /edit N (1-${draftActions.length}).`);
-          return true;
-        }
-        const target = draftActions[n - 1]!;
-        setDraftActions(prev => prev.filter((_, i) => i !== n - 1));
-        setInput(actionToLine(target, match));
+        const item = turnTimeline[n - 1]!;
+        removeTimelineItem(item);
+        setInput(item.line);
         setInputKey(k => k + 1);    // remount TextInput so the cursor lands at the end
         setMessage(`Editing #${n} — tweak the line and press Enter.`);
         return true;
@@ -2931,22 +2956,14 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         </Box>
       ) : (
       <Box flexDirection="column" marginTop={1} borderStyle="round" paddingX={1}>
-        <Text bold>Turn {match.turns.length + 1} in progress ({draftActions.length} action{draftActions.length === 1 ? '' : 's'})</Text>
+        <Text bold>Turn {match.turns.length + 1} in progress ({turnTimeline.length} event{turnTimeline.length === 1 ? '' : 's'})</Text>
         {moodyPending.length > 0 && (
           <Text color="yellow">⚠ Moody EOT boost — log for {moodyPending.map(m => `${m.species} (${m.ref})`).join(', ')}: e.g. <Text color="white">{moodyPending[0]!.ref} +2 spe -1 def</Text></Text>
         )}
-        {(() => {
-          // Merge actions + queued boost lines into one ordered timeline so each
-          // shows at its input position (a boost logged after a hit sits after it).
-          const items = [
-            ...draftActions.map((a, i) => ({ order: a.order ?? i + 1, kind: 'action' as const, a })),
-            ...draftBoostEvents.map(e => ({ order: e.order, kind: 'boost' as const, raw: e.raw })),
-          ].sort((x, y) => x.order - y.order);
-          return items.map((it, i) => it.kind === 'boost'
-            ? <Text key={`e${i}`} color="yellow">  {i + 1}. {it.raw}  <Text dimColor>(applies here, end of turn)</Text></Text>
-            : <Text key={`a${i}`} dimColor>  {i + 1}. {actionToLine(it.a, match)}{it.a.kind !== 'switch' && it.a.kind !== 'mega' && isPivotMove(it.a.move) ? <Text color="cyan"> ⟲ pivot — log the switch-in next</Text> : null}</Text>);
-        })()}
-        <Box marginTop={draftActions.length > 0 ? 1 : 0}>
+        {turnTimeline.map((it, i) => it.ev
+          ? <Text key={`e${i}`} color="yellow">  {i + 1}. {it.line}  <Text dimColor>(applies here, end of turn)</Text></Text>
+          : <Text key={`a${i}`} dimColor>  {i + 1}. {it.line}{it.action!.kind !== 'switch' && it.action!.kind !== 'mega' && isPivotMove(it.action!.move) ? <Text color="cyan"> ⟲ pivot — log the switch-in next</Text> : null}</Text>)}
+        <Box marginTop={turnTimeline.length > 0 ? 1 : 0}>
           <Text>{'> '}</Text>
           <TextInput
             key={inputKey}
@@ -2969,7 +2986,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
                 setInput('');
                 return;
               }
-              const r = parseTurnLine(trimmed, ctxWithDraft, draftActions.length + draftBoostEvents.length + 1);
+              const r = parseTurnLine(trimmed, ctxWithDraft, nextTurnOrder());
               if (!r.ok) {
                 setMessage(`Couldn't parse: ${r.error}`);
                 return;
@@ -2999,7 +3016,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
               // turn's ordered timeline (applied at finalize at its input position);
               // everything else (HP / status / corrections) mutates immediately.
               if (r.update.boosts && draftActions.length > 0) {
-                const order = draftActions.length + draftBoostEvents.length + 1;
+                const order = nextTurnOrder();
                 setDraftBoostEvents(prev => [...prev, { order, update: r.update, raw: trimmed }]);
                 noteBoostLogged([r.update]);
                 setMessage(`Queued: ${trimmed} (applies at this point in the turn)`);

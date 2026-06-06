@@ -41,8 +41,8 @@ export interface BattleCommand {
 
 export const BATTLE_COMMANDS: readonly BattleCommand[] = [
   { id: 'next',     aliases: ['next', 'n'],           description: 'Finalize the in-progress turn' },
-  { id: 'undo',     aliases: ['undo', 'u'],           description: 'Remove a drafted action: /undo (last) or /undo N (the Nth)' },
-  { id: 'edit',     aliases: ['edit', 'e'],           description: 'Edit drafted action N: /edit N pulls its line back into the input box' },
+  { id: 'undo',     aliases: ['undo', 'u'],           description: 'Remove a turn event (move or boost): /undo (last) or /undo N (the Nth)' },
+  { id: 'edit',     aliases: ['edit', 'e'],           description: 'Edit turn event N (move or boost): /edit N pulls its line back into the input' },
   { id: 'save',     aliases: ['save', 's', 'snap'],   description: 'Snapshot the match to disk / server' },
   { id: 'info',     aliases: ['info', 'i'],           description: 'Open the opponent info picker' },
   { id: 'crit',     aliases: ['crit', 'c'],           description: 'Toggle crit damage column in matchup grid' },
