@@ -403,13 +403,34 @@ against the real roll.
   state. Add `SET_TAILWIND` / `SET_TR` actions, offered only when the mon's known
   moveset / Pikalytics pool contains it (same conservatism as `oppProtectMove`).
 
-### Phase 4 — GPU parallel mode (future / parked)
+### Phase 4 — GPU parallel mode (MEASURED 2026-06-06 → NOT the bottleneck; shelve)
 
 User floated GPU-parallel break-point/branch math with the caveat *"we need to
-tidy everything up first."* Revisit only after Phases 1–3 ship and CPU perf is
-measured. Likely shape: batch the per-spread forward-damage grid (the
-`percentRolls` hot loop) as a GPU kernel; the maximin tree stays on CPU. Not in
-initial scope.
+tidy everything up first."* The "tidy + measure first" gate was the right call.
+
+**Measurement (full 4v4, 2 active + 2 bench/side, opps with 3 candidate spreads):**
+
+| stage | time |
+|---|---|
+| `createSearch` (builds the whole damage grid — the GPU's target) | **~290ms** |
+| `toDepth(1)` (root maximin) | ~100ms |
+| `toDepth(2)` | **~2.3s** (no switch-at-depth) / **~6.1s** (Step B switches at the frontier) |
+| `toDepth(3)` | **~72s** |
+
+**Conclusion: the GPU is the wrong lever.** The damage-grid build (its only target)
+is ~290ms — a rounding error next to a search TREE that costs seconds at depth 2 and
+over a minute at depth 3. Step A (coarse K=3 spread profile) already removed the
+per-spread explosion the GPU was meant to attack. And a GPU kernel would require
+**reimplementing the damage formula in WGSL**, which violates the project's
+"never reimplement the calc" rule. Net: high cost, near-zero payoff. **Shelved.**
+
+**The real lever is the tree** (super-exponential branching on full 4v4s). Worth
+doing instead, in rough value order: tighter alpha-beta move ordering; pruning
+redundant root-only options at depth (Protect/setup duplicates); a transposition
+table; and confidence/size-adaptive depth + `SWITCH_PLY_LIMIT` (Step C) — disable
+switch-at-depth when the bench is large (barely reached anyway) and widen it in
+small endgames where it's cheap and decisive. Step B's switches roughly tripled the
+depth-2 cost on a full 4v4, so that gating is the highest-value quick win.
 
 ### Phase 5 — Damage-altering status (optional / later)
 
