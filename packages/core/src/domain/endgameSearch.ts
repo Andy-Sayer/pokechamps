@@ -3233,10 +3233,34 @@ function leafScore(s: State): number {
     + (sumHp(s.myHp) - sumHp(s.oppHp, s.oppSeen));
 }
 
-// Maximin value of a state to the given depth. I maximise; opp replies worst-
-// case. `alpha` is the best value found so far at this level for the inner
-// prune.
-function value(t: Tables, s: State, depth: number, alpha: number, pass: Pass, maxDepth: number): number {
+// Cheap immediate-damage heuristic for a joint action (sum of the baked cell
+// dmgMid for its attacks; non-attacks score 0). Used ONLY to order evaluation —
+// it never changes the maximin result, just how fast the worst<=best cutoff fires.
+function jointDamageHeuristic(joint: Map<number, number>, off: Cell[][], spread: (SpreadOpt | null)[], prio: (Cell | null)[][]): number {
+  let total = 0;
+  for (const [actor, target] of joint) {
+    if (target === SPREAD) { const sp = spread[actor]; if (sp) for (const d of sp.dmgMid) total += d ?? 0; }
+    else if (isPrioTarget(target)) total += prio[actor]?.[prioFoeIdx(target)]?.dmgMid ?? 0;
+    else if (isFakeOutTarget(target)) total += 5;   // small nudge so Fake Out sorts above pure status
+    else if (target >= 0) total += off[actor]?.[target]?.dmgMid ?? 0;
+  }
+  return total;
+}
+// Order joints best-first by the heuristic (descending). Stable-ish; ties keep
+// enumeration order. Returns a new array; inputs untouched.
+function orderJoints(joints: Array<Map<number, number>>, off: Cell[][], spread: (SpreadOpt | null)[], prio: (Cell | null)[][]): Array<Map<number, number>> {
+  if (joints.length <= 1) return joints;
+  return joints
+    .map((j, i) => ({ j, i, d: jointDamageHeuristic(j, off, spread, prio) }))
+    .sort((a, b) => (b.d - a.d) || (a.i - b.i))
+    .map(x => x.j);
+}
+
+// Maximin value of a state to the given depth: I maximise, the opponent replies
+// worst-case. `alpha`/`beta` are the inherited fail-soft window — the floor the
+// caller already guarantees and the ceiling above which the caller (a MIN) stops
+// caring. Returns the exact maximin within that window; fail-soft outside it.
+function value(t: Tables, s: State, depth: number, alpha: number, beta: number, pass: Pass, maxDepth: number): number {
   const term = terminal(s, depth);
   if (term !== null) return term;
   if (depth === 0) return leafScore(s);
@@ -3272,17 +3296,33 @@ function value(t: Tables, s: State, depth: number, alpha: number, pass: Pass, ma
   const oppJoints = jointActions(s.oppActive, s.myActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak, oppBench, U, U, U, U, U, U, U, U, U, U, U, U, U, U, oppRestrict, U, U, oppPrio, oppHelp, oppGuard);
   if (myJoints.length === 0) return leafScore(s);
 
+  // Move ordering for sharper alpha-beta (no options dropped — exact same result,
+  // fewer nodes): my highest-damage joint first so `best` climbs fast; the
+  // opponent's most-threatening reply first so `worst` plunges fast — together the
+  // worst<=best cutoff fires far sooner, collapsing the inner loop for losing lines.
+  const myOrdered = orderJoints(myJoints, t.off, t.mySpread, t.myPrioCell);
+  const oppOrdered = orderJoints(oppJoints, t.thr, t.oppSpread, t.oppPrioCell);
+  // Fail-soft alpha-beta over the per-turn max(my)–min(opp) tree. `alpha` is the
+  // floor the caller already guarantees; `beta` the ceiling above which the caller
+  // (a MIN) stops caring. Threading BOTH down — not just the node-local `best` —
+  // is what collapses the deep tree: a my-joint whose worst can't clear `floor`
+  // is abandoned, and a node that climbs past `beta` is cut wholesale. The maximin
+  // value is unchanged; only the node count drops (exact).
   let best = -Infinity;
-  for (const my of myJoints) {
+  for (const my of myOrdered) {
     let worst = Infinity;
-    const replies = oppJoints.length ? oppJoints : [new Map<number, number>()];
+    const floor = Math.max(alpha, best);   // below this, this my-joint is moot
+    const replies = oppOrdered.length ? oppOrdered : [new Map<number, number>()];
     for (const opp of replies) {
       const child = resolveTurn(t, s, my, opp, pass);
-      const v = value(t, child, depth - 1, best, pass, maxDepth);
+      // The child only matters if its value lands in (floor, worst); hand it that
+      // window so it can fail-high/low without a full expansion.
+      const v = value(t, child, depth - 1, floor, Math.min(beta, worst), pass, maxDepth);
       if (v < worst) worst = v;
-      if (worst <= best) break;   // this my-action can't beat best — prune
+      if (worst <= floor) break;   // this my-joint can't lift the node above floor — prune
     }
     if (worst > best) best = worst;
+    if (best >= beta) break;       // fail-high: the parent MIN rejects this node — cut
   }
   return best;
 }
@@ -3488,13 +3528,20 @@ function rootSearch(t: Tables, s0: State, depth: number, pass: Pass): { score: n
   let bestJoint: Map<number, number> | null = null;
   let bestScore = -Infinity;
 
-  const oppJoints = rootOppJoints(t, s0);
+  // Order ONLY the opponent's replies (most-threatening first) for the inner-loop
+  // cutoff. My joints stay in enumeration order so the reported best play is stable
+  // among equal-value ties (ordering them would only change tie-breaking, not the
+  // score). value()'s internal ordering is fully safe since only the score propagates.
+  const oppJoints = orderJoints(rootOppJoints(t, s0), t.thr, t.oppSpread, t.oppPrioCell);
   for (const my of myJoints) {
     let worst = Infinity;
     const replies = oppJoints.length ? oppJoints : [new Map<number, number>()];
     for (const opp of replies) {
       const child = resolveTurn(t, s0, my, opp, pass);
-      const v = value(t, child, depth - 1, bestScore, pass, depth - 1);
+      // floor = bestScore (root has no inherited alpha); ceiling = the running min
+      // for this my-joint, so a reply that can't drop below what we already have is
+      // cut. A fail-low/high return is still enough to accept or reject the joint.
+      const v = value(t, child, depth - 1, bestScore, worst, pass, depth - 1);
       if (v < worst) worst = v;
       if (worst <= bestScore) break;
     }
@@ -3664,7 +3711,9 @@ function oppBestReply(t: Tables, s0: State, myJoint: Map<number, number> | null,
   let arg: Map<number, number> | null = null;
   for (const opp of replies) {
     const child = resolveTurn(t, s0, myJoint, opp, pass);
-    const v = value(t, child, depth - 1, -Infinity, pass, depth - 1);
+    // Full (-Inf,+Inf) window: this is the explainability path ("how they beat us"),
+    // so every reply's value must be exact to pick the true argmin — no pruning.
+    const v = value(t, child, depth - 1, -Infinity, Infinity, pass, depth - 1);
     if (v < worst) { worst = v; arg = opp; }
   }
   return arg;

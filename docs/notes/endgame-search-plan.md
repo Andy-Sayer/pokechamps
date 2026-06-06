@@ -432,6 +432,26 @@ switch-at-depth when the bench is large (barely reached anyway) and widen it in
 small endgames where it's cheap and decisive. Step B's switches roughly tripled the
 depth-2 cost on a full 4v4, so that gating is the highest-value quick win.
 
+**Done (2026-06-06) — real alpha-beta windowing + move ordering.** `value()` had
+only ever pruned against its node-local `best`; the `alpha` parameter was never
+read and there was no `beta`, so cutoffs never crossed a ply. Threading a proper
+fail-soft window — child gets `(floor = max(alpha, best), min(beta, worst))`, with a
+`best >= beta` fail-high cut — plus best-first move ordering (a cheap `dmgMid`
+heuristic per joint) collapses the deep tree. Exact: same maximin `score`/`verdict`/
+`plays`, fewer nodes (all 930 tests unchanged). Root keeps my-joints *unordered* so
+the reported best play is tie-stable; `oppBestReply` keeps a full `(-∞,+∞)` window
+for the exact "how they beat us" argmin. Measured on the same full 4v4 (with Step B
+switches at the frontier):
+
+| stage | before | after |
+|---|---|---|
+| `toDepth(2)` | ~6.0s | **~2.4s** (2.5×) |
+| `toDepth(3)` | ~628s | **~80s** (7.9×) |
+
+No options dropped — the speedup is pure pruning. Depth 3 is still ~80s on a fresh
+full 4v4, so the next levers (transposition table, root-only-dup pruning, Step C
+adaptive `SWITCH_PLY_LIMIT`) remain worthwhile for live depth-3+.
+
 ### Phase 5 — Damage-altering status (optional / later)
 
 Setup (Swords Dance), screens, Will-O-Wisp / Thunder Wave. These invalidate the
