@@ -5,6 +5,7 @@
 import { describe, test, expect } from 'vitest';
 import {
   inferSpread, scoreSpread, reconcileCandidates, abilitiesRuledOutByHit,
+  representativeSpreadIndices,
   type SpreadCandidate, type StoredObservation,
 } from '../src/domain/inference.js';
 import { damageRange } from '../src/domain/damage.js';
@@ -62,6 +63,30 @@ describe('#4 ability inference — type-immunity abilities ruled out by a landed
     expect(cands.length).toBeGreaterThan(0);
     expect(cands.some(c => abilityId(c.candidate.ability) === 'levitate')).toBe(false);
     expect(cands.some(c => abilityId(c.candidate.ability) === 'roughskin')).toBe(true);
+  });
+});
+
+describe('coarse search profile — representativeSpreadIndices', () => {
+  const mk = (evs: Partial<typeof ZERO_EVS>, nature = 'Hardy') => ({ evs: { ...ZERO_EVS, ...evs }, nature });
+
+  test('returns every index when the set is already within k', () => {
+    const cands = [mk({ hp: 4 }), mk({ hp: 8 })];
+    expect(representativeSpreadIndices(cands, undefined, 3).sort()).toEqual([0, 1]);
+  });
+
+  test('caps to k, keeps the bulkiest, and never duplicates', () => {
+    const cands = [
+      mk({ atk: 252 }),                  // frail / offensive
+      mk({ hp: 252, def: 252 }, 'Bold'), // bulkiest — the survival bound
+      mk({ hp: 100 }),
+      mk({ hp: 4 }),
+      mk({ hp: 8 }),
+    ];
+    const idxs = representativeSpreadIndices(cands, undefined, 3);
+    expect(idxs.length).toBeGreaterThanOrEqual(2);
+    expect(idxs.length).toBeLessThanOrEqual(3);
+    expect(idxs).toContain(1);                          // bulkiest preserved
+    expect(new Set(idxs).size).toBe(idxs.length);       // no dups
   });
 });
 

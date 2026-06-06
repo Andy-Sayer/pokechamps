@@ -25,6 +25,7 @@
 import type { PokemonSet, OpponentEntry, FieldState, Match, HazardState } from './types.js';
 import { ZERO_EVS, MAX_IVS } from './types.js';
 import { predictOffense, predictThreat, pikalyticsMoves } from './predictions.js';
+import { representativeSpreadIndices } from './inference.js';
 import { actualSpeed, actualStat, effectiveSpeedRange } from './speed.js';
 import { getMove, getSpecies, getNature, toId, isSpreadMove, moveFlinchChance } from './data.js';
 import { getMegaOptions } from './gimmicks/mega.js';
@@ -3662,6 +3663,20 @@ function oppBestReply(t: Tables, s0: State, myJoint: Map<number, number> | null,
 export interface PositionSearch {
   toDepth(depth: number): SearchResult;
 }
+// Representative spreads kept per opp mon for the lookahead (Step A). Fixed for
+// now; Step C makes it confidence-adaptive (smaller as inference narrows).
+const SEARCH_PROFILE_K = 3;
+function coarseSearchProfile(entry: OpponentEntry, k: number): OpponentEntry {
+  const cands = entry.candidates;
+  if (!cands || cands.length <= k) return entry;
+  const idxs = representativeSpreadIndices(cands, entry.candidateLikelihoods, k);
+  return {
+    ...entry,
+    candidates: idxs.map(i => cands[i]!),
+    candidateLikelihoods: entry.candidateLikelihoods ? idxs.map(i => entry.candidateLikelihoods![i] ?? 0) : undefined,
+  };
+}
+
 export function createSearch(input: SearchInput): PositionSearch {
   // Fold the opponent's KNOWN-but-unrevealed roster (`oppBench`) into the opp
   // list as phantom switch-ins, so the search can model "they switch to one of
@@ -3676,6 +3691,14 @@ export function createSearch(input: SearchInput): PositionSearch {
     }));
     if (phantoms.length) input = { ...input, opp: [...input.opp, ...phantoms] };
   }
+  // Coarse search profile (Step A of the deep-switch plan): cap each opp mon to K
+  // REPRESENTATIVE spreads so the per-mon search cost is bounded regardless of how
+  // wide inference's candidate grid is (it can be up to ~360k for an off-meta mon).
+  // The full set still lives on the match for the readout; the search consumes this
+  // digest. This is the foundation that makes switches-at-depth affordable — and it
+  // shrinks the @smogon/calc work per cell from |candidates| to K. K will become
+  // confidence-adaptive in Step C (narrower as inference sharpens).
+  input = { ...input, opp: input.opp.map(o => ({ ...o, entry: coarseSearchProfile(o.entry, SEARCH_PROFILE_K) })) };
   const s0 = initialState(input);
 
   // Mega is a root decision per side. I pick whether (and which active) to mega

@@ -532,6 +532,35 @@ export function mostLikely(candidates: SpreadCandidate[], likelihoods?: number[]
   return i < 0 ? null : candidates[i]!;
 }
 
+// --- Coarse search profile ---------------------------------------------------
+// Pick K REPRESENTATIVE spreads from a (possibly huge) candidate set so the
+// lookahead search's per-mon cost is a constant, decoupled from inference's grid
+// width. The full candidate set still drives the spread READOUT; the search only
+// needs enough spreads to preserve the DAMAGE ENVELOPE (does the foe survive / can
+// it KO). So we keep, in priority order: the most-likely (the expected case), the
+// BULKIEST and FRAILEST by defensive investment (the min/max damage bounds for "do
+// I KO it"), and the most-offensive (its max threat to me) — deduped, capped to k.
+// `k` is meant to SHRINK as inference gets confident (Step C of the deep-switch
+// plan); a narrow candidate set (≤k) is returned unchanged.
+export function representativeSpreadIndices(
+  candidates: { evs: Stats; item?: string; nature: string }[],
+  likelihoods: number[] | undefined,
+  k: number,
+): number[] {
+  const n = candidates.length;
+  if (n <= Math.max(1, k)) return candidates.map((_, i) => i);
+  const defInvest = (i: number) => candidates[i]!.evs.hp + candidates[i]!.evs.def + candidates[i]!.evs.spd;
+  const offInvest = (i: number) => candidates[i]!.evs.atk + candidates[i]!.evs.spa;
+  const all = candidates.map((_, i) => i);
+  const ml = mostLikelyIndex(candidates as SpreadCandidate[], likelihoods);
+  const maxDef = all.reduce((a, b) => (defInvest(b) > defInvest(a) ? b : a));
+  const minDef = all.reduce((a, b) => (defInvest(b) < defInvest(a) ? b : a));
+  const maxOff = all.reduce((a, b) => (offInvest(b) > offInvest(a) ? b : a));
+  const picked: number[] = [];
+  for (const i of [ml, maxDef, minDef, maxOff]) if (i >= 0 && !picked.includes(i)) picked.push(i);
+  return picked.slice(0, k);
+}
+
 // --- Joint solve -------------------------------------------------------------
 // The defensive (scoreSpread) and offensive (scoreOffensiveSpread) passes run on
 // DIFFERENT observations and chain through the candidate set — which keeps them
