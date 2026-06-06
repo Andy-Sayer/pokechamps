@@ -166,6 +166,61 @@ describe('match engine: finalizeTurn', () => {
     expect(r.match.opponentTeam[0]!.charging).toBeUndefined();
   });
 
+  test('logged target status lands on the opponent (Scald burn)', () => {
+    const match = freshMatch();
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0,
+      kind: 'move', move: 'Scald',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 45,
+      targetStatus: 'brn',
+      order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [action], field: match.field }, activeIdx: startActive,
+    });
+    expect(r.match.opponentTeam[0]!.status).toBe('brn');
+    // Attacker (mine) is untouched.
+    expect(r.match.myStatus?.[0]).toBeUndefined();
+  });
+
+  test('logged attacker status lands on the attacker, not the target (Flame Body)', () => {
+    const match = freshMatch();
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0,
+      kind: 'move', move: 'Flare Blitz',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 45,
+      selfRemainingHpRaw: 80,
+      attackerStatus: 'brn',
+      order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [action], field: match.field }, activeIdx: startActive,
+    });
+    expect(r.match.myStatus?.[0]).toBe('brn');
+    expect(r.match.opponentTeam[0]!.status).toBeUndefined();
+  });
+
+  test('logged tox status seeds the toxic counter', () => {
+    const match = freshMatch();
+    const action: MoveAction = {
+      side: 'mine', attackerSlot: 0, attackerTeamIndex: 0,
+      kind: 'move', move: 'Dire Claw',
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 60,
+      targetStatus: 'tox',
+      order: 1,
+    };
+    const r = finalizeTurn({
+      match, turn: { actions: [action], field: match.field }, activeIdx: startActive,
+    });
+    expect(r.match.opponentTeam[0]!.status).toBe('tox');
+    // Counter is seeded (1) then advanced by the same-turn EOT toxic tick — same
+    // as auto-applied tox. Assert it's tracking, not the exact EOT ramp value.
+    expect(r.match.opponentTeam[0]!.toxCounter).toBeGreaterThanOrEqual(1);
+  });
+
   test('opp-side switch action updates active slot + grows opponentBrought', () => {
     const match = freshMatch();
     const switchAction: MoveAction = {

@@ -199,6 +199,31 @@ function tryApplyOppStatusInto(
   return true;
 }
 
+// Apply an EXPLICITLY-logged status (a `45 brn` target tag or a `/ brn` self-clause)
+// to (side, teamIndex). Mirror of applyLoggedStatus in engine.ts: routes through the
+// berry interception, sets tox/slp counters, skips an already-statused mon.
+function applyLoggedStatusInto(
+  match: Match,
+  side: 'mine' | 'theirs',
+  teamIndex: number,
+  status: NonNullable<import('@pokechamps/core/domain/types.js').ActivePokemonState['status']>,
+): void {
+  if (side === 'mine') {
+    if (match.myStatus?.[teamIndex]) return;
+    if (tryApplyMyStatusInto(match, teamIndex, status)) {
+      if (status === 'tox') match.myToxCounter = { ...(match.myToxCounter ?? {}), [teamIndex]: 1 };
+      if (status === 'slp') match.mySleepCounter = { ...(match.mySleepCounter ?? {}), [teamIndex]: 3 };
+    }
+  } else {
+    const o = match.opponentTeam[teamIndex];
+    if (!o || o.status) return;
+    if (tryApplyOppStatusInto(o, status)) {
+      if (status === 'tox') o.toxCounter = 1;
+      if (status === 'slp') o.sleepCounter = 3;
+    }
+  }
+}
+
 // Type-based immunity for a status move. Mirrors isStatusMoveImmune in engine.ts.
 function isStatusMoveImmune(status: string, ignoreImmunity: boolean, isPowder: boolean, targetTypes: string[]): boolean {
   if (status === 'brn') return targetTypes.includes('Fire');
@@ -1331,6 +1356,18 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
           if (st === 'tox') o.toxCounter = 1;
           if (st === 'slp') o.sleepCounter = 3;
         }
+      }
+    }
+    // Explicitly-logged status from the turn line: a damaging move's secondary
+    // (`o1 > Scald > o1 > 45 brn`) or a contact-ability status on the ATTACKER
+    // (`m1 > Flare Blitz > o1 > 45 / 80 brn`). Mirror of engine.ts logged-status loop.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.targetStatus && typeof a.target === 'object' && a.targetTeamIndex != null) {
+        applyLoggedStatusInto(next, a.target.side, a.targetTeamIndex, a.targetStatus);
+      }
+      if (a.attackerStatus && a.attackerTeamIndex != null) {
+        applyLoggedStatusInto(next, a.side, a.attackerTeamIndex, a.attackerStatus);
       }
     }
     // Setup self-boost moves (Swords Dance, Nasty Plot, etc.).
@@ -3119,8 +3156,22 @@ function actionToLine(a: MoveAction, match: Match): string {
   const target = typeof a.target === 'object'
     ? `${a.target.side === 'mine' ? 'm' : 'o'}${a.target.slot + 1}`
     : a.target;
-  const dmg = a.damageHpPercent != null ? ` > ${a.damageHpPercent}%` : a.damageRaw != null ? ` > ${a.damageRaw} raw` : '';
-  return `${actor} > ${a.move} > ${target}${dmg}`;
+  // Damage / remaining-HP token: prefer the dealt-damage fields (set post-finalize),
+  // else the remaining-HP a fresh draft still carries (side-aware unit).
+  const dmgTok = a.damageHpPercent != null ? `${a.damageHpPercent}%`
+    : a.damageRaw != null ? `${a.damageRaw} raw`
+    : a.targetRemainingHpPercent != null ? `${a.targetRemainingHpPercent}`
+    : a.targetRemainingHpRaw != null ? `${a.targetRemainingHpRaw}`
+    : '';
+  // Trailing target flags + status (`… > 45 brn`, `… > 1 sash`, `… > 80 (berry)`).
+  const targetTrail = [dmgTok, a.sash ? 'sash' : '', a.berry ? '(berry)' : '', a.targetStatus ?? ''].filter(Boolean).join(' ');
+  // The `/` self-clause: attacker's own HP + source + contact status (`… / 80 brn`).
+  const selfNum = a.selfRemainingHpRaw != null ? `${a.selfRemainingHpRaw}`
+    : a.selfRemainingHpPercent != null ? `${a.selfRemainingHpPercent}`
+    : '';
+  const selfTrail = [selfNum, a.selfHpSource ?? '', a.attackerStatus ?? ''].filter(Boolean).join(' ');
+  const fourth = `${targetTrail}${selfTrail ? ` / ${selfTrail}` : ''}`.trim();
+  return `${actor} > ${a.move} > ${target}${fourth ? ` > ${fourth}` : ''}`;
 }
 
 // Full syntax + commands cheat-sheet shown by /help. Lives in a bordered
@@ -3178,6 +3229,8 @@ function HelpPanel() {
       <Text>  <Text color="white">o1 &gt; Sucker Punch &gt; m1 &gt; 145</Text>     <Text dimColor>— opp attack; you now at 145 raw HP</Text></Text>
       <Text>  <Text color="white">m1 &gt; Sucker Punch &gt; o1 &gt; 41%</Text>     <Text dimColor>— explicit % override</Text></Text>
       <Text>  <Text color="white">m1 &gt; Close Combat &gt; o1 &gt; 80 raw</Text>  <Text dimColor>— damage-DEALT in raw HP</Text></Text>
+      <Text>  <Text color="white">m1 &gt; Scald &gt; o1 &gt; 45 brn</Text>       <Text dimColor>— TARGET statused this hit (brn/par/psn/tox/slp/frz)</Text></Text>
+      <Text>  <Text color="white">m1 &gt; Flare Blitz &gt; o1 &gt; 45 / 80 brn</Text> <Text dimColor>— `/` self-clause: my HP after recoil + I got burned (Flame Body)</Text></Text>
       <Text>  <Text color="white">m1+mega &gt; Flamethrower &gt; o2 &gt; 45</Text> <Text dimColor>— +mega / +crit / +tera&lt;type&gt; / +quick (Quick Claw)</Text></Text>
       <Text>  <Text color="white">m1 &gt; switch &gt; Kingambit</Text>           <Text dimColor>— switch by species (must be in brought 4)</Text></Text>
       <Box marginTop={1}><Text bold>State updates</Text></Box>

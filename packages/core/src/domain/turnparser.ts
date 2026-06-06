@@ -685,10 +685,17 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
   // `m1 > Flare Blitz > o1 > 50 / 78 helmet`. Split it off the damage slot first.
   let selfHpTok: string | undefined;
   let selfHpSource: MoveAction['selfHpSource'];
+  let attackerStatus: MoveAction['attackerStatus'];
   if (dmgTok && dmgTok.includes('/')) {
     const slash = dmgTok.indexOf('/');
-    const selfPart = dmgTok.slice(slash + 1).trim();
+    let selfPart = dmgTok.slice(slash + 1).trim();
     dmgTok = dmgTok.slice(0, slash).trim() || undefined;
+    // A trailing status word in the self-clause is the ATTACKER's own status —
+    // e.g. burned by the foe's Flame Body on contact: `/ 80 brn`, or `/ brn`
+    // with no self-HP change. Peel it off before reading the self-HP number.
+    const sw = selfPart.match(/^(?:(.*\S)\s+)?(\S+)$/);
+    const sst = sw ? normalizeStatus(sw[2]) : undefined;
+    if (sw && sst) { attackerStatus = sst; selfPart = sw[1] ? sw[1] : ''; }
     const sm = selfPart.match(/^(\d+(?:\.\d+)?)\s*(recoil|drain|helmet|orb|barbs|rough|roughskin|ironbarbs)?$/i);
     if (sm) {
       selfHpTok = sm[1];
@@ -696,6 +703,16 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
       if (src === 'rough' || src === 'roughskin' || src === 'ironbarbs') selfHpSource = 'barbs';
       else if (src) selfHpSource = src as MoveAction['selfHpSource'];
     }
+  }
+  // A trailing status word in the target's damage slot is the TARGET's status (a
+  // damaging move's secondary, or a pure status move with no damage): `o1 > Scald
+  // > o1 > 45 brn`, or just `> brn`. Strip it first (outermost token) so the rest
+  // parses as remaining HP and any sash/berry flag still resolves.
+  let targetStatus: MoveAction['targetStatus'];
+  if (dmgTok) {
+    const m = dmgTok.trim().match(/^(?:(.*\S)\s+)?(\S+)$/);
+    const st = m ? normalizeStatus(m[2]) : undefined;
+    if (m && st) { targetStatus = st; dmgTok = m[1] ? m[1] : undefined; }
   }
   let sash = false;
   if (dmgTok) {
@@ -766,10 +783,28 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
       quickClaw: actor.quickClaw || undefined,
       sash: sash || undefined,
       berry: berry || undefined,
+      targetStatus,
+      attackerStatus,
       ...dmg,
       ...selfHp,
     }],
   };
+}
+
+// Status word → canonical non-volatile status, accepting the common spellings the
+// user might type after a hit (`brn`, `burn`, `burned`, …). Returns undefined for
+// anything that isn't a status word (so a normal damage token passes through).
+function normalizeStatus(word: string | undefined | null): MoveAction['targetStatus'] | undefined {
+  if (!word) return undefined;
+  switch (word.toLowerCase()) {
+    case 'brn': case 'burn': case 'burned': return 'brn';
+    case 'par': case 'para': case 'paralyzed': case 'paralysis': return 'par';
+    case 'psn': case 'poison': case 'poisoned': return 'psn';
+    case 'tox': case 'toxic': case 'badpoison': return 'tox';
+    case 'slp': case 'sleep': case 'asleep': return 'slp';
+    case 'frz': case 'freeze': case 'frozen': return 'frz';
+    default: return undefined;
+  }
 }
 
 // Multi-hit damage syntax for a single target: "99,98,97,96,90(crit)". Each

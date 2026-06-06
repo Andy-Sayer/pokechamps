@@ -232,6 +232,17 @@ export interface MoveAction {
   // `m1 > Sucker Punch > o1 > 80 (berry)`. finalizeTurn derives the resist berry
   // from the move's type via resistBerryForType and marks it as learned+consumed.
   berry?: boolean;
+  // Non-volatile status this move INFLICTED, logged as part of the hit and applied
+  // positionally in finalizeTurn. These are observed facts, so they apply even for
+  // the cases the auto-apply can't infer (a damaging move's secondary status, or a
+  // contact-ability status). `targetStatus` lands on the move's target — the status
+  // word trails the target HP: `o1 > Scald > o1 > 45 brn` (or just `> brn` for a
+  // pure status move). `attackerStatus` lands on the ATTACKER itself, parsed from
+  // the `/` self-clause: `m1 > Flare Blitz > o1 > 45 / 80 brn` (burned by the foe's
+  // Flame Body on contact), or `/ brn` with no self-HP change. Routed through the
+  // same status-berry interception (Lum/Rawst…) as auto-applied status.
+  targetStatus?: 'brn' | 'par' | 'psn' | 'tox' | 'slp' | 'frz';
+  attackerStatus?: 'brn' | 'par' | 'psn' | 'tox' | 'slp' | 'frz';
   notes?: string;
 }
 

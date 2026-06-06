@@ -613,3 +613,74 @@ describe('parseTurnLine — bring restriction on mine switches', () => {
     expect(r.actions[0]!.targetTeamIndex).toBe(2);
   });
 });
+
+describe('parseTurnLine: status-on-hit tags', () => {
+  test('target status after the HP token: `45 brn`', () => {
+    const r = parseTurnLine('m1 > Scald > o1 > 45 brn', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    const a = r.actions[0]!;
+    expect(a.targetStatus).toBe('brn');
+    expect(a.targetRemainingHpPercent).toBe(45); // HP still parses
+    expect(a.attackerStatus).toBeUndefined();
+  });
+
+  test('pure status move with no damage: `> brn`', () => {
+    const r = parseTurnLine('m1 > Will-O-Wisp > o1 > brn', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    const a = r.actions[0]!;
+    expect(a.targetStatus).toBe('brn');
+    expect(a.targetRemainingHpPercent).toBeUndefined();
+    expect(a.damageHpPercent).toBeUndefined();
+  });
+
+  test('attacker status in the self-clause WITH self-HP: `45 / 80 brn`', () => {
+    const r = parseTurnLine('m1 > Flare Blitz > o1 > 45 / 80 brn', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    const a = r.actions[0]!;
+    expect(a.targetRemainingHpPercent).toBe(45);
+    expect(a.selfRemainingHpRaw).toBe(80);      // attacker is mine → raw self-HP
+    expect(a.attackerStatus).toBe('brn');
+    expect(a.targetStatus).toBeUndefined();
+  });
+
+  test('attacker status in the self-clause WITHOUT self-HP: `/ brn`', () => {
+    const r = parseTurnLine('m1 > Flare Blitz > o1 > 45 / brn', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    const a = r.actions[0]!;
+    expect(a.targetRemainingHpPercent).toBe(45);
+    expect(a.selfRemainingHpRaw).toBeUndefined();
+    expect(a.selfRemainingHpPercent).toBeUndefined();
+    expect(a.attackerStatus).toBe('brn');
+  });
+
+  test('self-clause keeps its source AND status together: `/ 78 helmet brn`', () => {
+    const r = parseTurnLine('m1 > Flare Blitz > o1 > 45 / 78 helmet brn', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    const a = r.actions[0]!;
+    expect(a.selfRemainingHpRaw).toBe(78);
+    expect(a.selfHpSource).toBe('helmet');
+    expect(a.attackerStatus).toBe('brn');
+  });
+
+  test('status word aliases normalize: `paralyzed` → par, `toxic` → tox', () => {
+    const r1 = parseTurnLine('m1 > Nuzzle > o1 > 90 paralyzed', ctx, 1);
+    expect(r1.ok).toBe(true);
+    if (r1.ok && r1.kind === 'action') expect(r1.actions[0]!.targetStatus).toBe('par');
+    const r2 = parseTurnLine('m1 > Toxic > o1 > toxic', ctx, 1);
+    expect(r2.ok).toBe(true);
+    if (r2.ok && r2.kind === 'action') expect(r2.actions[0]!.targetStatus).toBe('tox');
+  });
+
+  test('a plain damage token is NOT mistaken for a status', () => {
+    const r = parseTurnLine('m1 > Close Combat > o1 > 67', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    expect(r.actions[0]!.targetStatus).toBeUndefined();
+    expect(r.actions[0]!.targetRemainingHpPercent).toBe(67);
+  });
+});

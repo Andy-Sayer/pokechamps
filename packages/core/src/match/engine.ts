@@ -202,6 +202,32 @@ function tryApplyOppStatus(
   return true;
 }
 
+// Apply an EXPLICITLY-logged status (a `45 brn` target tag or a `/ brn` self-clause)
+// to the mon at (side, teamIndex). Routes through the same status-berry interception
+// as auto-applied status and sets the tox/slp counters on success. Skips a mon that's
+// already non-volatile statused, so it's idempotent with the auto-apply passes.
+function applyLoggedStatus(
+  match: Match,
+  side: 'mine' | 'theirs',
+  teamIndex: number,
+  status: NonNullable<import('../domain/types.js').ActivePokemonState['status']>,
+): void {
+  if (side === 'mine') {
+    if (match.myStatus?.[teamIndex]) return;
+    if (tryApplyMyStatus(match, teamIndex, status)) {
+      if (status === 'tox') match.myToxCounter = { ...(match.myToxCounter ?? {}), [teamIndex]: 1 };
+      if (status === 'slp') match.mySleepCounter = { ...(match.mySleepCounter ?? {}), [teamIndex]: 3 };
+    }
+  } else {
+    const o = match.opponentTeam[teamIndex];
+    if (!o || o.status) return;
+    if (tryApplyOppStatus(o, status)) {
+      if (status === 'tox') o.toxCounter = 1;
+      if (status === 'slp') o.sleepCounter = 3;
+    }
+  }
+}
+
 // Type-based immunity for a status move: returns true when the target's types
 // make the status land as a no-op regardless of accuracy/ability.
 // brn → Fire; par → Electric (only when !ignoreImmunity i.e. Thunder Wave);
@@ -1056,6 +1082,20 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
         if (st === 'tox') o.toxCounter = 1;
         if (st === 'slp') o.sleepCounter = 3;
       }
+    }
+  }
+
+  // Explicitly-logged status from the turn line — observed facts the auto-apply
+  // above can't infer: a damaging move's secondary status (`o1 > Scald > o1 > 45
+  // brn`) or a contact-ability status on the ATTACKER (`m1 > Flare Blitz > o1 >
+  // 45 / 80 brn`, burned by the foe's Flame Body). Mirror in BattleScreen.tsx.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (a.targetStatus && typeof a.target === 'object' && a.targetTeamIndex != null) {
+      applyLoggedStatus(next, a.target.side, a.targetTeamIndex, a.targetStatus);
+    }
+    if (a.attackerStatus && a.attackerTeamIndex != null) {
+      applyLoggedStatus(next, a.side, a.attackerTeamIndex, a.attackerStatus);
     }
   }
 
