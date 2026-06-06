@@ -311,6 +311,13 @@ describe('parseTurnLine — state updates', () => {
     expect(r.update.namedHeal).toBe('sitrus');
   });
 
+  test('o1 leftovers → namedHeal:"leftovers"', () => {
+    const r = parseTurnLine('o1 leftovers', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'state') return;
+    expect(r.update.namedHeal).toBe('leftovers');
+  });
+
   test('HP percent clamped to 0-100', () => {
     const r = parseTurnLine('o3 = 150', ctx, 1);
     expect(r.ok).toBe(true);

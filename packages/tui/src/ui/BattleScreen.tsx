@@ -23,7 +23,7 @@ import { statusBerryFor } from '@pokechamps/core/domain/statusBerries.js';
 import { resistBerryForType } from '@pokechamps/core/domain/resistBerries.js';
 import { effectiveness, speciesTypes } from '@pokechamps/core/domain/typechart.js';
 import { switchInAbilityEffect, intimidateReaction, certainAbility, resolveDownloadBoost, type BoostMap } from '@pokechamps/core/domain/abilities.js';
-import { deriveSuggestionContext, getSuggestions, applySuggestion } from '@pokechamps/core/domain/actionSuggest.js';
+import { deriveSuggestionContext, getSuggestions, applySuggestion, type SuggestionKind } from '@pokechamps/core/domain/actionSuggest.js';
 import { predictOffense, predictOffenseAll, predictThreat, predictThreatAll, speedVerdict, type SpeedVerdict, type MatchupCell, type Confidence } from '@pokechamps/core/domain/predictions.js';
 import { PikaSpinner } from './PikaSpinner.js';
 import { ExportPanel } from './ExportPanel.js';
@@ -567,6 +567,10 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   const [message, setMessage] = useState<string>('');
   // Index in the in-progress autocomplete suggestion list.
   const [highlight, setHighlight] = useState(0);
+  // Bash-style Tab cycling: snapshot the stem + suggestion list on the first Tab
+  // so repeated Tabs cycle through the options (re-applied to the same stem)
+  // instead of re-completing the just-applied value. Reset when the user types.
+  const tabCycle = useRef<{ stem: string; kind: SuggestionKind; list: string[]; idx: number } | null>(null);
   // Incremented on Tab-apply so the TextInput remounts and its internal
   // cursor jumps to the end of the new value. Without this the cursor stays
   // mid-string and the next character types in the wrong place.
@@ -586,6 +590,14 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // `/help` overlay — full syntax cheat-sheet. Closes on Esc or the next
   // /help invocation.
   const [helpOpen, setHelpOpen] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  // Moody reminder: Moody boosts a random stat every EOT (deterministic trigger,
+  // random effect → we can't auto-apply it, but we CAN nudge you to log it).
+  // `boostedThisTurn` keys (`side:teamIndex`) of mons that got a manual boost line
+  // this turn, so the nudge suppresses once you've logged it; `moodyNagged` makes
+  // the /next gate soft (warn once, then let the next /next through).
+  const [boostedThisTurn, setBoostedThisTurn] = useState<Set<string>>(() => new Set());
+  const [moodyNagged, setMoodyNagged] = useState(false);
   // `/pika` preview — toggles a standalone Pikachu sprite so the user can
   // confirm sixel rendering without firing the AI review.
   const [pikaPreview, setPikaPreview] = useState<'run' | 'idle' | null>(null);
@@ -1635,6 +1647,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     setMatch(next);
     setActiveIdx(nextActive);
     setDraftActions([]);
+    setBoostedThisTurn(new Set());   // Moody nudge resets for the new turn
+    setMoodyNagged(false);
     saveMatchAsync(stores, next, setMessage);
     setPendingReplacement(next.outcome ? null : findPendingReplacement(next, nextActive));
     setMessage(`Turn ${turnIndex} logged. ${inferenceNotes.join(' · ')}${eotNote}`);
@@ -1738,6 +1752,15 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         if (o) o.itemConsumed = 'Sitrus Berry';
       } else {
         next.myItemConsumed![teamIndex] = 'Sitrus Berry';
+      }
+    }
+    if (update.namedHeal === 'leftovers') {
+      // EOT Leftovers tick: +1/16 max HP. For the opp, also confirm the held item
+      // so the lookahead models its recovery + inference locks it. Mirror of engine.ts.
+      applyHealPct(100 / 16);
+      if (side === 'theirs') {
+        const o = next.opponentTeam[teamIndex];
+        if (o) o.item = 'Leftovers';
       }
     }
     // Damage delta — clamps at 0, auto-faints if it hits 0.
@@ -1999,6 +2022,32 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // Reset the highlight whenever the suggestion list changes.
   useMemo(() => setHighlight(0), [suggestions.length, input]);
 
+  // Active mons with the Moody ability (mine: always known; opp: only once the
+  // ability is confirmed). Moody boosts a random stat every EOT, so while one is
+  // out we nudge the user to log it — unless they already logged a boost this turn.
+  const activeMoodyMons = useMemo(() => {
+    const out: { key: string; ref: string; species: string }[] = [];
+    const isMoody = (a?: string | null) => !!a && toId(a) === 'moody';
+    activeIdx.mine.forEach((idx, slot) => {
+      const set = idx == null ? null : match.myTeam[idx];
+      if (idx != null && set && isMoody(set.ability) && !match.myFainted?.includes(idx)) out.push({ key: `mine:${idx}`, ref: `m${slot + 1}`, species: set.species });
+    });
+    activeIdx.theirs.forEach((idx, slot) => {
+      const opp = idx == null ? null : match.opponentTeam[idx];
+      if (idx != null && opp && isMoody(opp.ability) && !opp.fainted) out.push({ key: `theirs:${idx}`, ref: `o${slot + 1}`, species: opp.species });
+    });
+    return out;
+  }, [activeIdx, match.myTeam, match.opponentTeam, match.myFainted]);
+  const moodyPending = activeMoodyMons.filter(m => !boostedThisTurn.has(m.key));
+  // Record manual boost lines logged this turn (so the Moody nudge suppresses) +
+  // reset the soft /next nag so it can warn again next turn.
+  const noteBoostLogged = (updates: { side: string; teamIndex: number; boosts?: unknown }[]) => {
+    const keys = updates.filter(u => u.boosts).map(u => `${u.side}:${u.teamIndex}`);
+    if (!keys.length) return;
+    setBoostedThisTurn(s => { const n = new Set(s); for (const k of keys) n.add(k); return n; });
+    setMoodyNagged(false);
+  };
+
   // ---------------- global hotkeys ----------------
 
   // Dispatch a parsed slash command. Returns true when handled (the caller
@@ -2039,20 +2088,59 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         // the main thread. setTimeout(0) is enough — Ink picks up the
         // state change and renders before the timer fires.
         if (finalizing) return true;
+        // Soft Moody gate: if a Moody mon is out and you haven't logged its EOT
+        // boost, warn ONCE — a second /next goes through (you may not care this turn).
+        if (moodyPending.length > 0 && !moodyNagged) {
+          setMoodyNagged(true);
+          setMessage(`⚠ Moody boost not logged: ${moodyPending.map(m => `${m.species} (${m.ref})`).join(', ')} — e.g. \`${moodyPending[0]!.ref} +2 spe -1 def\`, or /next again to skip.`);
+          return true;
+        }
         setFinalizing(true);
         setTimeout(() => {
           try { finalizeTurn(); } finally { setFinalizing(false); }
         }, 0);
         return true;
-      case 'undo':
+      case 'undo': {
         if (draftActions.length === 0) {
           setMessage('Nothing to undo — no drafted actions this turn.');
-        } else {
-          const last = draftActions[draftActions.length - 1]!;
-          setDraftActions(prev => prev.slice(0, -1));
-          setMessage(`Removed: ${actionToLine(last, match)}`);
+          return true;
         }
+        // `/undo` removes the last; `/undo N` removes the Nth (1-based, as shown
+        // in the drafted-this-turn list).
+        const arg = args.trim();
+        let idx = draftActions.length - 1;
+        if (arg) {
+          const n = parseInt(arg, 10);
+          if (!Number.isInteger(n) || n < 1 || n > draftActions.length) {
+            setMessage(`No drafted action #${arg} — there are ${draftActions.length}.`);
+            return true;
+          }
+          idx = n - 1;
+        }
+        const removed = draftActions[idx]!;
+        setDraftActions(prev => prev.filter((_, i) => i !== idx));
+        setMessage(`Removed: ${actionToLine(removed, match)}`);
         return true;
+      }
+      case 'edit': {
+        // `/edit N` removes drafted action N and drops its line back into the
+        // input box so the user can tweak + re-submit it (instead of remove + retype).
+        const n = parseInt(args.trim(), 10);
+        if (draftActions.length === 0) {
+          setMessage('Nothing to edit — no drafted actions this turn.');
+          return true;
+        }
+        if (!Number.isInteger(n) || n < 1 || n > draftActions.length) {
+          setMessage(`Usage: /edit N (1-${draftActions.length}).`);
+          return true;
+        }
+        const target = draftActions[n - 1]!;
+        setDraftActions(prev => prev.filter((_, i) => i !== n - 1));
+        setInput(actionToLine(target, match));
+        setInputKey(k => k + 1);    // remount TextInput so the cursor lands at the end
+        setMessage(`Editing #${n} — tweak the line and press Enter.`);
+        return true;
+      }
       case 'endgame': {
         const mine = activeIdx.mine
           .filter((idx): idx is number => idx != null)
@@ -2081,6 +2169,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         setMessage(lines.join('\n'));
         return true;
       }
+      case 'summary': setSummaryOpen(s => !s); return true;
       case 'override': setOverrideOpen(true); return true;
       case 'crit': setShowCrits(c => !c); return true;
       case 'allmoves': setShowAllMoves(a => !a); return true;
@@ -2168,6 +2257,10 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (key.escape) setHelpOpen(false);
       return;
     }
+    if (summaryOpen) {
+      if (key.escape) setSummaryOpen(false);
+      return;
+    }
     if (exportPanelText != null) {
       if (key.escape) setExportPanelText(null);
       return;
@@ -2177,7 +2270,19 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (key.upArrow) setHighlight(h => Math.max(0, h - 1));
       else if (key.downArrow) setHighlight(h => Math.min(suggestions.length - 1, h + 1));
       else if (key.tab && suggestions[highlight]) {
-        setInput(applySuggestion(input, suggestions[highlight]!, sctx.kind));
+        // Tab cycles bash-style: continue an active cycle (input still equals what
+        // we last applied) by advancing to the next snapshotted suggestion; else
+        // start a fresh cycle from the (arrow-selected) highlight.
+        const cyc = tabCycle.current;
+        if (cyc && cyc.list.length > 0 && input === applySuggestion(cyc.stem, cyc.list[cyc.idx]!, cyc.kind)) {
+          const idx = (cyc.idx + 1) % cyc.list.length;
+          cyc.idx = idx;
+          setInput(applySuggestion(cyc.stem, cyc.list[idx]!, cyc.kind));
+        } else {
+          const start = Math.min(highlight, suggestions.length - 1);
+          tabCycle.current = { stem: input, kind: sctx.kind, list: suggestions.slice(), idx: start };
+          setInput(applySuggestion(input, suggestions[start]!, sctx.kind));
+        }
         setHighlight(0);
         // Force-remount TextInput so its internal cursor snaps to the end
         // of the newly-applied value (otherwise the next keystroke inserts
@@ -2716,6 +2821,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
 
       {/* /help cheat-sheet — full syntax + slash command reference. Esc to close. */}
       {helpOpen && <HelpPanel />}
+      {summaryOpen && <MatchSummaryPanel match={match} />}
 
       {/* /export overlay — current team's Showdown export, selectable via
           the terminal's normal selection mechanism. Esc closes. */}
@@ -2782,6 +2888,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       ) : (
       <Box flexDirection="column" marginTop={1} borderStyle="round" paddingX={1}>
         <Text bold>Turn {match.turns.length + 1} in progress ({draftActions.length} action{draftActions.length === 1 ? '' : 's'})</Text>
+        {moodyPending.length > 0 && (
+          <Text color="yellow">⚠ Moody EOT boost — log for {moodyPending.map(m => `${m.species} (${m.ref})`).join(', ')}: e.g. <Text color="white">{moodyPending[0]!.ref} +2 spe -1 def</Text></Text>
+        )}
         {draftActions.map((a, i) => {
           const pivot = a.kind !== 'switch' && a.kind !== 'mega' && isPivotMove(a.move);
           return (
@@ -2832,12 +2941,14 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
                 // pure-ish (uses React's batched setState), so the final
                 // render reflects the cumulative result.
                 for (const u of r.updates) applyStateUpdate(u);
+                noteBoostLogged(r.updates);
                 setInput('');
                 setMessage(`Applied ${r.updates.length} HP updates.`);
                 return;
               }
               // r.kind === 'state' — mutate immediately, no turn entry.
               applyStateUpdate(r.update);
+              noteBoostLogged([r.update]);
               setInput('');
             }}
           />
@@ -2860,7 +2971,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
               </Text>
             ) : (
               <>
-                <Text dimColor>↑/↓ pick · Tab apply ({
+                <Text dimColor>↑/↓ pick · Tab cycle/apply ({
                   sctx.kind === 'switch-target' ? 'switch target' :
                   sctx.kind === 'state-verb' ? 'state verb' :
                   'move'}{sctx.query ? ` · "${sctx.query}"` : ''})</Text>
@@ -2940,6 +3051,49 @@ function actionToLine(a: MoveAction, match: Match): string {
 // Full syntax + commands cheat-sheet shown by /help. Lives in a bordered
 // panel near the bottom of the screen. Esc closes it (see the keyboard
 // handler higher up — helpOpen takes modal precedence over normal input).
+// Match recap from the turn log: per-mon damage dealt / taken (each summed on its
+// OWN HP bar, so percents are within-mon), KOs per side, and the MVP. Available any
+// time via /summary; doubles as the match-end summary.
+function MatchSummaryPanel({ match }: { match: Match }) {
+  const myDealt: Record<number, number> = {}, myTaken: Record<number, number> = {};
+  const oppDealt: Record<number, number> = {}, oppTaken: Record<number, number> = {};
+  for (const turn of match.turns) for (const a of turn.actions) {
+    const dmg = a.damageHpPercent ?? 0; if (dmg <= 0) continue;
+    if (a.side === 'mine') {
+      if (a.attackerTeamIndex != null) myDealt[a.attackerTeamIndex] = (myDealt[a.attackerTeamIndex] ?? 0) + dmg;
+      if (a.targetTeamIndex != null) oppTaken[a.targetTeamIndex] = (oppTaken[a.targetTeamIndex] ?? 0) + dmg;
+    } else if (a.side === 'theirs') {
+      if (a.attackerTeamIndex != null) oppDealt[a.attackerTeamIndex] = (oppDealt[a.attackerTeamIndex] ?? 0) + dmg;
+      if (a.targetTeamIndex != null) myTaken[a.targetTeamIndex] = (myTaken[a.targetTeamIndex] ?? 0) + dmg;
+    }
+  }
+  const myFainted = new Set(match.myFainted ?? []);
+  const myIdxs = match.bring && match.bring.length ? match.bring : match.myTeam.map((_, i) => i);
+  const myRows = myIdxs.map(i => ({ name: match.myTeam[i]?.species ?? `#${i}`, dealt: myDealt[i] ?? 0, taken: myTaken[i] ?? 0, fainted: myFainted.has(i) }));
+  const oppRows = match.opponentTeam
+    .map((o, j) => ({ name: o.species, dealt: oppDealt[j] ?? 0, taken: oppTaken[j] ?? 0, fainted: !!o.fainted }))
+    .filter(r => r.dealt > 0 || r.taken > 0 || r.fainted);
+  const mvp = myRows.slice().sort((a, b) => b.dealt - a.dealt)[0];
+  const myDown = myRows.filter(r => r.fainted).length;
+  const oppDown = oppRows.filter(r => r.fainted).length;
+  const row = (r: { name: string; dealt: number; taken: number; fainted: boolean }, key: string) => (
+    <Text key={key} color={r.fainted ? 'red' : undefined}>
+      {'  '}{r.name.padEnd(16)} {r.dealt.toFixed(0).padStart(4)}% dealt · {r.taken.toFixed(0).padStart(4)}% taken{r.fainted ? '  ✖ fainted' : ''}
+    </Text>
+  );
+  return (
+    <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor="cyan" paddingX={1}>
+      <Text bold color="cyan">/summary — match recap ({match.turns.length} turn{match.turns.length === 1 ? '' : 's'})</Text>
+      <Text dimColor>Mons down — you {myDown} · opp {oppDown}{mvp && mvp.dealt > 0 ? ` · MVP ${mvp.name} (${mvp.dealt.toFixed(0)}% dealt)` : ''}</Text>
+      <Box marginTop={1}><Text bold>Your team</Text></Box>
+      {myRows.map((r, i) => row(r, `my-${i}`))}
+      <Box marginTop={1}><Text bold>Opponent</Text></Box>
+      {oppRows.length === 0 ? <Text dimColor>  (no opponent damage logged yet)</Text> : oppRows.map((r, i) => row(r, `opp-${i}`))}
+      <Box marginTop={1}><Text dimColor>Esc to close · damage is summed per mon on its own HP bar</Text></Box>
+    </Box>
+  );
+}
+
 function HelpPanel() {
   return (
     <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor="magenta" paddingX={1}>
@@ -2961,10 +3115,13 @@ function HelpPanel() {
       <Text>  <Text color="white">o1 brn</Text> / <Text color="white">par</Text> / <Text color="white">psn</Text> / <Text color="white">tox</Text> / <Text color="white">slp</Text> / <Text color="white">frz</Text> / <Text color="white">cure</Text></Text>
       <Text>  <Text color="white">o1 +2 atk</Text>        <Text dimColor>— stat boost (or -1, multiple stats OK)</Text></Text>
       <Text>  <Text color="white">o1 wp</Text> / <Text color="white">sash</Text> / <Text color="white">balloon</Text>  <Text dimColor>— named item triggers</Text></Text>
+      <Text>  <Text color="white">o2 leftovers</Text>    <Text dimColor>— EOT Leftovers tick (+6% / 1/16) + confirms the item</Text></Text>
+      <Text>  <Text color="white">o1 sitrus</Text>       <Text dimColor>— Sitrus heal (+25%)</Text></Text>
       <Text>  <Text color="white">m rocks on</Text> · <Text color="white">o spikes 2</Text> · <Text color="white">o tspikes 1</Text> · <Text color="white">o web on</Text></Text>
       <Box marginTop={1}><Text bold>Slash commands</Text></Box>
       <Text>  <Text color="white">/next</Text> (/n)       <Text dimColor>finalize the turn</Text></Text>
-      <Text>  <Text color="white">/undo</Text> (/u)       <Text dimColor>remove the last drafted action</Text></Text>
+      <Text>  <Text color="white">/undo</Text> (/u)       <Text dimColor>remove a drafted action (/undo or /undo N)</Text></Text>
+      <Text>  <Text color="white">/edit</Text> (/e)       <Text dimColor>edit drafted action N back into the input box</Text></Text>
       <Text>  <Text color="white">/save</Text> (/s)       <Text dimColor>snapshot match to disk</Text></Text>
       <Text>  <Text color="white">/info</Text> (/i)       <Text dimColor>open opponent info picker</Text></Text>
       <Text>  <Text color="white">/crit</Text> (/c)       <Text dimColor>toggle crit damage column</Text></Text>

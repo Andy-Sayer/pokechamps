@@ -1538,6 +1538,13 @@ function applyStateUpdateImpl(
       next.myItemConsumed![teamIndex] = 'Sitrus Berry';
     }
   }
+  if (update.namedHeal === 'leftovers') {
+    applyHealPct(100 / 16);                        // EOT Leftovers tick: +1/16 max HP
+    if (side === 'theirs') {
+      const o = next.opponentTeam[teamIndex];
+      if (o) o.item = 'Leftovers';                 // confirm the held item (persistent — not consumed)
+    }
+  }
 
   const applyDamagePct = (pct: number) => {
     if (side === 'theirs') {

@@ -267,6 +267,15 @@ describe('match engine: applyStateUpdate', () => {
     expect(result.match.opponentTeam[0]!.currentHpPercent).toBe(42);
   });
 
+  test('leftovers heals the opp 1/16 and confirms the held item', () => {
+    const match = freshMatch();
+    match.opponentTeam[0] = { ...match.opponentTeam[0]!, currentHpPercent: 50 };
+    const update: StateUpdate = { side: 'theirs', teamIndex: 0, namedHeal: 'leftovers' };
+    const result = applyStateUpdate({ match, update, activeIdx: startActive });
+    expect(result.match.opponentTeam[0]!.currentHpPercent).toBeCloseTo(56.25, 1);
+    expect(result.match.opponentTeam[0]!.item).toBe('Leftovers');
+  });
+
   test('fainted update on opp clears active slot and may end match', () => {
     // Set up: 3 of 4 brought already down, faint the 4th.
     const match = freshMatch({ opponentBrought: [0, 1, 2, 3] });

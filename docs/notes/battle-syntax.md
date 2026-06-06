@@ -55,6 +55,10 @@ hp m1=45 m2=80 o1=30%   ← bulk HP update — many pairs in one line, end-of-tu
 o3 heal 25              ← +25% (capped at 100)
 m1 heal 30              ← +30 raw HP (mine)
 o1 sitrus               ← named berry: +25% + itemConsumed='Sitrus Berry'
+o2 leftovers            ← EOT Leftovers tick: +1/16 (~6%) + confirms item='Leftovers'
+                          (opp side; the live engine only auto-applies Leftovers
+                          for MINE, so you log the opp's EOT heal here — the search
+                          then models its recovery in lookahead)
 o1 damage 25            ← -25% (clamps at 0; auto-faints + clears slot if 0)
 m1 damage 30            ← -30 raw HP (mine)
 o2 ko / o2 fainted      ← faint
@@ -114,5 +118,5 @@ Encore/Taunt/Disable are move-restricting volatiles (Bulbapedia: Taunt 3t / Enco
 - After `m1 > ` → move suggestions from `myTeam[idx].moves`.
 - After `o1 > ` → opp move pool = `knownMoves` ∪ Pikalytics top ∪ full legal `getLearnset`.
 - After `m1 > switch > ` → team species (filtered by `myFainted` / `opponentTeam[].fainted`).
-- After `o2 ` (no `>`) → state verbs: `heal`, `sitrus`, `ko`, `fainted`, `in`, plus `damage`, `wp`, `sash`, `balloon` filtered from STATE_VERBS.
+- After `o2 ` (no `>`) → state verbs: `heal`, `sitrus`, `leftovers`, `ko`, `fainted`, `in`, plus `damage`, `wp`, `sash`, `balloon` filtered from STATE_VERBS.
 - Tab applies; cursor remounts via `inputKey` so it lands at the end of the new value.

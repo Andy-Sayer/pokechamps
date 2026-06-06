@@ -68,7 +68,7 @@ export interface StateUpdate {
   healRaw?: number;       // +N raw HP (for mine; converted via maxHpFor)
   damagePercent?: number; // -N% (clamped at 0)
   damageRaw?: number;     // -N raw HP for mine (clamped at 0)
-  namedHeal?: 'sitrus';   // shorthand resolved at apply time using species maxHp
+  namedHeal?: 'sitrus' | 'leftovers';   // shorthand resolved at apply time using species maxHp
   // Stage deltas to add to current boosts; clamped to [-6, +6] per stat in apply.
   boosts?: Partial<Record<'atk' | 'def' | 'spa' | 'spd' | 'spe' | 'acc' | 'eva', number>>;
   // Named after-attack item triggers — apply layer resolves to boosts/HP/item.
@@ -395,16 +395,18 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
     return { ok: true, kind: 'state', update: { side, teamIndex, healPercent: Math.max(0, v) } };
   }
 
-  // "o1 sitrus" — named berry shortcut; apply layer resolves to a real number
-  // using the species' maxHp because parser doesn't know base stats.
-  const namedHealMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+(sitrus)$/i);
+  // "o1 sitrus" (heal 25%) / "o2 leftovers" (EOT heal 1/16 + confirm the item).
+  // Apply layer resolves the real amount; for the opp `leftovers` also pins the
+  // held item so the lookahead models its recovery + inference locks it in.
+  const namedHealMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+(sitrus|leftovers|lefties)$/i);
   if (namedHealMatch) {
     const ref = resolveRef(namedHealMatch[1]!, parseInt(namedHealMatch[2]!, 10), ctx);
     if (!ref) {
       return { ok: false, error: `${namedHealMatch[1]}${namedHealMatch[2]} has no active mon to heal` };
     }
     const { side, teamIndex } = ref;
-    return { ok: true, kind: 'state', update: { side, teamIndex, namedHeal: 'sitrus' } };
+    const which: 'sitrus' | 'leftovers' = /sitrus/i.test(namedHealMatch[3]!) ? 'sitrus' : 'leftovers';
+    return { ok: true, kind: 'state', update: { side, teamIndex, namedHeal: which } };
   }
 
   // "o2 fainted" / "o2 ko"
