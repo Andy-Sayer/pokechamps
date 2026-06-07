@@ -549,6 +549,10 @@ interface Tables {
   // Deeper plies that still enumerate bench/phantom switches (Step B/C breadth
   // knob). Defaults to SWITCH_PLY_LIMIT; the widening driver dials it per pass.
   switchPlyLimit?: number;
+  // Transposition table for value(): keyed by (full state, depth, maxDepth, pass)
+  // → fail-soft alpha-beta bound. Per-Tables so mega combos + breadth never share
+  // entries; persists across toDepth() calls (the key's maxDepth keeps trees apart).
+  tt?: Map<string, { value: number; flag: 0 | 1 | 2 }>;   // flag: 0 exact · 1 lower · 2 upper
   mySpecies: string[];
   oppSpecies: string[];
   mySpeed: number[];           // effective base speed incl. Spe stage (pre-field)
@@ -1627,6 +1631,7 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     });
   });
   return {
+    tt: new Map(),
     myN: mine.length,
     oppN: opp.length,
     mySpecies: mine.map(m => m.set.species),
@@ -3263,6 +3268,40 @@ function orderJoints(joints: Array<Map<number, number>>, off: Cell[][], spread: 
     .map(x => x.j);
 }
 
+// Complete transposition key for value(): every State field that can change the
+// result, PLUS depth + maxDepth (switch availability is gated by plyFromRoot =
+// maxDepth − depth) + the pass (regime + opp-survival vector flip the damage/KO
+// model). Missing ANY value-affecting field would serve a stale value, so this is
+// exhaustive over State. Built per node; a hit skips the whole subtree, so the
+// build cost is amortised.
+function ttKey(s: State, depth: number, maxDepth: number, pass: Pass): string {
+  const nb = (a: number[]) => a.join('.');
+  const bl = (a: boolean[]) => a.map(x => (x ? 1 : 0)).join('');
+  const nn = (a: (number | null)[]) => a.map(x => (x == null ? 'n' : x)).join('.');
+  const bk = (b: BoostMap) => `${b.atk ?? 0},${b.def ?? 0},${b.spa ?? 0},${b.spd ?? 0},${b.spe ?? 0}`;
+  const bs = (a: BoostMap[]) => a.map(bk).join(';');
+  return [
+    depth, maxDepth, pass.regime, bl(pass.survOpp), bl(pass.survMy),
+    nb(s.myHp), nb(s.oppHp), nb(s.myActive), nb(s.oppActive), bl(s.oppSeen),
+    s.myStatus.join(''), s.oppStatus.join(''), nb(s.myToxicN), nb(s.oppToxicN), nb(s.mySleepTurns), nb(s.oppSleepTurns),
+    bs(s.myBoost), bs(s.oppBoost), nn(s.mySeeded), nn(s.oppSeeded),
+    nb(s.myProtectStreak), nb(s.oppProtectStreak),
+    `${s.trickRoom ? 1 : 0}${s.myTailwind ? 1 : 0}${s.theirTailwind ? 1 : 0}`,
+    `${s.trickRoomTurns ?? -1}.${s.myTailwindTurns ?? -1}.${s.theirTailwindTurns ?? -1}`,
+    `${s.myReflect ? 1 : 0}${s.myLightScreen ? 1 : 0}${s.theirReflect ? 1 : 0}${s.theirLightScreen ? 1 : 0}`,
+    `${s.myReflectTurns ?? -1}.${s.myLightScreenTurns ?? -1}.${s.theirReflectTurns ?? -1}.${s.theirLightScreenTurns ?? -1}`,
+    `${s.weather}.${s.weatherTurns ?? -1}.${s.terrain}.${s.terrainTurns ?? -1}`,
+    bl(s.myBerryUsed), bl(s.oppBerryUsed), bl(s.myResistBerryUsed), bl(s.oppResistBerryUsed),
+    bl(s.myUnburden), bl(s.oppUnburden), bl(s.myFirstTurn), bl(s.oppFirstTurn), bl(s.myDisguise), bl(s.oppDisguise),
+    bl(s.myRecharge), bl(s.oppRecharge), nb(s.myLocked), nb(s.oppLocked), nb(s.mySubHp), nb(s.oppSubHp),
+    nb(s.myWish), nb(s.oppWish), nb(s.myFutureTurns), nb(s.oppFutureTurns), nb(s.myFutureDmg), nb(s.oppFutureDmg),
+    nb(s.myTaunt), nb(s.oppTaunt), nb(s.myEncore), nb(s.oppEncore), nb(s.myEncoreAct), nb(s.oppEncoreAct),
+    `${s.gravity ? 1 : 0}${s.wonderRoom ? 1 : 0}${s.magicRoom ? 1 : 0}`,
+    `${s.gravityTurns ?? -1}.${s.wonderRoomTurns ?? -1}.${s.magicRoomTurns ?? -1}`,
+    JSON.stringify(s.myHazards), JSON.stringify(s.oppHazards),
+  ].join('|');
+}
+
 // Maximin value of a state to the given depth: I maximise, the opponent replies
 // worst-case. `alpha`/`beta` are the inherited fail-soft window — the floor the
 // caller already guarantees and the ceiling above which the caller (a MIN) stops
@@ -3271,6 +3310,22 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
   const term = terminal(s, depth);
   if (term !== null) return term;
   if (depth === 0) return leafScore(s);
+
+  // Transposition-table probe (~half of internal nodes recur — measured). A cached
+  // bound serves the whole subtree: EXACT returns outright; a LOWER bound that
+  // already clears beta is a fail-high; an UPPER bound at/below alpha is a fail-low.
+  // Otherwise we search and overwrite. Keyed exhaustively (see ttKey) so a hit is
+  // always for an identical state at this depth/ply/pass — no stale reuse.
+  const tt = t.tt;
+  const ttk = tt ? ttKey(s, depth, maxDepth, pass) : '';
+  if (tt) {
+    const e = tt.get(ttk);
+    if (e) {
+      if (e.flag === 0) return e.value;
+      if (e.flag === 1 && e.value >= beta) return e.value;
+      if (e.flag === 2 && e.value <= alpha) return e.value;
+    }
+  }
 
   // Deeper plies: no root-only actions (field/setup/…), but Taunt/Encore
   // RESTRICTIONS persist, so pass the restrict mask (param 22; the intervening
@@ -3331,6 +3386,9 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
     if (worst > best) best = worst;
     if (best >= beta) break;       // fail-high: the parent MIN rejects this node — cut
   }
+  // Store the fail-soft bound: below alpha ⇒ upper bound, at/above beta ⇒ lower
+  // bound, strictly inside the window ⇒ exact maximin value.
+  if (tt) tt.set(ttk, { value: best, flag: best <= alpha ? 2 : best >= beta ? 1 : 0 });
   return best;
 }
 
