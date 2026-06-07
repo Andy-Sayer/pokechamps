@@ -452,6 +452,41 @@ No options dropped — the speedup is pure pruning. Depth 3 is still ~80s on a f
 full 4v4, so the next levers (transposition table, root-only-dup pruning, Step C
 adaptive `SWITCH_PLY_LIMIT`) remain worthwhile for live depth-3+.
 
+**Profiled the per-edge cost (2026-06-07, depth-3 under `tsx`):** `resolveTurn`
+32% · `value` 17% · **GC just 1.8%** · and ~38% is `tsx`/esbuild tooling
+(`TextDecoder` + `__name`) that the production bundle doesn't pay. Takeaways: (a)
+allocation is NOT the bottleneck — make/unmake/pooling was dropped from the plan;
+(b) the real cost is `resolveTurn` *compute* × **1.49M edges** (≈26× branching/ply
+after alpha-beta), so the lever is fewer/cheaper edges (TT, ordering) or a narrower
+option set, not allocation; (c) the dev benchmarks over-report — re-baseline under
+the bundle.
+
+### Step C — adaptive depth + "work outwards" widening (shipped 2026-06-07)
+
+Measured a **2v2 endgame**: depth-5 ~2s and the cost **plateaus** (~2.5s at depth
+6-7) because short games terminate; and the verdict **flips with depth**
+(winning→even→winning) settling at depth 5. So depth matters most exactly where
+it's cheapest. Two parts shipped:
+
+- **Adaptive deepening (driver).** The always-on background search now sizes its
+  depth/budget to the position: ≤5 live mons → depth 10 / longer budget (reaches
+  the depth-5 stabilization point endgames need); a wide board stays shallow with a
+  growth-ratio guard so it never launches a 60s ply. Exact — only how deep/long we
+  search changes.
+- **Breadth knobs + widening schedule.** `createSearch(input, { spreadK,
+  switchPlyLimit })` parameterizes the two breadth constants; `wideningSchedule()`
+  returns the per-position passes. On a wide board: a fast **full** pass (the only
+  one that may claim `forced`) then a **narrow+deep probe** (most-likely spread, no
+  deep switches) for a tentative read several plies further out — surfaced in the
+  TUI as a separate "⌁ deep probe" line, never as the headline. A restricted pass
+  is stamped `breadth.full = false` and can **never** claim `forced` (it may have
+  pruned my saving option or the opp's refuting spread). Endgames collapse to one
+  deep full pass.
+
+Still open for the wide-board deep read to truly reach depth-5: a **transposition
+table** so deepening is incremental (today each `toDepth(d)` re-searches from
+scratch — cumulative), which is also the substrate the widening reuses.
+
 ### Phase 5 — Damage-altering status (optional / later)
 
 Setup (Swords Dance), screens, Will-O-Wisp / Thunder Wave. These invalidate the

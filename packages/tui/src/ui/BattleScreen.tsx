@@ -37,7 +37,7 @@ import { applyMegaAction } from '@pokechamps/core/domain/megaResolve.js';
 import { getMegaOptions } from '@pokechamps/core/domain/gimmicks/mega.js';
 import { solveEndgame } from '@pokechamps/core/domain/endgame.js';
 import type { EndgamePosition } from '@pokechamps/core/domain/endgame.js';
-import { createSearch, searchInputFromMatch, oppCanMega, type SearchResult } from '@pokechamps/core/domain/endgameSearch.js';
+import { createSearch, searchInputFromMatch, oppCanMega, wideningSchedule, type SearchResult } from '@pokechamps/core/domain/endgameSearch.js';
 
 export interface BattleScreenProps {
   stores: Stores;
@@ -684,6 +684,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // play. Cancels on the next position change or unmount. See
   // docs/notes/endgame-search-plan.md.
   const [bestSearch, setBestSearch] = useState<SearchResult | null>(null);
+  // The narrow+deep "work outwards" probe: a TENTATIVE read several plies past
+  // what full breadth can afford on a wide board. Null in endgames (full is
+  // already deep) or until the probe runs. Shown as a separate, clearly-tentative
+  // line — never as the headline verdict.
+  const [deepProbe, setDeepProbe] = useState<SearchResult | null>(null);
   // A cheap signature of everything the search depends on, so the effect only
   // re-runs when the board actually changes (not on every keystroke render).
   const posSig = useMemo(() => JSON.stringify([
@@ -700,53 +705,60 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     match.outcome,
   ]), [match, activeIdx, field]);
   useEffect(() => {
-    if (match.outcome) { setBestSearch(null); return; }
+    if (match.outcome) { setBestSearch(null); setDeepProbe(null); return; }
     const input = searchInputFromMatch(match, activeIdx);
     const liveMine = input.mine.filter(m => m.hpPercent > 0).length;
     const liveOpp = input.opp.filter(o => o.hpPercent > 0).length;
-    if (liveMine === 0 || liveOpp === 0) { setBestSearch(null); return; }
+    if (liveMine === 0 || liveOpp === 0) { setBestSearch(null); setDeepProbe(null); return; }
 
-    // Build the damage matrices once; deepen against them.
-    const search = createSearch(input);
+    // "Work outwards": step the widening schedule (endgame → one deep full pass;
+    // wide board → fast full pass, then a narrow+deep probe). Each tier builds its
+    // own matrices at its breadth and deepens cooperatively (one ply per macrotask
+    // so Ink stays responsive). See wideningSchedule / endgame-search-plan.md.
+    const tiers = wideningSchedule(liveMine + liveOpp);
+    setDeepProbe(null);
     let cancelled = false;
-    // Depth/budget adapt to how WIDE the position is. Endgames are cheap per ply
-    // and the cost plateaus (short games terminate), yet their shallow verdicts
-    // are unreliable — measured, a 2v2 reads winning→even→winning before settling
-    // at depth 5. So the fewer mons alive, the deeper we go and the longer we
-    // budget; a fresh 4v4 stays shallow (a single deep ply there costs seconds).
-    const liveTotal = liveMine + liveOpp;
-    const small = liveTotal <= 5;          // ~2v2 / 2v3 endgame
-    const MAX_DEPTH = small ? 10 : 6;
-    const BUDGET_MS = small ? 4000 : 1500;
+    let ti = 0;
+    let search = createSearch(input, tiers[0]!.breadth);
     let depth = 1;
     let prevVerdict: SearchResult['verdict'] | null = null;
     let stableFor = 0;
     let lastMs = 0, prevMs = 0;
-    const start = Date.now();
+    let tierStart = Date.now();
+    const advanceTier = (): boolean => {
+      if (++ti >= tiers.length) return false;
+      search = createSearch(input, tiers[ti]!.breadth);
+      depth = 1; prevVerdict = null; stableFor = 0; lastMs = 0; prevMs = 0;
+      tierStart = Date.now();
+      return true;
+    };
     const step = () => {
-      if (cancelled || depth > MAX_DEPTH) return;
+      if (cancelled) return;
+      const tier = tiers[ti]!;
       const t0 = Date.now();
       const res = search.toDepth(depth);
       if (cancelled) return;
-      setBestSearch(res);
+      // Full-breadth pass = the authoritative verdict (may be `forced`); a restricted
+      // pass = the tentative deep probe. Keep them in separate slots.
+      if (res.breadth?.full) setBestSearch(res); else setDeepProbe(res);
       prevMs = lastMs; lastMs = Date.now() - t0;
-      // Track verdict stability so a settled deep read can stop early.
       stableFor = res.verdict === prevVerdict ? stableFor + 1 : 0;
       prevVerdict = res.verdict;
       depth += 1;
-      // Stop on a genuinely FORCED outcome (proven under worst-case rolls/items/
-      // mega), OR on a deep verdict that's held for two extra plies — no need to
-      // burn the rest of the budget chasing a `forced` proof once it's settled.
-      const settled = depth > 5 && stableFor >= 2;
-      // Don't launch a ply we can't afford. In an endgame the cost plateaus, so a
-      // plain budget check suffices; on a wide board estimate the next ply from the
-      // observed growth ratio (huge there) so we never kick off a 60s step.
-      const elapsed = Date.now() - start;
+      // A full-breadth FORCED outcome is the final word — no probe needed.
+      if (res.forced) return;
+      // A settled deep full verdict (held two plies past depth 5) ends the full tier.
+      const settled = !!res.breadth?.full && depth > 5 && stableFor >= 2;
+      // Affordability: full plies self-limit (depth grows the tree ~25×, so a check
+      // against `lastMs` keeps us from launching a 60s ply); restricted probe plies
+      // can still explode, so estimate the next from the observed growth ratio.
+      const restricted = !res.breadth?.full;
       const ratio = prevMs > 0 ? Math.max(1, lastMs / prevMs) : 6;
-      const affordable = small ? elapsed < BUDGET_MS : elapsed + lastMs * ratio <= BUDGET_MS;
-      if (depth <= MAX_DEPTH && !res.forced && !settled && affordable) {
-        setTimeout(step, 0);
-      }
+      const estNext = restricted ? lastMs * ratio : lastMs;
+      const tierElapsed = Date.now() - tierStart;
+      const canDeepen = !settled && depth <= tier.maxDepth && tierElapsed + estNext <= tier.budgetMs;
+      if (canDeepen) { setTimeout(step, 0); return; }
+      if (advanceTier()) setTimeout(step, 0);   // tier exhausted → widen
     };
     const handle = setTimeout(step, 0);
     return () => { cancelled = true; clearTimeout(handle); };
@@ -2711,6 +2723,21 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             {unmodeledText ? <Text color="yellow">   ⚠ approximating: {unmodeledText}</Text> : null}
             {hmLine ? <Text dimColor>   {hmLine}</Text> : null}
           </>
+        );
+      })()}
+      {/* "Work outwards" deep probe: a tentative narrow read several plies past what
+          full breadth can afford. Only shown when it sees DEEPER than the verified
+          verdict, so it adds information rather than repeating it. */}
+      {!match.outcome && deepProbe && deepProbe.plays.length > 0 && (!bestSearch || deepProbe.depth > bestSearch.depth) && (() => {
+        const v = deepProbe.verdict;
+        const vColor = v === 'winning' ? 'green' : v === 'losing' ? 'red' : 'yellow';
+        const plays = deepProbe.plays
+          .map(p => p.self ? `${p.mySpecies}→${p.move}` : `${p.mySpecies}→${p.move || '—'}→${p.targetSpecies}`)
+          .join(' · ');
+        return (
+          <Text dimColor>
+            <Text color="blue">⌁ deep probe</Text> (depth {deepProbe.depth}, most-likely spread · tentative): {plays} <Text color={vColor}>— {v}</Text>
+          </Text>
         );
       })()}
       {match.outcome && (

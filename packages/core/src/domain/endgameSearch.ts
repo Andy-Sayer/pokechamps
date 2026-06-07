@@ -236,6 +236,10 @@ export interface SearchResult {
   breakpoints?: SearchBreakpoint[];
   /** Honest breadth-of-search report for the confidence chip. */
   explored?: SearchExplored;
+  /** Restriction breadth this pass ran at (Step C widening). `full` is true for an
+   *  un-restricted pass (default knobs); a restricted pass is a fast, TENTATIVE
+   *  deep read and can never claim `forced`. */
+  breadth?: { spreadK: number; switchPlyLimit: number; full: boolean };
   /** True when the opponent's spread/item has been refined from observed damage
    *  (inference produced candidates) — surfaced so the user knows the read is
    *  data-driven, not a prior. */
@@ -542,6 +546,9 @@ function rollKoProb(c: Cell, h: number): number {
 interface Tables {
   myN: number;
   oppN: number;
+  // Deeper plies that still enumerate bench/phantom switches (Step B/C breadth
+  // knob). Defaults to SWITCH_PLY_LIMIT; the widening driver dials it per pass.
+  switchPlyLimit?: number;
   mySpecies: string[];
   oppSpecies: string[];
   mySpeed: number[];           // effective base speed incl. Spe stage (pre-field)
@@ -3279,7 +3286,7 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
   // Lets the lookahead see "I switch my wall in next turn" and "they pivot to their
   // answer (incl. an unrevealed mon)", while the deep tail stays switch-free.
   const plyFromRoot = maxDepth - depth;
-  const switchesAllowed = plyFromRoot < SWITCH_PLY_LIMIT;
+  const switchesAllowed = plyFromRoot < (t.switchPlyLimit ?? SWITCH_PLY_LIMIT);
   const myBench = switchesAllowed ? benchSwitchTargets(s.myActive, s.myHp, t.myN) : U;
   const oppBench = switchesAllowed ? benchSwitchTargets(s.oppActive, s.oppHp, t.oppN) : U;
   const myRestrict = { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct, choice: t.myChoice, locked: s.myLocked.map(x => x > 0) };
@@ -3794,7 +3801,18 @@ function coarseSearchProfile(entry: OpponentEntry, k: number): OpponentEntry {
   };
 }
 
-export function createSearch(input: SearchInput): PositionSearch {
+/** Breadth knobs for the widening driver (Step C). Omitted ⇒ full breadth (the
+ *  defaults). A narrow pass searches deep+cheap; later passes widen toward full. */
+export interface SearchBreadth {
+  /** Opp candidate spreads kept per mon (Step A). 1 = the single most-likely
+   *  spread (narrowest/fastest); default SEARCH_PROFILE_K. */
+  spreadK?: number;
+  /** Deeper plies that still enumerate switches (Step B). 0 = no switches past the
+   *  root (narrowest); default SWITCH_PLY_LIMIT. */
+  switchPlyLimit?: number;
+}
+
+export function createSearch(input: SearchInput, breadth?: SearchBreadth): PositionSearch {
   // Fold the opponent's KNOWN-but-unrevealed roster (`oppBench`) into the opp
   // list as phantom switch-ins, so the search can model "they switch to one of
   // their other 6". Gated on the bring not yet being complete (until 4 are
@@ -3815,7 +3833,8 @@ export function createSearch(input: SearchInput): PositionSearch {
   // digest. This is the foundation that makes switches-at-depth affordable — and it
   // shrinks the @smogon/calc work per cell from |candidates| to K. K will become
   // confidence-adaptive in Step C (narrower as inference sharpens).
-  input = { ...input, opp: input.opp.map(o => ({ ...o, entry: coarseSearchProfile(o.entry, SEARCH_PROFILE_K) })) };
+  const spreadK = breadth?.spreadK ?? SEARCH_PROFILE_K;
+  input = { ...input, opp: input.opp.map(o => ({ ...o, entry: coarseSearchProfile(o.entry, spreadK) })) };
   const s0 = initialState(input);
 
   // Mega is a root decision per side. I pick whether (and which active) to mega
@@ -3836,10 +3855,16 @@ export function createSearch(input: SearchInput): PositionSearch {
     s0.oppActive.forEach(j => { if (oppCanMega(input.opp[j]!.entry)) oppPlans.push(j); });
   }
 
+  const switchPlyLimit = breadth?.switchPlyLimit ?? SWITCH_PLY_LIMIT;
+  // A pass is "full breadth" only when neither knob is restricted below the
+  // defaults — i.e. it's a genuine worst-case search that may claim `forced`.
+  const fullBreadth = spreadK >= SEARCH_PROFILE_K && switchPlyLimit >= SWITCH_PLY_LIMIT;
   const tables = new Map<string, Tables>();
   for (const myMega of myPlans) {
     for (const oppMega of oppPlans) {
-      tables.set(`${myMega},${oppMega}`, buildTables(input, { myMega, oppMega }));
+      const tbl = buildTables(input, { myMega, oppMega });
+      tbl.switchPlyLimit = switchPlyLimit;
+      tables.set(`${myMega},${oppMega}`, tbl);
     }
   }
 
@@ -4345,7 +4370,10 @@ export function createSearch(input: SearchInput): PositionSearch {
         plays: playsFromJoint(expected.table, expected.joint),
         verdict: eV,
         megaMon: expected.myMega != null ? input.mine[expected.myMega]!.set.species : undefined,
-        forced,
+        // A restricted (narrow) pass can't prove a worst-case outcome — it may
+        // have pruned my saving option or the opp's refuting spread/switch — so it
+        // never claims `forced`, only a tentative verdict.
+        forced: forced && fullBreadth,
         winChance,
         allOppRevealed,
         risks,
@@ -4354,6 +4382,7 @@ export function createSearch(input: SearchInput): PositionSearch {
         assumptions: assumptions.length ? assumptions : undefined,
         breakpoints: breakpoints.length ? breakpoints : undefined,
         explored,
+        breadth: { spreadK, switchPlyLimit, full: fullBreadth },
         adapted,
         hailMary,
         unmodeled: unmodeled.length ? unmodeled : undefined,
@@ -4385,6 +4414,36 @@ export function searchIterative(
     onDepth?.(last);
   }
   return last;
+}
+
+/** One pass of the "work outwards" schedule: a breadth, a depth cap, a per-tier
+ *  wall-clock budget, and a short label for the confidence chip. */
+export interface WideningTier { breadth: SearchBreadth; maxDepth: number; budgetMs: number; label: string }
+
+/**
+ * Step C widening schedule — the "fast read, then deep probe, then work outwards" plan.
+ *
+ * Driven by how WIDE the position is (live mons both sides):
+ *  - Small (endgame, ≤5 live): full breadth is already cheap AND deep (the cost
+ *    plateaus because games terminate), so skip the probes and run one deep, fully
+ *    trustworthy pass. This is the case where depth pays off the most.
+ *  - Wide (a fresh 4v4): full-breadth depth is stuck at ~2-3 plies. Run that fast
+ *    authoritative pass FIRST (it alone may claim `forced`), then spend the rest of
+ *    the budget on a NARROW+DEEP probe (most-likely opp spread, no deep switches)
+ *    for a TENTATIVE read several plies further out. The probe never claims forced;
+ *    the UI shows it as a separate "deep probe" read alongside the verified verdict.
+ *
+ * The driver runs these in order, deepening within each under its budget, and
+ * advances to the next when a tier hits its depth cap or can't afford another ply.
+ */
+export function wideningSchedule(liveTotal: number): WideningTier[] {
+  if (liveTotal <= 5) {
+    return [{ breadth: {}, maxDepth: 10, budgetMs: 4000, label: 'full · deep' }];
+  }
+  return [
+    { breadth: {}, maxDepth: 3, budgetMs: 1500, label: 'full' },
+    { breadth: { spreadK: 1, switchPlyLimit: 0 }, maxDepth: 6, budgetMs: 4000, label: 'probe · narrow+deep' },
+  ];
 }
 
 // ---------------------------------------------------------------------------

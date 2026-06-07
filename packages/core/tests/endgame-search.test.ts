@@ -3,7 +3,7 @@
 // predictThreat compute real damage; assertions stay on verdict/targets/score
 // sign to be robust to exact rolls.
 import { describe, test, expect } from 'vitest';
-import { searchToDepth, searchIterative, searchInputFromMatch, megaMaxSpeed, resolveOneTurn, type SearchInput } from '../src/domain/endgameSearch.js';
+import { searchToDepth, searchIterative, searchInputFromMatch, megaMaxSpeed, resolveOneTurn, createSearch, wideningSchedule, type SearchInput } from '../src/domain/endgameSearch.js';
 import type { PokemonSet, OpponentEntry, Match, MoveAction } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } from '../src/domain/types.js';
 import { maxHpFor } from '../src/domain/damage.js';
@@ -2103,5 +2103,39 @@ describe('P2: hazard setting (Stone Axe + dedicated moves + refill chip)', () =>
       field: { ...NEUTRAL_FIELD, theirHazards: { rocks: true } }, allOppRevealed: true,
     }, 1);
     expect(r.explored!.actionClasses).not.toContain('hazard');
+  });
+});
+
+describe('breadth-restricted passes + wideningSchedule (Step C)', () => {
+  const input: SearchInput = {
+    mine: [{ set: flutter, hpPercent: 100, active: true }],
+    opp: [{ entry: oppOf(incin), hpPercent: 30, active: true }],
+    field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+  };
+
+  test('full-breadth pass is stamped full; a restricted pass is not and never claims forced', () => {
+    const full = createSearch(input).toDepth(2);
+    expect(full.breadth?.full).toBe(true);
+
+    const narrow = createSearch(input, { spreadK: 1, switchPlyLimit: 0 }).toDepth(2);
+    expect(narrow.breadth?.full).toBe(false);
+    expect(narrow.breadth?.spreadK).toBe(1);
+    expect(narrow.breadth?.switchPlyLimit).toBe(0);
+    expect(narrow.forced).toBe(false);            // restricted can't prove worst-case
+    expect(narrow.plays.length).toBeGreaterThan(0); // still gives a recommendation
+    expect(narrow.verdict).toBeTruthy();
+  });
+
+  test('endgame schedule = one deep full pass; wide schedule = full first, then a narrow probe', () => {
+    const eg = wideningSchedule(4);                 // ~2v2
+    expect(eg).toHaveLength(1);
+    expect(eg[0]!.breadth.spreadK).toBeUndefined(); // full breadth
+    expect(eg[0]!.maxDepth).toBeGreaterThanOrEqual(8);
+
+    const wide = wideningSchedule(8);               // full 4v4
+    expect(wide.length).toBeGreaterThanOrEqual(2);
+    expect(wide[0]!.breadth.spreadK).toBeUndefined();          // authoritative pass first
+    expect(wide.some(t => t.breadth.spreadK === 1)).toBe(true); // narrow+deep probe present
+    expect(wide.every(t => t.budgetMs > 0 && t.maxDepth > 0)).toBe(true);
   });
 });
