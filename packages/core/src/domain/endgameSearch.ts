@@ -4500,7 +4500,10 @@ export function wideningSchedule(liveTotal: number): WideningTier[] {
   }
   return [
     { breadth: {}, maxDepth: 3, budgetMs: 1500, label: 'full' },
-    { breadth: { spreadK: 1, switchPlyLimit: 0 }, maxDepth: 6, budgetMs: 4000, label: 'probe · narrow+deep' },
+    // Bigger budget so the probe can actually clear one ply past the full read on a
+    // wide board (production narrow depth-3 ≈ 7s). Only runs when the full pass was
+    // 'even' (driver gate), so this cost is paid only on genuinely contested turns.
+    { breadth: { spreadK: 1, switchPlyLimit: 0 }, maxDepth: 6, budgetMs: 9000, label: 'probe · narrow+deep' },
   ];
 }
 

@@ -726,6 +726,12 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     let lastMs = 0, prevMs = 0;
     let tierStart = Date.now();
     const advanceTier = (): boolean => {
+      // Only spend the expensive narrow+deep probe when the fast full read is
+      // genuinely UNCERTAIN ('even') — a clear win/loss doesn't need a deeper look,
+      // so we skip it and save the background CPU. (`prevVerdict` here is still the
+      // verdict of the tier we're leaving — the full pass — before the reset below.)
+      const next = tiers[ti + 1];
+      if (next && next.breadth.spreadK != null && prevVerdict !== 'even') return false;
       if (++ti >= tiers.length) return false;
       search = createSearch(input, tiers[ti]!.breadth);
       depth = 1; prevVerdict = null; stableFor = 0; lastMs = 0; prevMs = 0;

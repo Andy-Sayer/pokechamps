@@ -507,6 +507,27 @@ plyFromRoot), so the TT speeds each `toDepth(d)` *internally* rather than making
 deepening incremental across `d`; cross-pass incrementality would need switch
 gating by depth-remaining instead — a future option.
 
+### Re-baseline under the production bundle (2026-06-07)
+
+The dev benchmarks run under `tsx`, which the profile showed adds ~40% (sourcemap
+`TextDecoder` + esbuild `__name`). An esbuild bundle run under plain `node` gives
+the **real** numbers:
+
+| position | tsx (dev) | bundle (real) |
+|---|---|---|
+| 4v4 `toDepth(2)` | 2.0s | **1.2s** |
+| 4v4 `toDepth(3)` | 36.5s | **25s** |
+| 2v2 `toDepth(5/7)` | ~0.12s | **~0.11s** |
+
+So in production the **wide-board depth-2 read fits the 1.5s always-on budget**, and
+endgames are ~0.1s to depth-7. Depth-3 on a fresh 4v4 (~25s) stays background-only —
+the super-exponential wall is fundamental, not a tuning gap.
+
+**Probe gate.** Because the wide-board narrow+deep probe costs seconds for a single
+tentative ply past the headline, the driver now runs it **only when the full pass is
+`even`** (genuinely contested) and gives it a 9s budget so it can clear depth-3.
+Clear wins/losses skip the probe — deep-think only where it could change the call.
+
 ### Phase 5 — Damage-altering status (optional / later)
 
 Setup (Swords Dance), screens, Will-O-Wisp / Thunder Wave. These invalidate the
