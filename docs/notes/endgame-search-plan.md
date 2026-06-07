@@ -483,9 +483,29 @@ it's cheapest. Two parts shipped:
   pruned my saving option or the opp's refuting spread). Endgames collapse to one
   deep full pass.
 
-Still open for the wide-board deep read to truly reach depth-5: a **transposition
-table** so deepening is incremental (today each `toDepth(d)` re-searches from
-scratch — cumulative), which is also the substrate the widening reuses.
+### Transposition table (shipped 2026-06-07)
+
+Validated first by measuring the recurrence rate: **~47%** of internal `value()`
+nodes repeat at depth-3 (4v4) and **~62%** at depth-5 (2v2) — exact-HP states
+coincide far more than expected (deterministic `dmgMid`; protect/switch/status
+lines converge). A per-`Tables` TT (`ttKey` serializes every value-affecting State
+field + depth + maxDepth + the pass) probes on entry (EXACT returns; a LOWER bound
+≥ β or UPPER bound ≤ α cuts) and stores the fail-soft bound on exit. Exact for the
+maximin — all tests green.
+
+| position | before | after |
+|---|---|---|
+| 4v4 `toDepth(3)` | 59s | **37s** (1.6×) |
+| 2v2 `toDepth(5)` | 2.0s | **0.13s** (16×) |
+| 2v2 `toDepth(6/7)` | ~2.5s | **~0.12s** (20×) |
+
+The endgame win is the headline — deep, narrow trees are where transpositions
+compound, so a 2v2 now solves to depth 7+ in ~0.1s and the adaptive driver reaches
+its deep cap there essentially for free. Wide 4v4 is more modest (more distinct
+states near the root). Note `maxDepth` is in the key (switch gating depends on
+plyFromRoot), so the TT speeds each `toDepth(d)` *internally* rather than making
+deepening incremental across `d`; cross-pass incrementality would need switch
+gating by depth-remaining instead — a future option.
 
 ### Phase 5 — Damage-altering status (optional / later)
 
