@@ -709,22 +709,42 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     // Build the damage matrices once; deepen against them.
     const search = createSearch(input);
     let cancelled = false;
+    // Depth/budget adapt to how WIDE the position is. Endgames are cheap per ply
+    // and the cost plateaus (short games terminate), yet their shallow verdicts
+    // are unreliable — measured, a 2v2 reads winning→even→winning before settling
+    // at depth 5. So the fewer mons alive, the deeper we go and the longer we
+    // budget; a fresh 4v4 stays shallow (a single deep ply there costs seconds).
+    const liveTotal = liveMine + liveOpp;
+    const small = liveTotal <= 5;          // ~2v2 / 2v3 endgame
+    const MAX_DEPTH = small ? 10 : 6;
+    const BUDGET_MS = small ? 4000 : 1500;
     let depth = 1;
-    const MAX_DEPTH = 6;
-    const BUDGET_MS = 1500;
+    let prevVerdict: SearchResult['verdict'] | null = null;
+    let stableFor = 0;
+    let lastMs = 0, prevMs = 0;
     const start = Date.now();
     const step = () => {
       if (cancelled || depth > MAX_DEPTH) return;
+      const t0 = Date.now();
       const res = search.toDepth(depth);
       if (cancelled) return;
       setBestSearch(res);
+      prevMs = lastMs; lastMs = Date.now() - t0;
+      // Track verdict stability so a settled deep read can stop early.
+      stableFor = res.verdict === prevVerdict ? stableFor + 1 : 0;
+      prevVerdict = res.verdict;
       depth += 1;
-      // Keep deepening until the outcome is genuinely FORCED (proven under
-      // worst-case rolls/items/mega). A shallow expected-pass "win" — e.g.
-      // KOing the two visible mons — is NOT a reason to stop: more mons and
-      // worse rolls can still flip it, so we keep looking.
-      const decided = res.forced;
-      if (depth <= MAX_DEPTH && !decided && Date.now() - start < BUDGET_MS) {
+      // Stop on a genuinely FORCED outcome (proven under worst-case rolls/items/
+      // mega), OR on a deep verdict that's held for two extra plies — no need to
+      // burn the rest of the budget chasing a `forced` proof once it's settled.
+      const settled = depth > 5 && stableFor >= 2;
+      // Don't launch a ply we can't afford. In an endgame the cost plateaus, so a
+      // plain budget check suffices; on a wide board estimate the next ply from the
+      // observed growth ratio (huge there) so we never kick off a 60s step.
+      const elapsed = Date.now() - start;
+      const ratio = prevMs > 0 ? Math.max(1, lastMs / prevMs) : 6;
+      const affordable = small ? elapsed < BUDGET_MS : elapsed + lastMs * ratio <= BUDGET_MS;
+      if (depth <= MAX_DEPTH && !res.forced && !settled && affordable) {
         setTimeout(step, 0);
       }
     };
