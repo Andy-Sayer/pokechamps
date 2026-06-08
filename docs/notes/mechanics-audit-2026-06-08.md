@@ -44,7 +44,8 @@ truth for these and was used directly.
 
 ### Phase 1 — internal consistency
 - 🟢 **`unmodeled.ts` matches the coverage doc** — gap detector is in lockstep; no drift found.
-- 🟢 **Dual `finalizeTurn` mirror** — Spicy Spray, status-on-hit, leftovers all present in both engine.ts and BattleScreen.tsx (spot-checked).
+- 🟢 **Dual `finalizeTurn` mirror — no drift.** Systematically compared mechanic coverage across `engine.ts` and `BattleScreen.tsx` (Spicy Spray, Weakness Policy, Counter, recoil/drain, Leech Seed, Salt Cure, Substitute, Sitrus/Leftovers/status/resist berries, Regenerator, Intimidate, Knock Off, Magic Bounce, Nightmare, Perish, hazards, …): every mechanic one mirror handles, the other does too. Count differences are structural (TUI display vs return shape), not coverage gaps.
+- 🟡 **Defiant/Competitive reaction is a LIVE-layer gap (consistent in both mirrors).** Neither finalize applies a +2 when a foe-drop / Intimidate hits a Defiant/Competitive mon — it's modelled only in the search (per coverage doc, "reactions deferred"). Both mirrors agree, so it's a documented deferral, not drift. Surfacing it here so the live HP/boost tracking's blind spot is explicit.
 - 🟡 **EOT residual ORDER differs from Showdown.** `endOfTurn.ts` applies status chip before Leftovers/Leech Seed; Showdown's `onResidualOrder` is Leftovers(5) → Leech Seed(8) → status(9). The code mitigates by summing all deltas then checking faint ONCE at the end (so Leftovers always offsets chip — *lenient* vs Showdown, which can faint mid-EOT). Matters only at exact EOT KO boundaries. Documented, not fixed (the sum-then-faint model is defensible for an HP tracker; reordering risks regressions for ~zero decision impact).
 
 ### Phase 2 — hardcoded constants vs Showdown
