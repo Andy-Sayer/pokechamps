@@ -1942,6 +1942,23 @@ function oppOutspeeds(t: Tables, s: State, oj: number, mi: number): boolean {
 
 interface Acting { side: 'mine' | 'opp'; actor: number; target: number; priority: number; speed: number }
 
+// Pure per-turn helpers hoisted to module scope so they're defined ONCE instead of
+// recreated (and re-`__name`d under tsx) on every one of ~1.5M resolveTurn calls.
+// Each takes all its inputs as parameters / uses only module-scope helpers, so the
+// call sites inside resolveTurn are unchanged.
+const accDrop = (m: Map<number, BoostMap>, idx: number, d: BoostMap) => m.set(idx, addBoosts(m.get(idx) ?? {}, d));
+const redirect = (target: number, defSwitch: Map<number, number>) => defSwitch.get(target) ?? target;
+const burnMult = (status: string, physical: boolean) => (status === 'brn' && physical ? 0.5 : 1);
+const powderImmune = (species: string, ability: string | null | undefined) => isType(species, 'Grass') || toId(ability ?? '') === 'overcoat';
+const lockable = (act: number | undefined): act is number => act != null && !isSwitchTarget(act) && !isBatonTarget(act) && !isPivotTarget(act) && act !== SLEEP_SKIP;
+const hasNeg = (b: BoostMap) => (['atk', 'def', 'spa', 'spd', 'spe'] as const).some(k => (b[k] ?? 0) < 0);
+const isEjectItem = (item: string | undefined) => { const id = toId(item ?? ''); return id === 'ejectbutton' || id === 'ejectpack'; };
+const isRedCardItem = (item: string | undefined) => toId(item ?? '') === 'redcard';
+const tick = (active: boolean, turns: number | undefined): [boolean, number | undefined] => {
+  if (active && turns != null) { const t = turns - 1; return t <= 0 ? [false, undefined] : [true, t]; }
+  return [active, turns];
+};
+
 // Resolve one turn given each side's target assignment (active index → enemy
 // index, or SPREAD/PROTECT sentinel). Returns a NEW state; inputs are not mutated.
 function resolveTurn(
@@ -1986,9 +2003,7 @@ function resolveTurn(
   // Foe stat-drops a move inflicts on its TARGET this turn (Icy Wind −1 Spe …),
   // accumulated per DEFENDER index (multiple hits stack), applied at end of turn.
   const myToFoeDrop = new Map<number, BoostMap>();   // drops I put on opp mons (opp index → drop)
-  const oppToFoeDrop = new Map<number, BoostMap>();   // drops opp puts on my mons (my index → drop)
-  const accDrop = (m: Map<number, BoostMap>, idx: number, d: BoostMap) => m.set(idx, addBoosts(m.get(idx) ?? {}, d));
-  // Weakness Policy: a holder that SURVIVES a super-effective hit gets +2 Atk/+2 SpA
+  const oppToFoeDrop = new Map<number, BoostMap>();   // drops opp puts on my mons (my index → drop)  // Weakness Policy: a holder that SURVIVES a super-effective hit gets +2 Atk/+2 SpA
   // (once, applied at end of turn → boosts NEXT ply, the search's main lever).
   const myWpProc = new Set<number>();
   const oppWpProc = new Set<number>();
@@ -2085,8 +2100,6 @@ function resolveTurn(
   const myActiveNow = s.myActive.map(i => mySwitchIn.get(i) ?? i);
   const oppActiveNow = s.oppActive.map(i => oppSwitchIn.get(i) ?? i);
   // A hit aimed at a mon that switched out lands on its replacement instead.
-  const redirect = (target: number, defSwitch: Map<number, number>) => defSwitch.get(target) ?? target;
-
   // Effective speed including the DYNAMIC Spe stage (Speed Boost / Dragon Dance)
   // AND a weather-speed ability (Chlorophyll/Swift Swim/… → ×2 in the matching
   // weather): scale the baked speed by the Spe-stage ratio, then the weather ×2.
@@ -2099,7 +2112,6 @@ function resolveTurn(
   const myPar = (i: number) => s.myStatus[i] === 'par';
   const oppPar = (j: number) => s.oppStatus[j] === 'par';
   // Burn halves the ATTACKER's physical output: scale by live-vs-baked burn.
-  const burnMult = (status: string, physical: boolean) => (status === 'brn' && physical ? 0.5 : 1);
   const myBurnScale = (actor: number, physical: boolean) => burnMult(s.myStatus[actor]!, physical) / burnMult(t.myResidual[actor]!.status, physical);
   const oppBurnScale = (actor: number, physical: boolean) => burnMult(s.oppStatus[actor]!, physical) / burnMult(t.oppResidual[actor]!.status, physical);
   // Screen damage scale on the DEFENDER's side: live screen vs the one baked into
@@ -2188,7 +2200,6 @@ function resolveTurn(
   const myRedirector = findRedirector(myTargets, myHp);
   const oppRedirector = findRedirector(oppTargets, oppHp);
   // Does an attacker on `side` get its single-target move pulled to the foe's redirector?
-  const powderImmune = (species: string, ability: string | null | undefined) => isType(species, 'Grass') || toId(ability ?? '') === 'overcoat';
   const myRedirTarget = (oppActor: number): number | null => {
     if (myRedirector == null) return null;
     if (toId(t.myRedirectMove[myRedirector] ?? '') === 'ragepowder' && powderImmune(t.oppSpecies[oppActor]!, t.oppAbility[oppActor])) return null;
@@ -2485,10 +2496,6 @@ function resolveTurn(
   // tick). A known turn count expires the effect; an unknown count (undefined)
   // persists for the horizon. Tailwind sets the caster's flag (4 turns); Trick
   // Room toggles the shared flag (5 turns when turned on, so two TRs cancel).
-  const tick = (active: boolean, turns: number | undefined): [boolean, number | undefined] => {
-    if (active && turns != null) { const t = turns - 1; return t <= 0 ? [false, undefined] : [true, t]; }
-    return [active, turns];
-  };
   let [trickRoom, trickRoomTurns] = tick(s.trickRoom, s.trickRoomTurns);
   let [myTailwind, myTailwindTurns] = tick(s.myTailwind, s.myTailwindTurns);
   let [theirTailwind, theirTailwindTurns] = tick(s.theirTailwind, s.theirTailwindTurns);
@@ -2813,9 +2820,7 @@ function resolveTurn(
   for (const inn of mySwitchIn.values()) { myTaunt[inn] = 0; myEncore[inn] = 0; myEncoreAct[inn] = NONE; }
   for (const inn of oppSwitchIn.values()) { oppTaunt[inn] = 0; oppEncore[inn] = 0; oppEncoreAct[inn] = NONE; }
   // Inflict (lasts ~3 turns). Encore locks the foe into the move it used THIS turn
-  // (any non-switch action), so it repeats it next ply.
-  const lockable = (act: number | undefined): act is number => act != null && !isSwitchTarget(act) && !isBatonTarget(act) && !isPivotTarget(act) && act !== SLEEP_SKIP;
-  // Magic Bounce reflects Taunt onto the caster; a bounced Encore simply fizzles.
+  // (any non-switch action), so it repeats it next ply.  // Magic Bounce reflects Taunt onto the caster; a bounced Encore simply fizzles.
   for (const [actor, target] of myTargets) {
     if (isTauntTarget(target) && t.myTauntMove[actor]) { const foe = redirect(tauntFoeIdx(target), oppSwitchIn); if ((oppHp[foe] ?? 0) > 0) { if (toId(t.oppAbility[foe] ?? '') === 'magicbounce') myTaunt[actor] = 3; else oppTaunt[foe] = 3; } }
     else if (isEncoreTarget(target) && t.myEncoreMove[actor]) { const foe = redirect(encoreFoeIdx(target), oppSwitchIn); const la = oppTargets.get(foe); if ((oppHp[foe] ?? 0) > 0 && toId(t.oppAbility[foe] ?? '') !== 'magicbounce' && lockable(la)) { oppEncore[foe] = 3; oppEncoreAct[foe] = la; } }
@@ -2869,7 +2874,6 @@ function resolveTurn(
   }
   // White Herb: once the holder has any lowered stat, restore all negatives to 0 and
   // consume the item (marked in berryUsed → triggers Unburden via the check below).
-  const hasNeg = (b: BoostMap) => (['atk', 'def', 'spa', 'spd', 'spe'] as const).some(k => (b[k] ?? 0) < 0);
   const whiteHerb = (boost: BoostMap[], wh: boolean[], used: boolean[], active: number[], hp: number[]) => {
     for (const i of active) {
       if (!wh[i] || used[i] || (hp[i] ?? 0) <= 0 || !hasNeg(boost[i]!)) continue;
@@ -2928,10 +2932,7 @@ function resolveTurn(
   // (cleared boosts) and eats hazards via the post-refill loops below. Bounded to
   // the single-target hits we tracked; the leaving mon survives on the bench.
   const myActiveForced = myActiveNow.slice();
-  const oppActiveForced = oppActiveNow.slice();
-  const isEjectItem = (item: string | undefined) => { const id = toId(item ?? ''); return id === 'ejectbutton' || id === 'ejectpack'; };
-  const isRedCardItem = (item: string | undefined) => toId(item ?? '') === 'redcard';
-  const doForce = (outIdx: number, active: number[], hp: number[], n: number, off: Cell[][], foeHp: number[], boost: BoostMap[], eligible?: boolean[]) => {
+  const oppActiveForced = oppActiveNow.slice();  const doForce = (outIdx: number, active: number[], hp: number[], n: number, off: Cell[][], foeHp: number[], boost: BoostMap[], eligible?: boolean[]) => {
     if ((hp[outIdx] ?? 0) <= 0) return;                     // fainted → refill handles it
     const pos = active.indexOf(outIdx); if (pos < 0) return; // not on the field
     const bench = pickBench(active, hp, n, off, foeHp, eligible);
