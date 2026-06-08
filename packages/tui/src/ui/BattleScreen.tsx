@@ -29,6 +29,7 @@ import { predictOffense, predictOffenseAll, predictThreat, predictThreatAll, spe
 import { PikaSpinner } from './PikaSpinner.js';
 import { ExportPanel } from './ExportPanel.js';
 import { OverridePanel } from './OverridePanel.js';
+import { useTerminalSize } from './useTerminalSize.js';
 import { MatchSummary } from './MatchSummary.js';
 import { formatShowdownTeamSP } from '@pokechamps/core/domain/showdown.js';
 import { BATTLE_COMMANDS, parseCommand, type BattleCommandId } from './slashCommands.js';
@@ -683,6 +684,10 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // per macrotask so Ink stays responsive — and publish the improving best
   // play. Cancels on the next position change or unmount. See
   // docs/notes/endgame-search-plan.md.
+  // Terminal width → reflow the side-by-side battle layout on narrow terminals so
+  // the matchup grid doesn't overflow / wrap into the team panel.
+  const { columns } = useTerminalSize();
+  const stackLayout = columns < 90;   // panel (42) + grid (~48) no longer fit side-by-side
   const [bestSearch, setBestSearch] = useState<SearchResult | null>(null);
   // The narrow+deep "work outwards" probe: a TENTATIVE read several plies past
   // what full breadth can afford on a wide board. Null in endgames (full is
@@ -2776,9 +2781,14 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         Type an action, or <Text color="white">/help</Text> for syntax + commands · ESC ends match
       </Text>
 
-      <Box marginTop={1} flexDirection="row">
+      {columns < 70 && (
+        <Text dimColor>↔ narrow terminal ({columns} cols) — panels stacked; some grid rows may wrap. Widen for the full layout.</Text>
+      )}
+      {/* Side-by-side on wide terminals; stacked vertically when too narrow to fit
+          the 42-wide team panel beside the matchup grid (resize-aware). */}
+      <Box marginTop={1} flexDirection={stackLayout ? 'column' : 'row'}>
         {/* Left: bring + opp roster */}
-        <Box flexDirection="column" width={42} marginRight={2}>
+        <Box flexDirection="column" width={stackLayout ? undefined : 42} marginRight={stackLayout ? 0 : 2} marginBottom={stackLayout ? 1 : 0}>
           <Text bold color="green">Me</Text>
           {bringTeam.map((m, i) => {
             const a0 = activeIdx.mine[0];
