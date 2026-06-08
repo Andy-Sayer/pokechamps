@@ -161,13 +161,32 @@ export function endOfTurn(
       if (c <= 0) { delete next.myStatus[idx]; delete next.mySleepCounter?.[idx]; notes.push(`m${idx + 1} woke up`); }
       else next.mySleepCounter![idx] = c;
     }
-    // Leftovers / Black Sludge — mine only.
-    if (set.item === 'Leftovers' || set.item === 'Black Sludge') {
+    // Leftovers always heals 1/16. Black Sludge heals a POISON-type holder 1/16,
+    // but DAMAGES a non-Poison holder 1/8 each turn (blocked by Magic Guard).
+    // Mine only — opp items are uncertain. (Earlier code healed Black Sludge for
+    // everyone, which was wrong for non-Poison holders.)
+    if (set.item === 'Leftovers') {
       const max = maxHpFor(set);
       const healPct = max > 0 ? (Math.floor(max / 16) / max) * 100 : 0;
       if (healPct > 0) {
         next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) + healPct);
-        notes.push(`m${idx + 1} +${healPct.toFixed(0)}% (${set.item})`);
+        notes.push(`m${idx + 1} +${healPct.toFixed(0)}% (Leftovers)`);
+      }
+    } else if (set.item === 'Black Sludge') {
+      const max = maxHpFor(set);
+      const isPoison = (types ?? []).includes('Poison');
+      if (isPoison) {
+        const healPct = max > 0 ? (Math.floor(max / 16) / max) * 100 : 0;
+        if (healPct > 0) {
+          next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) + healPct);
+          notes.push(`m${idx + 1} +${healPct.toFixed(0)}% (Black Sludge)`);
+        }
+      } else if (!myHasMG) {
+        const chipPct = max > 0 ? (Math.floor(max / 8) / max) * 100 : 0;
+        if (chipPct > 0) {
+          next.myCurrentHp![idx] = clampHp((next.myCurrentHp![idx] ?? 100) - chipPct);
+          notes.push(`m${idx + 1} -${chipPct.toFixed(0)}% (Black Sludge)`);
+        }
       }
     }
     // Toxic Orb / Flame Orb — apply the orb's status at EOT to the holder if

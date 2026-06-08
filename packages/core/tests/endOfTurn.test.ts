@@ -287,3 +287,27 @@ describe('Residual-chip volatiles via endOfTurn', () => {
     expect(out.myCurrentHp![0]).toBeCloseTo(60 + 100 / 16, 1);
   });
 });
+
+describe('Black Sludge', () => {
+  test('DAMAGES a non-Poison holder ~1/8 (not heal)', () => {
+    const m = freshMatch([mon({ species: 'Garchomp', item: 'Black Sludge' })], ['Incineroar']); // Dragon/Ground
+    m.myCurrentHp![0] = 50;
+    const { match: out } = endOfTurn(m, m.field, { mine: [0, null], theirs: [null, null] });
+    expect(out.myCurrentHp![0]).toBeLessThan(50);          // lost HP — earlier code wrongly healed
+    expect(out.myCurrentHp![0]).toBeGreaterThan(50 - 100 / 6); // ~1/8, not a huge chip
+  });
+
+  test('HEALS a Poison-type holder ~1/16', () => {
+    const m = freshMatch([mon({ species: 'Toxapex', item: 'Black Sludge' })], ['Incineroar']); // Poison/Water
+    m.myCurrentHp![0] = 50;
+    const { match: out } = endOfTurn(m, m.field, { mine: [0, null], theirs: [null, null] });
+    expect(out.myCurrentHp![0]).toBeGreaterThan(50);
+  });
+
+  test('Magic Guard blocks the non-Poison Black Sludge chip', () => {
+    const m = freshMatch([mon({ species: 'Garchomp', item: 'Black Sludge', ability: 'Magic Guard' })], ['Incineroar']);
+    m.myCurrentHp![0] = 50;
+    const { match: out } = endOfTurn(m, m.field, { mine: [0, null], theirs: [null, null] });
+    expect(out.myCurrentHp![0]).toBe(50); // no chip, no heal (non-Poison)
+  });
+});
