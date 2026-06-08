@@ -122,7 +122,21 @@ export function damageRange(args: {
     move: args.move,
     opts: moveOpts,
   });
-  const move = new CalcMove(GEN, args.move, moveOpts as any);
+  let move = new CalcMove(GEN, args.move, moveOpts as any);
+  // Dragonize (custom Champions ability, Feraligatr-Mega): the holder's Normal-type
+  // moves become Dragon type with 1.2x power. @smogon/calc has no logic for this
+  // ability NAME, so its -ate conversion is silently dropped — the move stays Normal
+  // (wrong type effectiveness: Ghost immunity, Steel/Rock resist vs Dragon's profile)
+  // AND loses Feraligatr-Mega's Water/DRAGON STAB AND the 1.2x. Emulate it by
+  // rebuilding the move with type+BP overrides; the calc then recomputes STAB +
+  // effectiveness from the Dragon type. Mirror of the Mega Sol weather emulation
+  // above. `atk.ability` is the RESOLVED (mega) ability — the gimmick swapped in the
+  // forme's ability. (Damaging moves only; status moves don't deal damage.)
+  if ((atk as unknown as { ability?: string }).ability === 'Dragonize'
+    && moveData?.type === 'Normal' && moveData?.category !== 'Status') {
+    const boostedBp = Math.round((((move as unknown as { bp?: number }).bp) ?? 0) * 1.2);
+    move = new CalcMove(GEN, args.move, { ...moveOpts, overrides: { type: 'Dragon', basePower: boostedBp } } as any);
+  }
   const field = toCalcField(effField, args.attackerSide, args.helpingHand);
   const result = calculate(GEN, atk, def, move, field);
   const dmg = result.damage;

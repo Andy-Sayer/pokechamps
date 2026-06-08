@@ -465,3 +465,36 @@ describe('mega forme abilities are applied in the calc', () => {
     expect(mega.maxPercent).toBeGreaterThan(noMega.maxPercent); // Fire ×1.5
   });
 });
+
+describe('Dragonize (custom Champions mega ability — Feraligatr-Mega)', () => {
+  // Feraligatr-Mega is Water/Dragon with Dragonize: its Normal moves become Dragon
+  // (1.2x). @smogon/calc doesn't know the ability, so damage.ts emulates the type/BP
+  // override. Body Slam is Normal — Gengar (Ghost/Poison) is IMMUNE to Normal, so any
+  // non-zero damage proves the conversion to Dragon happened.
+  const feraligatr: PokemonSet = {
+    species: 'Feraligatr', level: 50, item: 'Feraligite', nature: 'Adamant',
+    evs: { ...ZERO_EVS, atk: 252 }, ivs: MAX_IVS, moves: ['Body Slam'],
+  };
+  const gengar: PokemonSet = {
+    species: 'Gengar', level: 50, nature: 'Timid', evs: { ...ZERO_EVS }, ivs: MAX_IVS, moves: [],
+  };
+
+  test('mega-active: Normal Body Slam converts to Dragon and hits a Ghost', () => {
+    const mega = damageRange({ attacker: feraligatr, defender: gengar, move: 'Body Slam', field: NEUTRAL_FIELD, attackerSide: 'mine', attackerOpts: { gimmickActive: true } });
+    expect(mega.maxPercent).toBeGreaterThan(0); // Dragon hits Ghost neutrally; Normal would be immune
+  });
+
+  test('pre-mega: Body Slam stays Normal → immune to Ghost (no Dragonize conversion)', () => {
+    // Without the mega, no Dragonize → Body Slam is Normal, and Gengar (Ghost) is
+    // immune. @smogon/calc throws on a fully-immune hit (callers in predictions.ts
+    // guard with try/catch + skip), so the immunity manifests as a throw here.
+    expect(() => damageRange({ attacker: feraligatr, defender: gengar, move: 'Body Slam', field: NEUTRAL_FIELD, attackerSide: 'mine', attackerOpts: { gimmickActive: false } })).toThrow();
+  });
+
+  test('the Dragon conversion also lifts damage vs a neutral target (STAB + 1.2x + mega Atk)', () => {
+    const blissey: PokemonSet = { species: 'Blissey', level: 50, nature: 'Calm', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, ivs: MAX_IVS, moves: [] };
+    const base = damageRange({ attacker: feraligatr, defender: blissey, move: 'Body Slam', field: NEUTRAL_FIELD, attackerSide: 'mine', attackerOpts: { gimmickActive: false } });
+    const mega = damageRange({ attacker: feraligatr, defender: blissey, move: 'Body Slam', field: NEUTRAL_FIELD, attackerSide: 'mine', attackerOpts: { gimmickActive: true } });
+    expect(mega.maxPercent).toBeGreaterThan(base.maxPercent);
+  });
+});
