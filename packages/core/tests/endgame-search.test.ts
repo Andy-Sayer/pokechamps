@@ -2139,3 +2139,108 @@ describe('breadth-restricted passes + wideningSchedule (Step C)', () => {
     expect(wide.every(t => t.budgetMs > 0 && t.maxDepth > 0)).toBe(true);
   });
 });
+
+// Step D — coverage for the deep-switch machinery (switches enumerated in the
+// LOOKAHEAD, not just at the root) and the breadth knobs that gate it. The root-ply
+// switch behaviour is covered by Phase 3a above; these target depth ≥ 2.
+describe('Step D: deep (lookahead) switch coverage', () => {
+  // Rock-4× Volcarona is doomed to a fast Aerodactyl's Stone Edge; Bronzong
+  // (Steel/Psychic) resists Rock and sits on the bench to retreat into.
+  const volcarona = mon({ species: 'Volcarona', nature: 'Timid', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Bug Buzz', 'Fiery Dance'] });
+  const aggron = mon({ species: 'Aggron', ability: 'Sturdy', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, atk: 252 }, moves: ['Heavy Slam', 'Earthquake'] });
+  const bronzong = mon({ species: 'Bronzong', ability: 'Levitate', nature: 'Sassy', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Flash Cannon', 'Body Press'] });
+  const fastAero: OpponentEntry = { species: 'Aerodactyl', knownMoves: ['Stone Edge'], candidates: [mon({ species: 'Aerodactyl', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Stone Edge'] })] };
+
+  // The deep-switch lookahead is DECISION-CHANGING: preserving a doomed Volcarona
+  // behind Bronzong is only worth it because the search can see the follow-up plies
+  // playing out from behind the wall. Model those switches (limit=2) → recommend the
+  // retreat; switch them off at depth (limit=0) → the evaluation changes and the
+  // Bronzong retreat is no longer chosen. Proves the Step B/C knob is live + matters.
+  test('the deep-switch lookahead is decision-changing (switchPlyLimit knob is live)', () => {
+    const input: SearchInput = {
+      mine: [
+        { set: volcarona, hpPercent: 100, active: true },
+        { set: aggron, hpPercent: 100, active: true },
+        { set: bronzong, hpPercent: 100, active: false },
+      ],
+      opp: [
+        { entry: fastAero, hpPercent: 100, active: true },
+        { entry: oppOf(incin), hpPercent: 100, active: true },
+      ],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    };
+    const deep = createSearch(input, { switchPlyLimit: 2 }).toDepth(2);
+    const shallow = createSearch(input, { switchPlyLimit: 0 }).toDepth(2);
+    const retreats = (r: typeof deep) => r.plays.some(p => p.switch && p.mySpecies === 'Volcarona' && p.targetSpecies === 'Bronzong');
+    expect(retreats(deep)).toBe(true);     // deep lookahead → retreat the doomed mon
+    expect(retreats(shallow)).toBe(false); // no deep switches → different decision
+  });
+
+  // Maximin monotonicity #1: when only I have a bench, the opponent can't
+  // counter-switch, so giving me MORE deep-switch plies can only hold my value flat
+  // or raise it. A regression guard against a deep-switch bug that mis-signs value.
+  test('more deep-switch plies never LOWER my maximin when only I have a bench', () => {
+    const input: SearchInput = {
+      mine: [
+        { set: volcarona, hpPercent: 100, active: true },
+        { set: aggron, hpPercent: 100, active: true },
+        { set: bronzong, hpPercent: 100, active: false },   // my bench
+      ],
+      opp: [
+        { entry: fastAero, hpPercent: 100, active: true },
+        { entry: oppOf(incin), hpPercent: 100, active: true },  // opp: both active, NO bench
+      ],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    };
+    const s0 = createSearch(input, { switchPlyLimit: 0 }).toDepth(3).score;
+    const s2 = createSearch(input, { switchPlyLimit: 2 }).toDepth(3).score;
+    expect(s2).toBeGreaterThanOrEqual(s0 - 1e-6);
+  });
+
+  // Maximin monotonicity #2 (mirror): when only the OPPONENT has a bench, its extra
+  // deep defensive switches can only hold my value flat or LOWER it.
+  test('more deep-switch plies never RAISE my maximin when only the opp has a bench', () => {
+    const hydreigon = mon({ species: 'Hydreigon', nature: 'Modest', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Dark Pulse'] });
+    const heatran: OpponentEntry = { species: 'Heatran', knownMoves: ['Magma Storm'], candidates: [mon({ species: 'Heatran', ability: 'Flash Fire', nature: 'Modest', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Magma Storm'] })] };
+    const input: SearchInput = {
+      mine: [
+        { set: flutter, hpPercent: 100, active: true },
+        { set: garchomp, hpPercent: 100, active: true },   // me: both active, NO bench
+      ],
+      opp: [
+        { entry: oppOf(hydreigon), hpPercent: 100, active: true },
+        { entry: oppOf(incin), hpPercent: 100, active: true },
+        { entry: heatran, hpPercent: 100, active: false },  // opp bench wall to retreat to
+      ],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    };
+    const s0 = createSearch(input, { switchPlyLimit: 0 }).toDepth(3).score;
+    const s2 = createSearch(input, { switchPlyLimit: 2 }).toDepth(3).score;
+    expect(s2).toBeLessThanOrEqual(s0 + 1e-6);
+  });
+
+  // Step A — the coarse profile caps the opp's candidate spreads. The search digest
+  // keeps ≤ K spreads; spreadK=1 collapses to the single most-likely.
+  test('spreadK caps the opponent spread profile (Step A)', () => {
+    const wideSpreads: OpponentEntry = {
+      species: 'Incineroar', knownMoves: ['Flare Blitz'],
+      candidates: [
+        mon({ species: 'Incineroar', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Flare Blitz'] }),
+        mon({ species: 'Incineroar', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Flare Blitz'] }),
+        mon({ species: 'Incineroar', nature: 'Impish', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Flare Blitz'] }),
+        mon({ species: 'Incineroar', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Flare Blitz'] }),
+      ],
+      candidateLikelihoods: [0.4, 0.3, 0.2, 0.1],
+    };
+    const input: SearchInput = {
+      mine: [{ set: flutter, hpPercent: 100, active: true }],
+      opp: [{ entry: wideSpreads, hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    };
+    const full = createSearch(input).toDepth(1).explored!.spreads;
+    const narrow = createSearch(input, { spreadK: 1 }).toDepth(1).explored!.spreads;
+    expect(narrow).toBe(1);
+    expect(full).toBeGreaterThan(narrow);
+    expect(full).toBeLessThanOrEqual(3);   // default SEARCH_PROFILE_K
+  });
+});
