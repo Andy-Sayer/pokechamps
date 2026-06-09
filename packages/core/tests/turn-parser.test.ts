@@ -684,3 +684,26 @@ describe('parseTurnLine: status-on-hit tags', () => {
     expect(r.actions[0]!.targetRemainingHpPercent).toBe(67);
   });
 });
+
+describe('parseTurnLine: inline ability reveal', () => {
+  test('`o1 ability Defiant` → state update setAbility (opp side)', () => {
+    const r = parseTurnLine('o1 ability Defiant', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'state') return;
+    expect(r.update.side).toBe('theirs');
+    expect(r.update.teamIndex).toBe(0);
+    expect(r.update.setAbility).toBe('Defiant');
+  });
+
+  test('`abil` alias + multi-word ability name', () => {
+    const r = parseTurnLine('o2 abil Magic Bounce', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.kind === 'state') expect(r.update.setAbility).toBe('Magic Bounce');
+  });
+
+  test('`m1 ability Guts` targets my side', () => {
+    const r = parseTurnLine('m1 ability Guts', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.kind === 'state') { expect(r.update.side).toBe('mine'); expect(r.update.setAbility).toBe('Guts'); }
+  });
+});

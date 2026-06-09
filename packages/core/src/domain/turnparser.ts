@@ -122,6 +122,10 @@ export interface StateUpdate {
   perish?: number;        // default 3 if N omitted
   // One-turn flinch volatile. Clears at EOT. "o1 flinch" / "m1 flinch".
   flinch?: boolean;
+  // Reveal/set a mon's ABILITY inline (no /info screen): "o1 ability Defiant".
+  // Applied immediately, so a same-turn foe-drop/Intimidate reaction (e.g. the
+  // Snarl that just revealed Defiant) picks it up. Canonicalised at apply time.
+  setAbility?: string;
 }
 
 export type ParseResult =
@@ -433,6 +437,19 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
     const { side, teamIndex } = ref;
     const which: 'sitrus' | 'leftovers' = /sitrus/i.test(namedHealMatch[3]!) ? 'sitrus' : 'leftovers';
     return { ok: true, kind: 'state', update: { side, teamIndex, namedHeal: which } };
+  }
+
+  // Reveal/set a mon's ability inline (no /info): "o1 ability Defiant" /
+  // "o1 abil Magic Bounce" / "m1 ability Guts". The rest of the line is the ability
+  // name (canonicalised at apply time). Applied immediately so a foe-drop / Intimidate
+  // reaction logged in the SAME turn picks it up (the +2 lands on the revealing hit).
+  const abilityMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+(?:ability|abil)\s+(.+)$/i);
+  if (abilityMatch) {
+    const ref = resolveRef(abilityMatch[1]!, parseInt(abilityMatch[2]!, 10), ctx);
+    if (!ref) return { ok: false, error: `${abilityMatch[1]}${abilityMatch[2]} has no active mon` };
+    const name = abilityMatch[3]!.trim();
+    if (!name) return { ok: false, error: 'ability name required, e.g. "o1 ability Defiant"' };
+    return { ok: true, kind: 'state', update: { side: ref.side, teamIndex: ref.teamIndex, setAbility: name } };
   }
 
   // "o2 fainted" / "o2 ko"

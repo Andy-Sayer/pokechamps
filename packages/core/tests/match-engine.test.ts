@@ -999,3 +999,26 @@ describe('foe-drop moves + Defiant/Competitive reaction (live)', () => {
     expect(r.match.myBoosts?.[0] ?? {}).toEqual({});
   });
 });
+
+describe('inline ability reveal (o1 ability <Name>)', () => {
+  test('sets + canonicalizes the opp ability', () => {
+    const match = freshMatch({ oppSpecies: ['Kingambit', 'Amoonguss'] });
+    const r = applyStateUpdate({ match, update: { side: 'theirs', teamIndex: 0, setAbility: 'defiant' }, activeIdx: startActive });
+    expect(r.match.opponentTeam[0]!.ability).toBe('Defiant'); // canonicalized from 'defiant'
+  });
+
+  test('revealing the ability mid-turn lets the SAME-turn foe-drop trigger it (+2)', () => {
+    // m1 has no Defiant initially; reveal it inline (applied immediately), then a
+    // foe-drop move finalizes and sees it → +2 lands on that very hit.
+    let match = freshMatch({ myTeam: [mon({ species: 'Garchomp', moves: [] }), mon({ species: 'Amoonguss', moves: [] })] });
+    match = applyStateUpdate({ match, update: { side: 'mine', teamIndex: 0, setAbility: 'Defiant' }, activeIdx: startActive }).match;
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move', move: 'Snarl',
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0, damageHpPercent: 20, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: NEUTRAL_FIELD }, activeIdx: startActive });
+    const b = r.match.myBoosts?.[0] ?? {};
+    expect(b.spa).toBe(-1); // Snarl drop
+    expect(b.atk).toBe(2);  // Defiant fired because the ability was revealed first
+  });
+});

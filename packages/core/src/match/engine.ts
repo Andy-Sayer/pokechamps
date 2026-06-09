@@ -51,7 +51,7 @@ import { statusBerryFor } from '../domain/statusBerries.js';
 import { resistBerryForType } from '../domain/resistBerries.js';
 import { effectiveness, speciesTypes } from '../domain/typechart.js';
 import { EFFECT_DURATIONS } from '../domain/durations.js';
-import { isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, getSpecies, getMove, toId } from '../domain/data.js';
+import { isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, getSpecies, getMove, getAbility, toId } from '../domain/data.js';
 import type { StateUpdate, HazardUpdate } from '../domain/turnparser.js';
 
 export type ActiveIdx = {
@@ -1594,6 +1594,20 @@ function applyStateUpdateImpl(
   };
 
   const { side, teamIndex } = update;
+
+  // Reveal/set a mon's ability (no /info). Canonicalise via the dex so downstream
+  // (certainAbility / defiantStat / the calc's ability swap) sees the proper name.
+  if (update.setAbility != null) {
+    const ab = getAbility(update.setAbility);
+    const canon = ab?.exists ? ab.name : update.setAbility;
+    if (side === 'theirs') {
+      const o = next.opponentTeam[teamIndex];
+      if (o) o.ability = canon;
+    } else {
+      const s = next.myTeam[teamIndex];
+      if (s) next.myTeam = next.myTeam.map((m, i) => (i === teamIndex ? { ...m, ability: canon } : m));
+    }
+  }
 
   if (update.hpPercent != null) {
     if (side === 'theirs') {
