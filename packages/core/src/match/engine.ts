@@ -40,6 +40,9 @@ import {
   intimidateReaction,
   certainAbility,
   resolveDownloadBoost,
+  foeDropOf,
+  statDropImmune,
+  defiantStat,
   type BoostMap,
 } from '../domain/abilities.js';
 import { sashProcced } from '../domain/itemSignals.js';
@@ -818,6 +821,42 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
       applied[stat as keyof BoostMap] = contrary ? -(delta as number) : (delta as number);
     }
     applyBoostsTo(next, a.side, a.attackerTeamIndex, applied);
+  }
+
+  // Foe-targeted stat drops from a damaging move's GUARANTEED (100%) secondary
+  // (Icy Wind / Snarl / Electroweb / Struggle Bug / Breaking Swipe / Low Sweep / …):
+  // apply to the TARGET's boosts when the move connected, honouring Clear Body /
+  // White Smoke / Full Metal Body / Clear Amulet immunity + a standing Substitute,
+  // Contrary inversion, and the **Defiant / Competitive +2 reaction**. Spread moves
+  // log one action per target, so per-action application covers single + spread.
+  // (Intimidate's Defiant trigger is handled on switch-in via intimidateReaction.)
+  // Mirror in BattleScreen.tsx.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (a.damageHpPercent == null && a.damageRaw == null) continue;   // missed / immune → no secondary
+    if (typeof a.target !== 'object' || a.targetTeamIndex == null) continue;
+    const drop = foeDropOf(a.move);
+    if (!drop) continue;
+    const tSide = a.target.side;
+    const tIdx = a.targetTeamIndex;
+    if (tSide === 'mine' ? next.myCurrentSub?.[tIdx] != null : next.opponentTeam[tIdx]?.substitute != null) continue; // Sub blocks secondaries
+    const tAbil = tSide === 'mine'
+      ? next.myTeam[tIdx]?.ability
+      : certainAbility({ knownAbility: next.opponentTeam[tIdx]?.ability, species: next.opponentTeam[tIdx]?.species ?? '' });
+    const tItem = tSide === 'mine' ? next.myTeam[tIdx]?.item : next.opponentTeam[tIdx]?.item;
+    if (statDropImmune(tAbil, tItem)) continue;                       // no drop, no Defiant
+    if (tAbil && toId(tAbil) === 'contrary') {                        // Contrary: drop → boost, no Defiant
+      const inv: BoostMap = {};
+      for (const [s, d] of Object.entries(drop)) inv[s as keyof BoostMap] = -(d as number);
+      applyBoostsTo(next, tSide, tIdx, inv);
+      continue;
+    }
+    applyBoostsTo(next, tSide, tIdx, drop);
+    const react = defiantStat(tAbil);
+    if (react) {
+      applyBoostsTo(next, tSide, tIdx, { [react]: 2 } as BoostMap);
+      inferenceNotes.push(`${tSide === 'mine' ? 'm' : 'o'}${tIdx + 1} ${react === 'atk' ? 'Defiant' : 'Competitive'} +2 ${react} (foe-drop)`);
+    }
   }
 
   // Drain moves (Giga Drain, Drain Punch, Leech Life, …): heal the attacker by

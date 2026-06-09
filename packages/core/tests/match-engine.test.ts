@@ -951,3 +951,51 @@ describe('Liquid Ooze reverses drain healing', () => {
     expect(r.match.opponentTeam[0]!.currentHpPercent).toBeGreaterThan(60);
   });
 });
+
+describe('foe-drop moves + Defiant/Competitive reaction (live)', () => {
+  // Opp attacks MY mon with a guaranteed foe-drop move (the ability is read straight
+  // off my set). Using opp→mine deliberately avoids the mine→theirs inference pass,
+  // keeping these fast + focused on the boost logic.
+  const oppDropsOnMine = (move: string, myAbility: string) => {
+    const myTeam = [
+      mon({ species: 'Garchomp', ability: myAbility, moves: [] }),
+      mon({ species: 'Amoonguss', moves: [] }),
+    ];
+    const match = freshMatch({ myTeam });
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move', move,
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0, damageHpPercent: 15, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: NEUTRAL_FIELD }, activeIdx: startActive });
+    return r.match.myBoosts?.[0] ?? {};
+  };
+
+  test('Mystical Fire (−1 SpA) into a Defiant mon: drop lands + Defiant +2 Atk', () => {
+    const b = oppDropsOnMine('Mystical Fire', 'Defiant');
+    expect(b.spa).toBe(-1);
+    expect(b.atk).toBe(2);
+  });
+
+  test('Lunge (−1 Atk) into a Competitive mon: drop lands + Competitive +2 SpA', () => {
+    const b = oppDropsOnMine('Lunge', 'Competitive');
+    expect(b.atk).toBe(-1);
+    expect(b.spa).toBe(2);
+  });
+
+  test('Clear Body blocks the foe-drop entirely (no drop, no reaction)', () => {
+    expect(oppDropsOnMine('Mystical Fire', 'Clear Body')).toEqual({});
+  });
+
+  test('Contrary inverts the drop into a boost (no Defiant)', () => {
+    const b = oppDropsOnMine('Mystical Fire', 'Contrary');
+    expect(b.spa).toBe(1);          // −1 inverted to +1
+    expect(b.atk ?? 0).toBe(0);     // Contrary suppresses the Defiant-style trigger
+  });
+
+  test('a missed move (no damage logged) applies no foe-drop / reaction', () => {
+    const match = freshMatch({ myTeam: [mon({ species: 'Garchomp', ability: 'Defiant', moves: [] }), mon({ species: 'Amoonguss', moves: [] })] });
+    const action: MoveAction = { side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move', move: 'Mystical Fire', target: { side: 'mine', slot: 0 }, targetTeamIndex: 0, order: 1 };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: NEUTRAL_FIELD }, activeIdx: startActive });
+    expect(r.match.myBoosts?.[0] ?? {}).toEqual({});
+  });
+});

@@ -1,5 +1,5 @@
 import type { FieldState } from './types.js';
-import { getSpecies } from './data.js';
+import { getSpecies, getMove, toId } from './data.js';
 
 // Switch-in ability effects (A.2). On entry some abilities change the battle
 // state without any move being used: Intimidate drops foe Attack, weather
@@ -92,6 +92,35 @@ const INTIMIDATE_IMMUNE = new Set([
   'Hyper Cutter',
   'Inner Focus', 'Oblivious', 'Own Tempo', 'Scrappy',
 ]);
+
+// Guaranteed (100%) stat-drop a DAMAGING move inflicts on its TARGET: Icy Wind /
+// Electroweb / Bulldoze −1 Spe, Snarl / Struggle Bug −1 SpA, Breaking Swipe −1 Atk,
+// Low Sweep −1 Spe, Lunge −1 Atk, Acid Spray −2 SpD. Reads `move.secondary.boosts`
+// only when the chance is 100 (probabilistic 10–30% drops like Crunch/Liquidation
+// are policy-excluded, same as flinch). Negatives only; null if none.
+export function foeDropOf(move: string): BoostMap | null {
+  const sec = (getMove(move) as { secondary?: { chance?: number; boosts?: Record<string, number> } } | undefined)?.secondary;
+  if (!sec || sec.chance !== 100 || !sec.boosts) return null;
+  const out: BoostMap = {};
+  for (const k of ['atk', 'def', 'spa', 'spd', 'spe'] as const) if ((sec.boosts[k] ?? 0) < 0) out[k] = sec.boosts[k]!;
+  return Object.keys(out).length ? out : null;
+}
+
+// Abilities/items that block an OPPONENT-inflicted stat drop entirely (no drop, no
+// Defiant trigger). Hyper Cutter / Big Pecks (stat-specific) are a documented omission.
+const STAT_IMMUNE_ABILITIES = new Set(['clearbody', 'whitesmoke', 'fullmetalbody']);
+export function statDropImmune(ability: string | null | undefined, item: string | null | undefined): boolean {
+  return STAT_IMMUNE_ABILITIES.has(toId(ability ?? '')) || /clear\s*amulet/i.test(item ?? '');
+}
+
+// The stat a mon raises +2 when the OPPONENT lowers one of its stats: Defiant → Atk,
+// Competitive → SpA. null otherwise.
+export function defiantStat(ability: string | null | undefined): 'atk' | 'spa' | null {
+  const a = toId(ability ?? '');
+  if (a === 'defiant') return 'atk';
+  if (a === 'competitive') return 'spa';
+  return null;
+}
 
 export function intimidateReaction(
   foeAbility: string | undefined | null,

@@ -23,7 +23,7 @@ import { hpItemTriggerFor } from '@pokechamps/core/domain/hpItemTriggers.js';
 import { statusBerryFor } from '@pokechamps/core/domain/statusBerries.js';
 import { resistBerryForType } from '@pokechamps/core/domain/resistBerries.js';
 import { effectiveness, speciesTypes } from '@pokechamps/core/domain/typechart.js';
-import { switchInAbilityEffect, intimidateReaction, certainAbility, resolveDownloadBoost, type BoostMap } from '@pokechamps/core/domain/abilities.js';
+import { switchInAbilityEffect, intimidateReaction, certainAbility, resolveDownloadBoost, foeDropOf, statDropImmune, defiantStat, type BoostMap } from '@pokechamps/core/domain/abilities.js';
 import { deriveSuggestionContext, getSuggestions, applySuggestion, type SuggestionKind } from '@pokechamps/core/domain/actionSuggest.js';
 import { predictOffense, predictOffenseAll, predictThreat, predictThreatAll, speedVerdict, type SpeedVerdict, type MatchupCell, type Confidence } from '@pokechamps/core/domain/predictions.js';
 import { PikaSpinner } from './PikaSpinner.js';
@@ -1142,6 +1142,36 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         applied[stat as keyof BoostMap] = contrary ? -(delta as number) : (delta as number);
       }
       applyBoostsInto(next, a.side, a.attackerTeamIndex, applied);
+    }
+
+    // Foe-targeted stat drops from a damaging move's GUARANTEED (100%) secondary
+    // (Icy Wind / Snarl / Electroweb / Breaking Swipe / …): apply to the TARGET when
+    // the move connected, honouring Clear Body / Clear Amulet immunity + Substitute,
+    // Contrary inversion, and the Defiant / Competitive +2 reaction. Spread moves log
+    // one action per target → per-action covers single + spread. Mirror of engine.ts.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.damageHpPercent == null && a.damageRaw == null) continue;
+      if (typeof a.target !== 'object' || a.targetTeamIndex == null) continue;
+      const drop = foeDropOf(a.move);
+      if (!drop) continue;
+      const tSide = a.target.side;
+      const tIdx = a.targetTeamIndex;
+      if (tSide === 'mine' ? next.myCurrentSub?.[tIdx] != null : next.opponentTeam[tIdx]?.substitute != null) continue;
+      const tAbil = tSide === 'mine'
+        ? next.myTeam[tIdx]?.ability
+        : certainAbility({ knownAbility: next.opponentTeam[tIdx]?.ability, species: next.opponentTeam[tIdx]?.species ?? '' });
+      const tItem = tSide === 'mine' ? next.myTeam[tIdx]?.item : next.opponentTeam[tIdx]?.item;
+      if (statDropImmune(tAbil, tItem)) continue;
+      if (tAbil && toId(tAbil) === 'contrary') {
+        const inv: BoostMap = {};
+        for (const [s, d] of Object.entries(drop)) inv[s as keyof BoostMap] = -(d as number);
+        applyBoostsInto(next, tSide, tIdx, inv);
+        continue;
+      }
+      applyBoostsInto(next, tSide, tIdx, drop);
+      const react = defiantStat(tAbil);
+      if (react) applyBoostsInto(next, tSide, tIdx, { [react]: 2 } as BoostMap);
     }
 
     // Drain moves (Giga Drain / Drain Punch / …): heal attacker by drain
