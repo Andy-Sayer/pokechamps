@@ -72,6 +72,9 @@ o1 item Choice Specs    ← reveal a HELD item inline (no /info) — `itm` also 
                           clears any stale itemConsumed (it's held now) and prunes the opp's
                           candidate spreads to those carrying it. Item mechanics (resist/status
                           berries, Black Sludge, Clear Amulet, Choice lock, Air Balloon) then read it.
+                          ITEM CLAUSE is on: a known/used item on one opp mon is auto-excluded from
+                          every OTHER opp mon's candidate pool (ripples on reveal + each finalize;
+                          never empties a set). See domain/itemClause.ts.
 o1 ability Defiant      ← reveal an ability inline (no /info) — `abil` also works; a same-turn
                           foe-drop then auto-triggers Defiant/Competitive
 o1 damage 25            ← -25% (clamps at 0; auto-faints + clears slot if 0)

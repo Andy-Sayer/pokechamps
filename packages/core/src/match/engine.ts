@@ -21,6 +21,7 @@ import type {
 } from '../domain/types.js';
 import { NEUTRAL_FIELD } from '../domain/types.js';
 import { scoreSpread, scoreOffensiveSpread, recoilDrainHpEvs, reconcileCandidates } from '../domain/inference.js';
+import { applyItemClauseExclusion } from '../domain/itemClause.js';
 import { computeActionBoostContexts } from '../domain/turnBoosts.js';
 import { maxHpFor } from '../domain/damage.js';
 import { endOfTurn } from '../domain/endOfTurn.js';
@@ -1463,6 +1464,12 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     inferenceNotes.push(`${opp.species}: reconciled to ${opp.candidates.length} spread(s)`);
   }
 
+  // Item Clause: a known/used item on one opp mon can't be held by another, so
+  // prune it from every other mon's candidate pool. Runs after all inference +
+  // item-consume passes settle so a berry popping (or item revealed) THIS turn
+  // immediately ripples to the rest of the team.
+  inferenceNotes.push(...applyItemClauseExclusion(next.opponentTeam));
+
   // Tag pivot-follow switches. A pivot move (U-turn etc.) executes, then
   // forces its user out — the user logs the switch as the next action by
   // the same mon + slot. That switch happens within the pivot's priority
@@ -1920,6 +1927,11 @@ function applyStateUpdateImpl(
     applyHazardOnSwitchInto(next, side, teamIndex);
     applySwitchInAbility(next, side, teamIndex, nextActive);
   }
+
+  // Item Clause: a freshly revealed/consumed item (setItem, namedTrigger,
+  // leftovers/sitrus, a cured status berry) is now spoken for — ripple the
+  // exclusion to the rest of the opp team's candidate pools.
+  applyItemClauseExclusion(next.opponentTeam);
 
   next.outcome = detectOutcome(next);
 

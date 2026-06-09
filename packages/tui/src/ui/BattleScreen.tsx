@@ -5,6 +5,7 @@ import SelectInput from 'ink-select-input';
 import type { Match, FieldState, DamageObservation, MoveAction, OpponentEntry, PokemonSet } from '@pokechamps/core/domain/types.js';
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
 import { scoreSpread, scoreOffensiveSpread, mostLikely, recoilDrainHpEvs, reconcileCandidates } from '@pokechamps/core/domain/inference.js';
+import { applyItemClauseExclusion } from '@pokechamps/core/domain/itemClause.js';
 import { computeActionBoostContexts } from '@pokechamps/core/domain/turnBoosts.js';
 import { maxHpFor } from '@pokechamps/core/domain/damage.js';
 import { endOfTurn } from '@pokechamps/core/domain/endOfTurn.js';
@@ -1741,6 +1742,10 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       inferenceNotes.push(`${opp.species}: reconciled to ${opp.candidates.length} spread(s)`);
     }
 
+    // Item Clause: prune any item known/used on one opp mon from the others'
+    // candidate pools (mirror of engine.ts).
+    inferenceNotes.push(...applyItemClauseExclusion(next.opponentTeam));
+
     // Speed inference uses the whole match history. Apply to opp team.
     const speeds = inferOpponentSpeeds(next, next.myTeam);
     applySpeedInference(next.opponentTeam, speeds);
@@ -2195,6 +2200,10 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       // Switch-in ability triggers (Intimidate / weather / terrain).
       applySwitchInAbilityInto(next, side, teamIndex, nextActive);
     }
+
+    // Item Clause: ripple a freshly revealed/consumed item to the rest of the
+    // opp team (mirror of engine.ts applyStateUpdate).
+    applyItemClauseExclusion(next.opponentTeam);
 
     next.outcome = detectOutcome(next);
     setMatch(next);
