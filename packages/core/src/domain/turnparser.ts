@@ -126,6 +126,12 @@ export interface StateUpdate {
   // Applied immediately, so a same-turn foe-drop/Intimidate reaction (e.g. the
   // Snarl that just revealed Defiant) picks it up. Canonicalised at apply time.
   setAbility?: string;
+  // Reveal/set a mon's held ITEM inline (no /info screen): "o1 item Choice Specs".
+  // Marks the item currently HELD (clears any stale itemConsumed) and, on the opp
+  // side, prunes the candidate spreads to those carrying that item. Canonicalised
+  // at apply time; item-dependent mechanics (resist/status berries, Black Sludge,
+  // Clear Amulet, Choice lock, Air Balloon, …) then read the right item.
+  setItem?: string;
 }
 
 export type ParseResult =
@@ -450,6 +456,19 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
     const name = abilityMatch[3]!.trim();
     if (!name) return { ok: false, error: 'ability name required, e.g. "o1 ability Defiant"' };
     return { ok: true, kind: 'state', update: { side: ref.side, teamIndex: ref.teamIndex, setAbility: name } };
+  }
+
+  // Reveal/set a mon's held item inline (no /info): "o1 item Choice Specs" /
+  // "o1 itm Assault Vest" / "m1 item Leftovers". The rest of the line is the item
+  // name (canonicalised at apply time). Marks the item held now (clears a stale
+  // consumed flag) and prunes opp candidate spreads to that item.
+  const itemMatch = trimmed.match(/^(my|op|m|o)([1-6])\s+(?:item|itm)\s+(.+)$/i);
+  if (itemMatch) {
+    const ref = resolveRef(itemMatch[1]!, parseInt(itemMatch[2]!, 10), ctx);
+    if (!ref) return { ok: false, error: `${itemMatch[1]}${itemMatch[2]} has no active mon` };
+    const name = itemMatch[3]!.trim();
+    if (!name) return { ok: false, error: 'item name required, e.g. "o1 item Choice Specs"' };
+    return { ok: true, kind: 'state', update: { side: ref.side, teamIndex: ref.teamIndex, setItem: name } };
   }
 
   // "o2 fainted" / "o2 ko"

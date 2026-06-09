@@ -1023,6 +1023,63 @@ describe('inline ability reveal (o1 ability <Name>)', () => {
   });
 });
 
+describe('inline item reveal (o1 item <Name>)', () => {
+  test('sets + canonicalizes the opp item', () => {
+    const match = freshMatch({ oppSpecies: ['Garchomp', 'Amoonguss'] });
+    const r = applyStateUpdate({ match, update: { side: 'theirs', teamIndex: 0, setItem: 'choiceband' }, activeIdx: startActive });
+    expect(r.match.opponentTeam[0]!.item).toBe('Choice Band'); // canonicalized from 'choiceband'
+  });
+
+  test('revealing a held item clears a stale itemConsumed flag', () => {
+    const match = freshMatch({ oppSpecies: ['Garchomp', 'Amoonguss'] });
+    match.opponentTeam[0] = { ...match.opponentTeam[0]!, itemConsumed: 'Sitrus Berry' };
+    const r = applyStateUpdate({ match, update: { side: 'theirs', teamIndex: 0, setItem: 'Assault Vest' }, activeIdx: startActive });
+    const o = r.match.opponentTeam[0]!;
+    expect(o.item).toBe('Assault Vest');
+    expect(o.itemConsumed).toBeUndefined();
+  });
+
+  test('prunes opp candidate spreads to the revealed item, in lockstep with likelihoods', () => {
+    const match = freshMatch({ oppSpecies: ['Garchomp', 'Amoonguss'] });
+    const base = { species: 'Garchomp', level: 50, nature: 'Jolly', evs: { ...ZERO_EVS }, ivs: MAX_IVS, moves: [] as string[] };
+    match.opponentTeam[0] = {
+      ...match.opponentTeam[0]!,
+      candidates: [
+        { ...base, item: 'Leftovers', ability: 'Rough Skin' },
+        { ...base, item: 'Choice Scarf', ability: 'Rough Skin' },
+        { ...base, item: 'Leftovers', ability: 'Sand Veil' },
+      ],
+      candidateLikelihoods: [0.5, 0.3, 0.2],
+    };
+    const r = applyStateUpdate({ match, update: { side: 'theirs', teamIndex: 0, setItem: 'Leftovers' }, activeIdx: startActive });
+    const o = r.match.opponentTeam[0]!;
+    expect(o.candidates).toHaveLength(2);
+    expect(o.candidates!.every(c => c.item === 'Leftovers')).toBe(true);
+    expect(o.candidateLikelihoods).toEqual([0.5, 0.2]); // pruned parallel to candidates
+  });
+
+  test('no candidate matches the revealed item → leaves the set untouched (never empties)', () => {
+    const match = freshMatch({ oppSpecies: ['Garchomp', 'Amoonguss'] });
+    const base = { species: 'Garchomp', level: 50, nature: 'Jolly', evs: { ...ZERO_EVS }, ivs: MAX_IVS, moves: [] as string[] };
+    match.opponentTeam[0] = {
+      ...match.opponentTeam[0]!,
+      candidates: [{ ...base, item: 'Leftovers', ability: 'Rough Skin' }],
+    };
+    const r = applyStateUpdate({ match, update: { side: 'theirs', teamIndex: 0, setItem: 'Choice Band' }, activeIdx: startActive });
+    const o = r.match.opponentTeam[0]!;
+    expect(o.item).toBe('Choice Band');
+    expect(o.candidates).toHaveLength(1); // unchanged
+  });
+
+  test('m1 item targets my side and clears my consumed flag', () => {
+    const match = freshMatch();
+    match.myItemConsumed = { 0: 'Sitrus Berry' };
+    const r = applyStateUpdate({ match, update: { side: 'mine', teamIndex: 0, setItem: 'Choice Band' }, activeIdx: startActive });
+    expect(r.match.myTeam[0]!.item).toBe('Choice Band');
+    expect(r.match.myItemConsumed?.[0]).toBeUndefined();
+  });
+});
+
 describe('inline target stat drop (chance secondaries)', () => {
   test('an explicit (chance) drop triggers Defiant just like a 100% one', () => {
     // Crunch's 20% Def drop is probabilistic → never auto-applied. Logging it inline

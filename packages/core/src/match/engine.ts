@@ -51,7 +51,7 @@ import { statusBerryFor } from '../domain/statusBerries.js';
 import { resistBerryForType } from '../domain/resistBerries.js';
 import { effectiveness, speciesTypes } from '../domain/typechart.js';
 import { EFFECT_DURATIONS } from '../domain/durations.js';
-import { isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, getSpecies, getMove, getAbility, toId } from '../domain/data.js';
+import { isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, getSpecies, getMove, getAbility, getItem, toId } from '../domain/data.js';
 import type { StateUpdate, HazardUpdate } from '../domain/turnparser.js';
 
 export type ActiveIdx = {
@@ -1627,6 +1627,39 @@ function applyStateUpdateImpl(
     } else {
       const s = next.myTeam[teamIndex];
       if (s) next.myTeam = next.myTeam.map((m, i) => (i === teamIndex ? { ...m, ability: canon } : m));
+    }
+  }
+
+  // Reveal/set a mon's held item (no /info). Canonicalise via the dex so item
+  // mechanics (resist/status berries, Black Sludge, Clear Amulet, Choice lock,
+  // Air Balloon, …) read the proper name. The item is HELD now, so clear any
+  // stale consumed flag; on the opp side, prune the candidate spreads to those
+  // carrying this item (never emptying the set).
+  if (update.setItem != null) {
+    const it = getItem(update.setItem);
+    const canon = it?.exists ? it.name : update.setItem;
+    if (side === 'theirs') {
+      const o = next.opponentTeam[teamIndex];
+      if (o) {
+        o.item = canon;
+        o.itemConsumed = undefined;
+        if (o.candidates?.length) {
+          const keep = o.candidates
+            .map((c, i) => ({ c, i }))
+            .filter(({ c }) => toId(c.item ?? '') === toId(canon));
+          if (keep.length && keep.length < o.candidates.length) {
+            o.candidates = keep.map(({ c }) => c);
+            if (o.candidateLikelihoods) o.candidateLikelihoods = keep.map(({ i }) => o.candidateLikelihoods![i]!);
+          }
+        }
+      }
+    } else {
+      const s = next.myTeam[teamIndex];
+      if (s) next.myTeam = next.myTeam.map((m, i) => (i === teamIndex ? { ...m, item: canon } : m));
+      if (next.myItemConsumed?.[teamIndex] != null) {
+        next.myItemConsumed = { ...next.myItemConsumed };
+        delete next.myItemConsumed[teamIndex];
+      }
     }
   }
 

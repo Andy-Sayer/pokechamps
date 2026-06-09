@@ -12,7 +12,7 @@ import { inferOpponentSpeeds, applySpeedInference, actualSpeed, predictTurnOrder
 import { reviewLastTurn } from '@pokechamps/core/ai/prompts.js';
 import { isAvailable as aiAvailable } from '@pokechamps/core/ai/client.js';
 import type { Stores } from '@pokechamps/core/storage/index.js';
-import { getSpecies, getMove, getAbility, toId, isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, isSpreadMove, moveFlinchChance } from '@pokechamps/core/domain/data.js';
+import { getSpecies, getMove, getAbility, getItem, toId, isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, isSpreadMove, moveFlinchChance } from '@pokechamps/core/domain/data.js';
 import { defaultOpponentSet } from '@pokechamps/core/domain/bring.js';
 import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs, hazardClearEffect, applyHazardClear } from '@pokechamps/core/domain/hazards.js';
@@ -1876,6 +1876,36 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         if (s) next.myTeam = next.myTeam.map((m, i) => (i === teamIndex ? { ...m, ability: canon } : m));
       }
     }
+    // Reveal/set a mon's held item (no /info). Canonicalise via the dex; the item
+    // is held now (clear stale consumed flag) and opp candidates prune to it.
+    // Mirror of engine.ts.
+    if (update.setItem != null) {
+      const it = getItem(update.setItem);
+      const canon = it?.exists ? it.name : update.setItem;
+      if (side === 'theirs') {
+        const o = next.opponentTeam[teamIndex];
+        if (o) {
+          o.item = canon;
+          o.itemConsumed = undefined;
+          if (o.candidates?.length) {
+            const keep = o.candidates
+              .map((c, i) => ({ c, i }))
+              .filter(({ c }) => toId(c.item ?? '') === toId(canon));
+            if (keep.length && keep.length < o.candidates.length) {
+              o.candidates = keep.map(({ c }) => c);
+              if (o.candidateLikelihoods) o.candidateLikelihoods = keep.map(({ i }) => o.candidateLikelihoods![i]!);
+            }
+          }
+        }
+      } else {
+        const s = next.myTeam[teamIndex];
+        if (s) next.myTeam = next.myTeam.map((m, i) => (i === teamIndex ? { ...m, item: canon } : m));
+        if (next.myItemConsumed?.[teamIndex] != null) {
+          next.myItemConsumed = { ...next.myItemConsumed };
+          delete next.myItemConsumed[teamIndex];
+        }
+      }
+    }
     // Absolute HP set (m1 = 145 / o2 = 30). Auto-faints at 0 + clears the
     // active slot so the user gets prompted to switch in a replacement —
     // matches the damage-delta path's behaviour.
@@ -2177,6 +2207,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       update.damagePercent != null || update.damageRaw != null ? `Damage applied.` :
       update.boosts ? `Boosts applied.` :
       update.setAbility ? `Ability set: ${side === 'mine' ? 'm' : 'o'}${teamIndex + 1} = ${(getAbility(update.setAbility)?.exists ? getAbility(update.setAbility).name : update.setAbility)}.` :
+      update.setItem ? `Item set: ${side === 'mine' ? 'm' : 'o'}${teamIndex + 1} = ${(getItem(update.setItem)?.exists ? getItem(update.setItem).name : update.setItem)}.` :
       update.namedTrigger ? `${update.namedTrigger} triggered.` :
       update.status ? `Status: ${update.status}.` :
       update.cureStatus ? `Status cured.` :
@@ -3382,6 +3413,7 @@ function HelpPanel() {
       <Text>  <Text color="white">o1 brn</Text> / <Text color="white">par</Text> / <Text color="white">psn</Text> / <Text color="white">tox</Text> / <Text color="white">slp</Text> / <Text color="white">frz</Text> / <Text color="white">cure</Text></Text>
       <Text>  <Text color="white">o1 +2 atk</Text>        <Text dimColor>— stat boost (or -1, multiple stats OK)</Text></Text>
       <Text>  <Text color="white">o1 ability Defiant</Text> <Text dimColor>— reveal an ability inline (no /info); a same-turn foe-drop then auto-triggers Defiant/Competitive</Text></Text>
+      <Text>  <Text color="white">o1 item Choice Specs</Text> <Text dimColor>— reveal a held item inline (no /info); prunes candidate spreads to that item</Text></Text>
       <Text>  <Text color="white">o1 wp</Text> / <Text color="white">sash</Text> / <Text color="white">balloon</Text>  <Text dimColor>— named item triggers</Text></Text>
       <Text>  <Text color="white">o2 leftovers</Text>    <Text dimColor>— EOT Leftovers tick (+6% / 1/16) + confirms the item</Text></Text>
       <Text>  <Text color="white">o1 sitrus</Text>       <Text dimColor>— Sitrus heal (+25%)</Text></Text>

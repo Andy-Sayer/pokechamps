@@ -7,7 +7,7 @@ export type SuggestionKind = 'none' | 'move' | 'switch-target' | 'state-verb';
 
 // Verbs accepted after `oN ` / `mN ` on a state line. Kept sorted by most
 // common first so an empty query lands on the helpful default.
-const STATE_VERBS = ['heal', 'damage', 'sitrus', 'leftovers', 'wp', 'sash', 'balloon', 'brn', 'par', 'psn', 'tox', 'slp', 'frz', 'cure', 'taunt', 'encore', 'disable', 'ko', 'fainted', 'in'];
+const STATE_VERBS = ['heal', 'damage', 'sitrus', 'leftovers', 'item', 'ability', 'wp', 'sash', 'balloon', 'brn', 'par', 'psn', 'tox', 'slp', 'frz', 'cure', 'taunt', 'encore', 'disable', 'ko', 'fainted', 'in'];
 
 export interface SuggestionContext {
   kind: SuggestionKind;
@@ -167,7 +167,7 @@ export function applySuggestion(value: string, pick: string, kind: SuggestionKin
     // Replace the trailing whitespace-delimited token, not the post-`>` chunk.
     const m = value.match(/^(\s*[mo][1-6]\s+)\S*\s*$/i);
     if (m) {
-      const suffix = pick === 'in' || pick === 'heal' ? ' ' : '';
+      const suffix = ['in', 'heal', 'item', 'ability', 'encore', 'disable', 'damage'].includes(pick) ? ' ' : '';
       return `${m[1]}${pick}${suffix}`;
     }
     return value + pick;

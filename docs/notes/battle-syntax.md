@@ -68,6 +68,12 @@ o2 leftovers            ← EOT Leftovers tick: +1/16 (~6%) + confirms item='Lef
                           (opp side; the live engine only auto-applies Leftovers
                           for MINE, so you log the opp's EOT heal here — the search
                           then models its recovery in lookahead)
+o1 item Choice Specs    ← reveal a HELD item inline (no /info) — `itm` also works. Canonicalised;
+                          clears any stale itemConsumed (it's held now) and prunes the opp's
+                          candidate spreads to those carrying it. Item mechanics (resist/status
+                          berries, Black Sludge, Clear Amulet, Choice lock, Air Balloon) then read it.
+o1 ability Defiant      ← reveal an ability inline (no /info) — `abil` also works; a same-turn
+                          foe-drop then auto-triggers Defiant/Competitive
 o1 damage 25            ← -25% (clamps at 0; auto-faints + clears slot if 0)
 m1 damage 30            ← -30 raw HP (mine)
 o2 ko / o2 fainted      ← faint

@@ -708,6 +708,34 @@ describe('parseTurnLine: inline ability reveal', () => {
   });
 });
 
+describe('parseTurnLine: inline item reveal', () => {
+  test('`o1 item Choice Specs` → state update setItem (opp side)', () => {
+    const r = parseTurnLine('o1 item Choice Specs', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'state') return;
+    expect(r.update.side).toBe('theirs');
+    expect(r.update.teamIndex).toBe(0);
+    expect(r.update.setItem).toBe('Choice Specs');
+  });
+
+  test('`itm` alias + multi-word item name', () => {
+    const r = parseTurnLine('o2 itm Assault Vest', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.kind === 'state') expect(r.update.setItem).toBe('Assault Vest');
+  });
+
+  test('`m1 item Leftovers` targets my side', () => {
+    const r = parseTurnLine('m1 item Leftovers', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.kind === 'state') { expect(r.update.side).toBe('mine'); expect(r.update.setItem).toBe('Leftovers'); }
+  });
+
+  test('missing item name is an error', () => {
+    const r = parseTurnLine('o1 item', ctx, 1);
+    expect(r.ok).toBe(false);
+  });
+});
+
 describe('parseTurnLine: inline target stat drop (chance secondaries)', () => {
   test('`50 -1 def` → targetDrop on the hit, damage preserved', () => {
     const r = parseTurnLine('m1 > Crunch > o1 > 50 -1 def', ctx, 1);
