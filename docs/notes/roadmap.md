@@ -1,5 +1,14 @@
 # PokeChamps roadmap
 
+> **⏱ Near-term plan:** [`roadmap-2026-06.md`](roadmap-2026-06.md) is the current
+> **month-scoped execution plan** (June 2026) — read that for *what to build next*.
+> This doc remains the strategic/pillar reference + the J north-star. **Note:** the
+> "Recently shipped" / test-count figures below are stale (last bulk-updated
+> 2026-05-29 at ~492–594 tests; the suite is now **994 green** and most of the
+> "Now/Soon" tiers, the entire search long-tail closeout, the inline reveal verbs,
+> and cross-mon item-clause exclusion have since shipped — see git log + the month
+> plan for the true state).
+
 > **See also:** [`accuracy-roadmap.md`](accuracy-roadmap.md) — a focused, tiered punch-list of damage/state/inference/search fidelity gaps and the order to close them. Maintained alongside this strategic doc.
 
 ## Context
