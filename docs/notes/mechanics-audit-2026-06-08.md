@@ -43,7 +43,7 @@ lower-severity notes, each with an **explicit verdict** so nothing is left as a 
 | # | Note | Verdict |
 |---|---|---|
 | 4 | **Piercing Drill** (Mega Excadrill): the protect-pierce-for-1/4 effect isn't modelled | ✅ **leave as-is** — normal-hit damage is unaffected; only the rare "hit through Protect" case differs |
-| 5 | **Defiant/Competitive** +2 reaction is applied in the search but **not** in the live HP/boost tracker (consistent across both mirrors) | ⚠️ **real live-layer gap** — fix if you want Defiant mons tracked correctly after an Intimidate/foe-drop live; not drift |
+| 5 | **Defiant/Competitive** +2 reaction was applied in the search but **not** the live HP/boost tracker | ✅ **DONE** — now live in both `finalizeTurn` mirrors (foe-drop moves) |
 | 6 | **Wish** heals 50% of the **recipient's** max HP, not the **wisher's** | ✅ **leave as-is for now** — exact for same-mon/similar-bulk wishes; only wrong when wishing for a very different-bulk teammate |
 | 7 | **EOT residual order** differs from Showdown's `onResidualOrder` | ✅ **not a bug** — only changes *which* effect lands a KO at an exact EOT HP boundary; the sum-then-faint model is correct for an HP tracker |
 | 8 | `damageRange` **throws** on a fully-immune hit (calc's `kochance()` errors at 0 damage) | ✅ **not a bug** — every caller wraps it in `try/catch` and skips; an immune move is never chosen anyway |
@@ -99,14 +99,28 @@ Verified every EOT constant in `endOfTurn.ts` against Gen 9 rules — **all corr
 
 All **957 tests green**; core + tui typecheck clean.
 
-## The only remaining OPEN item that's a real gap (your call)
+## Defiant/Competitive live reaction — DONE
 
-- **Defiant/Competitive live-layer reaction** (note #5). The search applies the +2; the
-  live HP/boost tracker (both `finalizeTurn` mirrors) does not. So after an Intimidate
-  or a foe stat-drop, a live-tracked Defiant/Competitive mon won't show the +2. Worth
-  fixing **only if you want live Defiant tracking** — it's a clean addition (mirror of
-  the existing Intimidate handling, applied when a foe-drop lands). Everything else in
-  the notes table has verdict ✅ leave-as-is.
+(Was note #5, the one real open gap.) Implemented: the live `finalizeTurn` now
+auto-applies a damaging move's GUARANTEED foe-drop secondary (Icy Wind/Snarl/Lunge/
+Mystical Fire/Acid Spray/…) to the target's boosts, honouring Clear Body/Clear Amulet
+immunity + Substitute, Contrary inversion, and the Defiant(+2 Atk)/Competitive(+2 SpA)
+reaction. (Intimidate→Defiant was already live via `intimidateReaction`.) The shared
+helpers (`foeDropOf`/`statDropImmune`/`defiantStat`) were lifted into `abilities.ts`
+so the search + live layers can't drift. +5 tests.
+
+## Performance note found in passing (NOT a new bug — documented tradeoff)
+
+- **Live `finalizeTurn` can take tens of seconds** when the user logs a *surviving*
+  (non-KO) hit against an opponent whose candidate spreads aren't pruned by priors.
+  The inverse-inference solver then runs its full coarse grid (~360k spreads ×
+  `@smogon/calc`). This is **intentional** (`inference.ts` L133-137): the TUI omits
+  `quickOnly` so off-meta opps still get inferred, accepting the latency; the server
+  sets `quickOnly` to bound it. In normal play the opp is pre-pruned by Pikalytics
+  priors, so it's fast — the slowness only shows for an un-pruned (off-meta / no-prior)
+  opp. **Worth revisiting** if that UX freeze matters: a time-budget or a hard candidate
+  cap in the TUI path would trade some completeness for a responsive log. Flagged, not
+  changed (it's a product call about inference completeness vs latency).
 
 Optional/cosmetic (not gaps): model Piercing Drill's protect-pierce; thread the
 wisher's max HP into Wish; have `damageRange` return 0 instead of throwing on immune
