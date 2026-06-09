@@ -464,6 +464,18 @@ describe('mega forme abilities are applied in the calc', () => {
     expect(mega.desc).toContain('Sun');
     expect(mega.maxPercent).toBeGreaterThan(noMega.maxPercent); // Fire ×1.5
   });
+
+  test('Mega Sol overrides actual weather — Weather Ball is FIRE even in the rain', () => {
+    const meg = mk({ species: 'Meganium', ability: 'Overgrow', item: 'Meganiumite', nature: 'Modest', evs: { ...ZERO_EVS, spa: 252 }, moves: ['Weather Ball'] });
+    // Skarmory (Steel/Flying): Fire is 2x, Water is 1x — so the type swap is visible.
+    const skarmory: PokemonSet = { species: 'Skarmory', level: 50, nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, ivs: MAX_IVS, moves: [] };
+    const rain = { ...NEUTRAL_FIELD, weather: 'Rain' as const };
+    const base = damageRange({ attacker: meg, defender: skarmory, move: 'Weather Ball', field: rain, attackerSide: 'mine', attackerOpts: { gimmickActive: false } });
+    const mega = damageRange({ attacker: meg, defender: skarmory, move: 'Weather Ball', field: rain, attackerSide: 'mine', attackerOpts: { gimmickActive: true } });
+    expect(base.desc).toContain('Water');                            // base: Weather Ball is Water in real rain
+    expect(mega.desc).toContain('Fire');                             // Mega Sol: Fire even in the rain
+    expect(mega.maxPercent).toBeGreaterThan(base.maxPercent);        // + super-effective vs Steel
+  });
 });
 
 describe('Dragonize (custom Champions mega ability — Feraligatr-Mega)', () => {

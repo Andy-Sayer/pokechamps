@@ -96,13 +96,19 @@ export function damageRange(args: {
 }): DamageRange {
   const atk = toCalcPokemon(args.attacker, args.attackerOpts);
   const def = toCalcPokemon(args.defender, args.defenderOpts);
-  // Mega Sol (custom Champions ability): the holder's moves are used as if
-  // Sunny Day is active. @smogon/calc has no logic for this ability name, so
-  // emulate the weather for the attacker's calc (Fire ×1.5, Water ×0.5) when no
-  // real weather is set. `atk.ability` is the RESOLVED ability — the mega
-  // gimmick already swapped in the forme's ability above.
+  // Mega Sol (custom Champions ability, Meganium-Mega): the holder's moves are used
+  // as if Sunny Day is active NO MATTER the actual weather — so its Fire moves get
+  // ×1.5 and Weather Ball is Fire-typed even in the rain, and its Water moves are
+  // weakened even in the rain. @smogon/calc has no logic for this ability name, so
+  // force Sun in the holder's OFFENSIVE calc regardless of real weather. `atk.ability`
+  // is the RESOLVED (mega) ability — the gimmick swapped in the forme's ability above.
+  // Offense-only: when a Mega Sol mon DEFENDS, `atk` is the opponent, so the incoming
+  // hit still uses the real weather. KNOWN LIMITATION: forcing the calc field to Sun
+  // also drops the DEFENDER's real-weather SpD/Def boost (Sand→Rock, Snow→Ice) for that
+  // single calc — a rare edge (a Mega Sol mon attacking a Rock/Ice type while Sand/Snow
+  // is up). The dominant, intended effect (Fire ×1.5, Weather Ball → Fire) is correct.
   const effField: FieldState =
-    (atk as unknown as { ability?: string }).ability === 'Mega Sol' && !args.field.weather
+    (atk as unknown as { ability?: string }).ability === 'Mega Sol'
       ? { ...args.field, weather: 'Sun' }
       : args.field;
   const moveOpts: Record<string, unknown> = { isCrit: args.critical };
