@@ -21,7 +21,7 @@ m1 > Flare Blitz > o1 > 50 / 120           ← my recoil → my m1 at 120 (attac
 m1 > Liquidation > o1 > 50 / 84 helmet     ← attacker chip is Rocky Helmet (1/6), not recoil: `helmet`/`orb`/`barbs`
 m1 > Giga Drain > o1 > 60 / 132            ← drain: the heal lands on the attacker; `/ <attackerHP>`
 m1 > Close Combat > o1 > 1 sash            ← Focus Sash: survives at sliver, item consumed, hit skipped for inference
-m1 > Close Combat > o1 > 50 sash           ← logging `sash` = it fired → item consumed; >1 HP means it didn't proc, so full dmg still infers
+m1 > Close Combat > o1 > 50 sash           ← survived w/ HP to spare → Sash didn't proc: full dmg infers + item learned (held)
 m1 > Scald > o1 > 45 brn                    ← TARGET status this hit (status word trails the HP): brn/par/psn/tox/slp/frz
 m1 > Will-O-Wisp > o1 > brn                 ← pure status move, no damage → just the status word
 m1 > Flare Blitz > o1 > 45 / 80 brn         ← ATTACKER status in the `/` self-clause (e.g. Flame Body on contact)

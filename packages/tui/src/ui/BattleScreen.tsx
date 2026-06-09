@@ -1509,10 +1509,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (a.target.side === 'mine') { if (next.myTeam[tIdx]) next.myTeam[tIdx]!.item = attackerItem; }
       else { if (next.opponentTeam[tIdx]) next.opponentTeam[tIdx]!.item = attackerItem; }
     }
-    // Focus Sash (`... > o1 > N sash`): logging `sash` means it FIRED, so the
-    // item is always spent. The proc test (1-sliver) additionally keeps the mon
-    // alive at 1 HP and (via sashProcced in the inference passes) skips the
-    // capped hit. Mirror of engine.ts.
+    // Focus Sash (`... > o1 > N sash`): proc (1-sliver) → item consumed, alive,
+    // skip inference; survived with HP to spare → item learned (held), damage
+    // stands for inference. Mirror of engine.ts.
     for (const a of draftActions) {
       if (!a.sash) continue;
       if (typeof a.target !== 'object') continue;
@@ -1522,12 +1521,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (a.target.side === 'theirs') {
         const o = next.opponentTeam[tIdx];
         if (!o) continue;
-        o.itemConsumed = 'Focus Sash';
-        if (!o.item) o.item = 'Focus Sash';
-        if (procced) { o.fainted = false; if ((o.currentHpPercent ?? 0) <= 0) o.currentHpPercent = 1; }
-      } else {
+        if (procced) { o.itemConsumed = 'Focus Sash'; o.fainted = false; if ((o.currentHpPercent ?? 0) <= 0) o.currentHpPercent = 1; }
+        else o.item = 'Focus Sash';
+      } else if (procced) {
         next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: 'Focus Sash' };
-        if (procced) next.myFainted = (next.myFainted ?? []).filter(i => i !== tIdx);
+        next.myFainted = (next.myFainted ?? []).filter(i => i !== tIdx);
       }
     }
     // `(berry)` suffix: resist berry consumed. Derive berry name from move type and

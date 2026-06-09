@@ -76,10 +76,9 @@ describe('finalizeTurn: sash effect', () => {
     expect(opp.candidates ?? []).toHaveLength(0);
   });
 
-  test('survives with HP to spare → still consumed (it fired), damage drives inference', () => {
+  test('survives with HP to spare → item learned (held), damage drives inference', () => {
     const match = freshMatch();
-    // Garchomp ends at 50% after the hit. Logging `sash` means it triggered, so
-    // the Sash is spent — but it did NOT proc (>1 HP), so the damage is real.
+    // Garchomp ends at 50% after the hit, but flagged sash → didn't proc.
     const r = parseTurnLine('m1 > Close Combat > o1 > 50 sash', {
       myTeam: match.myTeam, opponentTeam: match.opponentTeam,
       myActiveTeamIndex: [0, null], theirActiveTeamIndex: [0, null],
@@ -89,10 +88,10 @@ describe('finalizeTurn: sash effect', () => {
     const opp = res.match.opponentTeam[0]!;
     expect(opp.currentHpPercent).toBe(50);
     expect(opp.fainted).toBeFalsy();
-    // Logged `sash` → it was used: learned + consumed.
+    // Held, not consumed — a Sash only spends when it procs.
     expect(opp.item).toBe('Focus Sash');
-    expect(opp.itemConsumed).toBe('Focus Sash');
-    // Full damage (not capped) → inference still ran (candidates populated).
+    expect(opp.itemConsumed).toBeUndefined();
+    // Full damage → inference ran (candidates populated).
     expect((opp.candidates ?? []).length).toBeGreaterThan(0);
   });
 });

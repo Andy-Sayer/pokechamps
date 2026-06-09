@@ -1218,13 +1218,12 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     inferenceNotes.push(`${a.move}: swapped items`);
   }
 
-  // Focus Sash logged via `... > o1 > N sash`. Logging `sash` means the Sash
-  // FIRED, so the item is always spent (open team sheets — you write `sash` to
-  // record it triggering, not to "discover" a held one). The PROC test (ended at
-  // a 1-HP/1% sliver) additionally keeps the mon alive at 1 HP and, via
-  // sashProcced in the inference passes, skips the capped hit (whose damage
-  // understates the move). A `sash` that left HP to spare (rare) still consumes
-  // but its damage stands for inference.
+  // Focus Sash logged via `... > o1 > N sash`. A Sash only fires (and is spent)
+  // when it PROCS — the holder was at full HP and the hit would KO, leaving a
+  // 1-HP/1% sliver. Then the item is consumed and the capped damage is skipped
+  // for inference (it understates the move). If the mon survived with HP to
+  // spare the Sash did NOT proc: the damage is the move's true output and we've
+  // simply learned the mon holds a Focus Sash (still held, not consumed).
   for (const a of draftActions) {
     if (!a.sash) continue;
     if (typeof a.target !== 'object') continue;
@@ -1234,12 +1233,11 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     if (a.target.side === 'theirs') {
       const o = next.opponentTeam[tIdx];
       if (!o) continue;
-      o.itemConsumed = 'Focus Sash';
-      if (!o.item) o.item = 'Focus Sash';
-      if (procced) { o.fainted = false; if ((o.currentHpPercent ?? 0) <= 0) o.currentHpPercent = 1; }
-    } else {
+      if (procced) { o.itemConsumed = 'Focus Sash'; o.fainted = false; if ((o.currentHpPercent ?? 0) <= 0) o.currentHpPercent = 1; }
+      else o.item = 'Focus Sash'; // held, not consumed — damage stands
+    } else if (procced) {
       next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: 'Focus Sash' };
-      if (procced) next.myFainted = (next.myFainted ?? []).filter(i => i !== tIdx);
+      next.myFainted = (next.myFainted ?? []).filter(i => i !== tIdx);
     }
   }
 
