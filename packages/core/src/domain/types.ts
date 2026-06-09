@@ -243,6 +243,14 @@ export interface MoveAction {
   // same status-berry interception (Lum/Rawst…) as auto-applied status.
   targetStatus?: 'brn' | 'par' | 'psn' | 'tox' | 'slp' | 'frz';
   attackerStatus?: 'brn' | 'par' | 'psn' | 'tox' | 'slp' | 'frz';
+  // Stat stage change this hit inflicted on the TARGET, logged inline after the
+  // damage (`m1 > Crunch > o1 > 50 -1 def`). Used for PROBABILISTIC secondaries the
+  // engine doesn't auto-apply (Crunch's 20% Def, Shadow Ball's 20% SpD, …) and for
+  // dedicated debuff moves (Charm `> -2 atk`, no damage). finalizeTurn routes it
+  // through the same foe-drop path as a 100% secondary — so Defiant/Competitive,
+  // Clear Body/Clear Amulet immunity, Substitute, and Contrary all apply. When set
+  // it OVERRIDES the move's auto 100% drop (so a 100% move isn't double-counted).
+  targetDrop?: Partial<Record<'atk' | 'def' | 'spa' | 'spd' | 'spe', number>>;
   notes?: string;
 }
 

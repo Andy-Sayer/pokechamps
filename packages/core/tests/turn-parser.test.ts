@@ -707,3 +707,33 @@ describe('parseTurnLine: inline ability reveal', () => {
     if (r.ok && r.kind === 'state') { expect(r.update.side).toBe('mine'); expect(r.update.setAbility).toBe('Guts'); }
   });
 });
+
+describe('parseTurnLine: inline target stat drop (chance secondaries)', () => {
+  test('`50 -1 def` → targetDrop on the hit, damage preserved', () => {
+    const r = parseTurnLine('m1 > Crunch > o1 > 50 -1 def', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    expect(r.actions[0]!.targetDrop).toEqual({ def: -1 });
+    expect(r.actions[0]!.targetRemainingHpPercent).toBe(50);
+  });
+
+  test('multiple drops `-1 atk -1 spa`', () => {
+    const r = parseTurnLine('m1 > Lunge > o1 > 60 -1 atk -1 spa', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.kind === 'action') expect(r.actions[0]!.targetDrop).toEqual({ atk: -1, spa: -1 });
+  });
+
+  test('dedicated debuff with no damage `> -2 atk`', () => {
+    const r = parseTurnLine('m1 > Charm > o1 > -2 atk', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.kind === 'action') {
+      expect(r.actions[0]!.targetDrop).toEqual({ atk: -2 });
+      expect(r.actions[0]!.targetRemainingHpPercent).toBeUndefined();
+    }
+  });
+
+  test('a plain damage number is NOT parsed as a drop', () => {
+    const r = parseTurnLine('m1 > Close Combat > o1 > 67', ctx, 1);
+    if (r.ok && r.kind === 'action') expect(r.actions[0]!.targetDrop).toBeUndefined();
+  });
+});

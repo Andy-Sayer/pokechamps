@@ -25,6 +25,8 @@ m1 > Scald > o1 > 45 brn                    ← TARGET status this hit (status w
 m1 > Will-O-Wisp > o1 > brn                 ← pure status move, no damage → just the status word
 m1 > Flare Blitz > o1 > 45 / 80 brn         ← ATTACKER status in the `/` self-clause (e.g. Flame Body on contact)
 m1 > Flare Blitz > o1 > 45 / brn            ← attacker status with no self-HP change → `/ brn`
+m1 > Crunch > o1 > 50 -1 def                ← a CHANCE stat drop that LANDED (probabilistic 2ndary, not auto-applied); multi OK: -1 atk -1 spa
+m1 > Charm > o1 > -2 atk                    ← dedicated debuff, no damage. Both route through the foe-drop path → auto Defiant/Competitive + Clear Body/Contrary/Sub
 m1 > switch > Garchomp                     ← switch by species name
 m1 > switch > my4                          ← switch by team-index ref
 o2 > switch > op3                          ← opp switch

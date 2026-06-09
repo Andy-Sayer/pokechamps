@@ -833,9 +833,12 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
   // Mirror in BattleScreen.tsx.
   for (const a of draftActions) {
     if (a.kind === 'switch' || a.kind === 'mega') continue;
-    if (a.damageHpPercent == null && a.damageRaw == null) continue;   // missed / immune → no secondary
     if (typeof a.target !== 'object' || a.targetTeamIndex == null) continue;
-    const drop = foeDropOf(a.move);
+    // An explicit inline drop (`> 50 -1 def`) is the user asserting a (usually
+    // probabilistic) secondary LANDED — apply it regardless of damage and OVERRIDE
+    // the move's auto 100% drop. The auto path only fires when the move connected.
+    const explicit = a.targetDrop && Object.keys(a.targetDrop).length ? (a.targetDrop as BoostMap) : null;
+    const drop = explicit ?? ((a.damageHpPercent != null || a.damageRaw != null) ? foeDropOf(a.move) : null);
     if (!drop) continue;
     const tSide = a.target.side;
     const tIdx = a.targetTeamIndex;

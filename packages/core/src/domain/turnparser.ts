@@ -721,6 +721,27 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
       else if (src) selfHpSource = src as MoveAction['selfHpSource'];
     }
   }
+  // Inline TARGET stat drop(s) on the hit: `m1 > Crunch > o1 > 50 -1 def` (a
+  // probabilistic secondary that LANDED — the engine never auto-applies those) or
+  // `m1 > Charm > o1 > -2 atk` (a dedicated debuff, no damage). Signed stat tokens,
+  // multiple allowed (`-1 atk -1 spa`). Strip them first so the rest parses as
+  // damage/status; finalizeTurn routes them through the foe-drop path (Defiant/
+  // Competitive + Clear Body/Clear Amulet/Contrary/Substitute) and they OVERRIDE the
+  // move's auto 100% drop so a 100% move is never double-counted.
+  let targetDrop: MoveAction['targetDrop'];
+  if (dmgTok && /[+-]\d+\s*(?:atk|def|spa|spd|spe)\b/i.test(dmgTok)) {
+    const dropRe = /([+-]\d+)\s*(atk|def|spa|spd|spe)\b/gi;
+    const drops: NonNullable<MoveAction['targetDrop']> = {};
+    let mm: RegExpExecArray | null;
+    while ((mm = dropRe.exec(dmgTok)) !== null) {
+      const stat = mm[2]!.toLowerCase() as keyof NonNullable<MoveAction['targetDrop']>;
+      drops[stat] = (drops[stat] ?? 0) + parseInt(mm[1]!, 10);
+    }
+    if (Object.keys(drops).length) {
+      targetDrop = drops;
+      dmgTok = dmgTok.replace(dropRe, ' ').replace(/\s+/g, ' ').trim() || undefined;
+    }
+  }
   // A trailing status word in the target's damage slot is the TARGET's status (a
   // damaging move's secondary, or a pure status move with no damage): `o1 > Scald
   // > o1 > 45 brn`, or just `> brn`. Strip it first (outermost token) so the rest
@@ -802,6 +823,7 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
       berry: berry || undefined,
       targetStatus,
       attackerStatus,
+      targetDrop,
       ...dmg,
       ...selfHp,
     }],

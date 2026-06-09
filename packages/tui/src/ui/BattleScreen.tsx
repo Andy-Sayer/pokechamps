@@ -1151,9 +1151,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     // one action per target → per-action covers single + spread. Mirror of engine.ts.
     for (const a of draftActions) {
       if (a.kind === 'switch' || a.kind === 'mega') continue;
-      if (a.damageHpPercent == null && a.damageRaw == null) continue;
       if (typeof a.target !== 'object' || a.targetTeamIndex == null) continue;
-      const drop = foeDropOf(a.move);
+      // Explicit inline drop (`> 50 -1 def`) overrides the auto 100% drop + applies
+      // without damage; the auto path needs the move to have connected. Mirror of engine.ts.
+      const explicit = a.targetDrop && Object.keys(a.targetDrop).length ? (a.targetDrop as BoostMap) : null;
+      const drop = explicit ?? ((a.damageHpPercent != null || a.damageRaw != null) ? foeDropOf(a.move) : null);
       if (!drop) continue;
       const tSide = a.target.side;
       const tIdx = a.targetTeamIndex;
@@ -3271,8 +3273,12 @@ function actionToLine(a: MoveAction, match: Match): string {
     : a.targetRemainingHpPercent != null ? `${a.targetRemainingHpPercent}`
     : a.targetRemainingHpRaw != null ? `${a.targetRemainingHpRaw}`
     : '';
-  // Trailing target flags + status (`… > 45 brn`, `… > 1 sash`, `… > 80 (berry)`).
-  const targetTrail = [dmgTok, a.sash ? 'sash' : '', a.berry ? '(berry)' : '', a.targetStatus ?? ''].filter(Boolean).join(' ');
+  // Inline target stat drop (`… > 50 -1 def`).
+  const dropTok = a.targetDrop
+    ? (['atk', 'def', 'spa', 'spd', 'spe'] as const).filter(s => a.targetDrop![s]).map(s => `${a.targetDrop![s]! > 0 ? '+' : ''}${a.targetDrop![s]} ${s}`).join(' ')
+    : '';
+  // Trailing target flags + drop + status (`… > 45 brn`, `… > 50 -1 def`, `… > 1 sash`).
+  const targetTrail = [dmgTok, dropTok, a.sash ? 'sash' : '', a.berry ? '(berry)' : '', a.targetStatus ?? ''].filter(Boolean).join(' ');
   // The `/` self-clause: attacker's own HP + source + contact status (`… / 80 brn`).
   const selfNum = a.selfRemainingHpRaw != null ? `${a.selfRemainingHpRaw}`
     : a.selfRemainingHpPercent != null ? `${a.selfRemainingHpPercent}`
@@ -3338,6 +3344,7 @@ function HelpPanel() {
       <Text>  <Text color="white">m1 &gt; Sucker Punch &gt; o1 &gt; 41%</Text>     <Text dimColor>— explicit % override</Text></Text>
       <Text>  <Text color="white">m1 &gt; Close Combat &gt; o1 &gt; 80 raw</Text>  <Text dimColor>— damage-DEALT in raw HP</Text></Text>
       <Text>  <Text color="white">m1 &gt; Scald &gt; o1 &gt; 45 brn</Text>       <Text dimColor>— TARGET statused this hit (brn/par/psn/tox/slp/frz)</Text></Text>
+      <Text>  <Text color="white">m1 &gt; Crunch &gt; o1 &gt; 50 -1 def</Text>    <Text dimColor>— a CHANCE stat drop that landed (auto-triggers Defiant etc.); multi OK (-1 atk -1 spa)</Text></Text>
       <Text>  <Text color="white">m1 &gt; Flare Blitz &gt; o1 &gt; 45 / 80 brn</Text> <Text dimColor>— `/` self-clause: my HP after recoil + I got burned (Flame Body)</Text></Text>
       <Text>  <Text color="white">m1+mega &gt; Flamethrower &gt; o2 &gt; 45</Text> <Text dimColor>— +mega / +crit / +tera&lt;type&gt; / +quick (Quick Claw)</Text></Text>
       <Text>  <Text color="white">m1 &gt; switch &gt; Kingambit</Text>           <Text dimColor>— switch by species (must be in brought 4)</Text></Text>

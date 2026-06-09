@@ -1022,3 +1022,40 @@ describe('inline ability reveal (o1 ability <Name>)', () => {
     expect(b.atk).toBe(2);  // Defiant fired because the ability was revealed first
   });
 });
+
+describe('inline target stat drop (chance secondaries)', () => {
+  test('an explicit (chance) drop triggers Defiant just like a 100% one', () => {
+    // Crunch's 20% Def drop is probabilistic → never auto-applied. Logging it inline
+    // asserts it landed; it routes through the same path (incl. Defiant).
+    const match = freshMatch({ myTeam: [mon({ species: 'Garchomp', ability: 'Defiant', moves: [] }), mon({ species: 'Amoonguss', moves: [] })] });
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move', move: 'Crunch',
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0, damageHpPercent: 20, targetDrop: { def: -1 }, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: NEUTRAL_FIELD }, activeIdx: startActive });
+    const b = r.match.myBoosts?.[0] ?? {};
+    expect(b.def).toBe(-1);
+    expect(b.atk).toBe(2);
+  });
+
+  test('an explicit drop OVERRIDES the move auto 100% drop (no double-count)', () => {
+    // Snarl is a 100% −1 SpA. An explicit −2 SpA replaces it (not −1 auto + −2).
+    const match = freshMatch({ myTeam: [mon({ species: 'Garchomp', moves: [] }), mon({ species: 'Amoonguss', moves: [] })] });
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move', move: 'Snarl',
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0, damageHpPercent: 20, targetDrop: { spa: -2 }, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: NEUTRAL_FIELD }, activeIdx: startActive });
+    expect(r.match.myBoosts?.[0]?.spa).toBe(-2);
+  });
+
+  test('Clear Body still blocks an explicit chance drop (no drop, no reaction)', () => {
+    const match = freshMatch({ myTeam: [mon({ species: 'Garchomp', ability: 'Clear Body', moves: [] }), mon({ species: 'Amoonguss', moves: [] })] });
+    const action: MoveAction = {
+      side: 'theirs', attackerSlot: 0, attackerTeamIndex: 0, kind: 'move', move: 'Crunch',
+      target: { side: 'mine', slot: 0 }, targetTeamIndex: 0, damageHpPercent: 20, targetDrop: { def: -1 }, order: 1,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [action], field: NEUTRAL_FIELD }, activeIdx: startActive });
+    expect(r.match.myBoosts?.[0] ?? {}).toEqual({});
+  });
+});
