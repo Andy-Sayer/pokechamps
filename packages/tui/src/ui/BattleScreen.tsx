@@ -891,6 +891,21 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       }
       if (newPct == null) continue;
 
+      // Mid-multi-hit item checkpoint (`... > 75, 20, sitrus 50, 30`): an item
+      // fired BETWEEN hits. Set running HP to the post-trigger value + mark it
+      // spent; no damage observation. Mirror of engine.ts.
+      if (a.midHitItem) {
+        if (tSide === 'theirs') {
+          const o = next.opponentTeam[tIdx];
+          if (o) { o.itemConsumed = a.midHitItem; if (!o.item) o.item = a.midHitItem; }
+          oppHpSoFar.set(tIdx, newPct);
+        } else {
+          next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: a.midHitItem };
+          myHpSoFar.set(tIdx, newPct);
+        }
+        continue;
+      }
+
       // Record the computed damageHpPercent so the inference pass below uses
       // the correct value (independent of how the user typed it). Captured
       // BEFORE any auto-trigger heal so inference sees the actual hit, not
@@ -1494,9 +1509,10 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (a.target.side === 'mine') { if (next.myTeam[tIdx]) next.myTeam[tIdx]!.item = attackerItem; }
       else { if (next.opponentTeam[tIdx]) next.opponentTeam[tIdx]!.item = attackerItem; }
     }
-    // Focus Sash (`... > o1 > N sash`): proc (1-sliver) → item consumed, alive,
-    // skip inference; survived with HP to spare → item learned (held), damage
-    // stands for inference.
+    // Focus Sash (`... > o1 > N sash`): logging `sash` means it FIRED, so the
+    // item is always spent. The proc test (1-sliver) additionally keeps the mon
+    // alive at 1 HP and (via sashProcced in the inference passes) skips the
+    // capped hit. Mirror of engine.ts.
     for (const a of draftActions) {
       if (!a.sash) continue;
       if (typeof a.target !== 'object') continue;
@@ -1506,11 +1522,12 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (a.target.side === 'theirs') {
         const o = next.opponentTeam[tIdx];
         if (!o) continue;
-        if (procced) { o.itemConsumed = 'Focus Sash'; o.fainted = false; if ((o.currentHpPercent ?? 0) <= 0) o.currentHpPercent = 1; }
-        else o.item = 'Focus Sash';
-      } else if (procced) {
+        o.itemConsumed = 'Focus Sash';
+        if (!o.item) o.item = 'Focus Sash';
+        if (procced) { o.fainted = false; if ((o.currentHpPercent ?? 0) <= 0) o.currentHpPercent = 1; }
+      } else {
         next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: 'Focus Sash' };
-        next.myFainted = (next.myFainted ?? []).filter(i => i !== tIdx);
+        if (procced) next.myFainted = (next.myFainted ?? []).filter(i => i !== tIdx);
       }
     }
     // `(berry)` suffix: resist berry consumed. Derive berry name from move type and
@@ -3277,8 +3294,15 @@ function actionToLine(a: MoveAction, match: Match): string {
   const dropTok = a.targetDrop
     ? (['atk', 'def', 'spa', 'spd', 'spe'] as const).filter(s => a.targetDrop![s]).map(s => `${a.targetDrop![s]! > 0 ? '+' : ''}${a.targetDrop![s]} ${s}`).join(' ')
     : '';
+  // Mid-multi-hit item checkpoint (`… > sitrus 50`): render the item word + the
+  // post-trigger HP (Focus Sash → `sash`, berries → their first word).
+  const midItemWord = a.midHitItem
+    ? (toId(a.midHitItem) === 'focussash' ? 'sash' : a.midHitItem.split(' ')[0]!.toLowerCase())
+    : '';
   // Trailing target flags + drop + status (`… > 45 brn`, `… > 50 -1 def`, `… > 1 sash`).
-  const targetTrail = [dmgTok, dropTok, a.sash ? 'sash' : '', a.berry ? '(berry)' : '', a.targetStatus ?? ''].filter(Boolean).join(' ');
+  const targetTrail = a.midHitItem
+    ? `${midItemWord} ${dmgTok}`.trim()
+    : [dmgTok, dropTok, a.sash ? 'sash' : '', a.berry ? '(berry)' : '', a.targetStatus ?? ''].filter(Boolean).join(' ');
   // The `/` self-clause: attacker's own HP + source + contact status (`… / 80 brn`).
   const selfNum = a.selfRemainingHpRaw != null ? `${a.selfRemainingHpRaw}`
     : a.selfRemainingHpPercent != null ? `${a.selfRemainingHpPercent}`
@@ -3346,6 +3370,8 @@ function HelpPanel() {
       <Text>  <Text color="white">m1 &gt; Scald &gt; o1 &gt; 45 brn</Text>       <Text dimColor>— TARGET statused this hit (brn/par/psn/tox/slp/frz)</Text></Text>
       <Text>  <Text color="white">m1 &gt; Crunch &gt; o1 &gt; 50 -1 def</Text>    <Text dimColor>— a CHANCE stat drop that landed (auto-triggers Defiant etc.); multi OK (-1 atk -1 spa)</Text></Text>
       <Text>  <Text color="white">m1 &gt; Flare Blitz &gt; o1 &gt; 45 / 80 brn</Text> <Text dimColor>— `/` self-clause: my HP after recoil + I got burned (Flame Body)</Text></Text>
+      <Text>  <Text color="white">m1 &gt; Bullet Seed &gt; o1 &gt; 75,20,sitrus 50,30</Text> <Text dimColor>— multi-hit: each comma is remaining HP; `sitrus 50`/`sash` fires mid-sequence + is spent</Text></Text>
+      <Text>  <Text color="white">m1 &gt; Close Combat &gt; o1 &gt; 1 sash</Text>  <Text dimColor>— Sash fired (consumed); 1-sliver = survived at 1 HP</Text></Text>
       <Text>  <Text color="white">m1+mega &gt; Flamethrower &gt; o2 &gt; 45</Text> <Text dimColor>— +mega / +crit / +tera&lt;type&gt; / +quick (Quick Claw)</Text></Text>
       <Text>  <Text color="white">m1 &gt; switch &gt; Kingambit</Text>           <Text dimColor>— switch by species (must be in brought 4)</Text></Text>
       <Box marginTop={1}><Text bold>State updates</Text></Box>

@@ -232,6 +232,14 @@ export interface MoveAction {
   // `m1 > Sucker Punch > o1 > 80 (berry)`. finalizeTurn derives the resist berry
   // from the move's type via resistBerryForType and marks it as learned+consumed.
   berry?: boolean;
+  // Set on a multi-hit CHECKPOINT entry that represents an item firing BETWEEN
+  // hits, e.g. `o1 > Bullet Seed > o1 > 75, 20, sitrus 50, 30` — the `sitrus 50`
+  // token becomes an action with `midHitItem: 'Sitrus Berry'` and
+  // targetRemainingHpPercent 50. finalizeTurn treats it as an HP checkpoint (sets
+  // the running HP to the post-trigger value and marks the item consumed) rather
+  // than a damaging hit, so it is excluded from inference and the surrounding
+  // hits' damage deltas are computed off the healed HP.
+  midHitItem?: string;
   // Non-volatile status this move INFLICTED, logged as part of the hit and applied
   // positionally in finalizeTurn. These are observed facts, so they apply even for
   // the cases the auto-apply can't infer (a damaging move's secondary status, or a

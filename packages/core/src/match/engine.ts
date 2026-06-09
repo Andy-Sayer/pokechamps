@@ -549,6 +549,22 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     }
     if (newPct == null) continue;
 
+    // Mid-multi-hit item checkpoint (`... > 75, 20, sitrus 50, 30`): an item
+    // fired BETWEEN hits. Set the running HP to the post-trigger value and mark
+    // the item consumed — no damage observation, so inference skips it and the
+    // following hit's delta is computed off the healed HP.
+    if (a.midHitItem) {
+      if (tSide === 'theirs') {
+        const o = next.opponentTeam[tIdx];
+        if (o) { o.itemConsumed = a.midHitItem; if (!o.item) o.item = a.midHitItem; }
+        oppHpSoFar.set(tIdx, newPct);
+      } else {
+        next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: a.midHitItem };
+        myHpSoFar.set(tIdx, newPct);
+      }
+      continue;
+    }
+
     // Record the raw hit damage BEFORE any auto-trigger heal so inference
     // sees the actual move output, not the post-Sitrus residual.
     a.damageHpPercent = Math.max(0, prevPct - newPct);
@@ -1202,10 +1218,13 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     inferenceNotes.push(`${a.move}: swapped items`);
   }
 
-  // Focus Sash logged via `... > o1 > N sash`. If it PROCCED (1-HP sliver),
-  // the item is consumed and the capped damage is unreliable. If it did NOT
-  // proc (survived with HP to spare), the damage is the move's true output and
-  // we've simply learned the mon holds a Focus Sash (still held, not consumed).
+  // Focus Sash logged via `... > o1 > N sash`. Logging `sash` means the Sash
+  // FIRED, so the item is always spent (open team sheets — you write `sash` to
+  // record it triggering, not to "discover" a held one). The PROC test (ended at
+  // a 1-HP/1% sliver) additionally keeps the mon alive at 1 HP and, via
+  // sashProcced in the inference passes, skips the capped hit (whose damage
+  // understates the move). A `sash` that left HP to spare (rare) still consumes
+  // but its damage stands for inference.
   for (const a of draftActions) {
     if (!a.sash) continue;
     if (typeof a.target !== 'object') continue;
@@ -1215,11 +1234,12 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     if (a.target.side === 'theirs') {
       const o = next.opponentTeam[tIdx];
       if (!o) continue;
-      if (procced) { o.itemConsumed = 'Focus Sash'; o.fainted = false; if ((o.currentHpPercent ?? 0) <= 0) o.currentHpPercent = 1; }
-      else o.item = 'Focus Sash'; // held, not consumed — damage stands
-    } else if (procced) {
+      o.itemConsumed = 'Focus Sash';
+      if (!o.item) o.item = 'Focus Sash';
+      if (procced) { o.fainted = false; if ((o.currentHpPercent ?? 0) <= 0) o.currentHpPercent = 1; }
+    } else {
       next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: 'Focus Sash' };
-      next.myFainted = (next.myFainted ?? []).filter(i => i !== tIdx);
+      if (procced) next.myFainted = (next.myFainted ?? []).filter(i => i !== tIdx);
     }
   }
 

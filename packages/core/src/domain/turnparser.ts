@@ -673,7 +673,7 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
     const mh = parseMultiHit(parts[3], parsedTarget.side);
     if (mh.ok === false) return mh;
     const targetTeamIndex = activeTeamIndex(ctx, parsedTarget.side, parsedTarget.slot);
-    const actions: MoveAction[] = mh.hits.map(h => ({
+    const actions: MoveAction[] = mh.entries.map(e => ({
       side: actor.side,
       attackerSlot: actor.slot,
       kind: 'move',
@@ -684,8 +684,11 @@ export function parseTurnLine(line: string, ctx: ParseContext, order: number): P
       order,
       mega: actor.mega || undefined,
       quickClaw: actor.quickClaw || undefined,
-      critical: h.critical || actor.crit || undefined,
-      ...h.dmg,
+      // Item checkpoints aren't hits: never crit, carry midHitItem so finalize
+      // treats them as an HP/consumption checkpoint instead of a damage delta.
+      critical: e.kind === 'hit' ? (e.critical || actor.crit || undefined) : undefined,
+      midHitItem: e.kind === 'item' ? e.item : undefined,
+      ...e.dmg,
     }));
     return { ok: true, kind: 'action', actions };
   }
@@ -846,22 +849,67 @@ function normalizeStatus(word: string | undefined | null): MoveAction['targetSta
   }
 }
 
+// Item words that can fire BETWEEN hits of a multi-hit move, mapped to their
+// canonical item name. HP-restoring consumables (Sitrus + the pinch berries)
+// and Focus Sash — the things that change a target's HP mid-sequence.
+const MID_HIT_ITEM_WORDS: Record<string, string> = {
+  sitrus: 'Sitrus Berry',
+  sash: 'Focus Sash',
+  figy: 'Figy Berry',
+  wiki: 'Wiki Berry',
+  mago: 'Mago Berry',
+  aguav: 'Aguav Berry',
+  iapapa: 'Iapapa Berry',
+};
+
 // Multi-hit damage syntax for a single target: "99,98,97,96,90(crit)". Each
 // value is the target's remaining HP after that hit (side-aware unit), with an
-// optional "(crit)" suffix on any hit. Returns one entry per hit.
+// optional "(crit)" suffix on any hit. Item triggers may be interleaved as their
+// own comma token with the resulting HP — "75, 20, sitrus 50, 30" — to mark a
+// Sitrus/pinch-berry heal or Focus Sash firing mid-sequence (the heal restores
+// HP so the next hit's damage delta is computed off the healed value). `sash`
+// may omit the number (defaults to a 1-HP sliver). Returns one ordered entry per
+// hit / item checkpoint.
 function parseMultiHit(token: string, targetSide: FieldSide):
-  | { ok: true; hits: Array<{ dmg: ReturnType<typeof parseDamage>; critical: boolean }> }
+  | { ok: true; entries: Array<
+      | { kind: 'hit'; dmg: ReturnType<typeof parseDamage>; critical: boolean }
+      | { kind: 'item'; item: string; dmg: ReturnType<typeof parseDamage> }
+    > }
   | { ok: false; error: string }
 {
-  const hits: Array<{ dmg: ReturnType<typeof parseDamage>; critical: boolean }> = [];
+  const entries: Array<
+    | { kind: 'hit'; dmg: ReturnType<typeof parseDamage>; critical: boolean }
+    | { kind: 'item'; item: string; dmg: ReturnType<typeof parseDamage> }
+  > = [];
   for (const raw of token.split(',').map(s => s.trim()).filter(Boolean)) {
-    const m = raw.match(/^(\d+(?:\.\d+)?)(%?)\s*(\(\s*crit\s*\))?$/i);
-    if (!m) return { ok: false, error: `multi-hit value "${raw}" — expected e.g. 90 or 90(crit)` };
-    const dmg = parseDamage(m[1]! + (m[2] ?? ''), targetSide);
-    hits.push({ dmg, critical: !!m[3] });
+    const hit = raw.match(/^(\d+(?:\.\d+)?)(%?)\s*(\(\s*crit\s*\))?$/i);
+    if (hit) {
+      const dmg = parseDamage(hit[1]! + (hit[2] ?? ''), targetSide);
+      entries.push({ kind: 'hit', dmg, critical: !!hit[3] });
+      continue;
+    }
+    const item = raw.match(/^([a-z]+)\s*(\d+(?:\.\d+)?)?(%?)$/i);
+    if (item) {
+      const word = item[1]!.toLowerCase();
+      const name = MID_HIT_ITEM_WORDS[word];
+      if (!name) {
+        return { ok: false, error: `multi-hit token "${raw}" — expected a remaining-HP number or an item (${Object.keys(MID_HIT_ITEM_WORDS).join('/')})` };
+      }
+      const hpTok = item[2];
+      if (hpTok == null && word !== 'sash') {
+        return { ok: false, error: `multi-hit item "${raw}" needs the resulting HP, e.g. "${word} 50"` };
+      }
+      const dmg = hpTok != null
+        ? parseDamage(hpTok + (item[3] ?? ''), targetSide)
+        : (targetSide === 'mine' ? { targetRemainingHpRaw: 1 } : { targetRemainingHpPercent: 1 });
+      entries.push({ kind: 'item', item: name, dmg });
+      continue;
+    }
+    return { ok: false, error: `multi-hit value "${raw}" — expected e.g. 90, 90(crit), or "sitrus 50"` };
   }
-  if (hits.length === 0) return { ok: false, error: 'multi-hit needs at least one value' };
-  return { ok: true, hits };
+  if (entries.length === 0) return { ok: false, error: 'multi-hit needs at least one value' };
+  if (!entries.some(e => e.kind === 'hit')) return { ok: false, error: 'multi-hit needs at least one damage value' };
+  return { ok: true, entries };
 }
 
 // Spread damage syntax: "o1:40, o2:35" / "o1:40,o2:35" / per-target side-aware

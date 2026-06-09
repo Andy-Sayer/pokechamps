@@ -15,12 +15,13 @@ m1+quick > Sucker Punch > o1 > 40          ← Quick Claw proc (priority bracket
 m1+mega+crit > Flamethrower > o1 > 0       ← stacked modifiers
 m1 > Heat Wave > spread > o1:40, o2:35     ← spread → one MoveAction per target
 m1 > Beat Up > o1 > 99,98,97,96,90(crit)   ← multi-hit: comma = remaining HP per hit; (crit) per hit
+m1 > Bullet Seed > o1 > 75,20,sitrus 50,30 ← multi-hit + mid-sequence item: `sitrus 50`/`sash [N]` fires between hits, is spent, and the next hit deltas off the healed HP (items: sitrus/figy/wiki/mago/aguav/iapapa/sash)
 o1 > Brave Bird > m1 > 45 / 89             ← recoil: `/ <attackerHP>` = the attacker's HP after (o1 opp → 89%)
 m1 > Flare Blitz > o1 > 50 / 120           ← my recoil → my m1 at 120 (attacker unit follows its own side: raw for mine)
 m1 > Liquidation > o1 > 50 / 84 helmet     ← attacker chip is Rocky Helmet (1/6), not recoil: `helmet`/`orb`/`barbs`
 m1 > Giga Drain > o1 > 60 / 132            ← drain: the heal lands on the attacker; `/ <attackerHP>`
 m1 > Close Combat > o1 > 1 sash            ← Focus Sash: survives at sliver, item consumed, hit skipped for inference
-m1 > Close Combat > o1 > 50 sash           ← survived w/ HP to spare → Sash didn't proc: full dmg infers + item learned (held)
+m1 > Close Combat > o1 > 50 sash           ← logging `sash` = it fired → item consumed; >1 HP means it didn't proc, so full dmg still infers
 m1 > Scald > o1 > 45 brn                    ← TARGET status this hit (status word trails the HP): brn/par/psn/tox/slp/frz
 m1 > Will-O-Wisp > o1 > brn                 ← pure status move, no damage → just the status word
 m1 > Flare Blitz > o1 > 45 / 80 brn         ← ATTACKER status in the `/` self-clause (e.g. Flame Body on contact)
