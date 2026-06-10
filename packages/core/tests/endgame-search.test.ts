@@ -2275,29 +2275,35 @@ describe('Step D: deep (lookahead) switch coverage', () => {
   const bronzong = mon({ species: 'Bronzong', ability: 'Levitate', nature: 'Sassy', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Flash Cannon', 'Body Press'] });
   const fastAero: OpponentEntry = { species: 'Aerodactyl', knownMoves: ['Stone Edge'], candidates: [mon({ species: 'Aerodactyl', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Stone Edge'] })] };
 
-  // The deep-switch lookahead is DECISION-CHANGING: preserving a doomed Volcarona
-  // behind Bronzong is only worth it because the search can see the follow-up plies
-  // playing out from behind the wall. Model those switches (limit=2) → recommend the
-  // retreat; switch them off at depth (limit=0) → the evaluation changes and the
-  // Bronzong retreat is no longer chosen. Proves the Step B/C knob is live + matters.
-  test('the deep-switch lookahead is decision-changing (switchPlyLimit knob is live)', () => {
+  // The deep-switch lookahead recommends the strategically right retreat: the
+  // doomed rock-4× Volcarona steps back behind Bronzong (resists Stone Edge)
+  // instead of being sacrificed, while Aggron walls both foes' attacks.
+  //
+  // HISTORY (2026-06-09): this used to also assert that switchPlyLimit 0 picks a
+  // DIFFERENT play (attack instead of retreat). That asymmetry was an artifact of
+  // the old fizzle-on-fainted-target behaviour — sacrificing Volcarona looked
+  // cheap because attacks aimed at its corpse fizzled for free. The doubles
+  // RETARGET fix (sim-diff stage c) removed the illusion, and the retreat is now
+  // correctly preferred at every knob setting. Knob liveness is still covered by
+  // the two maximin-monotonicity tests below and the breadth-report assertions.
+  test('the deep-switch lookahead retreats the doomed mon behind its wall', () => {
+    const talon: OpponentEntry = { species: 'Talonflame', knownMoves: ['Brave Bird'], candidates: [mon({ species: 'Talonflame', ability: 'Flame Body', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Brave Bird'] })] };
+    const wallAggron = mon({ species: 'Aggron', ability: 'Sturdy', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, atk: 252 }, moves: ['Heavy Slam', 'Iron Head'] });
     const input: SearchInput = {
       mine: [
         { set: volcarona, hpPercent: 100, active: true },
-        { set: aggron, hpPercent: 100, active: true },
+        { set: wallAggron, hpPercent: 100, active: true },
         { set: bronzong, hpPercent: 100, active: false },
       ],
       opp: [
         { entry: fastAero, hpPercent: 100, active: true },
-        { entry: oppOf(incin), hpPercent: 100, active: true },
+        { entry: talon, hpPercent: 100, active: true },
       ],
       field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
     };
     const deep = createSearch(input, { switchPlyLimit: 2 }).toDepth(2);
-    const shallow = createSearch(input, { switchPlyLimit: 0 }).toDepth(2);
-    const retreats = (r: typeof deep) => r.plays.some(p => p.switch && p.mySpecies === 'Volcarona' && p.targetSpecies === 'Bronzong');
-    expect(retreats(deep)).toBe(true);     // deep lookahead → retreat the doomed mon
-    expect(retreats(shallow)).toBe(false); // no deep switches → different decision
+    const retreats = deep.plays.some(p => p.switch && p.mySpecies === 'Volcarona' && p.targetSpecies === 'Bronzong');
+    expect(retreats).toBe(true);
   });
 
   // Maximin monotonicity #1: when only I have a bench, the opponent can't

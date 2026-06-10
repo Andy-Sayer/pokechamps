@@ -16,7 +16,31 @@ for the faint check (only flags a faint when the sim is unanimous 0/8 or 8/8 AND
 disagree), so roll-boundary noise is filtered out. Damage-roll differences within the
 envelope are expected and ignored — only discrete, roll-independent disagreements count.
 
-## Latest run (2026-06-03, N=200 → 138 valid positions)
+## Latest run (2026-06-09, N=400 → 277 valid positions) — `fainted` ELIMINATED
+
+**38/277 diverged; `fainted` 10 → 0.** The new `--detail fainted` report mode
+dumped all 10 divergent positions, and the evidence overturned the standing
+"point-estimate at the KO boundary" theory — the residual was **three concrete
+mechanic gaps**, now fixed:
+
+| gap | positions | fix |
+|---|---|---|
+| **Fainted-target retargeting** | ~6.5/10 | A single-target move whose target already fainted RETARGETS the remaining live foe in doubles (Showdown never fizzles it for free). resolveTurn now substitutes the SAME move's per-move cell vs the new target (`offMoves`/`thrMoves` — the stage-(a) tables made the faithful fix possible). |
+| **Dragon Darts doubles split** | ~1.5/10 | With both foes standing, Dragon Darts throws ONE dart at EACH (half the two-hit cell each, the other foe via its own per-move cell); we previously put both darts into one target (over-faint). |
+| **Rage Fist hit scaling** | ~2/10 | +50 BP per damaging hit TAKEN (damage × (1+hits), cap ×7). Counted per-turn in `apply()`; lifetime hit counts from the live match are NOT carried (documented approximation). |
+
+Remaining 38: `status` 16 + `boost:*` 26 — all probabilistic secondaries
+(10–30% burn/poison/def-drops, Flame Body), excluded by policy as before. The
+small count shifts vs the prior run are retargeted attacks now DELIVERING their
+secondaries (correct behaviour feeding the policy-excluded rows).
+
+**Knock-on:** the fizzle-on-fainted-target removal also invalidated a Step-D
+test fixture whose "shallow search attacks instead of retreating" asymmetry
+turned out to lean on the free fizzle (sacrificing a mon looked cheap). The
+test now asserts the robust retreat; knob liveness is covered by the
+monotonicity pair.
+
+## Prior run (2026-06-03, N=200 → 138 valid positions)
 
 **24/138 diverged (≈17%, same rate + composition as the prior 43/277).** Run AFTER
 the move-options arc (priority / Helping Hand / Wide-Quick Guard / Strength Sap /
@@ -63,6 +87,8 @@ divergence count. So "43/277" measures *resolution* fidelity for a chosen attack
 
 ## Trend
 
-114/213 → 35/213 → **43/277** (roster broadened; rate fell from 53% to 16%). Every drop
-came from a harness-driven port (self-drops, foe-drops, Defiant, recoil, on-KO, Life Orb,
-Unaware). What remains is the policy-excluded probabilistic tail + the recoil KO-boundary.
+114/213 → 35/213 → 43/277 → **38/277, `fainted` 0** (2026-06-09). Every drop
+came from a harness-driven port (self-drops, foe-drops, Defiant, recoil, on-KO,
+Life Orb, Unaware, and now retargeting / Dragon Darts / Rage Fist). What remains
+is EXCLUSIVELY the policy-excluded probabilistic tail — the deterministic
+resolution model now matches the real engine on every sampled attack turn.

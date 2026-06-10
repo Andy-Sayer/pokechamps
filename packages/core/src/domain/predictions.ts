@@ -195,6 +195,7 @@ export function predictOffense(args: {
         move: chosenMove,
         field: args.field,
         attackerSide: 'mine',
+        critical: args.critical,
         attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
         defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
       });
@@ -212,6 +213,7 @@ export function predictOffense(args: {
     : koChance;
   const likely = likelyRange(args.opponent, cands, chosenMove, c => damageRange({
     attacker: args.attacker, defender: c, move: chosenMove, field: args.field, attackerSide: 'mine',
+    critical: args.critical,
     attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
     defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
   }));
@@ -385,6 +387,7 @@ export function predictThreat(args: {
         move: chosenMove,
         field: args.field,
         attackerSide: 'theirs',
+        critical: args.critical,
         attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
         defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
       });
@@ -403,6 +406,7 @@ export function predictThreat(args: {
   // Likely range here = the opp's most-likely (least-invested) ATTACKING spread.
   const likely = likelyRange(args.opponent, cands, chosenMove, c => damageRange({
     attacker: c, defender: args.defender, move: chosenMove, field: args.field, attackerSide: 'theirs',
+    critical: args.critical,
     attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
     defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
   }));

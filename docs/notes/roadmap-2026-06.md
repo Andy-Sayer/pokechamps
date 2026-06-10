@@ -84,6 +84,25 @@ the still-exported `predictOffense`/`predictThreat`. No behaviour change
 deliberately untouched — they carry semantic quirks (pivot skips blade-forme,
 prio overrides priority); consolidation is a later cleanup.
 
+**Stages (c)+(d) ✅ shipped 2026-06-09 — THEME 1 COMPLETE.**
+- **(c) `fainted` residual ELIMINATED (10 → 0; 43/277 → 38/277).** Diagnosis-first:
+  a `--detail fainted` report mode dumped all 10 positions, overturning the
+  "point-estimate at the KO boundary" theory — the real causes were three
+  mechanic gaps, all fixed: **fainted-target retargeting** (~6.5/10; a
+  single-target move whose target died retargets the remaining foe with the
+  SAME move's per-move cell — the stage-(a) tables made the faithful fix
+  possible), **Dragon Darts doubles split** (one dart each foe), and **Rage
+  Fist hit scaling** (+1× per hit taken this turn). Remaining 38 divergences
+  are exclusively policy-excluded probabilistic secondaries. See
+  [`sim-divergences.md`](sim-divergences.md).
+- **(d) crit out (defensive flavor).** Forced losses escapable only by
+  crit-KOing the killer first now demote with `"crit: …"` as Hail-Mary Line B
+  (critProbFor Gen-9 stages, lazy root-only crit cells, strict outspeed gate,
+  terminal-aware `flipScore` counterfactual). Bonus: fixed the
+  predictOffense/Threat quirk so the TUI `/crit` grid reports true crit ranges.
+  Offensive crit flavor deferred (needs a crit-augmented pass). See
+  [`accuracy-roadmap.md`](accuracy-roadmap.md) §"Hail Mary".
+
 **Stage (b) ✅ shipped 2026-06-09 — true Choice lock.** `State.my/oppChoiceMove`
 (set when a holder attacks, cleared on switch-in, in the TT key); locked actors'
 attacks substitute the locked move's per-move cell and their options narrow to

@@ -60,6 +60,11 @@ function buildPosition(rand: () => number): SearchInput {
 
 function main() {
   const N = Number(process.argv[2] ?? 300);
+  // `--detail <field>` (e.g. `--detail fainted`): for every divergence on that
+  // field, dump the full position — species/HP/abilities, the moves both engines
+  // resolved, and our per-mon post-turn HP — so the math can be replayed by hand.
+  const detailIdx = process.argv.indexOf('--detail');
+  const detailField = detailIdx >= 0 ? (process.argv[detailIdx + 1] ?? 'fainted') : null;
   const rand = rng(20260531);
   const byField = new Map<string, number>();
   const examples = new Map<string, Divergence>();
@@ -82,12 +87,27 @@ function main() {
         ((n * 13 + 5) + k * 1019) % 9967,
         ((n * 31 + 7) + k * 1021) % 9949,
       ] as [number, number, number, number]);
-      const { divergences } = diffTurn(input, myAct, opAct, seed, faintSeeds);
+      const { divergences, hpGaps } = diffTurn(input, myAct, opAct, seed, faintSeeds);
       positions++;
       if (divergences.length) withDiv++;
       for (const d of divergences) {
         byField.set(d.field, (byField.get(d.field) ?? 0) + 1);
         if (!examples.has(d.field)) examples.set(d.field, d);
+      }
+      if (detailField && divergences.some(d => d.field === detailField)) {
+        const monLine = (set: PokemonSet, hp: number) =>
+          `${set.species} (${set.ability}) ${hp}% [${(set.moves ?? []).join('/')}]`;
+        console.log(`\n--- position #${n} (${detailField} divergence) ---`);
+        console.log(`  mine: ${input.mine.map(m => monLine(m.set, m.hpPercent)).join('  |  ')}`);
+        console.log(`  opp:  ${input.opp.map(o => monLine(o.entry.candidates![0]!, o.hpPercent)).join('  |  ')}`);
+        const actLine = (acts: Map<number, TurnAction>, slots: typeof our.mine) =>
+          [...acts.entries()].map(([i, a]) => `#${i}→${a.kind === 'attack' ? `foe${(a as { target: number }).target}` : a.kind} (${slots[i]?.moveUsed ?? '?'})`).join('  ');
+        console.log(`  myActs:  ${actLine(myAct, our.mine)}`);
+        console.log(`  oppActs: ${actLine(opAct, our.opp)}`);
+        console.log(`  ours post-turn: mine=${our.mine.map(s => s ? `${s.species}:${s.hpPct.toFixed(1)}%${s.fainted ? ' KO' : ''}` : '-').join(' ')} opp=${our.opp.map(s => s ? `${s.species}:${s.hpPct.toFixed(1)}%${s.fainted ? ' KO' : ''}` : '-').join(' ')}`);
+        for (const d of divergences.filter(d => d.field === detailField)) {
+          console.log(`  >> ${d.who}: ours=${d.ours} sim=${d.sim} (hpGap ${hpGaps[d.who]?.toFixed(1) ?? '?'}%)`);
+        }
       }
     } catch (err) { errors++; }
   }

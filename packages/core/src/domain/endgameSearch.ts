@@ -543,6 +543,20 @@ function moveAccuracyPct(moveName: string): number {
   return a === true || a == null ? 100 : a;
 }
 
+// Gen-9 crit chance for one attack: stage = (move's critRatio − 1) + Super Luck
+// + Scope Lens / Razor Claw; P = [1/24, 1/8, 1/2, 1][min(stage, 3)]. Battle
+// Armor / Shell Armor on the defender blocks crits entirely. Drives the
+// Hail-Mary "crit-KO the killer first" out.
+function critProbFor(move: string, atkAbility: string | null | undefined, atkItem: string | null | undefined, defAbility: string | null | undefined): number {
+  const defA = toId(defAbility ?? '');
+  if (defA === 'battlearmor' || defA === 'shellarmor') return 0;
+  let stage = ((getMove(move) as { critRatio?: number } | undefined)?.critRatio ?? 1) - 1;
+  if (toId(atkAbility ?? '') === 'superluck') stage += 1;
+  const item = toId(atkItem ?? '');
+  if (item === 'scopelens' || item === 'razorclaw') stage += 1;
+  return [1 / 24, 1 / 8, 1 / 2, 1][Math.min(Math.max(stage, 0), 3)]!;
+}
+
 // Uniform-envelope KO chance for a spread option (no per-roll distribution).
 function spreadKoProb(lo: number, mid: number, hi: number, h: number): number {
   if (hi < h) return 0;
@@ -1922,6 +1936,18 @@ function isRechargeMove(move: string | null | undefined): boolean {
   return RECHARGE_MOVES.has(toId(move ?? ''));
 }
 
+// Dragon Darts: in doubles with both foes standing it throws ONE dart at EACH
+// foe (the two-hit cell's damage splits half/half) instead of both darts at one
+// target. Sim diff-harness finding (over-faint on the chosen target).
+function isDragonDarts(move: string | null | undefined): boolean { return toId(move ?? '') === 'dragondarts'; }
+// Rage Fist: +50 BP per damaging hit the user has TAKEN (base 50, cap 350) —
+// damage scales linearly with BP, so multiply by (1 + hits, ≤7). We count THIS
+// turn's hits only; lifetime hit counts from the live match aren't carried
+// (documented approximation). Sim diff-harness finding (under-damage when the
+// user is hit before it acts).
+function isRageFist(move: string | null | undefined): boolean { return toId(move ?? '') === 'ragefist'; }
+function rageScale(move: string, hitsTaken: number): number { return isRageFist(move) ? 1 + Math.min(hitsTaken, 6) : 1; }
+
 // Locked multi-turn moves (Outrage family): the user is locked into attacking for
 // 2 more turns (can't switch / setup / protect), then becomes confused.
 const LOCKED_MOVES: ReadonlySet<string> = new Set(['outrage', 'petaldance', 'thrash', 'ragingfury']);
@@ -1987,6 +2013,13 @@ function oppOutspeeds(t: Tables, s: State, oj: number, mi: number): boolean {
   const oppS = effSpeed(t.oppSpeed[oj]!, s.theirTailwind, t.oppPar[oj]!);
   return s.trickRoom ? oppS < myS : oppS > myS;
 }
+// STRICT mirror: my mi acts before opp oj. A speed TIE does not qualify — it's
+// a 50% coin the crit out must not silently absorb.
+function myOutspeedsStrict(t: Tables, s: State, mi: number, oj: number): boolean {
+  const myS = effSpeed(t.mySpeed[mi]!, s.myTailwind, t.myPar[mi]!);
+  const oppS = effSpeed(t.oppSpeed[oj]!, s.theirTailwind, t.oppPar[oj]!);
+  return s.trickRoom ? myS < oppS : myS > oppS;
+}
 
 interface Acting { side: 'mine' | 'opp'; actor: number; target: number; priority: number; speed: number }
 
@@ -2040,6 +2073,10 @@ function resolveTurn(
   // actor's single-target attack substitutes the locked move's per-move cell.
   const myChoiceMove = s.myChoiceMove.slice();
   const oppChoiceMove = s.oppChoiceMove.slice();
+  // Damaging move-hits TAKEN this turn per mon (counted in apply) — feeds Rage
+  // Fist's +50-BP-per-hit scaling at the moment the user attacks.
+  const myHitsTaken = s.myHp.map(() => 0);
+  const oppHitsTaken = s.oppHp.map(() => 0);
   const mySubHp = s.mySubHp.slice();
   const oppSubHp = s.oppSubHp.slice();
   const myWish = s.myWish.slice();
@@ -2279,6 +2316,8 @@ function resolveTurn(
     if (dg && dg.arr[idx] && dmg > 0) { dg.arr[idx] = false; hp[idx] = Math.max(0, hp[idx]! - dg.chip); return; }
     const before = hp[idx]!;
     const after = before - dmg;
+    // Move-hit counter for Rage Fist scaling (sub/disguise absorbs returned above).
+    if (dmg > 0 && before > 0) { const hits = hp === myHp ? myHitsTaken : oppHitsTaken; hits[idx] = (hits[idx] ?? 0) + 1; }
     // Forced-survive re-check (forced-loss demotion): a designated MY mon doesn't
     // die this turn — models "the opp's kill missed". Clamps any lethal hit to 1
     // regardless of HP / multi-hit; not consumed (survives every incoming hit).
@@ -2401,16 +2440,26 @@ function resolveTurn(
       // the max-damage off cell. Redirection (opp Rage Powder/Follow Me) overrides
       // targeting; else the switch-redirect (hit the replacement if it switched).
       const myPrio = isPrioTarget(act.target);
-      const oTgt = oppRedirTarget(act.actor) ?? redirect(myPrio ? prioFoeIdx(act.target) : act.target, oppSwitchIn);
+      let oTgt = oppRedirTarget(act.actor) ?? redirect(myPrio ? prioFoeIdx(act.target) : act.target, oppSwitchIn);
       const myLockMv = myChoiceMove[act.actor];
-      const oc = myPrio ? t.myPrioCell[act.actor]?.[oTgt]
+      let oc = myPrio ? t.myPrioCell[act.actor]?.[oTgt]
         : myLockMv ? lockedCellFor(t.offMoves[act.actor]?.[oTgt], myLockMv)
         : t.off[act.actor]![oTgt]!;
+      // Doubles retarget: a single-target move whose target already FAINTED hits
+      // the remaining live foe with the SAME move (its per-move cell vs the new
+      // target) — Showdown never lets it fizzle for free. The sim diff-harness
+      // found this as the dominant `fainted` divergence (6/10 positions).
+      if ((oppHp[oTgt] ?? 0) <= 0) {
+        const alt = oppActiveNow.find(j => j !== oTgt && (oppHp[j] ?? 0) > 0);
+        const sub = alt != null && oc ? lockedCellFor(t.offMoves[act.actor]?.[alt], oc.move) : undefined;
+        if (alt == null || !sub) continue;           // no standing foe / move can't damage it → fizzle
+        oTgt = alt;
+        oc = sub;
+      }
       if (oppProtected.has(oTgt)) {                  // target protecting → fizzle (+ King's Shield etc. punish)
         if (oc?.contact) applyProtectPunish(t.oppProtectMove[oTgt], 'mine', act.actor);
         continue;
       }
-      if (oppHp[oTgt]! <= 0) continue;               // target already down → fizzle
       if (!oc) continue;                              // no priority move vs this foe
       if (psychicBlocked(oc.priority, t.oppGrounded[oTgt]!)) continue; // Psychic Terrain blocks priority
       if (oppQuickGuard && oc.priority > 0) continue;  // Quick Guard blocks priority moves
@@ -2419,8 +2468,30 @@ function resolveTurn(
         if ((oppFutureTurns[oTgt] ?? 0) <= 0) { oppFutureTurns[oTgt] = 2; oppFutureDmg[oTgt] = myDmg(act.actor, oTgt, oc.dmgMid, oc.physical, oc.type, oc.groundMove); }
         continue;
       }
+      // Dragon Darts in doubles: one dart at EACH standing foe (half the cell
+      // each, the other foe via its own per-move cell). A lone foe takes both
+      // darts through the normal path below.
+      if (isDragonDarts(oc.move)) {
+        const other = oppActiveNow.find(j => j !== oTgt && (oppHp[j] ?? 0) > 0 && !oppProtected.has(j));
+        const otherCell = other != null ? lockedCellFor(t.offMoves[act.actor]?.[other], oc.move) : undefined;
+        if (other != null && otherCell) {
+          let dealtAny = false;
+          for (const [foe, cell] of [[oTgt, oc], [other, otherCell]] as Array<[number, Cell]>) {
+            const koBefore = oppHp[foe]!;
+            apply(oppHp, foe, myDmg(act.actor, foe, myRoll(cell, r) / 2, cell.physical, cell.type, cell.groundMove), oppSurv, false, oppDg(foe));
+            trackHit(oppBigHit, foe, act.actor, koBefore - oppHp[foe]!, cell.physical);
+            if (oppHp[foe]! < koBefore) dealtAny = true;
+            if (koBefore > 0 && oppHp[foe]! <= 0 && t.myOnKo[act.actor]) myKoCount.set(act.actor, (myKoCount.get(act.actor) ?? 0) + 1);
+            markResist(oppResistBerryUsed, t.oppResistBerryType, foe, cell.type, t.oppSpecies[foe]!);
+            procWp('opp', foe, cell.type);
+          }
+          if (t.myLifeOrb[act.actor] && dealtAny) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10);
+          if (t.myChoice[act.actor] && !myChoiceMove[act.actor]) myChoiceMove[act.actor] = oc.move;
+          continue;
+        }
+      }
       const oBefore = oppHp[oTgt]!;
-      apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r), oc.physical, oc.type, oc.groundMove), oppSurv, oc.multiHit, oppDg(oTgt));
+      apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r) * rageScale(oc.move, myHitsTaken[act.actor] ?? 0), oc.physical, oc.type, oc.groundMove), oppSurv, oc.multiHit, oppDg(oTgt));
       const oDealt = oBefore - oppHp[oTgt]!;
       trackHit(oppBigHit, oTgt, act.actor, oDealt, oc.physical);   // for the opp's Counter
       if (oc.setsHazard) oppHazards = addHazard(oppHazards, oc.setsHazard); // Stone Axe → SR, Ceaseless Edge → Spikes (on their side)
@@ -2484,16 +2555,23 @@ function resolveTurn(
       // Priority-attack option uses the opp prio cell; a Choice-LOCKED opp
       // substitutes its locked move's per-move cell; else the max-damage thr cell.
       const oppPrio = isPrioTarget(act.target);
-      const mTgt = myRedirTarget(act.actor) ?? redirect(oppPrio ? prioFoeIdx(act.target) : act.target, mySwitchIn);  // redirection, else switch-redirect
+      let mTgt = myRedirTarget(act.actor) ?? redirect(oppPrio ? prioFoeIdx(act.target) : act.target, mySwitchIn);  // redirection, else switch-redirect
       const oppLockMv = oppChoiceMove[act.actor];
-      const tc = oppPrio ? t.oppPrioCell[act.actor]?.[mTgt]
+      let tc = oppPrio ? t.oppPrioCell[act.actor]?.[mTgt]
         : oppLockMv ? lockedCellFor(t.thrMoves[act.actor]?.[mTgt], oppLockMv)
         : t.thr[act.actor]![mTgt]!;
+      // Doubles retarget onto my side (same rule as above, mirrored).
+      if ((myHp[mTgt] ?? 0) <= 0) {
+        const alt = myActiveNow.find(i => i !== mTgt && (myHp[i] ?? 0) > 0);
+        const sub = alt != null && tc ? lockedCellFor(t.thrMoves[act.actor]?.[alt], tc.move) : undefined;
+        if (alt == null || !sub) continue;
+        mTgt = alt;
+        tc = sub;
+      }
       if (myProtected.has(mTgt)) {                    // my mon protecting → fizzle (+ King's Shield etc. punish)
         if (tc?.contact) applyProtectPunish(t.myProtectMove[mTgt], 'opp', act.actor);
         continue;
       }
-      if (myHp[mTgt]! <= 0) continue;
       if (!tc) continue;                              // no priority move vs this foe
       if (psychicBlocked(tc.priority, t.myGrounded[mTgt]!)) continue; // Psychic Terrain blocks priority
       if (myQuickGuard && tc.priority > 0) continue;  // Quick Guard blocks priority moves
@@ -2502,8 +2580,28 @@ function resolveTurn(
         if ((myFutureTurns[mTgt] ?? 0) <= 0) { myFutureTurns[mTgt] = 2; myFutureDmg[mTgt] = oppDmg(act.actor, mTgt, tc.dmgMid, tc.physical, tc.type, tc.groundMove); }
         continue;
       }
+      // Dragon Darts in doubles (opp side): one dart at EACH of my standing mons.
+      if (isDragonDarts(tc.move)) {
+        const other = myActiveNow.find(i => i !== mTgt && (myHp[i] ?? 0) > 0 && !myProtected.has(i));
+        const otherCell = other != null ? lockedCellFor(t.thrMoves[act.actor]?.[other], tc.move) : undefined;
+        if (other != null && otherCell) {
+          let dealtAny = false;
+          for (const [me, cell] of [[mTgt, tc], [other, otherCell]] as Array<[number, Cell]>) {
+            const koBefore = myHp[me]!;
+            apply(myHp, me, oppDmg(act.actor, me, oppRoll(cell, r) / 2, cell.physical, cell.type, cell.groundMove), mySurv, false, myDg(me));
+            trackHit(myBigHit, me, act.actor, koBefore - myHp[me]!, cell.physical);
+            if (myHp[me]! < koBefore) dealtAny = true;
+            if (koBefore > 0 && myHp[me]! <= 0 && t.oppOnKo[act.actor]) oppKoCount.set(act.actor, (oppKoCount.get(act.actor) ?? 0) + 1);
+            markResist(myResistBerryUsed, t.myResistBerryType, me, cell.type, t.mySpecies[me]!);
+            procWp('mine', me, cell.type);
+          }
+          if (t.oppLifeOrb[act.actor] && dealtAny) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
+          if (t.oppChoice[act.actor] && !oppChoiceMove[act.actor]) oppChoiceMove[act.actor] = tc.move;
+          continue;
+        }
+      }
       const mBefore = myHp[mTgt]!;
-      apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r), tc.physical, tc.type, tc.groundMove), mySurv, tc.multiHit, myDg(mTgt));
+      apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r) * rageScale(tc.move, oppHitsTaken[act.actor] ?? 0), tc.physical, tc.type, tc.groundMove), mySurv, tc.multiHit, myDg(mTgt));
       const mDealt = mBefore - myHp[mTgt]!;
       trackHit(myBigHit, mTgt, act.actor, mDealt, tc.physical);   // for my Counter
       if (tc.setsHazard) myHazards = addHazard(myHazards, tc.setsHazard); // their Stone Axe / Ceaseless Edge → hazard on my side
@@ -4132,6 +4230,25 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
     return best ?? { score: -Infinity, joint: null, table: tables.get('null,null')!, myMega: null };
   };
 
+  // Counterfactual maximin score for a MODIFIED state ("if that killer were
+  // already down, do my best rolls win?") — drives the crit-out verdict flip.
+  // Goes through value(), NOT rootSearch: value checks terminal() first, so a
+  // state whose last live foe was removed scores as the win it is (rootSearch
+  // has no joints to enumerate there and would return -Infinity).
+  const flipScore = (state: State, pass: Pass, depth: number): number => {
+    let best = -Infinity;
+    for (const myMega of myPlans) {
+      let worst = Infinity;
+      for (const oppMega of oppPlans) {
+        const table = tables.get(`${myMega},${oppMega}`)!;
+        const v = value(table, state, depth, -Infinity, Infinity, pass, depth);
+        if (v < worst) worst = v;
+      }
+      if (worst > best) best = worst;
+    }
+    return best;
+  };
+
   const rank = (v: SearchResult['verdict']): number => (v === 'winning' ? 2 : v === 'even' ? 1 : 0);
 
   return {
@@ -4175,13 +4292,42 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
       //  • a per-out verdict-flip re-check requires my best rolls to WIN once that
       //    mon survives the turn (survive-at-1 ≤ full-HP-after-a-miss, so the proxy
       //    can only ever under-credit, never over-claim, an out).
+      // Crit out (defensive flavor): my mon crit-KOs the opp's guaranteed killer
+      // BEFORE it acts. Lazy (a couple of calc calls, forced-losing roots only).
+      // Strict outspeed gate; the move is mi's Choice lock, else its best cell.
+      // When this demotes the forced loss, the line is stashed so the Hail-Mary
+      // block surfaces it (Line C yields nothing for an accurate guaranteed kill).
+      let critDemoted: { plays: SearchPlay[]; outs: HailMaryOut[]; prob: number } | null = null;
+      const critOutFor = (mi: number, oj: number): { label: string; prob: number; move: string } | null => {
+        const myMon = input.mine[mi]; const oppMon = input.opp[oj];
+        if (!myMon || !oppMon) return null;
+        const tbl = opt.table;
+        if (!myOutspeedsStrict(tbl, s0, mi, oj)) return null;
+        const ojHp = s0.oppHp[oj] ?? 0;
+        if (ojHp <= 0) return null;
+        const mv = s0.myChoiceMove[mi] ?? tbl.off[mi]?.[oj]?.move;
+        if (!mv) return null;
+        const pCrit = critProbFor(mv, myMon.set.ability, myMon.set.item, oppMon.entry.ability);
+        if (pCrit <= 0) return null;
+        const cc = cellFrom(predictOffense({
+          attacker: { ...myMon.set, moves: [mv] }, opponent: oppMon.entry, field: input.field,
+          critical: true,
+          attackerGimmickActive: mi === opt.myMega || !!myMon.megaActive,
+          attackerBoosts: myMon.boosts, attackerStatus: myMon.status,
+          defenderBoosts: oppMon.boosts, defenderStatus: oppMon.status,
+        }));
+        const pKo = rollKoProb(cc, ojHp);
+        if (pKo <= 0) return null;
+        return { label: `crit: ${tbl.mySpecies[mi]}'s ${mv} crit-KOs ${tbl.oppSpecies[oj]}`, prob: pCrit * pKo, move: mv };
+      };
+
       if (eV === 'losing' && forcedLoss) {
         for (const mi of s0.myActive) {
           const myHp = s0.myHp[mi] ?? 0;
           if (myHp <= 0) continue;
           // Per opp mon: the MAX accuracy among its roll-guaranteed KOs on mi (the
           // opp picks its most accurate guaranteed kill). One entry per killer.
-          const threatAccs: number[] = [];
+          const threats: Array<{ oj: number; acc: number }> = [];
           for (const oj of s0.oppActive) {
             if ((s0.oppHp[oj] ?? 0) <= 0) continue;
             let maxAcc = -1;
@@ -4197,14 +4343,33 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
               const sp = oppSpreadAt(tbl, oj); if (sp) consider(sp.move, spreadKoProb(sp.dmgMin[mi] ?? 0, sp.dmgMid[mi] ?? 0, sp.dmgMax[mi] ?? 0, myHp));
               const pc = oppPrioAt(tbl, oj, mi); if (pc && pc.dmgMax >= myHp) consider(pc.move, rollKoProb(pc, myHp));
             }
-            if (maxAcc >= 0) threatAccs.push(maxAcc);
+            if (maxAcc >= 0) threats.push({ oj, acc: maxAcc });
           }
-          // Exactly one sub-100%-accuracy guaranteed killer is the nameable out.
-          if (threatAccs.length !== 1 || threatAccs[0]! >= 100) continue;
-          // Verdict-flip: if mi survives this turn, do my best rolls win? Only then
-          // is the miss a genuine game-flipping out (reuses the sensitivity pass).
-          const flip = evalPass(buildPass('optimistic', { myIdx: mi, survMy: true }), depth);
-          if (flip.score >= WIN) { forcedLoss = false; break; }
+          // A single guaranteed killer is the analyzable case (≥2 stand pat).
+          if (threats.length !== 1) continue;
+          const { oj, acc } = threats[0]!;
+          // Miss out: a sub-100%-accuracy guaranteed kill can MISS. Verdict-flip:
+          // if mi survives this turn, do my best rolls win? Only then is the miss
+          // a genuine game-flipping out (reuses the sensitivity pass).
+          if (acc < 100) {
+            const flip = evalPass(buildPass('optimistic', { myIdx: mi, survMy: true }), depth);
+            if (flip.score >= WIN) { forcedLoss = false; break; }
+          }
+          // Crit out: even a 100%-accurate kill never lands if its user is
+          // crit-KO'd first. Verdict-flip on a "killer already down" state.
+          const out = critOutFor(mi, oj);
+          if (out) {
+            const dead: State = { ...s0, oppHp: s0.oppHp.map((h, j) => (j === oj ? 0 : h)) };
+            if (flipScore(dead, buildPass('optimistic'), depth) >= WIN) {
+              forcedLoss = false;
+              critDemoted = {
+                plays: [{ mySpecies: opt.table.mySpecies[mi]!, move: out.move, targetSpecies: opt.table.oppSpecies[oj]! }],
+                outs: [{ label: out.label, prob: out.prob }],
+                prob: out.prob,
+              };
+              break;
+            }
+          }
         }
       }
 
@@ -4461,6 +4626,11 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
           }
           if (best) lines.push({ plays: playsFromJoint(expected.table, expected.joint), outs: [best], prob: best.prob });
         }
+
+        // ---- Line B: crit-KO the killer before it acts (set by the forced-loss
+        // demotion above — the only out when the kill neither misses nor rolls
+        // low). Pushed as a candidate so the headline picks it when it's best.
+        if (critDemoted) lines.push(critDemoted);
 
         // Surface the most-likely line as the headline Hail Mary.
         if (lines.length) {

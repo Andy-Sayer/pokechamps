@@ -157,12 +157,22 @@ guaranteed) from "misses or rolls low" (roll-dependent). Tests: forced-loss
 demotion (fires / verdict-flip gate holds / 100%-acc stays forced) in
 `endgame-search.test.ts`.
 
-**Remaining follow-up — the crit out.** The optimistic regime also ignores crits,
-so a position escapable only via a crit is still mislabelled `forced`. The **crit**
-out (`critProbFor`: Gen-9 crit stages + Scope Lens / Super Luck / Battle Armor) is
-structurally dead in the non-forced regime (dominated by the higher-prob "opp rolls
-low"), so it ships with the forced-loss work — but it needs faithful same-turn,
-turn-order-aware crit-KO modelling, so it's its own change, deferred.
+**STATUS 2026-06-09 — crit out SHIPPED (defensive flavor).** A forced loss whose
+only escape is crit-KOing the opp's guaranteed killer BEFORE it acts now demotes
+and surfaces `"crit: <mon>'s <move> crit-KOs <killer> (~4%)"` as Hail-Mary Line B.
+Mechanics: `critProbFor` (Gen-9 stages — base 1/24, high-crit 1/8, +Super Luck /
+Scope Lens / Razor Claw, zeroed by Battle/Shell Armor); a LAZY crit cell at the
+root (the mon's Choice-locked move, else its best cell move, recomputed
+`critical: true` — a handful of calc calls on forced-losing roots only); a
+STRICT outspeed gate (`myOutspeedsStrict`, TR-aware — speed ties never qualify);
+and a verdict flip via `flipScore` on a "killer already down" counterfactual
+state (goes through `value()`, which is terminal-aware — rootSearch has no
+joints to enumerate when the last foe is removed). Along the way the
+long-standing predictOffense/predictThreat quirk (move CHOSEN with `critical`
+but range computed without it) was fixed — the TUI `/crit` grid now reports true
+crit ranges. Deferred, documented: the OFFENSIVE crit flavor (crit lets my
+needed KO land — requires a crit-augmented optimistic pass), priority-aware crit
+ordering, speed-tie halving. Tests: `crit-out.test.ts`.
 
 When the expected verdict is **losing** but the position **isn't `forced` loss**, there's something the opponent has to roll right to actually close it out — and you're guaranteed to lose if you *don't* play for that miss. Today the recommender shows "likely loss N%" and stops; what the user wants is the explicit *out*: "your only shot is the crit / the miss / the flinch — here's how unlikely."
 
