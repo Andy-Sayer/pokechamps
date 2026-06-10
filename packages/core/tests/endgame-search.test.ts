@@ -574,6 +574,56 @@ describe('hailMary outs analysis', () => {
     }
   });
 
+  // The "opp fails the kill it's relying on" out: a roll-dependent endgame where
+  // a faster foe KOs me with an INACCURATE move on a good roll, and if I survive
+  // I KO it back. The out blends the miss AND the low-roll chance into one honest
+  // probability and names the move + failure mode.
+  test('opp-fails-kill out: inaccurate KO surfaces "misses or rolls low" with a blended prob', () => {
+    const garStoneEdge = mon({
+      species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly',
+      evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Stone Edge'], // 80% acc, faster than Bax
+    });
+    const bax = mon({
+      species: 'Baxcalibur', ability: 'Thermal Exchange', nature: 'Adamant',
+      evs: { ...ZERO_EVS, hp: 4, atk: 252, spe: 252 }, moves: ['Icicle Crash'], // OHKOs Garchomp (Ice 4x)
+    });
+    const r = searchToDepth({
+      mine: [{ set: bax, hpPercent: 82, active: true }],
+      opp: [{ entry: oppOf(garStoneEdge), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 2);
+    expect(r.verdict).toBe('losing');
+    expect(r.forced).toBe(false);
+    expect(r.hailMary).toBeDefined();
+    const hm = r.hailMary!;
+    expect(hm.noRealisticOut).toBe(false);
+    expect(hm.outs).toHaveLength(1);
+    expect(hm.outs[0]!.label).toContain('Stone Edge');
+    expect(hm.outs[0]!.label).toContain('misses or rolls low');
+    // Blended out: a 20% flat miss PLUS the low-roll survival chance — strictly
+    // above the bare miss and below certainty.
+    expect(hm.combined).toBeGreaterThan(0.2);
+    expect(hm.combined).toBeLessThan(0.9);
+    expect(hm.combined).toBe(hm.outs[0]!.prob);
+  });
+
+  // When the loss rides a LATER ply (the opp doesn't KO me THIS turn), there's no
+  // single dice event to name → the generic "opp rolls low" last-resort.
+  test('generic last-resort: "opp rolls low" when no single dice event pins the win', () => {
+    const gargan = mon({
+      species: 'Garganacl', ability: 'Purifying Salt', nature: 'Adamant',
+      evs: { ...ZERO_EVS, hp: 252, atk: 252 }, moves: ['Rock Slide'],
+    });
+    const r = searchToDepth({
+      mine: [{ set: flutter, hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(gargan), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 2);
+    if (r.verdict === 'losing' && !r.forced && r.hailMary) {
+      expect(r.hailMary.outs.some(o => /rolls low/.test(o.label))).toBe(true);
+    }
+  });
+
   test('hailMary.plays has valid plays when defined', () => {
     const input: SearchInput = {
       mine: [{ set: flutter, hpPercent: 20, active: true }],

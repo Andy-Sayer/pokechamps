@@ -2817,7 +2817,12 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
           if (hm.noRealisticOut) {
             hmLine = '~lost — no realistic out';
           } else {
-            const outText = hm.outs.map(o => `${o.label} (${Math.round(o.prob * 100)}%)`).join(' + ');
+            // Single out: the headline ~% already states the odds — don't repeat
+            // it after the label. Multiple outs: show each one's % as a breakdown
+            // (the headline is their product).
+            const outText = hm.outs.length === 1
+              ? hm.outs[0]!.label
+              : hm.outs.map(o => `${o.label} (${Math.round(o.prob * 100)}%)`).join(' + ');
             hmLine = `only out: ~${Math.round(hm.combined * 100)}% — ${outText}`;
           }
         }

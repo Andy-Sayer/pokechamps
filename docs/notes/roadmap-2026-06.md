@@ -72,24 +72,23 @@ KO-boundary residual should shrink) and `search-mechanics.test.ts`.
 default selection, no behaviour change; (b) Choice-lock selection; (c)
 KO-boundary regime precision. Each stage independently testable.
 
-### Theme 2 — Hail-Mary outs analysis *(user-requested, framework exists)*
+### Theme 2 — Hail-Mary outs analysis *(non-forced case ✅ shipped 2026-06-09)*
 
-Full spec already written in [`accuracy-roadmap.md`](accuracy-roadmap.md) §"Hail
-Mary". Runs only when `verdict === 'losing' && !forced`. Enumerate the discrete
-dice events that could flip the position inside the horizon — crit on my lethal
-KO, opponent's KO misses (move accuracy), my flinch move, opponent status turn
-loss, my top roll / their low roll, my Sash/berry triggering — price each from
-real sources (calc crit chance, move accuracy, flinch %, the empirical roll
-distribution), simulate the favourable resolution, and surface the single best
-out:
+Turned out a basic version already existed (only "my KO needs top roll" + a vague
+"opp rolls low 0.5"). Rebuilt it around candidate **lines** and shipped the
+unified **"opp fails the kill it's relying on"** out —
+`P(fail) = (1−acc) + acc·P(roll doesn't KO)` — surfaced as
+`"opp's Stone Edge misses or rolls low on Baxcalibur (~30%)"`, plus the my-roll
+line and a generic last-resort. See [`accuracy-roadmap.md`](accuracy-roadmap.md)
+§"Hail Mary" for the shipped detail + tests.
 
-> `⌁ best play (3 ahead): Sableye→Foul Play→Aerodactyl — only out: ~8% (crit + Rock Slide low roll)`
-
-Below a sanity floor (~0.5%) label it `~lost — no realistic out` rather than
-implying false hope. Mechanically it's the mirror of the forced-win/winChance
-machinery already built — reuse the regime passes + roll distribution.
-
-*Effort:* medium. High visibility. Ship early in the month.
+**Remaining (the high-value half):** the search's `forced`-loss flag ignores
+accuracy/crits, so the cases where "they just have to land it" matters MOST are
+mislabelled `forced` and suppressed. Demoting `forced` when a genuine dice out
+exists (with a per-out verdict-flip check) — and folding in the **crit** out
+(`critProbFor` is written but parked, since it's dominated in the non-forced
+regime) — is the follow-up. Medium effort; touches `forced` semantics so it gets
+its own change.
 
 ### Theme 3 — Inference backward half
 

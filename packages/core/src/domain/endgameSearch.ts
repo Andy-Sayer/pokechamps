@@ -521,6 +521,20 @@ function rollKoProb(c: Cell, h: number): number {
   return Math.max(0, Math.min(1, (c.dmgMax - h) / (c.dmgMax - c.dmgMin)));
 }
 
+// Move accuracy as a 0..100 percent. `accuracy === true` (never-miss) or unset
+// → 100. Used by the Hail-Mary "the opp has to land it" out.
+function moveAccuracyPct(moveName: string): number {
+  const a = (getMove(moveName) as { accuracy?: number | true } | undefined)?.accuracy;
+  return a === true || a == null ? 100 : a;
+}
+
+// Uniform-envelope KO chance for a spread option (no per-roll distribution).
+function spreadKoProb(lo: number, mid: number, hi: number, h: number): number {
+  if (hi < h) return 0;
+  if (hi <= lo) return mid >= h ? 1 : 0;
+  return Math.max(0, Math.min(1, (hi - h) / (hi - lo)));
+}
+
 interface Tables {
   myN: number;
   oppN: number;
@@ -4142,16 +4156,25 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
         winChance = unpriced ? undefined : Math.max(0, Math.min(1, winChance));
       }
 
-      // Hail Mary: when losing but the optimistic regime finds a winning path,
-      // surface the specific dice rolls needed. This is the mirror of the
-      // winning-side sensitivity analysis above.
+      // Hail Mary: when losing but not a FORCED loss, name the dice that could
+      // still save the game. We assemble candidate LINES — each a plan plus the
+      // lucky event(s) it relies on — and surface the single most-likely one as
+      // "your best shot". This is the mirror of the winning-side sensitivity
+      // analysis above. Two out types:
+      //  A) my favourable ROLLS land the KO(s) the optimistic line needs;
+      //  C) the opp FAILS the kill it's relying on — it misses, or hits but
+      //     rolls too low to KO. P(fail) = (1−acc) + acc·P(roll doesn't KO),
+      //     which unifies the accuracy and roll components into one honest out.
       let hailMary: HailMary | undefined;
       if (eV === 'losing' && !forcedLoss) {
+        const myMegaChosen = expected.myMega;
+        type HMLine = { plays: SearchPlay[]; outs: HailMaryOut[]; prob: number };
+        const lines: HMLine[] = [];
+
+        // ---- Line A: my favourable rolls close it (optimistic regime wins) ----
         if (opt.score >= WIN) {
-          // There IS a winning path under best-case conditions. Find which
-          // root-turn KOs in the opt play require a high roll to land.
-          const hmOuts: HailMaryOut[] = [];
-          let hmCombined = 1;
+          const outsA: HailMaryOut[] = [];
+          let comboA = 1;
           for (const [actor, target] of (opt.joint ?? [])) {
             if (target === SPREAD) {
               const sp = opt.table.mySpread[actor];
@@ -4162,11 +4185,10 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
                 const dMid = sp.dmgMid[foe] ?? 0;
                 const dMax = sp.dmgMax[foe] ?? 0;
                 if (dMax < h || dMid >= h) continue; // can't KO or already guaranteed
-                // Uniform envelope estimate (no koRolls for spread moves).
                 const p = dMax > dMid ? (dMax - h) / (dMax - dMid) : 0;
                 if (p <= 0) continue;
-                hmOuts.push({ label: `${opt.table.oppSpecies[foe] ?? 'foe'} KO needs top roll`, prob: p });
-                hmCombined *= p;
+                outsA.push({ label: `${opt.table.oppSpecies[foe] ?? 'foe'} KO needs top roll`, prob: p });
+                comboA *= p;
               }
             } else if (target >= 0 || isPrioTarget(target)) {        // direct or priority attack (skip PROTECT / SWITCH)
               const foe = isPrioTarget(target) ? prioFoeIdx(target) : target;
@@ -4176,25 +4198,62 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
               if (h <= 0 || c.dmgMax < h || c.dmgMid >= h) continue;
               const p = rollKoProb(c, h);
               if (p <= 0 || p >= 1) continue;
-              hmOuts.push({ label: `${opt.table.oppSpecies[foe] ?? 'foe'} KO needs top roll`, prob: p });
-              hmCombined *= p;
+              outsA.push({ label: `${opt.table.oppSpecies[foe] ?? 'foe'} KO needs top roll`, prob: p });
+              comboA *= p;
             }
           }
-          // If no roll-based outs at the root turn, the win comes from later
-          // plies or from opp rolling low — add a generic unpriced caveat.
-          if (!hmOuts.length) {
-            hmOuts.push({ label: 'opp needs to roll low', prob: 0.5 });
-            hmCombined = 0.5;
+          if (outsA.length) lines.push({ plays: playsFromJoint(opt.table, opt.joint), outs: outsA, prob: comboA });
+        }
+
+        // ---- Line C: the opp FAILS the kill it's relying on (miss / low roll) ----
+        // For each of my live actives the opp can KO this turn, find the opp's
+        // single most RELIABLE kill attempt across mega plans / moves — pKO =
+        // (acc/100)·P(roll KOs). If that's a coin-flip (< 1), surviving it is a
+        // real out; label it by the dominant failure mode (a sub-100% move can
+        // miss OR roll low; a 100%-accurate one only rolls low).
+        {
+          let best: HailMaryOut | null = null;
+          for (const mi of s0.myActive) {
+            const myHp = s0.myHp[mi] ?? 0;
+            if (myHp <= 0) continue;
+            let bestPKo = 0; let bestMove = ''; let bestAcc = 100;
+            const consider = (mv: string | undefined, rollKo: number) => {
+              if (!mv || rollKo <= 0) return;
+              const acc = moveAccuracyPct(mv);
+              const pKo = (acc / 100) * rollKo;
+              if (pKo > bestPKo) { bestPKo = pKo; bestMove = mv; bestAcc = acc; }
+            };
+            for (const oppMega of oppPlans) {
+              const tbl = tables.get(`${myMegaChosen},${oppMega}`);
+              if (!tbl) continue;
+              for (const oj of s0.oppActive) {
+                if ((s0.oppHp[oj] ?? 0) <= 0) continue;
+                const c = tbl.thr[oj]?.[mi]; if (c && c.dmgMax >= myHp) consider(c.move, rollKoProb(c, myHp));
+                const sp = tbl.oppSpread[oj]; if (sp) consider(sp.move, spreadKoProb(sp.dmgMin[mi] ?? 0, sp.dmgMid[mi] ?? 0, sp.dmgMax[mi] ?? 0, myHp));
+                const pc = tbl.oppPrioCell[oj]?.[mi]; if (pc && pc.dmgMax >= myHp) consider(pc.move, rollKoProb(pc, myHp));
+              }
+            }
+            if (bestPKo <= 0 || bestPKo >= 1) continue; // no kill, or a guaranteed one (not an out)
+            const survive = 1 - bestPKo;
+            const myName = expected.table.mySpecies[mi] ?? 'my mon';
+            const mode = bestAcc < 100 ? `${bestMove} misses or rolls low` : `${bestMove} rolls low`;
+            const out: HailMaryOut = { label: `opp's ${mode} on ${myName}`, prob: survive };
+            if (!best || survive > best.prob) best = out;
           }
-          const combined = Math.max(0, Math.min(1, hmCombined));
-          hailMary = {
-            plays: playsFromJoint(opt.table, opt.joint),
-            outs: hmOuts,
-            combined,
-            noRealisticOut: combined < 0.005,
-          };
+          if (best) lines.push({ plays: playsFromJoint(expected.table, expected.joint), outs: [best], prob: best.prob });
+        }
+
+        // Surface the most-likely line as the headline Hail Mary.
+        if (lines.length) {
+          const win = lines.reduce((a, b) => (b.prob > a.prob ? b : a));
+          const combined = Math.max(0, Math.min(1, win.prob));
+          hailMary = { plays: win.plays, outs: win.outs, combined, noRealisticOut: combined < 0.005 };
+        } else if (opt.score >= WIN) {
+          // A win exists under best-case rolls, but no single dice event pins it
+          // (it rides later plies / the opp rolling low). Generic last-resort.
+          hailMary = { plays: playsFromJoint(opt.table, opt.joint), outs: [{ label: 'opp rolls low', prob: 0.5 }], combined: 0.5, noRealisticOut: false };
         } else {
-          // Even optimistic conditions don't find a win — no realistic path.
+          // No winning path even under best-case conditions.
           hailMary = { plays: [], outs: [], combined: 0, noRealisticOut: true };
         }
       }

@@ -128,6 +128,28 @@ Each of these is its own multi-commit project and changes the **lookahead search
 
 ## "Hail Mary" — surface the dice rolls when everything else is a loss
 
+**STATUS 2026-06-09 — shipped (non-forced case).** `endgameSearch.ts` now names
+the dice when `verdict === 'losing' && !forced`. Two out types: (A) my favourable
+ROLLS land the KO(s) the optimistic line needs (`"X KO needs top roll"`,
+product-combined), and (C) **the opp fails the kill it's relying on** — the
+unified `P(fail) = (1−acc) + acc·P(roll doesn't KO)`, surfaced as
+`"opp's Stone Edge misses or rolls low on Baxcalibur (~30%)"`. This subsumes both
+the accuracy and the roll components in one honest number (the earlier idea of a
+bare "miss %" understated it by dropping the low-roll survival). A generic
+`"opp rolls low"` is the last resort when the loss rides a later ply. Concrete
+outs are preferred over the vague caveat. Tests in `endgame-search.test.ts`.
+
+**Follow-up (the high-value remainder):** the search's `forced` loss flag is
+computed from the optimistic regime, which **ignores accuracy and crits** — so a
+position whose only kill is a 70%-accurate move (or that's escapable only via a
+crit) is mislabelled `forced` and the Hail-Mary is suppressed, exactly where the
+user most wants "they just have to land it" named. Demoting `forced` when a real
+dice out exists needs a per-out verdict-flip check (re-evaluate the line with the
+event resolved); deferred as its own change. The **crit** out (`critProbFor`:
+Gen-9 crit stages + Scope Lens / Super Luck / Battle-Armor) lives there too — it's
+structurally dead in the non-forced regime (always dominated by the higher-prob
+"opp rolls low") so it ships with the forced-loss demotion, not before.
+
 When the expected verdict is **losing** but the position **isn't `forced` loss**, there's something the opponent has to roll right to actually close it out — and you're guaranteed to lose if you *don't* play for that miss. Today the recommender shows "likely loss N%" and stops; what the user wants is the explicit *out*: "your only shot is the crit / the miss / the flinch — here's how unlikely."
 
 A new analysis layer that runs only when `verdict === 'losing' && !forced`:
