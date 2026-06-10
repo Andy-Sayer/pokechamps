@@ -111,7 +111,15 @@ export function damageRange(args: {
     (atk as unknown as { ability?: string }).ability === 'Mega Sol'
       ? { ...args.field, weather: 'Sun' }
       : args.field;
-  const moveOpts: Record<string, unknown> = { isCrit: args.critical };
+  // The attacker's resolved ability/item feed the calc's Move constructor so
+  // hit counts resolve correctly (Skill Link pins 2-5-hit moves at 5) and
+  // item/ability-dependent move types (Multi-Attack, Judgment) follow suit.
+  // `atk` is post-gimmick, so a mega forme's swapped ability is what's passed.
+  const moveOpts: Record<string, unknown> = {
+    isCrit: args.critical,
+    ability: (atk as unknown as { ability?: string }).ability,
+    item: (atk as unknown as { item?: string }).item,
+  };
   // Spread modifier: in doubles, moves targeting both foes (allAdjacentFoes)
   // or all adjacent (allAdjacent — both foes + ally) take a 0.75x damage
   // multiplier. @smogon/calc honors this via the `isSpread` flag; we set it
@@ -153,9 +161,41 @@ export function damageRange(args: {
   // @smogon/calc returns PER-HIT rolls, so a single roll undercounts the move by
   // its hit count. kochance()/desc() are already total-based; only the raw rolls
   // need scaling. `move.hits` is the calc-resolved hit count (e.g. 2; 3 for the
-  // 2-5 moves; 5 with Skill Link).
+  // 2-5 moves; 5 with Skill Link via the ability passed above).
+  //
+  // VARIABLE-count moves (dex multihit [2,5], no Skill Link) get the true
+  // Gen-5+ hit-count distribution instead of the calc's flat 3-hit average:
+  // 2/3 hits 35% each, 4/5 hits 15% each — encoded by replicating the per-hit
+  // roll set ×7/7/3/3 (out of 20) at each count. Loaded Dice → 4 or 5, 50/50.
+  // min/max then span the honest envelope (a 2-hit low roll no longer falls
+  // below `min`, which used to make inference reject truthful observations),
+  // and every rolls/percentRolls consumer (candidateLikelihood, the search's
+  // koRolls pooling) weights KO odds by the real hit-count probabilities.
+  // Approximation (same as the fixed-count path): per-hit rolls are treated
+  // as perfectly correlated (total = hits × one roll) rather than summed
+  // independently — slightly fatter tails, never a wrong envelope.
   const hits = Math.max(1, ((move as unknown as { hits?: number }).hits) ?? 1);
-  const rolls = hits > 1 ? rawRolls.map(r => r * hits) : rawRolls;
+  const mh = moveData?.multihit as number | [number, number] | undefined;
+  // Skill Link already pins hits at the max → fixed-count path. The weights
+  // below encode the [2,5] distribution specifically — every variable-count
+  // move in Gen 9 is [2,5]; anything exotic falls back to the calc's average.
+  const isVariable = Array.isArray(mh) && mh[0] === 2 && mh[1] === 5 && hits !== 5;
+  let rolls: number[];
+  if (isVariable) {
+    // The calc emits one nested 16-roll array PER hit (identical sets for
+    // uniform-power 2-5 moves) — reduce to a single hit's set before weighting.
+    const perHitRolls = rawRolls.slice(0, Math.max(1, Math.floor(rawRolls.length / hits)));
+    const hasDice = /loaded\s*dice/i.test((atk as unknown as { item?: string }).item ?? '');
+    const weights: Array<[number, number]> = hasDice
+      ? [[4, 1], [5, 1]]
+      : [[2, 7], [3, 7], [4, 3], [5, 3]];
+    rolls = [];
+    for (const [h, w] of weights) {
+      for (let i = 0; i < w; i++) for (const r of perHitRolls) rolls.push(r * h);
+    }
+  } else {
+    rolls = hits > 1 ? rawRolls.map(r => r * hits) : rawRolls;
+  }
   const min = rolls.length ? Math.min(...rolls) : 0;
   const max = rolls.length ? Math.max(...rolls) : 0;
   const maxHP = def.maxHP();

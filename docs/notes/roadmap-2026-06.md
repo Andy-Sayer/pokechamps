@@ -162,9 +162,19 @@ HP-stat read, positional boosts, item-clause exclusion). What's still thin:
   Magic Bounce checks via the threaded call sites. Bonus: an `o1 ability`
   reveal now prunes the candidate set (it previously only set the field).
   Dual-mirrored in engine.ts + BattleScreen.tsx; `ability-inference.test.ts` (16).
-- **Multi-hit variable-range KO distribution.** `@smogon/calc` averages at 3
-  hits (5 with Skill Link). A per-hit-count distribution tightens KO odds for
-  Bullet Seed / Rock Blast / Triple Axel / Icicle Spear / Population Bomb.
+- **Multi-hit variable-range KO distribution. ✅ shipped 2026-06-10.**
+  `damageRange` now expands [2,5]-hit moves to the true Gen-5+ hit-count
+  weights (2/3 hits 35% each, 4/5 15% each) instead of the calc's flat 3-hit
+  average: `rolls`/`percentRolls` carry the weighted union, so min/max span the
+  honest 2×min..5×max envelope (a 2-hit low roll used to fall BELOW `min` and
+  made inference reject truthful observations) and every consumer
+  (candidateLikelihood, the search's koRolls pooling → rollKoProb) weights KO
+  odds by hit-count probability automatically. Bonus fixes: the attacker's
+  resolved ability/item now feed the calc's `Move` constructor — **Skill Link
+  was previously ignored** (Cinccino/Cloyster computed 3 hits, now 5) — and
+  Loaded Dice gets its 4-5 @ 50/50 distribution. Triple Axel/Triple Kick
+  (escalating BP, fixed 3) and Population Bomb (fixed 10) keep the calc's
+  fixed-count path. `multi-hit-distribution.test.ts` (5).
 - **Thread item-clause into the inference *axis*** (parked in
   `project_item_clause_exclusion`). Today it's a post-hoc filter on candidate
   output — correct for the displayed result, but the coarse grid still *generates*
