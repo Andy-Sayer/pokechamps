@@ -41,6 +41,7 @@ import { getMegaOptions } from '@pokechamps/core/domain/gimmicks/mega.js';
 import { solveEndgame } from '@pokechamps/core/domain/endgame.js';
 import type { EndgamePosition } from '@pokechamps/core/domain/endgame.js';
 import { createSearch, searchInputFromMatch, oppCanMega, wideningSchedule, type SearchResult } from '@pokechamps/core/domain/endgameSearch.js';
+import { runExactOracle, formatOracleResult } from '@pokechamps/core/domain/simOracle.js';
 
 export interface BattleScreenProps {
   stores: Stores;
@@ -661,6 +662,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // AI battle review (opt-in via `r`). Holds the rendered text and a busy flag.
   const [aiReview, setAiReview] = useState<string | null>(null);
   const [aiReviewBusy, setAiReviewBusy] = useState(false);
+  // /exact oracle busy flag — one ground-truth resolution at a time.
+  const [exactBusy, setExactBusy] = useState(false);
   // True while finalizeTurn is running — inference for off-meta opps can
   // take several seconds. We render a running-Pikachu spinner so the
   // user knows the app isn't stuck. Set via /next dispatch which schedules
@@ -2504,6 +2507,24 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         // just the brought 4) — same as TeamPicker's `x` does.
         setExportPanelText(t => t == null ? formatShowdownTeamSP(match.myTeam) : null);
         return true;
+      case 'exact': {
+        // Opt-in ground truth: resolve the CURRENT recommended line through the
+        // real Showdown engine over 16 RNG seeds (client-side; @pkmn/sim is an
+        // optional dep — runExactOracle degrades to a friendly message without it).
+        if (!bestSearch || bestSearch.plays.length === 0) {
+          setMessage('/exact needs a search result — wait for the ⌁ best play line.');
+          return true;
+        }
+        if (exactBusy) return true;
+        setExactBusy(true);
+        setMessage('⚑ exact sim: resolving the recommended line through the real engine…');
+        const exactInput = searchInputFromMatch(match, activeIdx);
+        runExactOracle(exactInput, bestSearch)
+          .then(r => setMessage(formatOracleResult(r).join('\n')))
+          .catch(e => setMessage(`⚑ exact sim failed: ${e instanceof Error ? e.message : String(e)}`))
+          .finally(() => setExactBusy(false));
+        return true;
+      }
       case 'review': {
         if (match.turns.length === 0) {
           setMessage('/review needs at least one finalized turn.');
@@ -2907,7 +2928,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             {oneDChessText ? <Text dimColor>   1D chess (opp likely): {oneDChessText}</Text> : null}
             {bestSearch.adapted ? <Text dimColor>   spread refined from observed damage</Text> : null}
             {riskText ? <Text dimColor>   risks: {riskText}</Text> : null}
-            {unmodeledText ? <Text color="yellow">   ⚠ approximating: {unmodeledText}</Text> : null}
+            {unmodeledText ? <Text color="yellow">   ⚠ approximating: {unmodeledText} — <Text color="white">/exact</Text> for ground truth</Text> : null}
             {hmLine ? <Text dimColor>   {hmLine}</Text> : null}
           </>
         );

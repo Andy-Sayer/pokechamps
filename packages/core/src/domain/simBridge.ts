@@ -6,18 +6,40 @@
  * forward engine we can (a) diff our fast `endgameSearch.ts` against to find gaps,
  * and (b) later expose as an opt-in oracle for the recommended line.
  *
- * IMPORTANT — DEPENDENCY BOUNDARY. `@pkmn/sim` is a **devDependency**. Nothing on
- * the shipped/runtime path may import this module, or the TUI bundle pulls in the
- * whole engine. It is consumed only by tests today. When the opt-in oracle ships,
- * promote `@pkmn/sim` to an OPTIONAL dependency and lazy-`import()` this module so
- * the base bundle stays lean (see `project_tui_bundle_deploy`).
+ * IMPORTANT — DEPENDENCY BOUNDARY. `@pkmn/sim` is an OPTIONAL dependency, loaded
+ * lazily via `ensureSimLoaded()` — this module has NO eager engine import, so it
+ * is safe on the runtime path (the opt-in `/exact` oracle imports it). The TUI
+ * bundle marks `@pkmn/sim` external (scripts/bundle-tui.mjs): a bundle user
+ * without the package simply gets `ensureSimLoaded() === false` and a friendly
+ * message, while dev installs and the repo TUI have it available. Callers must
+ * await `ensureSimLoaded()` before any of the sync APIs below.
  *
  * The engine has no public "load arbitrary mid-game state" API, so we construct a
  * customgame battle (no team preview → actives are sent out immediately) and then
  * set HP / status / boosts / field to the target state before resolving the turn.
  */
-import { Battle } from '@pkmn/sim';
+import type { Battle } from '@pkmn/sim';
 import { toId } from './data.js';
+
+// Lazily-loaded Battle constructor. Null until ensureSimLoaded() succeeds.
+let BattleCtor: typeof Battle | null = null;
+
+/** Load `@pkmn/sim` if present. Returns false (without throwing) when the
+ *  package isn't installed — the caller surfaces "exact engine unavailable". */
+export async function ensureSimLoaded(): Promise<boolean> {
+  if (BattleCtor) return true;
+  try {
+    BattleCtor = (await import('@pkmn/sim')).Battle;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True once ensureSimLoaded() has succeeded in this process. */
+export function simAvailable(): boolean {
+  return BattleCtor != null;
+}
 
 /** One Pokémon for the sim. Mirrors Showdown's PokemonSet shape (the fields we use). */
 export interface SimMon {
@@ -53,6 +75,10 @@ export interface SimPosition {
   p2state?: (SimSlotState | undefined)[];
   field?: SimField;
   seed?: [number, number, number, number];
+  /** Resolve as a SINGLES battle (gen9customgame). Used for true 1v1 endgames:
+   *  the sim can't start a doubles battle with a one-mon side, and a 1v1 has
+   *  no doubles-only semantics (spread/ally targeting) to lose. */
+  singles?: boolean;
 }
 
 /** Read-out of one active slot after a turn. */
@@ -86,15 +112,19 @@ function toSimSet(m: SimMon) {
 
 // Order a team so the desired actives occupy the first `active.length` slots —
 // customgame sends out the leading team members, so we reorder to control leads.
-function orderTeam(team: SimMon[], active: number[]): SimMon[] {
+// Exported so the oracle can map "switch to species X" to the sim's team slot.
+export function orderTeam(team: SimMon[], active: number[]): SimMon[] {
   const lead = active.map(i => team[i]!);
   const rest = team.filter((_, i) => !active.includes(i));
   return [...lead, ...rest];
 }
 
-/** Build a started customgame battle with the position's mid-state applied. */
+/** Build a started customgame battle with the position's mid-state applied.
+ *  Requires a prior successful `await ensureSimLoaded()`. */
 export function buildBattle(pos: SimPosition): Battle {
-  const battle = new Battle({ formatid: 'gen9doublescustomgame', seed: pos.seed ?? [1, 2, 3, 4] } as any);
+  if (!BattleCtor) throw new Error('@pkmn/sim not loaded — await ensureSimLoaded() first');
+  const formatid = pos.singles ? 'gen9customgame' : 'gen9doublescustomgame';
+  const battle = new BattleCtor({ formatid, seed: pos.seed ?? [1, 2, 3, 4] } as any);
   battle.setPlayer('p1', { name: 'p1', team: orderTeam(pos.p1team, pos.p1active).map(toSimSet) as any });
   battle.setPlayer('p2', { name: 'p2', team: orderTeam(pos.p2team, pos.p2active).map(toSimSet) as any });
   // Even customgame opens at a team-preview request; the default order (our

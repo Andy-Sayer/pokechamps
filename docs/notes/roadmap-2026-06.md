@@ -190,12 +190,23 @@ HP-stat read, positional boosts, item-clause exclusion). What's still thin:
 Two halves of the same `replay.ts` investment (see
 [`project_sim_engine_strategy`] + roadmap §J):
 
-- **Opt-in exact oracle for the shown line.** `unmodeled.ts` already tells the
-  user *when* the verdict has blind spots. Step 2 is letting them act on it:
-  resolve the recommended line through real `@pkmn/sim` on demand and show the
-  ground-truth turn outcome. Client-side only (per
-  `project_client_side_compute`). Spike already proved mid-battle load +
-  ~700–3k turns/sec.
+- **Opt-in exact oracle for the shown line. ✅ shipped 2026-06-10.** `/exact`
+  (alias `/sim`) maps the current ⌁ best play + predicted opp reply to Showdown
+  choice strings (`simOracle.ts`), resolves the turn through real `@pkmn/sim`
+  over 16 deterministic RNG seeds, and reports the ground-truth DISTRIBUTION:
+  per-mon HP envelope/mean, faint rate, gained-status rates (a 30% Scald burn
+  shows as `brn 31%`), field changes. The "⚠ approximating" line now points at
+  it. Dependency boundary: `simBridge` lazy-loads the engine
+  (`ensureSimLoaded()`), `@pkmn/sim` moved devDep → **optionalDependency**, and
+  the TUI bundle marks it `external` — verified the bundle builds without the
+  engine's source and boots without the package (degrades to "exact engine
+  unavailable — npm i @pkmn/sim"). Choices are probe-validated first
+  (`side.choose()`), so an unmappable/illegal line fails honestly instead of
+  silently resolving a default. Board shapes: full 2v2, and true 1v1 endgames
+  via a SINGLES-format fallback (the sim can't start doubles with a one-mon
+  side); one-active-with-live-bench / 2v1 fail with a clear message — the
+  known v1 limitation. Custom Champions megas don't exist in the sim → probe
+  rejects them honestly. `sim-oracle.test.ts` (5).
 - **Replay ingest + legality (J.0–J.2).** Parse a Showdown replay
   (`|`-protocol) into a `BattleTranscript`, walk it through the *production*
   `match/engine.ts`, and assert move-possibility (learnset / target / gimmick /

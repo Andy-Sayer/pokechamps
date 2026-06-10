@@ -11,6 +11,7 @@
 import type { SearchInput, TurnAction } from '../domain/endgameSearch.js';
 import { resolveOneTurn } from '../domain/endgameSearch.js';
 import { diffTurn, type Divergence } from '../domain/simDiff.js';
+import { ensureSimLoaded } from '../domain/simBridge.js';
 import type { PokemonSet, OpponentEntry } from '../domain/types.js';
 import { ZERO_EVS, MAX_IVS } from '../domain/types.js';
 
@@ -58,7 +59,11 @@ function buildPosition(rand: () => number): SearchInput {
   };
 }
 
-function main() {
+async function main() {
+  if (!(await ensureSimLoaded())) {
+    console.error('[sim-diff-report] @pkmn/sim not installed — npm install first.');
+    process.exit(1);
+  }
   const N = Number(process.argv[2] ?? 300);
   // `--detail <field>` (e.g. `--detail fainted`): for every divergence on that
   // field, dump the full position — species/HP/abilities, the moves both engines

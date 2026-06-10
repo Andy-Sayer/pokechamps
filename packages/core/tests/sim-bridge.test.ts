@@ -1,8 +1,13 @@
 // Validate the @pkmn/sim bridge against KNOWN game outcomes, so it can serve as
 // ground truth for diffing our fast search. We assert structural facts (faints,
 // status, weather, mid-state load) that don't depend on a specific damage roll.
-import { describe, test, expect } from 'vitest';
-import { buildBattle, stepTurn, readOutcome, type SimPosition } from '../src/domain/simBridge.js';
+import { describe, test, expect, beforeAll } from 'vitest';
+import { buildBattle, stepTurn, readOutcome, ensureSimLoaded, type SimPosition } from '../src/domain/simBridge.js';
+
+beforeAll(async () => {
+  // @pkmn/sim is an optional dep loaded lazily; the dev install has it.
+  expect(await ensureSimLoaded()).toBe(true);
+});
 
 const garchomp = { species: 'Garchomp', ability: 'Rough Skin', moves: ['earthquake', 'dragonclaw'], nature: 'Jolly', evs: { atk: 252, spe: 252 } };
 const incin = { species: 'Incineroar', ability: 'Intimidate', moves: ['knockoff', 'flareblitz'], nature: 'Careful', evs: { hp: 252, spd: 252 } };

@@ -53,6 +53,11 @@ await build({
   // which the shipped bundle never sets. Alias it to a no-op stub so esbuild
   // can bundle Ink without that optional dep present at runtime.
   alias: { 'react-devtools-core': join(repoRoot, 'scripts', 'stub-react-devtools.mjs') },
+  // @pkmn/sim (the whole Showdown engine, used only by the opt-in /exact
+  // oracle) stays OUT of the bundle: simBridge lazy-imports it and degrades to
+  // "exact engine unavailable" when missing. A bundle user can `npm i
+  // @pkmn/sim` next to tui.mjs to enable /exact.
+  external: ['@pkmn/sim'],
   // Keep node builtins external (node: prefix handled automatically).
   banner: { js: `#!/usr/bin/env node\n${shim}` },
   legalComments: 'none',

@@ -2,9 +2,13 @@
 // position + the same concrete moves. A clean attack turn should AGREE structurally;
 // known-gap mechanics (sleep, self-stat-drop secondary) should be CAUGHT as
 // divergences — which is what ranks the porting backlog.
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, beforeAll } from 'vitest';
 import { diffTurn, searchInputToSimPosition } from '../src/domain/simDiff.js';
-import { buildBattle, readOutcome } from '../src/domain/simBridge.js';
+import { buildBattle, readOutcome, ensureSimLoaded } from '../src/domain/simBridge.js';
+
+beforeAll(async () => {
+  expect(await ensureSimLoaded()).toBe(true);
+});
 import type { SearchInput, TurnAction } from '../src/domain/endgameSearch.js';
 import type { PokemonSet, OpponentEntry } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } from '../src/domain/types.js';

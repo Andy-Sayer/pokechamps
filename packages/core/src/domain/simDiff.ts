@@ -5,9 +5,10 @@
  * weather / terrain) are roll-INDEPENDENT, so a mismatch there is a real modelling
  * gap, not a damage roll. HP is reported for context but not asserted.
  *
- * DEV/TEST ONLY — imports `simBridge` (the `@pkmn/sim` devDependency). Must never be
- * reached from the runtime path (see `project_client_side_compute` /
- * `project_sim_engine_strategy`).
+ * Used by the dev diff-harness (tests + sim-diff-report) and, for the position/
+ * choice plumbing, by the runtime `/exact` oracle (`simOracle.ts`). `simBridge`
+ * loads `@pkmn/sim` lazily, so importing this module is runtime-safe — but any
+ * caller of `diffTurn` must first `await ensureSimLoaded()`.
  */
 import type { SearchInput, TurnAction } from './endgameSearch.js';
 import { resolveOneTurn } from './endgameSearch.js';
