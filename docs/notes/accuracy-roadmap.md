@@ -139,16 +139,30 @@ bare "miss %" understated it by dropping the low-roll survival). A generic
 `"opp rolls low"` is the last resort when the loss rides a later ply. Concrete
 outs are preferred over the vague caveat. Tests in `endgame-search.test.ts`.
 
-**Follow-up (the high-value remainder):** the search's `forced` loss flag is
-computed from the optimistic regime, which **ignores accuracy and crits** — so a
-position whose only kill is a 70%-accurate move (or that's escapable only via a
-crit) is mislabelled `forced` and the Hail-Mary is suppressed, exactly where the
-user most wants "they just have to land it" named. Demoting `forced` when a real
-dice out exists needs a per-out verdict-flip check (re-evaluate the line with the
-event resolved); deferred as its own change. The **crit** out (`critProbFor`:
-Gen-9 crit stages + Scope Lens / Super Luck / Battle-Armor) lives there too — it's
-structurally dead in the non-forced regime (always dominated by the higher-prob
-"opp rolls low") so it ships with the forced-loss demotion, not before.
+**STATUS 2026-06-09 — forced-loss DEMOTION shipped (accuracy half).** The `forced`
+loss flag is computed from the optimistic regime, which **ignores accuracy** — so a
+position whose only loss path is the opp landing a roll-guaranteed but sub-100%
+kill was mislabelled `forced` and the Hail-Mary suppressed, exactly the "they just
+have to land Focus Blast" case. Now: when `eV === 'losing' && forcedLoss`, for each
+of my live actives with a SINGLE roll-guaranteed sub-100%-accuracy killer (a
+100%-acc guaranteed kill, or ≥2 separate guaranteed killers, still stand), a
+**per-out verdict-flip re-check** re-runs the optimistic pass with that mon forced
+to live through the turn (new `Pass.forceSurvMy` — clamps any lethal hit to 1
+regardless of HP, distinct from the full-HP-only Sash `survMy`); demote only if my
+best rolls then WIN. Conservative by construction (`forceSurvMy` ≤ full-HP-after-a-
+miss, so the proxy can only under-credit an out, never falsely demote). After
+demotion the existing Hail-Mary block surfaces the `"opp's Stone Edge misses on
+Baxcalibur (~20%)"` out — the label now distinguishes pure "misses" (roll
+guaranteed) from "misses or rolls low" (roll-dependent). Tests: forced-loss
+demotion (fires / verdict-flip gate holds / 100%-acc stays forced) in
+`endgame-search.test.ts`.
+
+**Remaining follow-up — the crit out.** The optimistic regime also ignores crits,
+so a position escapable only via a crit is still mislabelled `forced`. The **crit**
+out (`critProbFor`: Gen-9 crit stages + Scope Lens / Super Luck / Battle Armor) is
+structurally dead in the non-forced regime (dominated by the higher-prob "opp rolls
+low"), so it ships with the forced-loss work — but it needs faithful same-turn,
+turn-order-aware crit-KO modelling, so it's its own change, deferred.
 
 When the expected verdict is **losing** but the position **isn't `forced` loss**, there's something the opponent has to roll right to actually close it out — and you're guaranteed to lose if you *don't* play for that miss. Today the recommender shows "likely loss N%" and stops; what the user wants is the explicit *out*: "your only shot is the crit / the miss / the flinch — here's how unlikely."
 

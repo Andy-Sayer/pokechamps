@@ -262,6 +262,10 @@ export interface SearchResult {
 const WIN = 100_000;          // terminal magnitude; faster wins score higher
 const MATERIAL = 1_000;       // per-mon material weight (dominates HP)
 const MAX_ACTIVE = 2;
+// A KO probability at/above this counts as roll-GUARANTEED (every roll KOs) — so
+// the only thing that can stop the kill is a MISS. Used by the forced-loss
+// demotion + the Hail-Mary "misses" vs "misses or rolls low" label.
+const ROLL_GUARANTEED = 0.999;
 // Non-attack target sentinels (vs a foe index ≥ 0). Small negatives are single
 // actions; switches occupy a separate range below SWITCH_BASE so a benched-index
 // encoding never collides with them.
@@ -494,6 +498,11 @@ interface Pass {
   /** Per-index: should a Focus Sash / Sturdy survive-at-1 be applied this pass? */
   survMy: boolean[];
   survOpp: boolean[];
+  /** Re-check only: per-index, a MY mon that doesn't die this turn regardless of
+   *  HP — models "the opp's kill missed". Unlike `survMy` (Sash: needs full HP,
+   *  consumed once), this clamps every lethal incoming hit to 1 and is never
+   *  consumed. Drives the forced-loss demotion's verdict-flip re-check. */
+  forceSurvMy?: boolean[];
 }
 function myRoll(c: Cell, r: Regime): number {
   return r === 'pessimistic' ? c.dmgMin : r === 'optimistic' ? c.dmgMax : c.dmgMid;
@@ -2219,7 +2228,11 @@ function resolveTurn(
     if (dg && dg.arr[idx] && dmg > 0) { dg.arr[idx] = false; hp[idx] = Math.max(0, hp[idx]! - dg.chip); return; }
     const before = hp[idx]!;
     const after = before - dmg;
-    if (!breaks && after <= 0 && before >= 100 && surv[idx]) { surv[idx] = false; hp[idx] = 1; }
+    // Forced-survive re-check (forced-loss demotion): a designated MY mon doesn't
+    // die this turn — models "the opp's kill missed". Clamps any lethal hit to 1
+    // regardless of HP / multi-hit; not consumed (survives every incoming hit).
+    if (hp === myHp && pass.forceSurvMy?.[idx] && after <= 0) { hp[idx] = 1; }
+    else if (!breaks && after <= 0 && before >= 100 && surv[idx]) { surv[idx] = false; hp[idx] = 1; }
     else hp[idx] = Math.max(0, after);
   };
 
@@ -3951,18 +3964,23 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
   // the opponent's are uncertain — assume present worst-case (pessimistic),
   // most-likely (expected, prob ≥ 0.5), or absent best-case (optimistic).
   // `forceOppSurv` overrides one opp index for sensitivity toggles.
-  const buildPass = (regime: Regime, override?: { idx: number; survOpp: boolean }): Pass => ({
+  const buildPass = (regime: Regime, override?: { oppIdx?: number; survOpp?: boolean; myIdx?: number; survMy?: boolean }): Pass => ({
     regime,
-    // My items are known → always applied. Opp survival: pessimistic assumes
-    // it's present (worst case); expected/optimistic only apply CERTAIN ones
-    // (prob ≥ 1) — uncertain Sash is surfaced as a risk, not baked into the
-    // headline verdict.
+    // My items are known → always applied (Focus Sash / Sturdy, full-HP only).
     survMy: input.mine.map(m => (m.survival?.prob ?? 0) > 0),
+    // Opp survival: pessimistic assumes it's present (worst case); expected/
+    // optimistic only apply CERTAIN ones (prob ≥ 1) — uncertain Sash is surfaced
+    // as a risk, not baked into the headline verdict. `override.survOpp` forces one.
     survOpp: input.opp.map((o, j) => {
-      if (override && override.idx === j) return override.survOpp;
+      if (override?.oppIdx === j && override.survOpp != null) return override.survOpp;
       const p = o.survival?.prob ?? 0;
       return regime === 'pessimistic' ? p > 0 : p >= 1;
     }),
+    // Verdict-flip re-check: force ONE of my mons to live through the turn,
+    // regardless of HP — "if this mon survives, do my best rolls win?".
+    forceSurvMy: override?.myIdx != null && override.survMy
+      ? input.mine.map((_, i) => i === override.myIdx)
+      : undefined,
   });
 
   // My-max / opp-min mega maximin for one pass; returns the principal line.
@@ -3993,7 +4011,52 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
       const opt = evalPass(buildPass('optimistic'), depth);   // my high rolls, opp low, no survival
 
       const forcedWin = pess.score >= WIN && allOppRevealed;
-      const forcedLoss = opt.score <= -WIN;
+      let forcedLoss = opt.score <= -WIN;
+
+      // Forced-loss DEMOTION. `opt` (my best rolls, opp worst rolls) ignores move
+      // ACCURACY, so a position whose only loss path is the opp landing a
+      // roll-guaranteed-but-sub-100%-accuracy kill is mislabelled `forced` — the
+      // exact "they just have to land Focus Blast" case. If a genuine dice out
+      // exists (that kill MISSES) and surviving it actually wins, demote so the
+      // Hail-Mary block below can name the out. Conservative — no false demotion:
+      //  • we only act on a SINGLE roll-guaranteed sub-100% threat to one mon
+      //    (a 100%-acc guaranteed kill, or ≥2 separate guaranteed killers, stand);
+      //  • a per-out verdict-flip re-check requires my best rolls to WIN once that
+      //    mon survives the turn (survive-at-1 ≤ full-HP-after-a-miss, so the proxy
+      //    can only ever under-credit, never over-claim, an out).
+      if (eV === 'losing' && forcedLoss) {
+        for (const mi of s0.myActive) {
+          const myHp = s0.myHp[mi] ?? 0;
+          if (myHp <= 0) continue;
+          // Per opp mon: the MAX accuracy among its roll-guaranteed KOs on mi (the
+          // opp picks its most accurate guaranteed kill). One entry per killer.
+          const threatAccs: number[] = [];
+          for (const oj of s0.oppActive) {
+            if ((s0.oppHp[oj] ?? 0) <= 0) continue;
+            let maxAcc = -1;
+            const consider = (mv: string | undefined, rollKo: number) => {
+              if (!mv || rollKo < ROLL_GUARANTEED) return;
+              const acc = moveAccuracyPct(mv);
+              if (acc > maxAcc) maxAcc = acc;
+            };
+            for (const oppMega of oppPlans) {
+              const tbl = tables.get(`${opt.myMega},${oppMega}`);
+              if (!tbl) continue;
+              const c = tbl.thr[oj]?.[mi]; if (c && c.dmgMax >= myHp) consider(c.move, rollKoProb(c, myHp));
+              const sp = tbl.oppSpread[oj]; if (sp) consider(sp.move, spreadKoProb(sp.dmgMin[mi] ?? 0, sp.dmgMid[mi] ?? 0, sp.dmgMax[mi] ?? 0, myHp));
+              const pc = tbl.oppPrioCell[oj]?.[mi]; if (pc && pc.dmgMax >= myHp) consider(pc.move, rollKoProb(pc, myHp));
+            }
+            if (maxAcc >= 0) threatAccs.push(maxAcc);
+          }
+          // Exactly one sub-100%-accuracy guaranteed killer is the nameable out.
+          if (threatAccs.length !== 1 || threatAccs[0]! >= 100) continue;
+          // Verdict-flip: if mi survives this turn, do my best rolls win? Only then
+          // is the miss a genuine game-flipping out (reuses the sensitivity pass).
+          const flip = evalPass(buildPass('optimistic', { myIdx: mi, survMy: true }), depth);
+          if (flip.score >= WIN) { forcedLoss = false; break; }
+        }
+      }
+
       const forced = forcedWin || forcedLoss;
 
       const risks: SearchRisk[] = [];
@@ -4069,7 +4132,7 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
           const sv = input.opp[j]?.survival;
           const p = sv?.prob ?? 0;
           if (p <= 0 || p >= 1) continue; // certain items are baked into expected
-          const tog = evalPass(buildPass('expected', { idx: j, survOpp: true }), depth);
+          const tog = evalPass(buildPass('expected', { oppIdx: j, survOpp: true }), depth);
           if (rank(verdictOf(tog.score)) >= rank(eV)) continue; // non-blocking → skip
           risks.push({ label: `${input.opp[j]!.entry.species} ${sv!.label}`, prob: p, effect: 'may survive', blocking: true });
           winChance *= 1 - p;
@@ -4209,19 +4272,20 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
         // For each of my live actives the opp can KO this turn, find the opp's
         // single most RELIABLE kill attempt across mega plans / moves — pKO =
         // (acc/100)·P(roll KOs). If that's a coin-flip (< 1), surviving it is a
-        // real out; label it by the dominant failure mode (a sub-100% move can
-        // miss OR roll low; a 100%-accurate one only rolls low).
+        // real out; label it by the dominant failure mode: a roll-guaranteed but
+        // inaccurate kill only MISSES; a 100%-accurate one only ROLLS LOW; an
+        // inaccurate roll-dependent one can do either.
         {
           let best: HailMaryOut | null = null;
           for (const mi of s0.myActive) {
             const myHp = s0.myHp[mi] ?? 0;
             if (myHp <= 0) continue;
-            let bestPKo = 0; let bestMove = ''; let bestAcc = 100;
+            let bestPKo = 0; let bestMove = ''; let bestAcc = 100; let bestRollKo = 0;
             const consider = (mv: string | undefined, rollKo: number) => {
               if (!mv || rollKo <= 0) return;
               const acc = moveAccuracyPct(mv);
               const pKo = (acc / 100) * rollKo;
-              if (pKo > bestPKo) { bestPKo = pKo; bestMove = mv; bestAcc = acc; }
+              if (pKo > bestPKo) { bestPKo = pKo; bestMove = mv; bestAcc = acc; bestRollKo = rollKo; }
             };
             for (const oppMega of oppPlans) {
               const tbl = tables.get(`${myMegaChosen},${oppMega}`);
@@ -4236,7 +4300,11 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
             if (bestPKo <= 0 || bestPKo >= 1) continue; // no kill, or a guaranteed one (not an out)
             const survive = 1 - bestPKo;
             const myName = expected.table.mySpecies[mi] ?? 'my mon';
-            const mode = bestAcc < 100 ? `${bestMove} misses or rolls low` : `${bestMove} rolls low`;
+            const canMiss = bestAcc < 100;
+            const canRollLow = bestRollKo < ROLL_GUARANTEED;
+            const mode = canMiss && canRollLow ? `${bestMove} misses or rolls low`
+              : canMiss ? `${bestMove} misses`
+              : `${bestMove} rolls low`;
             const out: HailMaryOut = { label: `opp's ${mode} on ${myName}`, prob: survive };
             if (!best || survive > best.prob) best = out;
           }

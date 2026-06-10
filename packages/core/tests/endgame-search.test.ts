@@ -607,6 +607,80 @@ describe('hailMary outs analysis', () => {
     expect(hm.combined).toBe(hm.outs[0]!.prob);
   });
 
+  // FORCED-LOSS DEMOTION. The optimistic regime ignores accuracy, so when the
+  // opp's only winning line is a roll-GUARANTEED but sub-100%-accuracy kill, the
+  // position is mislabelled `forced` and the Hail-Mary is suppressed — the exact
+  // "they just have to land it" case. Same Garchomp/Baxcalibur mirror as above but
+  // at LOW HP so Stone Edge KOs on every roll: forced should DEMOTE to a hedged
+  // loss and surface the "Stone Edge misses" out (a pure miss — it can't roll low).
+  test('forced-loss demotion: a roll-guaranteed inaccurate kill demotes + surfaces "misses"', () => {
+    const garStoneEdge = mon({
+      species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly',
+      evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Stone Edge'], // 80% acc, faster than Bax
+    });
+    const bax = mon({
+      species: 'Baxcalibur', ability: 'Thermal Exchange', nature: 'Adamant',
+      evs: { ...ZERO_EVS, hp: 4, atk: 252, spe: 252 }, moves: ['Icicle Crash'], // OHKOs Garchomp (Ice 4x)
+    });
+    const r = searchToDepth({
+      mine: [{ set: bax, hpPercent: 60, active: true }], // low enough that Stone Edge is guaranteed
+      opp: [{ entry: oppOf(garStoneEdge), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 2);
+    expect(r.verdict).toBe('losing');
+    expect(r.forced).toBe(false); // demoted: the kill can still MISS
+    expect(r.hailMary).toBeDefined();
+    const hm = r.hailMary!;
+    expect(hm.noRealisticOut).toBe(false);
+    expect(hm.outs).toHaveLength(1);
+    expect(hm.outs[0]!.label).toContain('Stone Edge');
+    expect(hm.outs[0]!.label).toContain('misses');
+    expect(hm.outs[0]!.label).not.toContain('rolls low'); // guaranteed roll → pure miss
+    // The out is exactly the 20% miss (the roll is guaranteed, so no low-roll term).
+    expect(hm.combined).toBeGreaterThan(0.15);
+    expect(hm.combined).toBeLessThan(0.25);
+    expect(hm.combined).toBe(hm.outs[0]!.prob);
+  });
+
+  // The verdict-flip GATE: demote only when surviving the kill actually wins. Same
+  // guaranteed Stone Edge, but my mon can't KO Garchomp back (a weak neutral move),
+  // so even if Stone Edge misses I still lose next turn → the loss stays `forced`.
+  test('forced-loss demotion: NOT demoted when surviving the miss does not win', () => {
+    const garStoneEdge = mon({
+      species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly',
+      evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Stone Edge'],
+    });
+    const weakBax = mon({
+      species: 'Baxcalibur', ability: 'Thermal Exchange', nature: 'Adamant',
+      evs: { ...ZERO_EVS, hp: 4, atk: 252, spe: 252 }, moves: ['Brick Break'], // neutral, won't OHKO Chomp
+    });
+    const r = searchToDepth({
+      mine: [{ set: weakBax, hpPercent: 60, active: true }],
+      opp: [{ entry: oppOf(garStoneEdge), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 2);
+    expect(r.verdict).toBe('losing');
+    expect(r.forced).toBe(true); // surviving doesn't flip the verdict → stays forced
+    expect(r.hailMary).toBeUndefined();
+  });
+
+  // A 100%-accurate roll-guaranteed kill is a TRUE forced loss — no miss out, so it
+  // stays `forced` even though I'd OHKO back if it somehow failed.
+  test('forced-loss demotion: a 100%-accurate guaranteed kill stays forced', () => {
+    const bax = mon({
+      species: 'Baxcalibur', ability: 'Thermal Exchange', nature: 'Adamant',
+      evs: { ...ZERO_EVS, hp: 4, atk: 252, spe: 252 }, moves: ['Icicle Crash'],
+    });
+    const r = searchToDepth({
+      mine: [{ set: bax, hpPercent: 25, active: true }],
+      opp: [{ entry: oppOf(garchomp), hpPercent: 100, active: true }], // Earthquake — 100% acc, faster
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 2);
+    expect(r.verdict).toBe('losing');
+    expect(r.forced).toBe(true);
+    expect(r.hailMary).toBeUndefined();
+  });
+
   // When the loss rides a LATER ply (the opp doesn't KO me THIS turn), there's no
   // single dice event to name → the generic "opp rolls low" last-resort.
   test('generic last-resort: "opp rolls low" when no single dice event pins the win', () => {

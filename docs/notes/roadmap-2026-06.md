@@ -72,7 +72,7 @@ KO-boundary residual should shrink) and `search-mechanics.test.ts`.
 default selection, no behaviour change; (b) Choice-lock selection; (c)
 KO-boundary regime precision. Each stage independently testable.
 
-### Theme 2 — Hail-Mary outs analysis *(non-forced case ✅ shipped 2026-06-09)*
+### Theme 2 — Hail-Mary outs analysis *(non-forced + forced-demotion ✅ shipped 2026-06-09)*
 
 Turned out a basic version already existed (only "my KO needs top roll" + a vague
 "opp rolls low 0.5"). Rebuilt it around candidate **lines** and shipped the
@@ -82,13 +82,18 @@ unified **"opp fails the kill it's relying on"** out —
 line and a generic last-resort. See [`accuracy-roadmap.md`](accuracy-roadmap.md)
 §"Hail Mary" for the shipped detail + tests.
 
-**Remaining (the high-value half):** the search's `forced`-loss flag ignores
-accuracy/crits, so the cases where "they just have to land it" matters MOST are
-mislabelled `forced` and suppressed. Demoting `forced` when a genuine dice out
-exists (with a per-out verdict-flip check) — and folding in the **crit** out
-(`critProbFor` is written but parked, since it's dominated in the non-forced
-regime) — is the follow-up. Medium effort; touches `forced` semantics so it gets
-its own change.
+**Forced-loss demotion (the accuracy half) ✅ shipped 2026-06-09.** When the only
+loss path is the opp landing a roll-guaranteed sub-100% kill, the position now
+demotes from `forced` (per-out verdict-flip re-check via the new `Pass.forceSurvMy`
+"this mon lives through the turn" flag) and surfaces the `"opp's Stone Edge misses"`
+out. Conservative (single-killer gate + survive-proxy ≤ a real miss → no false
+demotion). See [`accuracy-roadmap.md`](accuracy-roadmap.md) §"Hail Mary".
+
+**Remaining — the crit out.** The optimistic regime also ignores crits, so a
+position escapable only via a crit is still mislabelled `forced`. Folding in the
+**crit** out (`critProbFor`: Gen-9 crit stages + Scope Lens / Super Luck / Battle
+Armor) needs faithful same-turn, turn-order-aware crit-KO modelling — its own
+change, deferred.
 
 ### Theme 3 — Inference backward half
 
