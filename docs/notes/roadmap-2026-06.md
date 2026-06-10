@@ -146,12 +146,22 @@ AFTER Theme 1 stages (a)–(b), not before.
 The forward/live inference is mature (joint axis, offensive-EV, recoil/drain
 HP-stat read, positional boosts, item-clause exclusion). What's still thin:
 
-- **Ability inference from observations.** Today we mostly take the Pikalytics
-  top ability. Narrow it: a fast turn-1 rules out Truant; observed neutral
-  damage from a Ground move rules out Levitate; paralysis landing on contact
-  rules out Limber; Hydration clearing status in rain; no Sand chip taken ⇒
-  Magic Guard / Sand-immune / (already: not-Safety-Goggles via sand chip).
-  Mirror the `abilitiesRuledOutByHit` hook that already exists in `inference.ts`.
+- **Ability inference from observations. ✅ shipped 2026-06-10.**
+  `domain/abilityInference.ts` + `OpponentEntry.abilitiesRuledOut`: landed
+  damaging hits persist the type-immunity rule-out (Ground hit ⇒ no Levitate —
+  durable now, not per-observation), and explicitly-logged statuses (`45 brn`
+  tags, `/ brn` self-clauses, `o1 par` state lines) rule out the status's
+  immunity abilities (par ⇒ no Limber; + Leaf Guard when sun was up; berry-cured
+  still counts — the landing happened). Conservatism: engine-ASSUMED statuses
+  (auto-applied status moves, Spicy Spray) prove nothing; Mold Breaker-line
+  attackers and ignore-ability moves suppress the proof; sand-chip rule-outs
+  deferred (EOT chip is engine-assumed, not observed). Rule-outs feed
+  `scoreSpread`'s ability axis + candidate filtering, and `certainAbility` now
+  takes `ruledOut` — a 2-ability species collapses to CERTAIN (Garchomp minus
+  Sand Veil ⇒ Rough Skin), unlocking switch-in effects / Magic Guard EOT /
+  Magic Bounce checks via the threaded call sites. Bonus: an `o1 ability`
+  reveal now prunes the candidate set (it previously only set the field).
+  Dual-mirrored in engine.ts + BattleScreen.tsx; `ability-inference.test.ts` (16).
 - **Multi-hit variable-range KO distribution.** `@smogon/calc` averages at 3
   hits (5 with Skill Link). A per-hit-count distribution tightens KO odds for
   Bullet Seed / Rock Blast / Triple Axel / Icicle Spear / Population Bomb.

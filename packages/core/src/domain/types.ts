@@ -97,6 +97,13 @@ export interface OpponentEntry {
   // doesn't hold Safety Goggles and isn't Sand-immune. Used to exclude
   // Safety Goggles from the item candidate set.
   sandChipObserved?: boolean;
+  // Ability ids PROVEN absent by observation: a landed damaging hit rules out
+  // the type-immunity ability for the move's type (Ground hit ⇒ no Levitate),
+  // a landed non-volatile status rules out its immunity abilities (par ⇒ no
+  // Limber). Durable for the match; consumed by inference (ability axis +
+  // candidate filtering) and certainAbility (2-ability species collapse to
+  // certain when one is ruled out). See domain/abilityInference.ts.
+  abilitiesRuledOut?: string[];
   // Leech Seed volatile: set when this mon was seeded; cleared on switch-out
   // (and on Rapid Spin). Tracks the SEEDER's identity so the EOT residual can
   // heal the right mon — and skip the heal if the seeder has since switched

@@ -155,18 +155,24 @@ export function resolveDownloadBoost(defenderDef: number, defenderSpd: number): 
 
 // Resolve the ability to attribute to a (possibly opponent) mon switching in.
 // My own sets always know their ability. For opponents the ability is only
-// certain when we've observed it (`knownAbility`) OR the species has exactly
-// one possible ability in the dex — otherwise we return undefined so the
-// engine doesn't apply a switch-in effect the mon might not have.
+// certain when we've observed it (`knownAbility`) OR exactly one of the
+// species' dex abilities survives the observation-driven rule-outs
+// (`ruledOut`, ability ids from OpponentEntry.abilitiesRuledOut — a Garchomp
+// that took a landed status in sand has Sand Veil ruled out, leaving Rough
+// Skin certain). Otherwise undefined, so the engine doesn't apply a switch-in
+// effect the mon might not have.
 export function certainAbility(opts: {
   knownAbility?: string | null;
   species: string;
+  ruledOut?: string[];
 }): string | undefined {
   if (opts.knownAbility) return opts.knownAbility;
   const sp = getSpecies(opts.species) as any;
   const ab = sp?.abilities;
-  if (ab && ab['0'] && ab['1'] === undefined && ab['H'] === undefined && ab['S'] === undefined) {
-    return ab['0'] as string;
-  }
-  return undefined;
+  if (!ab) return undefined;
+  const ruled = new Set(opts.ruledOut ?? []);
+  const possible = Array.from(new Set(
+    (Object.values(ab) as string[]).filter(a => a && !ruled.has(toId(a))),
+  ));
+  return possible.length === 1 ? possible[0] : undefined;
 }

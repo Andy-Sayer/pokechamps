@@ -47,7 +47,7 @@ export function endOfTurn(
     const o = next.opponentTeam[idx];
     if (!o || o.fainted) return;
     const types = (getSpecies(o.species) as any)?.types as string[] | undefined;
-    const oppHasMG = isMagicGuard(certainAbility({ knownAbility: o.ability, species: o.species }));
+    const oppHasMG = isMagicGuard(certainAbility({ knownAbility: o.ability, species: o.species, ruledOut: o.abilitiesRuledOut }));
     // Weather chip — blocked by Magic Guard
     const wChip = weatherChipPct(field.weather, types);
     if (wChip > 0 && !oppHasMG) { o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - wChip); notes.push(`o${idx + 1} -${wChip.toFixed(0)}% (${field.weather})`); }
@@ -254,7 +254,7 @@ export function endOfTurn(
       if (i == null) continue;
       const o = next.opponentTeam[i];
       if (!o || o.fainted || o.status !== 'slp') continue;
-      const targetHasMG = isMagicGuard(certainAbility({ knownAbility: o.ability, species: o.species }));
+      const targetHasMG = isMagicGuard(certainAbility({ knownAbility: o.ability, species: o.species, ruledOut: o.abilitiesRuledOut }));
       if (targetHasMG) continue;
       const chip = 100 / 8;
       o.currentHpPercent = clampHp((o.currentHpPercent ?? 100) - chip);
@@ -296,7 +296,7 @@ export function endOfTurn(
     if (side === 'theirs') {
       const o = next.opponentTeam[idx];
       if (!o || o.fainted) return;
-      const targetHasMG = isMagicGuard(certainAbility({ knownAbility: o.ability, species: o.species }));
+      const targetHasMG = isMagicGuard(certainAbility({ knownAbility: o.ability, species: o.species, ruledOut: o.abilitiesRuledOut }));
       if (targetHasMG) return;
       const after = clampHp((o.currentHpPercent ?? 100) - drainPct);
       o.currentHpPercent = after;

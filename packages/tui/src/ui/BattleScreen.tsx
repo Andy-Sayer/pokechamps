@@ -4,7 +4,8 @@ import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
 import type { Match, FieldState, DamageObservation, MoveAction, OpponentEntry, PokemonSet } from '@pokechamps/core/domain/types.js';
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
-import { scoreSpread, scoreOffensiveSpread, mostLikely, recoilDrainHpEvs, reconcileCandidates } from '@pokechamps/core/domain/inference.js';
+import { scoreSpread, scoreOffensiveSpread, mostLikely, recoilDrainHpEvs, reconcileCandidates, abilitiesRuledOutByHit } from '@pokechamps/core/domain/inference.js';
+import { abilitiesRuledOutByStatus, ruleOutAbilities, confirmAbility, attackerIgnoresAbilities } from '@pokechamps/core/domain/abilityInference.js';
 import { applyItemClauseExclusion } from '@pokechamps/core/domain/itemClause.js';
 import { computeActionBoostContexts } from '@pokechamps/core/domain/turnBoosts.js';
 import { maxHpFor } from '@pokechamps/core/domain/damage.js';
@@ -226,6 +227,19 @@ function applyLoggedStatusInto(
   }
 }
 
+// My mon's effective ability at `idx` (mega forme's slot-0 once mega'd, else
+// the set's). Mirror of engine.myEffectiveAbility — gates ability rule-outs
+// on the Mold Breaker line.
+function myEffectiveAbility(match: Match, idx: number): string | undefined {
+  const set = match.myTeam[idx];
+  if (!set) return undefined;
+  const forme = match.myMegaUsed?.includes(idx) ? match.myMegaForme?.[idx] : undefined;
+  if (forme) {
+    return (getSpecies(forme) as { abilities?: Record<string, string> } | undefined)?.abilities?.['0'] ?? set.ability;
+  }
+  return set.ability;
+}
+
 // Type-based immunity for a status move. Mirrors isStatusMoveImmune in engine.ts.
 function isStatusMoveImmune(status: string, ignoreImmunity: boolean, isPowder: boolean, targetTypes: string[]): boolean {
   if (status === 'brn') return targetTypes.includes('Fire');
@@ -264,7 +278,11 @@ function applySwitchInAbilityInto(
   const incoming = side === 'mine' ? match.myTeam[teamIndex] : match.opponentTeam[teamIndex];
   if (!incoming) return notes;
   const knownAbility = side === 'mine' ? (incoming as PokemonSet).ability : (incoming as OpponentEntry).ability;
-  const ability = certainAbility({ knownAbility, species: incoming.species });
+  const ability = certainAbility({
+    knownAbility,
+    species: incoming.species,
+    ruledOut: side === 'theirs' ? (incoming as OpponentEntry).abilitiesRuledOut : undefined,
+  });
   const effect = switchInAbilityEffect(ability);
   if (!effect) return notes;
 
@@ -285,7 +303,7 @@ function applySwitchInAbilityInto(
       if (foeIdx == null) continue;
       const foeAbility = foeSide === 'mine'
         ? match.myTeam[foeIdx]?.ability
-        : certainAbility({ knownAbility: match.opponentTeam[foeIdx]?.ability, species: match.opponentTeam[foeIdx]?.species ?? '' });
+        : certainAbility({ knownAbility: match.opponentTeam[foeIdx]?.ability, species: match.opponentTeam[foeIdx]?.species ?? '', ruledOut: match.opponentTeam[foeIdx]?.abilitiesRuledOut });
       const reaction = intimidateReaction(foeAbility);
       if (!reaction.blocked) applyBoostsInto(match, foeSide, foeIdx, { atk: -1 });
       if (reaction.reaction) applyBoostsInto(match, foeSide, foeIdx, reaction.reaction);
@@ -1103,7 +1121,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         const types = (getSpecies(formeName) as { types?: string[] } | undefined)?.types;
         if (types?.includes('Grass')) continue;
         if (o.substitute != null) continue; // Substitute blocks Leech Seed
-        const lsAbilOpp = certainAbility({ knownAbility: o.ability, species: o.species });
+        const lsAbilOpp = certainAbility({ knownAbility: o.ability, species: o.species, ruledOut: o.abilitiesRuledOut });
         if (lsAbilOpp && toId(lsAbilOpp) === 'magicbounce') continue;
         o.leechSeeded = { seederSide: a.side, seederIndex: sIdx };
         inferenceNotes.push(`o${tIdx + 1} seeded`);
@@ -1178,7 +1196,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (tSide === 'mine' ? next.myCurrentSub?.[tIdx] != null : next.opponentTeam[tIdx]?.substitute != null) continue;
       const tAbil = tSide === 'mine'
         ? next.myTeam[tIdx]?.ability
-        : certainAbility({ knownAbility: next.opponentTeam[tIdx]?.ability, species: next.opponentTeam[tIdx]?.species ?? '' });
+        : certainAbility({ knownAbility: next.opponentTeam[tIdx]?.ability, species: next.opponentTeam[tIdx]?.species ?? '', ruledOut: next.opponentTeam[tIdx]?.abilitiesRuledOut });
       const tItem = tSide === 'mine' ? next.myTeam[tIdx]?.item : next.opponentTeam[tIdx]?.item;
       if (statDropImmune(tAbil, tItem)) continue;
       if (tAbil && toId(tAbil) === 'contrary') {
@@ -1431,7 +1449,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       // Magic Bounce reflects status-category moves back at the user.
       const tAbilMB = tSide === 'mine'
         ? next.myTeam[tIdx]?.ability
-        : certainAbility({ knownAbility: next.opponentTeam[tIdx]?.ability, species: next.opponentTeam[tIdx]?.species ?? '' });
+        : certainAbility({ knownAbility: next.opponentTeam[tIdx]?.ability, species: next.opponentTeam[tIdx]?.species ?? '', ruledOut: next.opponentTeam[tIdx]?.abilitiesRuledOut });
       if (tAbilMB && toId(tAbilMB) === 'magicbounce') continue;
       const st = sm.status as NonNullable<import('@pokechamps/core/domain/types.js').ActivePokemonState['status']>;
       if (tSide === 'mine') {
@@ -1456,9 +1474,30 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (a.kind === 'switch' || a.kind === 'mega') continue;
       if (a.targetStatus && typeof a.target === 'object' && a.targetTeamIndex != null) {
         applyLoggedStatusInto(next, a.target.side, a.targetTeamIndex, a.targetStatus);
+        // Landed status rules out its immunity abilities — even when a berry
+        // cured it. Gated on the attacker piercing abilities (Mold Breaker
+        // line). Mirror of engine.ts.
+        if (a.target.side === 'theirs') {
+          const o = next.opponentTeam[a.targetTeamIndex];
+          const aIdx = a.attackerTeamIndex ?? -1;
+          const atkAbility = a.side === 'mine'
+            ? myEffectiveAbility(next, aIdx)
+            : certainAbility({
+                knownAbility: next.opponentTeam[aIdx]?.ability,
+                species: next.opponentTeam[aIdx]?.species ?? '',
+                ruledOut: next.opponentTeam[aIdx]?.abilitiesRuledOut,
+              });
+          if (o) ruleOutAbilities(o, abilitiesRuledOutByStatus(a.targetStatus, { weather: field.weather, attackerAbility: atkAbility }));
+        }
       }
       if (a.attackerStatus && a.attackerTeamIndex != null) {
         applyLoggedStatusInto(next, a.side, a.attackerTeamIndex, a.attackerStatus);
+        // Self-clause status (orb, opposing Flame Body…) — ambient source,
+        // no ability bypass possible. Mirror of engine.ts.
+        if (a.side === 'theirs') {
+          const o = next.opponentTeam[a.attackerTeamIndex];
+          if (o) ruleOutAbilities(o, abilitiesRuledOutByStatus(a.attackerStatus, { weather: field.weather }));
+        }
       }
     }
     // Setup self-boost moves (Swords Dance, Nasty Plot, etc.).
@@ -1558,6 +1597,21 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       myActive: [activeIdx.mine[0], activeIdx.mine[1]],
       oppActive: [activeIdx.theirs[0], activeIdx.theirs[1]],
     });
+    // Ability rule-outs from landed damaging hits: real damage of type T proves
+    // the defender lacks T's immunity/absorb ability. Fires for sash/sub-absorbed
+    // hits too; skipped when my attacker pierces abilities. Mirror of engine.ts.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (a.side !== 'mine') continue;
+      if (((a.damageHpPercent ?? a.damageRaw) ?? 0) <= 0) continue;
+      if (typeof a.target !== 'object' || a.target.side !== 'theirs') continue;
+      const opp = a.targetTeamIndex != null ? next.opponentTeam[a.targetTeamIndex] : undefined;
+      if (!opp || a.attackerTeamIndex == null) continue;
+      const md = getMove(a.move) as { type?: string; ignoreAbility?: boolean } | undefined;
+      if (md?.ignoreAbility) continue;
+      if (attackerIgnoresAbilities(myEffectiveAbility(next, a.attackerTeamIndex))) continue;
+      ruleOutAbilities(opp, abilitiesRuledOutByHit(md?.type));
+    }
     for (const a of draftActions) {
       if (a.kind === 'switch' || a.kind === 'mega') continue;
       if (a.side !== 'mine') continue;
@@ -1599,6 +1653,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             : undefined,
           // A recoil/drain readout pins the HP EV defense-independently — honour it.
           hpEvCandidates: opp.hpEvLock,
+          // Abilities proven absent by earlier observations (landed status/hits).
+          ruledOutAbilities: opp.abilitiesRuledOut,
           // Item permanence: gone if consumed BEFORE this turn (pre-turn state, so
           // a berry popping on THIS hit still applies). Mirror of engine.ts.
           itemKnownGone: !!match.opponentTeam[oppIdx]?.itemConsumed,
@@ -1875,7 +1931,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       const canon = ab?.exists ? ab.name : update.setAbility;
       if (side === 'theirs') {
         const o = next.opponentTeam[teamIndex];
-        if (o) o.ability = canon;
+        if (o) {
+          o.ability = canon;
+          // Settled ability axis: prune candidates to it + clear stale rule-outs.
+          confirmAbility(o, canon);
+        }
       } else {
         const s = next.myTeam[teamIndex];
         if (s) next.myTeam = next.myTeam.map((m, i) => (i === teamIndex ? { ...m, ability: canon } : m));
@@ -2082,6 +2142,13 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
           // Sleep is 1-3 turns; default to 2 (mean). Caller can override
           // later if they observe an early wake or full duration.
           if (update.status === 'slp') o.sleepCounter = 2;
+        }
+        // Observed landing, unknown source: rule out the status's immunity
+        // abilities unless one of MY actives could have pierced them.
+        // Fires even when a berry cured the status. Mirror of engine.ts.
+        const anyPiercer = activeIdx.mine.some(i => i != null && attackerIgnoresAbilities(myEffectiveAbility(next, i)));
+        if (o && !anyPiercer) {
+          ruleOutAbilities(o, abilitiesRuledOutByStatus(update.status, { weather: next.field?.weather }));
         }
       } else {
         if (tryApplyMyStatusInto(next, teamIndex, update.status)) {

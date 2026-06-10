@@ -137,6 +137,11 @@ export interface InferenceInput {
   quickOnly?: boolean;
   // Item signals: exclude Safety Goggles if the mon has taken sand chip damage.
   sandChipObserved?: boolean;
+  // Ability ids proven absent by PRIOR observations (OpponentEntry.
+  // abilitiesRuledOut — landed-status / landed-hit rule-outs persisted across
+  // turns). Merged with this observation's own per-hit type-immunity rule-out;
+  // filters both the coarse ability axis and prior/starting candidates.
+  ruledOutAbilities?: string[];
   // Item permanence: the opponent's held item is known to have been consumed on
   // a PRIOR turn (gone before this observation). Per the permanence model, a mon
   // whose item was consumed can't still be holding a persistent item, so collapse
@@ -248,6 +253,8 @@ export function scoreSpread(input: InferenceInput): ScoredCandidate[] {
   const tookDamage = (input.observation.damageHpPercent ?? input.observation.damageRaw ?? 0) > 0;
   const moveType = (getMove(input.observation.move) as { type?: string } | undefined)?.type;
   const ruledOut = tookDamage ? abilitiesRuledOutByHit(moveType) : new Set<string>();
+  // Persisted rule-outs from earlier observations (landed status / prior hits).
+  for (const id of input.ruledOutAbilities ?? []) ruledOut.add(id);
   if (ruledOut.size) {
     const narrowed = possibleAbilities.filter(a => !ruledOut.has(toId(a)));
     if (narrowed.length) possibleAbilities = narrowed; // never empty the axis
