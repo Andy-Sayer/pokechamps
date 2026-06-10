@@ -78,6 +78,24 @@ export function detectChoiceLock(match: Match, oppIdx: number): ChoiceLock | nul
   return run && run.count >= 2 ? { move: run.move, turns: run.count } : null;
 }
 
+// The last move this mon used since it last entered the field — the HARD
+// Choice-lock read (vs detectChoiceLock's soft ≥2-repeat suspicion): with a
+// KNOWN Choice item, ONE use locks the mon until it leaves. Any switch
+// involving the mon (in or out) resets to null, since the lock only holds
+// while it stays in. Item-agnostic — the isChoiceItem gate lives at the
+// caller (searchInputFromMatch).
+export function lockedMoveSinceEntry(match: Match, side: FieldSide, teamIndex: number): string | null {
+  let last: string | null = null;
+  for (const turn of match.turns) {
+    for (const a of turn.actions) {
+      if (a.side !== side) continue;
+      if (a.kind === 'switch' && (a.attackerTeamIndex === teamIndex || a.targetTeamIndex === teamIndex)) last = null;
+      else if (a.kind === 'move' && a.attackerTeamIndex === teamIndex) last = a.move;
+    }
+  }
+  return last;
+}
+
 // Detect if an opponent mon takes sand-chip damage, proving it's not holding
 // Safety Goggles (and doesn't have Sand immunity by type/ability). This signal
 // flags the opponent entry to exclude Safety Goggles from the item candidate set.

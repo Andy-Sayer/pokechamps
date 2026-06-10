@@ -129,7 +129,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 | HP-trigger heal | Sitrus, Aguav/figy/… pinch berries | ✅ live (hpItemTriggers) | ✅ search — `hpItemTriggerFor` heals at the 50%/25% threshold (Sitrus, pinch berries), consumed once |
 | Status berries | Lum, Cheri, Pecha, … | ✅ live (statusBerries) | ✅ search — `statusBerryFor` cures the matching status on infliction, consumed once |
 | Leftovers / Black Sludge | — | ✅ live; ✅ search (Leftovers heal) | Black Sludge (poison-type heal / else hurt) **PARTIAL** in search |
-| Choice lock | Choice items | ✅ calc(dmg); ✅ live | **PARTIAL** search — a Choice holder is restricted to attacks/spread/switch (no setup/Protect/status); the true single-move lock still needs per-move cells |
+| Choice lock | Choice items | ✅ calc(dmg); ✅ live | ✅ search (2026-06-09) — TRUE single-move lock via per-move cells: `State.my/oppChoiceMove` set when a holder attacks, cleared on switch-in; the locked actor's attacks substitute the locked move's `offMoves`/`thrMoves` cell, options narrow to that move's viable targets (+switch), and the live-match lock threads from the log (`lockedMoveSinceEntry`, known item only). Approximations: opp locks need a REVEALED Choice item (soft repeat-move suspicion stays display-only); no Trick/Switcheroo transfer; locked cells use base move priority (no Gale Wings/Grassy Glide bump); a pivot sets no lock (the user leaves) |
 | Resist berries | Yache/Occa/Passho/Chople/… (17 in meta) | ✅ calc (first hit ½) | ✅ search — consumed after the first SE matching-type hit; a later same-type hit is no longer halved (×2 vs the baked cell) |
 | White Herb | — | ✅ calc(n/a) | ✅ search — restores lowered stats once, then consumed (triggers Unburden) |
 | Booster Energy | Protosynthesis/Quark Drive proc | ✅ calc(if active) | proc-on-switch **search GAP** |
@@ -262,10 +262,11 @@ EOT residual, root-ply action, switch-in hook).
    the opposing actives' Atk −1 (into the dynamic boosts), honoring Clear Body /
    Clear Amulet / Hyper Cutter / … immunity. Defiant/Competitive/Guard Dog
    REACTIONS deferred.
-5. **Choice lock** — **RE-TIERED to P3.** Its real value (a mon stuck in a move a
-   switch-in walls) needs PER-MOVE damage cells; the search collapses to
-   best-move-per-foe, and real Choice mons run 4 attacks so the "attacks-only"
-   restriction is nearly a no-op. Revisit if/when cells gain per-move data.
+5. ~~**Choice lock**~~ ✅ SHIPPED (2026-06-09) — true single-move lock on the
+   per-move cells (Theme 1 stage b): in-tree dynamic locking + live-match root
+   locks from the log; the advisory layers (risks/Hail-Mary/obvious-play) no
+   longer name moves a locked opp can't use. See the matrix row for the
+   documented approximations.
 
 **P2 — impactful but rarer / more work**
 6. **Foe stat-drops** (Snarl/Icy Wind/Charm/Electroweb) — symmetric to setup but

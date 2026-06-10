@@ -37,7 +37,7 @@ import { statusBerryFor, isStatusBerry } from './statusBerries.js';
 import { applyHazardsToSwitchIn, type HazardEffect } from './hazards.js';
 import { unmodeledMechanics, type UnmodeledMechanic } from './unmodeled.js';
 import { effectiveness } from './typechart.js';
-import { firstTurnOut } from './itemSignals.js';
+import { firstTurnOut, lockedMoveSinceEntry } from './itemSignals.js';
 import { foeDropOf, statDropImmune, defiantStat } from './abilities.js';
 
 // ---------------------------------------------------------------------------
@@ -70,6 +70,9 @@ export interface SearchMyMon {
   firstTurnOut?: boolean;
   /** Substitute HP remaining (% of max), if this mon is behind a sub. */
   subHpPercent?: number;
+  /** Choice lock from the live match: the move this Choice-item holder is locked
+   *  into (used a move, hasn't left the field since). Ignored without a Choice item. */
+  choiceLockedMove?: string;
 }
 export interface SearchOppMon {
   entry: OpponentEntry;
@@ -90,6 +93,9 @@ export interface SearchOppMon {
   firstTurnOut?: boolean;
   /** Substitute HP remaining (% of max), if this mon is behind a sub. */
   subHpPercent?: number;
+  /** Choice lock from the live match — only meaningful when the entry's item is
+   *  a KNOWN Choice item (revealed); soft suspicions never hard-lock the search. */
+  choiceLockedMove?: string;
 }
 export interface SearchInput {
   mine: SearchMyMon[];
@@ -984,6 +990,12 @@ interface State {
    *  while >0 the mon can only attack — no switch / setup / protect. */
   myLocked: number[];
   oppLocked: number[];
+  /** Choice lock: the move a Choice-item holder is locked into (null = holder
+   *  hasn't attacked yet, or not a Choice holder). Set when the holder attacks,
+   *  cleared on switch-in (same lifecycle as myLocked). The locked mon's
+   *  attacks substitute the locked move's per-move cell (offMoves/thrMoves). */
+  myChoiceMove: (string | null)[];
+  oppChoiceMove: (string | null)[];
   /** Substitute HP remaining (% of the mon's max HP; 0 = no sub). Incoming damage
    *  hits the sub first; status / secondaries are blocked while it stands. */
   mySubHp: number[];
@@ -1257,6 +1269,12 @@ function effectiveAttackPriority(move: string, ability: string | null | undefine
 function hasUnburden(ability: string | null | undefined): boolean { return toId(ability ?? '') === 'unburden'; }
 function isWhiteHerb(item: string | null | undefined): boolean { return toId(item ?? '') === 'whiteherb'; }
 function isChoiceItem(item: string | null | undefined): boolean { const i = toId(item ?? ''); return i === 'choiceband' || i === 'choicespecs' || i === 'choicescarf'; }
+// The locked move's per-move cell vs one foe (Choice lock substitution).
+// Undefined when the locked move can't damage this foe → the attack fizzles.
+function lockedCellFor(cells: Cell[] | undefined, locked: string): Cell | undefined {
+  const lid = toId(locked);
+  return cells?.find(c => toId(c.move) === lid && c.dmgMax > 0);
+}
 function hasFakeOut(moves: string[]): boolean { return moves.some(m => toId(m) === 'fakeout'); }
 function hasHelpingHand(moves: string[]): boolean { return moves.some(m => toId(m) === 'helpinghand'); }
 function hasWideGuard(moves: string[]): boolean { return moves.some(m => toId(m) === 'wideguard'); }
@@ -1866,6 +1884,11 @@ function initialState(input: SearchInput): State {
     oppRecharge: input.opp.map(() => false),
     myLocked: input.mine.map(() => 0),
     oppLocked: input.opp.map(() => 0),
+    // Live Choice locks: only honored when the item is genuinely a Choice item
+    // (my items known; opp's only when revealed — and a knocked-off/consumed
+    // item lifts the lock).
+    myChoiceMove: input.mine.map(m => isChoiceItem(m.set.item) ? (m.choiceLockedMove ?? null) : null),
+    oppChoiceMove: input.opp.map(o => isChoiceItem(o.entry.item) && !o.entry.itemConsumed ? (o.choiceLockedMove ?? null) : null),
     mySubHp: input.mine.map(m => m.subHpPercent ?? 0),
     oppSubHp: input.opp.map(o => o.subHpPercent ?? 0),
     myWish: input.mine.map(() => 0),
@@ -2013,6 +2036,10 @@ function resolveTurn(
   const oppRecharge = s.oppRecharge.map(() => false);
   const myLocked = s.myLocked.slice();
   const oppLocked = s.oppLocked.slice();
+  // Choice lock: set when an unlocked Choice holder attacks; an already-locked
+  // actor's single-target attack substitutes the locked move's per-move cell.
+  const myChoiceMove = s.myChoiceMove.slice();
+  const oppChoiceMove = s.oppChoiceMove.slice();
   const mySubHp = s.mySubHp.slice();
   const oppSubHp = s.oppSubHp.slice();
   const myWish = s.myWish.slice();
@@ -2342,6 +2369,7 @@ function resolveTurn(
           if (fc) apply(oppHp, f, myDmg(act.actor, f, myRoll(fc, r), fc.physical, fc.type, fc.groundMove), oppSurv, fc.multiHit, oppDg(f));
           if (!t.oppFlinchImmune[f]) oppFlinched.add(f);   // Inner Focus / Covert Cloak block the flinch
         }
+        if (t.myChoice[act.actor] && !myChoiceMove[act.actor]) myChoiceMove[act.actor] = 'Fake Out'; // Choice: locked (switch-only after)
         continue;
       }
       if (act.target === SPREAD) {
@@ -2365,14 +2393,19 @@ function resolveTurn(
         if (sp.selfDrop) mySelfDrop.set(act.actor, sp.selfDrop);
         if (t.myLifeOrb[act.actor] && spreadDealt) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10);
         if (isSelfdestruct(sp.move)) myHp[act.actor] = 0;   // Explosion / Self-Destruct: user faints
+        if (t.myChoice[act.actor] && !myChoiceMove[act.actor]) myChoiceMove[act.actor] = sp.move; // Choice: lock to the spread move
         continue;
       }
       // Priority-attack option (Sucker Punch/Aqua Jet/…) uses the prio cell; else
+      // a Choice-LOCKED actor substitutes the locked move's per-move cell; else
       // the max-damage off cell. Redirection (opp Rage Powder/Follow Me) overrides
       // targeting; else the switch-redirect (hit the replacement if it switched).
       const myPrio = isPrioTarget(act.target);
       const oTgt = oppRedirTarget(act.actor) ?? redirect(myPrio ? prioFoeIdx(act.target) : act.target, oppSwitchIn);
-      const oc = myPrio ? t.myPrioCell[act.actor]?.[oTgt] : t.off[act.actor]![oTgt]!;
+      const myLockMv = myChoiceMove[act.actor];
+      const oc = myPrio ? t.myPrioCell[act.actor]?.[oTgt]
+        : myLockMv ? lockedCellFor(t.offMoves[act.actor]?.[oTgt], myLockMv)
+        : t.off[act.actor]![oTgt]!;
       if (oppProtected.has(oTgt)) {                  // target protecting → fizzle (+ King's Shield etc. punish)
         if (oc?.contact) applyProtectPunish(t.oppProtectMove[oTgt], 'mine', act.actor);
         continue;
@@ -2408,6 +2441,7 @@ function resolveTurn(
         if (isRechargeMove(oc.move)) myRecharge[act.actor] = true;
         else if (isLockedMove(oc.move) && myLocked[act.actor]! <= 0) myLocked[act.actor] = 2;
       }
+      if (t.myChoice[act.actor] && !myChoiceMove[act.actor]) myChoiceMove[act.actor] = oc.move; // Choice: lock to the move used
     } else {
       if (oppHp[act.actor]! <= 0) continue;
       if (oppFlinched.has(act.actor)) continue;       // flinched by Fake Out
@@ -2420,6 +2454,7 @@ function resolveTurn(
           if (fc) apply(myHp, f, oppDmg(act.actor, f, oppRoll(fc, r), fc.physical, fc.type, fc.groundMove), mySurv, fc.multiHit, myDg(f));
           if (!t.myFlinchImmune[f]) myFlinched.add(f);
         }
+        if (t.oppChoice[act.actor] && !oppChoiceMove[act.actor]) oppChoiceMove[act.actor] = 'Fake Out'; // Choice: locked (switch-only after)
         continue;
       }
       if (act.target === SPREAD) {
@@ -2443,12 +2478,17 @@ function resolveTurn(
         if (sp.selfDrop) oppSelfDrop.set(act.actor, sp.selfDrop);
         if (t.oppLifeOrb[act.actor] && spreadDealt) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
         if (isSelfdestruct(sp.move)) oppHp[act.actor] = 0;   // Explosion / Self-Destruct: user faints
+        if (t.oppChoice[act.actor] && !oppChoiceMove[act.actor]) oppChoiceMove[act.actor] = sp.move; // Choice: lock to the spread move
         continue;
       }
-      // Priority-attack option uses the opp prio cell; else the max-damage thr cell.
+      // Priority-attack option uses the opp prio cell; a Choice-LOCKED opp
+      // substitutes its locked move's per-move cell; else the max-damage thr cell.
       const oppPrio = isPrioTarget(act.target);
       const mTgt = myRedirTarget(act.actor) ?? redirect(oppPrio ? prioFoeIdx(act.target) : act.target, mySwitchIn);  // redirection, else switch-redirect
-      const tc = oppPrio ? t.oppPrioCell[act.actor]?.[mTgt] : t.thr[act.actor]![mTgt]!;
+      const oppLockMv = oppChoiceMove[act.actor];
+      const tc = oppPrio ? t.oppPrioCell[act.actor]?.[mTgt]
+        : oppLockMv ? lockedCellFor(t.thrMoves[act.actor]?.[mTgt], oppLockMv)
+        : t.thr[act.actor]![mTgt]!;
       if (myProtected.has(mTgt)) {                    // my mon protecting → fizzle (+ King's Shield etc. punish)
         if (tc?.contact) applyProtectPunish(t.myProtectMove[mTgt], 'opp', act.actor);
         continue;
@@ -2483,6 +2523,7 @@ function resolveTurn(
         if (isRechargeMove(tc.move)) oppRecharge[act.actor] = true;
         else if (isLockedMove(tc.move) && oppLocked[act.actor]! <= 0) oppLocked[act.actor] = 2;
       }
+      if (t.oppChoice[act.actor] && !oppChoiceMove[act.actor]) oppChoiceMove[act.actor] = tc.move; // Choice: lock to the move used
     }
   }
 
@@ -2754,8 +2795,8 @@ function resolveTurn(
   const myBerryUsed = s.myBerryUsed.slice();
   const oppBerryUsed = s.oppBerryUsed.slice();
   // Status persists on a mon that switches out; a switch-in arrives clean (awake).
-  for (const inn of mySwitchIn.values()) { myStatus[inn] = ''; myToxicN[inn] = 0; mySleepTurns[inn] = 0; myDisguise[inn] = hasDisguise(t.myAbility[inn]); myRecharge[inn] = false; myLocked[inn] = 0; mySubHp[inn] = 0; myWish[inn] = 0; }
-  for (const inn of oppSwitchIn.values()) { oppStatus[inn] = ''; oppToxicN[inn] = 0; oppSleepTurns[inn] = 0; oppDisguise[inn] = hasDisguise(t.oppAbility[inn]); oppRecharge[inn] = false; oppLocked[inn] = 0; oppSubHp[inn] = 0; oppWish[inn] = 0; }
+  for (const inn of mySwitchIn.values()) { myStatus[inn] = ''; myToxicN[inn] = 0; mySleepTurns[inn] = 0; myDisguise[inn] = hasDisguise(t.myAbility[inn]); myRecharge[inn] = false; myLocked[inn] = 0; myChoiceMove[inn] = null; mySubHp[inn] = 0; myWish[inn] = 0; }
+  for (const inn of oppSwitchIn.values()) { oppStatus[inn] = ''; oppToxicN[inn] = 0; oppSleepTurns[inn] = 0; oppDisguise[inn] = hasDisguise(t.oppAbility[inn]); oppRecharge[inn] = false; oppLocked[inn] = 0; oppChoiceMove[inn] = null; oppSubHp[inn] = 0; oppWish[inn] = 0; }
   // Wake: a mon that started the turn asleep ticks its counter down (it couldn't act
   // this turn); it wakes when the counter hits 0. Runs BEFORE this turn's infliction
   // so a freshly-slept mon keeps its full count.
@@ -3003,7 +3044,7 @@ function resolveTurn(
     myBerryUsed, oppBerryUsed, myHazards, oppHazards, mySleepTurns, oppSleepTurns,
     myTaunt, oppTaunt, myEncore, oppEncore, myEncoreAct, oppEncoreAct,
     myUnburden, oppUnburden, myResistBerryUsed, oppResistBerryUsed, myFirstTurn, oppFirstTurn,
-    myDisguise, oppDisguise, myRecharge, oppRecharge, myLocked, oppLocked, mySubHp, oppSubHp,
+    myDisguise, oppDisguise, myRecharge, oppRecharge, myLocked, oppLocked, myChoiceMove, oppChoiceMove, mySubHp, oppSubHp,
     myWish, oppWish, myFutureTurns, oppFutureTurns, myFutureDmg, oppFutureDmg,
     gravity, wonderRoom, magicRoom, gravityTurns, wonderRoomTurns, magicRoomTurns,
   };
@@ -3038,6 +3079,34 @@ function refill(
     onField.add(best);
   }
   return live;
+}
+
+// Per-actor Choice-lock option set for jointActions. `foes` = live direct
+// targets the locked move can actually hit (its per-move cell exists with
+// damage); `spread`/`pivot` = the locked move IS the side's spread / pivot
+// option. A first-turn-only locked move (Choice Band Fake Out) allows nothing
+// but switching out — it fails after the first turn.
+interface ChoiceLockOptions { foes: number[]; spread: boolean; pivot: boolean }
+function choiceLockFor(
+  lockedArr: (string | null)[],
+  moveCells: Cell[][][],            // offMoves (mine) / thrMoves (opp) — [actor][foe]
+  spread: (SpreadOpt | null)[],
+  pivotMove: (string | null)[],
+  foeActive: number[],
+  foeHp: number[],
+): (ChoiceLockOptions | null)[] {
+  return lockedArr.map((locked, actor) => {
+    if (!locked) return null;
+    const lid = toId(locked);
+    if (FIRST_TURN_MOVE_IDS.has(lid)) return { foes: [], spread: false, pivot: false };
+    const foes = foeActive.filter(j => (foeHp[j] ?? 0) > 0
+      && (moveCells[actor]?.[j] ?? []).some(c => toId(c.move) === lid && c.dmgMax > 0));
+    return {
+      foes,
+      spread: toId(spread[actor]?.move ?? '') === lid,
+      pivot: toId(pivotMove[actor] ?? '') === lid,
+    };
+  });
 }
 
 // All joint target assignments for a side's live actives (cartesian product of
@@ -3094,10 +3163,13 @@ function jointActions(
   pivot?: { move: (string | null)[]; foes: number[] },
   // Dedicated debuff capability (root only): per-actor move + the foe indices to debuff.
   debuff?: { move: ({ move: string; boosts: BoostMap } | null)[]; foes: number[] },
-  // Option-restriction state (all plies): a taunted (or Choice-locked) mon may only
-  // attack/spread/switch; an encored mon may only repeat `encoreAct`. (Choice's true
-  // single-move lock needs per-move cells — this is the tractable subset.)
-  restrict?: { taunt: boolean[]; encore: boolean[]; encoreAct: number[]; choice?: boolean[]; locked?: boolean[] },
+  // Option-restriction state (all plies): a taunted (or unlocked-Choice) mon may
+  // only attack/spread/switch; an encored mon may only repeat `encoreAct`.
+  // `choiceLock` is the TRUE per-move Choice lock (set once the holder attacks):
+  // per actor, the direct-target foes its locked move can hit, whether the locked
+  // move is the side's spread option, and whether it's the pivot move — plus
+  // switching out. Null = not locked (the loose `choice` filter applies instead).
+  restrict?: { taunt: boolean[]; encore: boolean[]; encoreAct: number[]; choice?: boolean[]; locked?: boolean[]; choiceLock?: (ChoiceLockOptions | null)[] },
   // Taunt/Encore CAST capability (root only): per-actor move + foe indices.
   tauntEncore?: { taunt: (string | null)[]; encore: (string | null)[]; foes: number[] },
   // Fake Out (root only): offered when the mon knows it AND is on its first turn out.
@@ -3217,13 +3289,25 @@ function jointActions(
       ...switchCodes,
       ...batonCodes,
     ];
-    // Locked into a multi-turn move (Outrage) → ONLY attacking options (no switch).
-    // Taunted / Choice-locked → attacking/spread/switch (no setup/status/protect).
-    const usable = restrict?.locked?.[actor]
-      ? options.filter(o => o >= 0 || o === SPREAD || isPrioTarget(o))
-      : (restrict?.taunt[actor] || restrict?.choice?.[actor])
-        ? options.filter(o => o >= 0 || o === SPREAD || isSwitchTarget(o) || isPrioTarget(o))
-        : options;
+    // Choice lock (true per-move lock) narrows FIRST: only the locked move's
+    // viable targets / its spread / its pivot, plus switching out. Then the
+    // Outrage lock drops switches; otherwise Taunt / unlocked-Choice apply the
+    // loose attack-only filter. A locked mon with nothing usable no-ops
+    // (SLEEP_SKIP) rather than emptying the joint set.
+    const cl = restrict?.choiceLock?.[actor];
+    const pool = cl
+      ? options.filter(o =>
+          (o >= 0 && cl.foes.includes(o))
+          || (o === SPREAD && cl.spread)
+          || (isPivotTarget(o) && cl.pivot)
+          || isSwitchTarget(o))
+      : options;
+    const usable0 = restrict?.locked?.[actor]
+      ? pool.filter(o => o >= 0 || o === SPREAD || isPrioTarget(o))
+      : (!cl && (restrict?.taunt[actor] || restrict?.choice?.[actor]))
+        ? pool.filter(o => o >= 0 || o === SPREAD || isSwitchTarget(o) || isPrioTarget(o))
+        : pool;
+    const usable = cl && usable0.length === 0 ? [SLEEP_SKIP] : usable0;
     const next: Array<Map<number, number>> = [];
     for (const combo of combos) {
       for (const opt of usable) {
@@ -3324,6 +3408,7 @@ function ttKey(s: State, depth: number, maxDepth: number, pass: Pass): string {
     bl(s.myBerryUsed), bl(s.oppBerryUsed), bl(s.myResistBerryUsed), bl(s.oppResistBerryUsed),
     bl(s.myUnburden), bl(s.oppUnburden), bl(s.myFirstTurn), bl(s.oppFirstTurn), bl(s.myDisguise), bl(s.oppDisguise),
     bl(s.myRecharge), bl(s.oppRecharge), nb(s.myLocked), nb(s.oppLocked), nb(s.mySubHp), nb(s.oppSubHp),
+    s.myChoiceMove.map(m => m ?? 'n').join('.'), s.oppChoiceMove.map(m => m ?? 'n').join('.'),
     nb(s.myWish), nb(s.oppWish), nb(s.myFutureTurns), nb(s.oppFutureTurns), nb(s.myFutureDmg), nb(s.oppFutureDmg),
     nb(s.myTaunt), nb(s.oppTaunt), nb(s.myEncore), nb(s.oppEncore), nb(s.myEncoreAct), nb(s.oppEncoreAct),
     `${s.gravity ? 1 : 0}${s.wonderRoom ? 1 : 0}${s.magicRoom ? 1 : 0}`,
@@ -3374,8 +3459,8 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
   const switchesAllowed = plyFromRoot < (t.switchPlyLimit ?? SWITCH_PLY_LIMIT);
   const myBench = switchesAllowed ? benchSwitchTargets(s.myActive, s.myHp, t.myN) : U;
   const oppBench = switchesAllowed ? benchSwitchTargets(s.oppActive, s.oppHp, t.oppN) : U;
-  const myRestrict = { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct, choice: t.myChoice, locked: s.myLocked.map(x => x > 0) };
-  const oppRestrict = { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct, choice: t.oppChoice, locked: s.oppLocked.map(x => x > 0) };
+  const myRestrict = { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct, choice: t.myChoice, locked: s.myLocked.map(x => x > 0), choiceLock: choiceLockFor(s.myChoiceMove, t.offMoves, t.mySpread, t.myPivotMove, s.oppActive, s.oppHp) };
+  const oppRestrict = { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct, choice: t.oppChoice, locked: s.oppLocked.map(x => x > 0), choiceLock: choiceLockFor(s.oppChoiceMove, t.thrMoves, t.oppSpread, t.oppPivotMove, s.myActive, s.myHp) };
   const myPrio = { cell: t.myPrioCell, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0), koOnly: true };
   const oppPrio = { cell: t.oppPrioCell, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0), koOnly: true };
   // Support moves at depth too (Helping Hand / Wide Guard / Quick Guard): bounded
@@ -3475,6 +3560,9 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
       boosts: match.myBoosts?.[idx], status: match.myStatus?.[idx], survival: mySurvival(set),
       // Fake Out / First Impression eligibility — true until the mon moves after entry.
       firstTurnOut: myActive.has(idx) && firstTurnOut(match, 'mine', idx),
+      // Choice lock: holder moved since its last entry (a knocked-off item lifts it).
+      choiceLockedMove: myActive.has(idx) && isChoiceItem(set.item) && !match.myItemConsumed?.[idx]
+        ? lockedMoveSinceEntry(match, 'mine', idx) ?? undefined : undefined,
     });
     myTeamIdx.push(idx);
   }
@@ -3489,6 +3577,10 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
       entry, hpPercent, active: oppActive.has(idx), megaActive: entry.megaUsed,
       boosts: entry.currentBoosts, status: entry.status, survival: oppSurvival(entry),
       firstTurnOut: oppActive.has(idx) && firstTurnOut(match, 'theirs', idx),
+      // Hard Choice lock only from a KNOWN (revealed) Choice item — soft repeat-
+      // move suspicions stay display-only and never restrict the search.
+      choiceLockedMove: oppActive.has(idx) && isChoiceItem(entry.item) && !entry.itemConsumed
+        ? lockedMoveSinceEntry(match, 'theirs', idx) ?? undefined : undefined,
     });
     oppTeamIdx.push(idx);
   }
@@ -3562,7 +3654,7 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     t.myRedirectMove,
     { move: t.myPivotMove, foes: myBench.length > 0 ? s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) : [] },
     { move: t.myDebuffMove, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
-    { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct, choice: t.myChoice, locked: s.myLocked.map(x => x > 0) },
+    { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct, choice: t.myChoice, locked: s.myLocked.map(x => x > 0), choiceLock: choiceLockFor(s.myChoiceMove, t.offMoves, t.mySpread, t.myPivotMove, s.oppActive, s.oppHp) },
     { taunt: t.myTauntMove, encore: t.myEncoreMove, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
     { has: t.myHasFakeOut, firstTurn: s.myFirstTurn, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
     { cell: t.myPrioCell, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
@@ -3599,7 +3691,7 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     t.oppRedirectMove,
     { move: t.oppPivotMove, foes: oppBench.length > 0 ? s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) : [] },
     { move: t.oppDebuffMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
-    { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct, choice: t.oppChoice, locked: s.oppLocked.map(x => x > 0) },
+    { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct, choice: t.oppChoice, locked: s.oppLocked.map(x => x > 0), choiceLock: choiceLockFor(s.oppChoiceMove, t.thrMoves, t.oppSpread, t.oppPivotMove, s.myActive, s.myHp) },
     { taunt: t.oppTauntMove, encore: t.oppEncoreMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
     { has: t.oppHasFakeOut, firstTurn: s.oppFirstTurn, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
     { cell: t.oppPrioCell, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
@@ -3650,7 +3742,7 @@ function verdictOf(score: number): SearchResult['verdict'] {
     : score > MATERIAL / 2 ? 'winning' : score < -MATERIAL / 2 ? 'losing' : 'even';
 }
 
-function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPlay[] {
+function playsFromJoint(t: Tables, joint: Map<number, number> | null, choiceMove?: (string | null)[]): SearchPlay[] {
   const plays: SearchPlay[] = [];
   if (!joint) return plays;
   for (const [actor, target] of joint) {
@@ -3715,7 +3807,10 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
     } else if (target === PROTECT) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myProtectMove[actor] ?? 'Protect', targetSpecies: t.mySpecies[actor]!, self: true });
     } else {
-      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.off[actor]![target]!.move, targetSpecies: t.oppSpecies[target]! });
+      // A Choice-locked actor attacks with its LOCKED move, not the best cell.
+      const lk = choiceMove?.[actor];
+      const cell = lk ? lockedCellFor(t.offMoves[actor]?.[target], lk) : undefined;
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: (cell ?? t.off[actor]![target]!).move, targetSpecies: t.oppSpecies[target]! });
     }
   }
   return plays;
@@ -3724,7 +3819,7 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null): SearchPla
 // The OPPONENT's joint formatted as plays ("how they beat us"). Mirror of
 // playsFromJoint over the thr/oppSpread tables: `mySpecies` carries the opp
 // actor's species and `targetSpecies` my mon (SearchPlay is side-agnostic).
-function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): SearchPlay[] {
+function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null, choiceMove?: (string | null)[]): SearchPlay[] {
   const plays: SearchPlay[] = [];
   if (!joint) return plays;
   for (const [actor, target] of joint) {
@@ -3789,7 +3884,10 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null): Search
     } else if (target === PROTECT) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppProtectMove[actor] ?? 'Protect', targetSpecies: t.oppSpecies[actor]!, self: true });
     } else {
-      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.thr[actor]![target]!.move, targetSpecies: t.mySpecies[target]! });
+      // A Choice-locked opp attacks with its LOCKED move, not the best cell.
+      const lk = choiceMove?.[actor];
+      const cell = lk ? lockedCellFor(t.thrMoves[actor]?.[target], lk) : undefined;
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: (cell ?? t.thr[actor]![target]!).move, targetSpecies: t.mySpecies[target]! });
     }
   }
   return plays;
@@ -3833,38 +3931,47 @@ function obviousOppPlay(t: Tables, s0: State): SearchPlay[] {
   for (const oj of s0.oppActive) {
     if ((s0.oppHp[oj] ?? 0) <= 0) continue;
     const oppName = t.oppSpecies[oj] ?? 'foe';
+    // Choice-locked opp: it can only repeat the locked move (or switch) — gate
+    // every branch so the "obvious play" never names a move it can't use.
+    const lk = s0.oppChoiceMove[oj];
+    const lkOk = (mv: string | undefined) => !lk || (mv != null && toId(mv) === toId(lk));
     // a. Priority KO — a priority move that kills one of my actives at current HP.
     let done = false;
     for (const mi of liveMy) {
       const pc = t.oppPrioCell[oj]?.[mi];
-      if (pc && pc.dmgMax >= (s0.myHp[mi] ?? 0) && pc.dmgMax > 0) {
+      if (pc && lkOk(pc.move) && pc.dmgMax >= (s0.myHp[mi] ?? 0) && pc.dmgMax > 0) {
         out.push({ mySpecies: oppName, move: pc.move, targetSpecies: t.mySpecies[mi]! });
         done = true; break;
       }
     }
     if (done) continue;
     // b. Fake Out on turn 1 — flinch my biggest threat to this opp.
-    if (s0.oppFirstTurn[oj] && t.oppHasFakeOut[oj]) {
+    if (s0.oppFirstTurn[oj] && t.oppHasFakeOut[oj] && !lk) {
       let tgt = liveMy[0]!, best = -1;
       for (const mi of liveMy) { const d = t.off[mi]?.[oj]?.dmgMid ?? 0; if (d > best) { best = d; tgt = mi; } }
       out.push({ mySpecies: oppName, move: 'Fake Out', targetSpecies: t.mySpecies[tgt]! });
       continue;
     }
-    // c. Protect when it's guaranteed-KO'd this turn (stall).
+    // c. Protect when it's guaranteed-KO'd this turn (stall) — a locked mon can't.
     const doomed = liveMy.some(mi => (t.off[mi]?.[oj]?.dmgMin ?? 0) >= (s0.oppHp[oj] ?? 0));
-    if (doomed && t.oppProtectMove[oj]) {
+    if (doomed && t.oppProtectMove[oj] && !lk) {
       out.push({ mySpecies: oppName, move: t.oppProtectMove[oj]!, targetSpecies: oppName, self: true });
       continue;
     }
     // d. Max damage — best single-target vs the spread (whichever does more total).
+    // A locked opp substitutes the locked move's per-move cell.
     let bestMi = -1, bestDmg = -1;
-    for (const mi of liveMy) { const c = t.thr[oj]?.[mi]; if (c && c.dmgMid > bestDmg) { bestDmg = c.dmgMid; bestMi = mi; } }
-    const sp = t.oppSpread[oj];
+    for (const mi of liveMy) {
+      const c = lk ? lockedCellFor(t.thrMoves[oj]?.[mi], lk) : t.thr[oj]?.[mi];
+      if (c && c.dmgMid > bestDmg) { bestDmg = c.dmgMid; bestMi = mi; }
+    }
+    const sp = lkOk(t.oppSpread[oj]?.move) ? t.oppSpread[oj] : null;
     const spreadTotal = sp ? liveMy.reduce((a, mi) => a + (sp.dmgMid[mi] ?? 0), 0) : 0;
     if (sp && spreadTotal > bestDmg && spreadTotal > 0) {
       out.push({ mySpecies: oppName, move: sp.move, targetSpecies: 'both', spread: true });
     } else if (bestMi >= 0 && bestDmg > 0) {
-      out.push({ mySpecies: oppName, move: t.thr[oj]![bestMi]!.move, targetSpecies: t.mySpecies[bestMi]! });
+      const c = lk ? lockedCellFor(t.thrMoves[oj]?.[bestMi], lk)! : t.thr[oj]![bestMi]!;
+      out.push({ mySpecies: oppName, move: c.move, targetSpecies: t.mySpecies[bestMi]! });
     }
   }
   return out;
@@ -4034,6 +4141,26 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
       const pess = evalPass(buildPass('pessimistic'), depth); // my low rolls, opp high + survives
       const opt = evalPass(buildPass('optimistic'), depth);   // my high rolls, opp low, no survival
 
+      // A Choice-LOCKED opp (root state) can only threaten with its locked move —
+      // substitute that per-move cell and drop non-matching spread/priority
+      // threats, so the advisory layers (risks, Hail-Mary, forced-demotion)
+      // never name a move it can't use. The maximin itself is already
+      // lock-aware via resolveTurn; these mirror it for the explanation layer.
+      const thrCellAt = (tbl: Tables, oj: number, mi: number): Cell | undefined => {
+        const lk = s0.oppChoiceMove[oj];
+        return lk ? lockedCellFor(tbl.thrMoves[oj]?.[mi], lk) : tbl.thr[oj]?.[mi];
+      };
+      const oppSpreadAt = (tbl: Tables, oj: number): SpreadOpt | null => {
+        const lk = s0.oppChoiceMove[oj];
+        const sp = tbl.oppSpread[oj];
+        return sp && (!lk || toId(sp.move) === toId(lk)) ? sp : null;
+      };
+      const oppPrioAt = (tbl: Tables, oj: number, mi: number): Cell | null => {
+        const lk = s0.oppChoiceMove[oj];
+        const pc = tbl.oppPrioCell[oj]?.[mi];
+        return pc && (!lk || toId(pc.move) === toId(lk)) ? pc : null;
+      };
+
       const forcedWin = pess.score >= WIN && allOppRevealed;
       let forcedLoss = opt.score <= -WIN;
 
@@ -4066,9 +4193,9 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
             for (const oppMega of oppPlans) {
               const tbl = tables.get(`${opt.myMega},${oppMega}`);
               if (!tbl) continue;
-              const c = tbl.thr[oj]?.[mi]; if (c && c.dmgMax >= myHp) consider(c.move, rollKoProb(c, myHp));
-              const sp = tbl.oppSpread[oj]; if (sp) consider(sp.move, spreadKoProb(sp.dmgMin[mi] ?? 0, sp.dmgMid[mi] ?? 0, sp.dmgMax[mi] ?? 0, myHp));
-              const pc = tbl.oppPrioCell[oj]?.[mi]; if (pc && pc.dmgMax >= myHp) consider(pc.move, rollKoProb(pc, myHp));
+              const c = thrCellAt(tbl, oj, mi); if (c && c.dmgMax >= myHp) consider(c.move, rollKoProb(c, myHp));
+              const sp = oppSpreadAt(tbl, oj); if (sp) consider(sp.move, spreadKoProb(sp.dmgMin[mi] ?? 0, sp.dmgMid[mi] ?? 0, sp.dmgMax[mi] ?? 0, myHp));
+              const pc = oppPrioAt(tbl, oj, mi); if (pc && pc.dmgMax >= myHp) consider(pc.move, rollKoProb(pc, myHp));
             }
             if (maxAcc >= 0) threatAccs.push(maxAcc);
           }
@@ -4137,13 +4264,13 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
             if (!tbl) continue;
             for (const oj of s0.oppActive) {
               if ((s0.oppHp[oj] ?? 0) <= 0) continue;
-              const c = tbl.thr[oj]?.[mi];
+              const c = thrCellAt(tbl, oj, mi);
               if (c) consider(c.dmgMin, c.dmgMid, c.dmgMax, c.koRolls, oj, oppMega, tbl);
-              const sp = tbl.oppSpread[oj];
+              const sp = oppSpreadAt(tbl, oj);
               if (sp) consider(sp.dmgMin[mi] ?? 0, sp.dmgMid[mi] ?? 0, sp.dmgMax[mi] ?? 0, [], oj, oppMega, tbl);
               // Priority KO (Sucker Punch / Aqua Jet / …): hidden from the max-damage
               // thr cell, but a contingent priority KO is a real reason a line fails.
-              const pc = tbl.oppPrioCell[oj]?.[mi];
+              const pc = oppPrioAt(tbl, oj, mi);
               if (pc) consider(pc.dmgMin, pc.dmgMid, pc.dmgMax, pc.koRolls, oj, oppMega, tbl, true);
             }
           }
@@ -4316,9 +4443,9 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
               if (!tbl) continue;
               for (const oj of s0.oppActive) {
                 if ((s0.oppHp[oj] ?? 0) <= 0) continue;
-                const c = tbl.thr[oj]?.[mi]; if (c && c.dmgMax >= myHp) consider(c.move, rollKoProb(c, myHp));
-                const sp = tbl.oppSpread[oj]; if (sp) consider(sp.move, spreadKoProb(sp.dmgMin[mi] ?? 0, sp.dmgMid[mi] ?? 0, sp.dmgMax[mi] ?? 0, myHp));
-                const pc = tbl.oppPrioCell[oj]?.[mi]; if (pc && pc.dmgMax >= myHp) consider(pc.move, rollKoProb(pc, myHp));
+                const c = thrCellAt(tbl, oj, mi); if (c && c.dmgMax >= myHp) consider(c.move, rollKoProb(c, myHp));
+                const sp = oppSpreadAt(tbl, oj); if (sp) consider(sp.move, spreadKoProb(sp.dmgMin[mi] ?? 0, sp.dmgMid[mi] ?? 0, sp.dmgMax[mi] ?? 0, myHp));
+                const pc = oppPrioAt(tbl, oj, mi); if (pc && pc.dmgMax >= myHp) consider(pc.move, rollKoProb(pc, myHp));
               }
             }
             if (bestPKo <= 0 || bestPKo >= 1) continue; // no kill, or a guaranteed one (not an out)
@@ -4355,7 +4482,7 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
       // "How they beat us": the opponent's minimizing reply to my recommended
       // joint. Cheap (one root inner-min) and informative; rendered when losing.
       const oppReply = oppBestReply(expected.table, s0, expected.joint, depth, buildPass('expected'));
-      const oppLine = oppPlaysFromJoint(expected.table, oppReply);
+      const oppLine = oppPlaysFromJoint(expected.table, oppReply, s0.oppChoiceMove);
 
       // Pivotal SPEED assumptions: an opp attacker that outspeeds (non-TR) — or
       // moves first under Trick Room — ONLY if it invested the relevant Speed.
@@ -4555,7 +4682,7 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
       return {
         depth,
         score: expected.score,
-        plays: playsFromJoint(expected.table, expected.joint),
+        plays: playsFromJoint(expected.table, expected.joint, s0.myChoiceMove),
         verdict: eV,
         megaMon: expected.myMega != null ? input.mine[expected.myMega]!.set.species : undefined,
         // A restricted (narrow) pass can't prove a worst-case outcome — it may

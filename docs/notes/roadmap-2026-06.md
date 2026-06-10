@@ -82,7 +82,18 @@ derivation, and `per-move-cells.test.ts` holds LIVING equivalence tests against
 the still-exported `predictOffense`/`predictThreat`. No behaviour change
 (1013 green, search-suite runtime flat). Bolt-on cells (prio/Fake Out/pivot)
 deliberately untouched — they carry semantic quirks (pivot skips blade-forme,
-prio overrides priority); consolidation is a later cleanup. Next: stage (b).
+prio overrides priority); consolidation is a later cleanup.
+
+**Stage (b) ✅ shipped 2026-06-09 — true Choice lock.** `State.my/oppChoiceMove`
+(set when a holder attacks, cleared on switch-in, in the TT key); locked actors'
+attacks substitute the locked move's per-move cell and their options narrow to
+that move's viable targets + switching (`restrict.choiceLock`); live root locks
+derive read-only from the match log (`lockedMoveSinceEntry` in itemSignals —
+NO engine/BattleScreen mirror changes needed); opp locks require a KNOWN Choice
+item (soft repeat suspicions stay display-only). Advisory layers
+(risks/Hail-Mary/forced-demotion/obvious-play/oppLine labels) all honor the
+lock. The last meta-priorities gap is closed. 1025 green; search runtime flat.
+Next: stage (c) KO-boundary regimes.
 
 ### Theme 2 — Hail-Mary outs analysis *(non-forced + forced-demotion ✅ shipped 2026-06-09)*
 
