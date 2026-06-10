@@ -93,7 +93,11 @@ demotion). See [`accuracy-roadmap.md`](accuracy-roadmap.md) §"Hail Mary".
 position escapable only via a crit is still mislabelled `forced`. Folding in the
 **crit** out (`critProbFor`: Gen-9 crit stages + Scope Lens / Super Luck / Battle
 Armor) needs faithful same-turn, turn-order-aware crit-KO modelling — its own
-change, deferred.
+change, deferred. **Sequencing note:** a crit is a per-MOVE event (1/24 base vs
+1/8 high-crit moves; ×1.5, ignores the defender's positive Def boosts + screens),
+which today's single best-damage cell can't represent — per-move cells (Theme 1)
+give it a natural home as one more roll regime on the cell. Slot the crit out
+AFTER Theme 1 stages (a)–(b), not before.
 
 ### Theme 3 — Inference backward half
 
