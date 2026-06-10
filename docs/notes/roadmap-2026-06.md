@@ -72,6 +72,18 @@ KO-boundary residual should shrink) and `search-mechanics.test.ts`.
 default selection, no behaviour change; (b) Choice-lock selection; (c)
 KO-boundary regime precision. Each stage independently testable.
 
+**Stage (a) ✅ shipped 2026-06-09.** `Tables.offMoves[mi][oj]` / `thrMoves[oj][mi]`
+carry a `Cell` per damaging move; the legacy `off`/`thr` cells are **derived from
+them** via new single-pass `predictOffenseCells`/`predictThreatCells`
+(`predictions.ts`) that reproduce the selectors bit-identically (offense =
+candidate vote, threat = worst-case-for-me) and emit `percentRolls` per move.
+The per-move tables therefore sit on the hot path — every search exercises the
+derivation, and `per-move-cells.test.ts` holds LIVING equivalence tests against
+the still-exported `predictOffense`/`predictThreat`. No behaviour change
+(1013 green, search-suite runtime flat). Bolt-on cells (prio/Fake Out/pivot)
+deliberately untouched — they carry semantic quirks (pivot skips blade-forme,
+prio overrides priority); consolidation is a later cleanup. Next: stage (b).
+
 ### Theme 2 — Hail-Mary outs analysis *(non-forced + forced-demotion ✅ shipped 2026-06-09)*
 
 Turned out a basic version already existed (only "my KO needs top roll" + a vague

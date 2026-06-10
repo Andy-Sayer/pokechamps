@@ -24,7 +24,7 @@
  */
 import type { PokemonSet, OpponentEntry, FieldState, Match, HazardState } from './types.js';
 import { ZERO_EVS, MAX_IVS } from './types.js';
-import { predictOffense, predictThreat, pikalyticsMoves } from './predictions.js';
+import { predictOffense, predictThreat, predictOffenseCells, predictThreatCells, pikalyticsMoves } from './predictions.js';
 import { representativeSpreadIndices } from './inference.js';
 import { actualSpeed, actualStat, effectiveSpeedRange } from './speed.js';
 import { getMove, getSpecies, getNature, toId, isSpreadMove, moveFlinchChance } from './data.js';
@@ -562,6 +562,12 @@ interface Tables {
   oppPar: boolean[];
   off: Cell[][];               // off[mi][oj] — my mi attacking opp oj (best single-target)
   thr: Cell[][];               // thr[oj][mi] — opp oj attacking my mi
+  // Per-move cells (Theme 1 keystone): every damaging move's cell per pair, in
+  // move-list order. off/thr above are DERIVED from these (the selector's pick),
+  // so the per-move tables sit on the hot path. Consumers (Choice lock,
+  // KO-boundary regimes, the crit out) select a specific move's cell by `.move`.
+  offMoves: Cell[][][];        // offMoves[mi][oj] — my mi's damaging moves vs opp oj
+  thrMoves: Cell[][][];        // thrMoves[oj][mi] — opp oj's damaging moves vs my mi
   mySpread: (SpreadOpt | null)[]; // mySpread[mi] — best spread move, or null
   mySpreadActors: Set<number>; // indices of mine that have a spread option
   oppSpread: (SpreadOpt | null)[]; // oppSpread[oj] — opp's best spread move (dmg vs each my index), or null
@@ -1522,20 +1528,32 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
   const bladeSet = (set: PokemonSet): PokemonSet => bladeForme(set.species, set.ability) ? { ...set, species: 'Aegislash-Blade' } : set;
   const bladeEntry = (e: OpponentEntry): OpponentEntry => bladeForme(e.species, e.ability)
     ? { ...e, species: 'Aegislash-Blade', candidates: (e.candidates ?? []).map(c => ({ ...c, species: 'Aegislash-Blade' })) } : e;
-  const off: Cell[][] = mine.map((m, mi) => oppEntries.map((oe, oj) =>
-    cellFromOffense(bladeSet(m.set), oe, input.field, {
+  // Per-move cells: ONE pass per pair computes every damaging move's cell, and
+  // the legacy best/worst cell is DERIVED from them — bit-identical to
+  // predictOffense/predictThreat (guarded by per-move-cells.test.ts), so the
+  // per-move tables are exercised by every search, not bolted on beside it.
+  const offPairs = mine.map((m, mi) => oppEntries.map((oe, oj) =>
+    predictOffenseCells({
+      attacker: bladeSet(m.set), opponent: oe, field: input.field,
       attackerGimmickActive: myMega(mi),
       defenderGimmickActive: oppHypoMega(oj),
       attackerBoosts: m.boosts, attackerStatus: m.status,
       defenderBoosts: opp[oj]!.boosts, defenderStatus: opp[oj]!.status,
     })));
-  const thr: Cell[][] = oppEntries.map((oe, oj) => mine.map((m, mi) =>
-    cellFromThreat(bladeEntry(oe), m.set, input.field, {
+  const off: Cell[][] = offPairs.map(row => row.map(p =>
+    cellFrom(p.all.find(c => c.move === p.chosenMove) ?? null)));
+  const offMoves: Cell[][][] = offPairs.map(row => row.map(p => p.all.map(cellFrom)));
+  const thrPairs = oppEntries.map((oe, oj) => mine.map((m, mi) =>
+    predictThreatCells({
+      opponent: bladeEntry(oe), defender: m.set, field: input.field,
       attackerGimmickActive: oppHypoMega(oj),
       defenderGimmickActive: myMega(mi),
       attackerBoosts: opp[oj]!.boosts, attackerStatus: opp[oj]!.status,
       defenderBoosts: m.boosts, defenderStatus: m.status,
     })));
+  const thr: Cell[][] = thrPairs.map(row => row.map(p =>
+    cellFrom(p.all.find(c => c.move === p.chosenMove) ?? null)));
+  const thrMoves: Cell[][][] = thrPairs.map(row => row.map(p => p.all.map(cellFrom)));
   const mySpread = mine.map((m, mi) => bestSpread(m, opp, input.field, {
     attackerGimmickActive: myMega(mi), defHypoMega: oppHypoMega,
   }));
@@ -1646,7 +1664,7 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppSpeed: opp.map((o, oj) => (oj === plan.oppMega ? (megaMaxSpeed(o.entry.species) ?? oppBaseSpeed(o.entry, input.field)) : oppBaseSpeed(o.entry, input.field)) * speStageMult(o.boosts?.spe)),
     myPar: mine.map(m => m.status === 'par'),
     oppPar: opp.map(o => o.status === 'par'),
-    off, thr, mySpread, mySpreadActors, oppSpread, oppSpreadActors,
+    off, thr, offMoves, thrMoves, mySpread, mySpreadActors, oppSpread, oppSpreadActors,
     myProtectMove: mine.map(m => findProtectMove(m.set.moves ?? [])),
     // Opp protect: only offer it in the search when the opp has REVEALED a
     // protect variant (opp-conservatism rule — we don't model unseen moves).
@@ -1773,6 +1791,12 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppContactChip: opp.map(o => contactChipFor(o.entry.ability, o.entry.item)),
     field: input.field,
   };
+}
+
+/** Testing hook (same pattern as resolveOneTurn): expose the damage tables so
+ *  per-move-cells.test.ts can assert the off/thr ↔ offMoves/thrMoves contract. */
+export function buildTablesForTest(input: SearchInput, plan: { myMega: number | null; oppMega: number | null }) {
+  return buildTables(input, plan);
 }
 
 function initialState(input: SearchInput): State {

@@ -489,6 +489,182 @@ export function predictThreatAll(args: {
   return out;
 }
 
+// Per-move cells + the single-cell selector's choice, in ONE pass. The search's
+// per-move damage tables (endgameSearch `Tables.offMoves`/`thrMoves`) need every
+// damaging move's cell INCLUDING percentRolls, and the legacy best/worst cell
+// must be derivable from them bit-identically — so each damageRange call here
+// feeds both the per-move aggregates and the selection state, in EXACTLY
+// predictOffense/predictThreat's iteration order (tie behaviour included).
+// Equivalence is guarded by tests/per-move-cells.test.ts against the live
+// predictOffense/predictThreat outputs. No `critical` param: the search never
+// sets it, and the single-cell functions treat it inconsistently (choice with,
+// range without) — a quirk not worth reproducing.
+export interface PerMoveCells {
+  /** One cell per damaging move (finite range vs ≥1 candidate), move-list order. */
+  all: MatchupCell[];
+  /** The move predictOffense / predictThreat would choose; `all` contains its
+   *  cell with identical numbers. Null when nothing is calculable. */
+  chosenMove: string | null;
+}
+
+export function predictOffenseCells(args: {
+  attacker: PokemonSet;
+  opponent: OpponentEntry;
+  field: FieldState;
+  attackerGimmickActive?: boolean;
+  defenderGimmickActive?: boolean;
+  defenderCurrentHpPercent?: number;
+  attackerBoosts?: Partial<Record<string, number>>;
+  defenderBoosts?: Partial<Record<string, number>>;
+  attackerStatus?: string;
+  defenderStatus?: string;
+  attackerFirstTurnOut?: boolean;
+}): PerMoveCells {
+  const cands = defenderCandidates(args.opponent, args.attacker.level);
+  if (!cands.length) return { all: [], chosenMove: null };
+  const atkMoves = args.attackerFirstTurnOut === false
+    ? args.attacker.moves.filter(m => !isFirstTurnMove(m))
+    : args.attacker.moves;
+
+  // Candidate-outer / move-inner: the inner loop IS bestMoveAgainst (argmax by
+  // max%, strict >, move-list order), and the same damageRange result feeds the
+  // per-move aggregate. Vote semantics copied verbatim from predictOffense.
+  type Agg = { min: number; max: number; koChance: string; rolls: number[] };
+  const agg = new Map<string, Agg>();
+  const votes = new Map<string, { count: number; sumMax: number }>();
+  for (const c of cands) {
+    let best: { move: string; max: number } | null = null;
+    for (const move of atkMoves) {
+      try {
+        const r = damageRange({
+          attacker: args.attacker, defender: c, move, field: args.field, attackerSide: 'mine',
+          attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+          defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
+        });
+        let a = agg.get(move);
+        if (!a) { a = { min: Infinity, max: -Infinity, koChance: '', rolls: [] }; agg.set(move, a); }
+        if (r.minPercent < a.min) a.min = r.minPercent;
+        if (r.maxPercent > a.max) { a.max = r.maxPercent; a.koChance = r.koChance; }
+        a.rolls.push(...r.percentRolls);
+        if (!best || r.maxPercent > best.max) best = { move, max: r.maxPercent };
+      } catch { /* skip */ }
+    }
+    if (best) {
+      const v = votes.get(best.move) ?? { count: 0, sumMax: 0 };
+      v.count += 1;
+      v.sumMax += best.max;
+      votes.set(best.move, v);
+    }
+  }
+  const chosenMove = votes.size
+    ? [...votes.entries()].sort((a, b) => b[1].count - a[1].count || b[1].sumMax - a[1].sumMax)[0]![0]
+    : null;
+
+  const all: MatchupCell[] = [];
+  for (const move of atkMoves) {
+    const a = agg.get(move);
+    if (!a || !Number.isFinite(a.min) || all.some(c => c.move === move)) continue;
+    const finalKo = args.defenderCurrentHpPercent != null && args.defenderCurrentHpPercent < 100
+      ? koVsRemaining(a.rolls, args.defenderCurrentHpPercent)
+      : a.koChance;
+    const likely = likelyRange(args.opponent, cands, move, c => damageRange({
+      attacker: args.attacker, defender: c, move, field: args.field, attackerSide: 'mine',
+      attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+      defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
+    }));
+    all.push({
+      move,
+      minPercent: a.min,
+      maxPercent: a.max,
+      koChance: finalKo,
+      candidatesConsidered: cands.length,
+      likelyMinPercent: likely?.min,
+      likelyMaxPercent: likely?.max,
+      confidence: confidenceFor(!!args.opponent.candidates?.length, a.min, a.max),
+      conditional: isAttackConditionalMove(move) ? 'only if target attacks' : undefined,
+      percentRolls: a.rolls,
+    });
+  }
+  return { all, chosenMove };
+}
+
+export function predictThreatCells(args: {
+  opponent: OpponentEntry;
+  defender: PokemonSet;
+  field: FieldState;
+  attackerGimmickActive?: boolean;
+  defenderGimmickActive?: boolean;
+  defenderCurrentHpPercent?: number;
+  attackerBoosts?: Partial<Record<string, number>>;
+  defenderBoosts?: Partial<Record<string, number>>;
+  attackerStatus?: string;
+  defenderStatus?: string;
+  attackerFirstTurnOut?: boolean;
+}): PerMoveCells {
+  // Move pool + selection copied verbatim from predictThreat: knownMoves else
+  // Pikalytics, Encore forces / Disable filters / first-turn gate; worst-case-
+  // for-me choice (per-candidate argmax, then strict > across candidates).
+  let moves = args.opponent.knownMoves.length
+    ? args.opponent.knownMoves
+    : pikalyticsMoves(args.opponent.species);
+  if (args.opponent.encoreMove) moves = [args.opponent.encoreMove];
+  else if (args.opponent.disabledMove) moves = moves.filter(m => m !== args.opponent.disabledMove);
+  if (args.attackerFirstTurnOut === false) moves = moves.filter(m => !isFirstTurnMove(m));
+  if (!moves.length) return { all: [], chosenMove: null };
+  const cands = defenderCandidates(args.opponent, args.defender.level);
+  if (!cands.length) return { all: [], chosenMove: null };
+
+  type Agg = { min: number; max: number; koChance: string; rolls: number[] };
+  const agg = new Map<string, Agg>();
+  let chosen: { move: string; max: number } | null = null;
+  for (const c of cands) {
+    let candBest: { move: string; max: number } | null = null;
+    for (const move of moves) {
+      try {
+        const r = damageRange({
+          attacker: c, defender: args.defender, move, field: args.field, attackerSide: 'theirs',
+          attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+          defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
+        });
+        let a = agg.get(move);
+        if (!a) { a = { min: Infinity, max: -Infinity, koChance: '', rolls: [] }; agg.set(move, a); }
+        if (r.minPercent < a.min) a.min = r.minPercent;
+        if (r.maxPercent > a.max) { a.max = r.maxPercent; a.koChance = r.koChance; }
+        a.rolls.push(...r.percentRolls);
+        if (!candBest || r.maxPercent > candBest.max) candBest = { move, max: r.maxPercent };
+      } catch { /* skip */ }
+    }
+    if (candBest && (!chosen || candBest.max > chosen.max)) chosen = candBest;
+  }
+
+  const all: MatchupCell[] = [];
+  for (const move of moves) {
+    const a = agg.get(move);
+    if (!a || !Number.isFinite(a.min) || all.some(c => c.move === move)) continue;
+    const finalKo = args.defenderCurrentHpPercent != null && args.defenderCurrentHpPercent < 100
+      ? koVsRemaining(a.rolls, args.defenderCurrentHpPercent)
+      : a.koChance;
+    const likely = likelyRange(args.opponent, cands, move, c => damageRange({
+      attacker: c, defender: args.defender, move, field: args.field, attackerSide: 'theirs',
+      attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+      defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
+    }));
+    all.push({
+      move,
+      minPercent: a.min,
+      maxPercent: a.max,
+      koChance: finalKo,
+      candidatesConsidered: cands.length,
+      likelyMinPercent: likely?.min,
+      likelyMaxPercent: likely?.max,
+      confidence: confidenceFor(!!args.opponent.candidates?.length, a.min, a.max),
+      conditional: isAttackConditionalMove(move) ? 'only if you attack' : undefined,
+      percentRolls: a.rolls,
+    });
+  }
+  return { all, chosenMove: chosen?.move ?? null };
+}
+
 // Per-pair speed comparison. Tailwind and Trick Room are applied here so the
 // UI doesn't have to. If both bounds are unknown, returns 'unknown'.
 //
