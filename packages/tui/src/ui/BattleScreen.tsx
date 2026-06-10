@@ -6,7 +6,7 @@ import type { Match, FieldState, DamageObservation, MoveAction, OpponentEntry, P
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
 import { scoreSpread, scoreOffensiveSpread, mostLikely, recoilDrainHpEvs, reconcileCandidates, abilitiesRuledOutByHit } from '@pokechamps/core/domain/inference.js';
 import { abilitiesRuledOutByStatus, ruleOutAbilities, confirmAbility, attackerIgnoresAbilities } from '@pokechamps/core/domain/abilityInference.js';
-import { applyItemClauseExclusion } from '@pokechamps/core/domain/itemClause.js';
+import { applyItemClauseExclusion, claimedItemIdsExcept } from '@pokechamps/core/domain/itemClause.js';
 import { computeActionBoostContexts } from '@pokechamps/core/domain/turnBoosts.js';
 import { maxHpFor } from '@pokechamps/core/domain/damage.js';
 import { endOfTurn } from '@pokechamps/core/domain/endOfTurn.js';
@@ -1655,6 +1655,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
           hpEvCandidates: opp.hpEvLock,
           // Abilities proven absent by earlier observations (landed status/hits).
           ruledOutAbilities: opp.abilitiesRuledOut,
+          // Item clause: teammates' claimed items can't appear on this mon.
+          excludeItems: claimedItemIdsExcept(next.opponentTeam, oppIdx),
           // Item permanence: gone if consumed BEFORE this turn (pre-turn state, so
           // a berry popping on THIS hit still applies). Mirror of engine.ts.
           itemKnownGone: !!match.opponentTeam[oppIdx]?.itemConsumed,

@@ -142,6 +142,10 @@ export interface InferenceInput {
   // turns). Merged with this observation's own per-hit type-immunity rule-out;
   // filters both the coarse ability axis and prior/starting candidates.
   ruledOutAbilities?: string[];
+  // Item ids the ITEM CLAUSE forbids on this mon (claimed by a teammate —
+  // claimedItemIdsExcept in itemClause.ts). Filters the item AXIS so the grid
+  // never generates claimed-item spreads, and prunes prior/starting candidates.
+  excludeItems?: string[];
   // Item permanence: the opponent's held item is known to have been consumed on
   // a PRIOR turn (gone before this observation). Per the permanence model, a mon
   // whose item was consumed can't still be holding a persistent item, so collapse
@@ -276,6 +280,11 @@ export function scoreSpread(input: InferenceInput): ScoredCandidate[] {
   let items = Array.from(new Set([...baseItems, ...gimmickItems, ...berryItems]));
   // Keep the empty-string "no item" entry; everything else must be format-legal.
   items = items.filter(i => !i || isLegalItem(i));
+  // Item clause: a teammate's claimed item can't appear on this mon.
+  const excludeItems = new Set((input.excludeItems ?? []).map(toId));
+  if (excludeItems.size) {
+    items = items.filter(i => !i || !excludeItems.has(toId(i)));
+  }
   // Item signals: exclude Safety Goggles if we've observed sand chip damage.
   if (input.sandChipObserved) {
     items = items.filter(i => i !== 'Safety Goggles');
@@ -302,10 +311,11 @@ export function scoreSpread(input: InferenceInput): ScoredCandidate[] {
   // Apply the ability/item narrowing to whichever candidate set we picked —
   // priors and chained startingCandidates carry their own item/ability that
   // bypass the `items`/`possibleAbilities` arrays the coarse grid builds from.
-  if (ruledOut.size || input.itemKnownGone) {
+  if (ruledOut.size || input.itemKnownGone || excludeItems.size) {
     const seen = new Set<string>();
     const narrowed = candidates
       .filter(c => !c.ability || !ruledOut.has(toId(c.ability)))
+      .filter(c => !c.item || !excludeItems.has(toId(c.item)))
       .map(c => (input.itemKnownGone ? { ...c, item: undefined } : c))
       .filter(c => {
         const key = `${c.evs.hp}|${c.evs.atk}|${c.evs.def}|${c.evs.spa}|${c.evs.spd}|${c.evs.spe}|${c.nature}|${c.item ?? ''}|${c.ability ?? ''}`;

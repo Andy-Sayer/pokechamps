@@ -22,7 +22,7 @@ import type {
 import { NEUTRAL_FIELD } from '../domain/types.js';
 import { scoreSpread, scoreOffensiveSpread, recoilDrainHpEvs, reconcileCandidates, abilitiesRuledOutByHit } from '../domain/inference.js';
 import { abilitiesRuledOutByStatus, ruleOutAbilities, confirmAbility, attackerIgnoresAbilities } from '../domain/abilityInference.js';
-import { applyItemClauseExclusion } from '../domain/itemClause.js';
+import { applyItemClauseExclusion, claimedItemIdsExcept } from '../domain/itemClause.js';
 import { computeActionBoostContexts } from '../domain/turnBoosts.js';
 import { maxHpFor } from '../domain/damage.js';
 import { endOfTurn } from '../domain/endOfTurn.js';
@@ -1378,6 +1378,8 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
         hpEvCandidates: opp.hpEvLock,
         // Abilities proven absent by earlier observations (landed status/hits).
         ruledOutAbilities: opp.abilitiesRuledOut,
+        // Item clause: teammates' claimed items can't appear on this mon.
+        excludeItems: claimedItemIdsExcept(next.opponentTeam, oppIdx),
         // Item permanence: if the item was already consumed BEFORE this turn, it's
         // gone — read pre-turn state so a berry popping on THIS hit still applies.
         itemKnownGone: !!match.opponentTeam[oppIdx]?.itemConsumed,

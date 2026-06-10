@@ -1,7 +1,9 @@
 // Item Clause cross-mon exclusion: a held/used item on one opp mon can't appear
-// on another, so it's pruned from their candidate pools.
+// on another, so it's pruned from their candidate pools — and threaded into the
+// inference AXIS so the solver never generates claimed-item spreads at all.
 import { describe, test, expect } from 'vitest';
-import { applyItemClauseExclusion } from '../src/domain/itemClause.js';
+import { applyItemClauseExclusion, claimedItemIdsExcept } from '../src/domain/itemClause.js';
+import { scoreSpread, type SpreadCandidate } from '../src/domain/inference.js';
 import { applyStateUpdate, type ActiveIdx } from '../src/match/engine.js';
 import type { Match, OpponentEntry, PokemonSet } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } from '../src/domain/types.js';
@@ -80,6 +82,43 @@ describe('applyItemClauseExclusion (unit)', () => {
     ];
     applyItemClauseExclusion(team);
     expect(team[0]!.candidates).toHaveLength(2); // self-claim is ignored
+  });
+});
+
+describe('item clause threaded into the inference axis', () => {
+  test('claimedItemIdsExcept collects teammates’ claims, never the mon’s own', () => {
+    const team: OpponentEntry[] = [
+      { species: 'Garchomp', knownMoves: [], item: 'Choice Band' },
+      { species: 'Incineroar', knownMoves: [], itemConsumed: 'Sitrus Berry' },
+      { species: 'Tyranitar', knownMoves: [], item: '' }, // no item claims nothing
+      { species: 'Amoonguss', knownMoves: [] },
+    ];
+    expect(claimedItemIdsExcept(team, 3).sort()).toEqual(['choiceband', 'sitrusberry']);
+    expect(claimedItemIdsExcept(team, 0)).toEqual(['sitrusberry']); // own claim excluded
+  });
+
+  test('scoreSpread excludeItems prunes starting candidates carrying a claimed item', () => {
+    const attacker: PokemonSet = {
+      species: 'Garchomp', level: 50, ability: 'Rough Skin', nature: 'Adamant',
+      evs: { ...ZERO_EVS, atk: 252 }, ivs: MAX_IVS, moves: ['Dragon Claw'],
+    };
+    const starting: SpreadCandidate[] = [
+      { evs: { ...ZERO_EVS, hp: 252 }, nature: 'Careful', item: 'Sitrus Berry' },
+      { evs: { ...ZERO_EVS, hp: 252 }, nature: 'Careful', item: 'Leftovers' },
+    ];
+    const scored = scoreSpread({
+      defenderSpecies: 'Tyranitar', defenderLevel: 50, knownDefenderMoves: [],
+      attackerSet: attacker,
+      observation: {
+        attackerSide: 'mine', attackerSpecies: 'Garchomp', defenderSide: 'theirs',
+        defenderSpecies: 'Tyranitar', move: 'Dragon Claw', field: NEUTRAL_FIELD, damageHpPercent: 25,
+      },
+      startingCandidates: starting,
+      excludeItems: ['sitrusberry'],
+      quickOnly: true,
+    });
+    expect(scored.length).toBeGreaterThan(0);
+    expect(scored.some(s => s.candidate.item === 'Sitrus Berry')).toBe(false);
   });
 });
 

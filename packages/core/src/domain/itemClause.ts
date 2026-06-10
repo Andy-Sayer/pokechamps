@@ -13,15 +13,32 @@ import { toId } from './data.js';
 //    a mislogged duplicate item), the set is left intact rather than vanishing.
 //  - Operates in place on the passed array's entries; returns human-readable
 //    notes for the inference log.
+// The item id a single mon has claimed (a held item wins over a consumed one).
+// null = nothing claimed (unknown or explicitly no item).
+function claimedItemId(o: OpponentEntry): string | null {
+  const held = o.item && o.item.trim() ? o.item : undefined;
+  const it = held ?? o.itemConsumed;
+  return it && it.trim() ? toId(it) : null;
+}
+
+// Item ids claimed by every opponent mon EXCEPT `exceptIdx` — the set the
+// item clause forbids on that mon. Feed this into scoreSpread's `excludeItems`
+// so the solver's item AXIS never generates claimed-item spreads (the post-hoc
+// applyItemClauseExclusion below stays as the safety net for claims that
+// appear without a fresh observation).
+export function claimedItemIdsExcept(opponentTeam: OpponentEntry[], exceptIdx: number): string[] {
+  const out = new Set<string>();
+  opponentTeam.forEach((o, j) => {
+    if (j === exceptIdx) return;
+    const cid = claimedItemId(o);
+    if (cid) out.add(cid);
+  });
+  return [...out];
+}
+
 export function applyItemClauseExclusion(opponentTeam: OpponentEntry[]): string[] {
   const notes: string[] = [];
-  // The specific item id each mon has claimed (a held item wins over a consumed
-  // one). null = nothing claimed (unknown or explicitly no item).
-  const claimedBy = opponentTeam.map(o => {
-    const held = o.item && o.item.trim() ? o.item : undefined;
-    const it = held ?? o.itemConsumed;
-    return it && it.trim() ? toId(it) : null;
-  });
+  const claimedBy = opponentTeam.map(claimedItemId);
   opponentTeam.forEach((o, idx) => {
     if (!o.candidates?.length) return;
     const exclude = new Set<string>();

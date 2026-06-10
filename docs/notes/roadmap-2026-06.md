@@ -175,14 +175,15 @@ HP-stat read, positional boosts, item-clause exclusion). What's still thin:
   Loaded Dice gets its 4-5 @ 50/50 distribution. Triple Axel/Triple Kick
   (escalating BP, fixed 3) and Population Bomb (fixed 10) keep the calc's
   fixed-count path. `multi-hit-distribution.test.ts` (5).
-- **Thread item-clause into the inference *axis*** (parked in
-  `project_item_clause_exclusion`). Today it's a post-hoc filter on candidate
-  output — correct for the displayed result, but the coarse grid still *generates*
-  claimed-item spreads. Passing an `excludeItems` set into `scoreSpread`'s item
-  axis is tidier and slightly higher quality.
+- **Thread item-clause into the inference *axis*. ✅ shipped 2026-06-10.**
+  `scoreSpread({excludeItems})` filters both the coarse item axis (claimed
+  spreads are never generated) and prior/starting candidates;
+  `claimedItemIdsExcept(opponentTeam, idx)` (itemClause.ts) supplies the set at
+  both finalizeTurn call sites (engine.ts + BattleScreen.tsx). The post-hoc
+  `applyItemClauseExclusion` stays as the safety net for claims that appear
+  without a fresh observation (e.g. an `o1 item` reveal mid-turn).
 
-*Effort:* medium, splits into 3 independent commits. Ability inference is the
-highest-value of the three.
+**Theme 3 complete (3/3 commits, 2026-06-10).**
 
 ### Theme 4 — `@pkmn/sim` exact oracle + replay ingest (J.0–J.2)
 
