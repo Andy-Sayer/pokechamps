@@ -54,6 +54,9 @@ export interface DamageCheckInput {
   beforePct: number;
   afterPct: number;
   fainted: boolean;
+  /** Damage was capped by a survival item (Focus Sash popped on this hit) —
+   *  like a faint, the observed drop is only a LOWER bound on true damage. */
+  capped?: boolean;
 }
 
 export interface CheckMon {
@@ -67,10 +70,13 @@ export interface CheckMon {
   status?: string;
   /** Current HP % (Eruption/Water Spout-class BP). */
   curHpPct?: number;
-  /** Terastallized — type changed, outside the Champions model → skip. */
-  tera?: boolean;
+  /** Terastallized as this type — the calc models tera natively (STAB,
+   *  defensive typing, Tera Blast) once teraType is passed. */
+  teraType?: string;
   /** Glaive Rush volatile: this mon takes DOUBLE damage until it next acts. */
   doubleDamageTaken?: boolean;
+  /** Protosynthesis/Quark Drive active on this stat (×1.3, no stage event). */
+  boostedStat?: 'atk' | 'def' | 'spa' | 'spd' | 'spe';
 }
 
 // Moves whose BP/damage depends on state the envelope can't bound: speed
@@ -83,6 +89,9 @@ const UNBOUNDED_MOVES = new Set([
   'counter', 'mirrorcoat', 'metalburst', 'comeuppance', // damage-received
   'reversal', 'flail',                // own-HP BP (could bound later)
   'powertrip', 'punishment',          // boost-count BP (boosts known — could bound later)
+  // Fixed/HP-arithmetic damage via callbacks the calc zeroes out (could be
+  // checked EXACTLY from tracked HP later — they don't need an envelope).
+  'endeavor', 'superfang', 'naturesmadness', 'ruination', 'finalgambit', 'painsplit',
 ]);
 
 // Rounding tolerance: both before/after percents round to integers (±0.5 each)
@@ -130,12 +139,10 @@ export function checkDamageEvent(input: DamageCheckInput): DamageCheck {
   const observedPct = Math.max(0, input.beforePct - input.afterPct);
   const base: Omit<DamageCheck, 'verdict' | 'minPct' | 'maxPct'> = {
     turn: input.turn, attacker: attacker.species, defender: defender.species,
-    move, observedPct, faintTruncated: input.fainted,
+    move, observedPct, faintTruncated: input.fainted || !!input.capped,
   };
   const skip = (note: string): DamageCheck => ({ ...base, minPct: 0, maxPct: 0, verdict: 'skipped', note });
 
-  if (attacker.tera) return skip('attacker terastallized — outside the Champions model');
-  if (defender.tera) return skip('defender terastallized — outside the Champions model');
   if (UNBOUNDED_MOVES.has(toId(move))) return skip('state-dependent damage the envelope can\'t bound');
   const offStat = offensiveStatOf(move);
   const md = getMove(move) as { category?: string; damage?: unknown } | undefined;
@@ -153,12 +160,6 @@ export function checkDamageEvent(input: DamageCheckInput): DamageCheck {
   const defItemFrail = defItemKnown ? (defender.item || undefined) : undefined;
 
   const defStat: 'def' | 'spd' = isSpecial ? 'spd' : 'def';
-  const stat = offStat ?? 'atk';
-  const atkMax = buildSet(attacker, { nature: NATURES[stat]![0], evs: { [stat]: 252 }, item: atkItemMax });
-  const atkMin = buildSet(attacker, { nature: NATURES[stat]![1], evs: {}, zeroIvStat: stat, item: atkItemMin });
-  const defBulky = buildSet(defender, { nature: NATURES[defStat][0], evs: { hp: 252, [defStat]: 252 }, item: defItemBulky });
-  const defFrail = buildSet(defender, { nature: NATURES[defStat][1], evs: {}, item: defItemFrail });
-
   const common = {
     move, field: input.field,
     helpingHand: input.helpingHand,
@@ -169,16 +170,33 @@ export function checkDamageEvent(input: DamageCheckInput): DamageCheck {
     boosts: m.boosts as Record<string, number> | undefined,
     status: m.status || undefined,
     curHpPercent: m.curHpPct,
+    teraType: m.teraType,
+    boostedStat: m.boostedStat,
   });
 
-  let maxPct: number, minPct: number;
-  try {
+  // Envelope for one offensive-stat hypothesis. Tera Blast on a tera'd
+  // attacker uses the HIGHER of Atk/SpA, so the caller merges both.
+  const envFor = (stat: 'atk' | 'spa' | 'def'): { minPct: number; maxPct: number } => {
+    const atkMax = buildSet(attacker, { nature: NATURES[stat][0], evs: { [stat]: 252 }, item: atkItemMax });
+    const atkMin = buildSet(attacker, { nature: NATURES[stat][1], evs: {}, zeroIvStat: stat, item: atkItemMin });
+    const defBulky = buildSet(defender, { nature: NATURES[defStat][0], evs: { hp: 252, [defStat]: 252 }, item: defItemBulky });
+    const defFrail = buildSet(defender, { nature: NATURES[defStat][1], evs: {}, item: defItemFrail });
     // Sides: 'mine'/'theirs' only routes screens; the caller builds the field
     // with attackerSide-relative screens, so 'mine' is always the attacker.
     const hi = damageRange({ ...common, attacker: atkMax, defender: defFrail, attackerSide: 'mine', attackerOpts: opts(attacker), defenderOpts: opts(defender) });
     const lo = damageRange({ ...common, attacker: atkMin, defender: defBulky, attackerSide: 'mine', attackerOpts: opts(attacker), defenderOpts: opts(defender) });
-    maxPct = hi.maxPercent;
-    minPct = lo.minPercent;
+    return { minPct: lo.minPercent, maxPct: hi.maxPercent };
+  };
+
+  let maxPct: number, minPct: number;
+  try {
+    if (toId(move) === 'terablast' && attacker.teraType) {
+      const a = envFor('atk'), s = envFor('spa');
+      minPct = Math.min(a.minPct, s.minPct);
+      maxPct = Math.max(a.maxPct, s.maxPct);
+    } else {
+      ({ minPct, maxPct } = envFor(offStat ?? 'atk'));
+    }
   } catch (e) {
     return skip(`calc failed: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -186,11 +204,11 @@ export function checkDamageEvent(input: DamageCheckInput): DamageCheck {
   // next acts — a flat multiplier on the whole envelope.
   if (defender.doubleDamageTaken) { minPct *= 2; maxPct *= 2; }
 
-  // Faint-truncated: the observed drop is a LOWER bound on the true damage —
-  // only "the kill must be reachable" is assessable.
-  if (input.fainted) {
+  // Faint- or sash-truncated: the observed drop is a LOWER bound on the true
+  // damage — only "the hit must reach this hard" is assessable.
+  if (input.fainted || input.capped) {
     const verdict = maxPct + TOL >= observedPct ? 'in' : 'out';
-    return { ...base, minPct, maxPct, verdict, note: verdict === 'out' ? `KO needs ≥${observedPct.toFixed(0)}% but max reachable is ${maxPct.toFixed(0)}%` : undefined };
+    return { ...base, minPct, maxPct, verdict, note: verdict === 'out' ? `hit needs ≥${observedPct.toFixed(0)}% but max reachable is ${maxPct.toFixed(0)}%` : undefined };
   }
   const verdict = observedPct >= minPct - TOL && observedPct <= maxPct + TOL ? 'in' : 'out';
   return {

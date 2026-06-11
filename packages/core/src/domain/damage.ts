@@ -39,6 +39,13 @@ function toCalcPokemon(set: PokemonSet, opts: {
   status?: string;
   boosts?: Partial<Record<string, number>>;
   gimmickActive?: boolean;
+  /** Terastallized AS this type. Champions is Mega-format, so live play never
+   *  sets this — the replay validation harness does (real gen9 replays tera,
+   *  and the calc models it natively once teraType is present). */
+  teraType?: string;
+  /** Protosynthesis / Quark Drive active on this stat (×1.3) — again a
+   *  replay-harness input; the calc applies it via its boostedStat option. */
+  boostedStat?: string;
 } = {}): CalcPokemon {
   const calcOpts: Record<string, unknown> = {
     level: set.level,
@@ -50,6 +57,8 @@ function toCalcPokemon(set: PokemonSet, opts: {
     moves: set.moves as any,
     boosts: (opts.boosts as any) ?? undefined,
     status: (opts.status as any) ?? '',
+    ...(opts.teraType ? { teraType: opts.teraType } : {}),
+    ...(opts.boostedStat ? { boostedStat: opts.boostedStat } : {}),
   };
   // Let the active gimmick override the species name (e.g. Mega swaps the
   // base forme for the mega forme when a stone is held — @smogon/calc does
@@ -211,6 +220,10 @@ export function damageRange(args: {
   const max = rolls.length ? Math.max(...rolls) : 0;
   const maxHP = def.maxHP();
   const percentRolls = rolls.map(r => (r / maxHP) * 100);
+  // NOTE: kochance() THROWS on an all-zero damage result (status moves,
+  // fixed-damage callbacks the calc can't price). Callers rely on that throw
+  // to exclude non-damaging options (solveEndgame's sentinel path); the
+  // replay checker catches it as an honest 'calc failed' skip.
   return {
     min,
     max,

@@ -71,10 +71,19 @@ describe('checkDamageEvent (unit)', () => {
     expect(doubled.minPct).toBeCloseTo(base.minPct * 2, 5);
   });
 
-  test('state-dependent moves and tera are honestly skipped', () => {
+  test('state-dependent moves are honestly skipped', () => {
     expect(checkDamageEvent(input({ move: 'Gyro Ball' })).verdict).toBe('skipped');
     expect(checkDamageEvent(input({ move: 'Rage Fist' })).verdict).toBe('skipped');
-    expect(checkDamageEvent(input({ attacker: { ...input().attacker, tera: true } })).verdict).toBe('skipped');
+  });
+
+  test('tera is MODELLED, not skipped: tera STAB raises the envelope', () => {
+    const at = { species: 'Pikachu', level: 50, item: '', ability: 'Static', moves: ['Tackle'] };
+    const plain = checkDamageEvent(input({ attacker: at }));
+    const teraNormal = checkDamageEvent(input({ attacker: { ...at, teraType: 'Normal' } }));
+    expect(teraNormal.verdict).not.toBe('skipped');
+    // Tera-Normal Tackle gains 2.0× STAB (adaptability-style tera-on-own-type
+    // is 2.0, plain non-STAB Tackle has none) → strictly bigger envelope.
+    expect(teraNormal.maxPct).toBeGreaterThan(plain.maxPct);
   });
 
   test('transcript-truth boosts scale the envelope (+4 Atk ≈ ×3)', () => {
@@ -95,7 +104,8 @@ describe('J.3 on the real fixtures', () => {
     const vuln = r.damage.find(d => d.move === 'Eruption' && d.defender === 'Baxcalibur' && d.turn === 2)!;
     expect(vuln.verdict).toBe('in');
     expect(vuln.maxPct).toBeGreaterThan(100);
-    expect(r.damage.some(d => d.verdict === 'skipped' && /terastallized/.test(d.note ?? ''))).toBe(true);
+    // Tera'd mons are modelled (teraType through the calc), not skipped.
+    expect(r.damage.some(d => /terastallized/.test(d.note ?? ''))).toBe(false);
   });
 
   test('team-preview forme wildcards fold into one entry (Urshifu-*)', () => {

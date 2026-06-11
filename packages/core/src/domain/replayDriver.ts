@@ -186,14 +186,25 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
   const runningHp = new Map<string, number>();             // updated on every observed HP
   const boostsTruth = new Map<string, Record<string, number>>();
   const statusTruth = new Map<string, string>();
-  const teraSet = new Set<string>();
+  const teraTypeOf = new Map<string, string>();            // terastallized mons → tera type
   const itemGone = new Set<string>();
   const glaiveVuln = new Set<string>();                    // Glaive Rush ×2-taken volatile
+  // Transcript-truth field. The engine ticks its own weather/terrain durations
+  // during finalizeTurn and can expire (or extend) effects the replay says are
+  // still up — the |-weather|/|-fieldstart|/|-fieldend| events are authoritative,
+  // so this is re-asserted onto match.field after every engine turn.
+  const truthField: Pick<FieldState, 'weather' | 'terrain' | 'trickRoom'> = {
+    weather: field.weather ?? null, terrain: field.terrain ?? null, trickRoom: field.trickRoom,
+  };
+  // Protosynthesis/Quark Drive ×1.3 stat condition (no stage event — only a
+  // |-start|…|protosynthesisspa marker). Cleared by its |-end|, switch, faint.
+  const boostedStatOf = new Map<string, 'atk' | 'def' | 'spa' | 'spd' | 'spe'>();
   const formeNow = new Map<string, string>();              // detailschange (mega) formes
   const screens: Record<Side, { reflect: boolean; lightScreen: boolean }> = {
     p1: { reflect: false, lightScreen: false }, p2: { reflect: false, lightScreen: false },
   };
-  // Pre-battle statuses/HP from the lead block.
+  // Pre-battle statuses/HP/conditions from the lead block (Booster Energy
+  // procs Protosynthesis on send-out, before turn 1).
   for (const ev of t.leadEvents) {
     if (ev.kind === 'switch') {
       const idx = teamIndexAt(ev.pos);
@@ -207,6 +218,12 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
         const b = boostsTruth.get(key(ev.pos.side, idx)) ?? {};
         b[ev.stat] = Math.max(-6, Math.min(6, (b[ev.stat] ?? 0) + ev.delta));
         boostsTruth.set(key(ev.pos.side, idx), b);
+      }
+    } else if (ev.kind === 'volstart') {
+      const m = ev.effect.match(/^(?:protosynthesis|quarkdrive)(atk|def|spa|spd|spe)$/i);
+      if (m) {
+        const idx = teamIndexAt(ev.pos);
+        if (idx >= 0) boostedStatOf.set(key(ev.pos.side, idx), m[1]!.toLowerCase() as 'atk' | 'def' | 'spa' | 'spd' | 'spe');
       }
     }
   }
@@ -228,8 +245,9 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
         boosts: boostsTruth.get(k) as CheckMon['boosts'],
         status: statusTruth.get(k),
         curHpPct: runningHp.get(k) ?? 100,
-        tera: teraSet.has(k),
+        teraType: teraTypeOf.get(k),
         doubleDamageTaken: glaiveVuln.has(k),
+        boostedStat: boostedStatOf.get(k),
       },
     };
   };
@@ -246,12 +264,13 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
   // known bumps we can verify (Prankster on status moves, Gale Wings at full
   // HP) when the attacker's ability is revealed. Flag-only downstream.
   const prioOf = (species: string, side: Side, move: string): number => {
-    const md = getMove(move) as { priority?: number; category?: string; type?: string } | undefined;
+    const md = getMove(move) as { priority?: number; category?: string; type?: string; flags?: Record<string, number> } | undefined;
     let p = md?.priority ?? 0;
     const mon = (side === mySide ? myMons : oppMons)[idxOf(side, species)];
     const abil = toId(mon?.ability ?? '');
     if (abil === 'prankster' && md?.category === 'Status') p += 1;
     if (abil === 'galewings' && md?.type === 'Flying') p += 1; // HP gate unknowable mid-walk — tolerant
+    if (abil === 'triage' && md?.flags?.heal) p += 3;          // Comfey Floral Healing etc.
     return p;
   };
 
@@ -272,7 +291,7 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
 
     let order = 0;
     let afterUpkeep = false;
-    const moveOrderSeen: { species: string; side: Side; move: string; prio: number }[] = [];
+    const moveOrderSeen: { species: string; side: Side; move: string; prio: number; abilityKnown: boolean }[] = [];
     // Helping Hand recipients this turn (cleared at turn end).
     const hhActive = new Set<string>();
 
@@ -288,6 +307,7 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
           if (prevOccupant != null) {
             boostsTruth.delete(key(ev.pos.side, prevOccupant));
             glaiveVuln.delete(key(ev.pos.side, prevOccupant));
+            boostedStatOf.delete(key(ev.pos.side, prevOccupant));
           }
           const idx = recordSwitchIn(ev.pos, ev.species, turn.index, ev.forced);
           if (idx == null || idx < 0) break;
@@ -324,10 +344,13 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
             }
           }
           // J.2 order check: a later mover in a HIGHER priority bracket than an
-          // earlier one is impossible (modulo hidden Quick Claw/Custap — flag only).
+          // earlier one is impossible — but only assert it when the EARLIER
+          // mover's ability is KNOWN (a hidden Prankster/Triage/Gale Wings
+          // could legitimately have bumped its bracket; items like Quick Claw
+          // stay an accepted blind spot of a flag-only check).
           const prio = prioOf(species, ev.pos.side, ev.move);
           for (const prev of moveOrderSeen) {
-            if (prio > prev.prio) {
+            if (prio > prev.prio && prev.abilityKnown) {
               flags.push({
                 turn: turn.index, kind: 'order', who: species,
                 detail: `${ev.move} (prio ${prio}) moved after ${prev.species}'s ${prev.move} (prio ${prev.prio})`,
@@ -335,7 +358,8 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
               break;
             }
           }
-          moveOrderSeen.push({ species, side: ev.pos.side, move: ev.move, prio });
+          const atkMon = (ev.pos.side === mySide ? myMons : oppMons)[atkIdx];
+          moveOrderSeen.push({ species, side: ev.pos.side, move: ev.move, prio, abilityKnown: !!atkMon?.ability });
 
           // Collect this move's damage/crit/status consequences (events up to
           // the next move/switch/upkeep), then emit one action per damaged
@@ -377,15 +401,39 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
           };
           if (damages.length) {
             const atkInfo = checkMonAt(ev.pos);
-            for (const d of damages) {
-              // J.3: envelope check at hit time — BEFORE noteHp moves the truth.
-              const defInfo = checkMonAt(d.pos);
-              if (atkInfo && defInfo && !ev.missed) {
-                const defScr = screens[d.pos.side];
+            // J.3: ONE envelope check per TARGET, aggregated over the move's
+            // damage events — multi-hit moves (Surging Strikes ×3) log one
+            // |-damage| per hit, and a per-hit drop vs the full-move envelope
+            // is a guaranteed false `out`. Snapshot before-HP first; noteHp
+            // moves the running truth as the per-hit actions are emitted.
+            if (atkInfo && !ev.missed) {
+              const perTarget = new Map<string, { pos: Pos; first: number; lastPct: number; fainted: boolean }>();
+              for (const d of damages) {
+                const k2 = key(d.pos.side, teamIndexAt(d.pos));
+                const cur = perTarget.get(k2);
+                if (!cur) {
+                  perTarget.set(k2, { pos: d.pos, first: runningHp.get(k2) ?? 100, lastPct: d.hpPct, fainted: d.fainted });
+                } else {
+                  cur.lastPct = d.hpPct;
+                  cur.fainted = cur.fainted || d.fainted;
+                }
+              }
+              for (const agg of perTarget.values()) {
+                const defInfo = checkMonAt(agg.pos);
+                if (!defInfo) continue;
+                const defScr = screens[agg.pos.side];
+                // Focus Sash popping on this hit caps the damage — the
+                // observed drop is only a lower bound (like a faint).
+                const sashed = block.some(b => b.kind === 'itemreveal' && b.consumed
+                  && toId(b.item) === 'focussash' && samePos(b.pos, agg.pos));
                 damage.push(checkDamageEvent({
                   turn: turn.index, move: ev.move,
-                  critical: critTargets.has(key(d.pos.side, teamIndexAt(d.pos))),
-                  spreadHit: !!ev.spreadTargets && damages.length >= 2,
+                  critical: critTargets.has(defInfo.k),
+                  capped: sashed,
+                  // The [spread] tag is emitted iff MULTIPLE targets existed at
+                  // execution — the 0.75× applies even when immunities left
+                  // only one target damaged.
+                  spreadHit: !!ev.spreadTargets,
                   helpingHand: hhActive.has(atkInfo.k),
                   // attackerSide is always 'mine' in the check, so the
                   // defender's screens ride the `their*` flags.
@@ -397,10 +445,14 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
                     theirLightScreen: defScr.lightScreen,
                   },
                   attacker: atkInfo.mon, defender: defInfo.mon,
-                  beforePct: runningHp.get(defInfo.k) ?? 100,
-                  afterPct: d.hpPct, fainted: d.fainted,
+                  beforePct: agg.first, afterPct: agg.lastPct, fainted: agg.fainted,
                 }));
+                if (process.env.REPLAY_DEBUG && damage[damage.length - 1]!.verdict === 'out') {
+                  console.log('OUT-input:', JSON.stringify({ move: ev.move, atk: atkInfo.mon, def: defInfo.mon, field: match.field, spread: !!ev.spreadTargets, crit: critTargets.has(defInfo.k) }));
+                }
               }
+            }
+            for (const d of damages) {
               actions.push(mkAction(d.pos, d));
               noteHp(d.pos, d.hpPct, d.fainted);
             }
@@ -421,6 +473,21 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
           if (/glaive\s*rush/i.test(ev.effect)) {
             const idx = teamIndexAt(ev.pos);
             if (idx >= 0) glaiveVuln.add(key(ev.pos.side, idx));
+          }
+          break;
+        }
+        case 'volstart': {
+          const m = ev.effect.match(/^(?:protosynthesis|quarkdrive)(atk|def|spa|spd|spe)$/i);
+          if (m) {
+            const idx = teamIndexAt(ev.pos);
+            if (idx >= 0) boostedStatOf.set(key(ev.pos.side, idx), m[1]!.toLowerCase() as 'atk' | 'def' | 'spa' | 'spd' | 'spe');
+          }
+          break;
+        }
+        case 'moveend': {
+          if (/protosynthesis|quark\s*drive/i.test(ev.effect)) {
+            const idx = teamIndexAt(ev.pos);
+            if (idx >= 0) boostedStatOf.delete(key(ev.pos.side, idx));
           }
           break;
         }
@@ -461,26 +528,30 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
         }
 
         case 'detailschange': {
-          // Mega evolution: count for the one-gimmick check; the engine's mega
-          // path needs Champions stones, so a real-replay mega is note-only.
-          // The J.3 check DOES use the new forme (real stats/typing).
+          // Permanent forme change. The J.3 check always uses the new forme
+          // (real stats/typing); only MEGA/PRIMAL formes count as a gimmick —
+          // tera formes (Ogerpon-…-Tera) fire |detailschange| ALONGSIDE their
+          // own |-terastallize| event, and Zero-to-Hero-class changes are no
+          // gimmick at all.
           {
             const idx = teamIndexAt(ev.pos);
             if (idx >= 0) formeNow.set(key(ev.pos.side, idx), ev.toForme);
           }
-          gimmickUsed[ev.pos.side].push(`mega:${ev.toForme}`);
-          if (gimmickUsed[ev.pos.side].length > 1) {
-            flags.push({ turn: turn.index, kind: 'gimmick', who: speciesOf(t, ev.pos), detail: 'second gimmick activation in one battle' });
+          if (/-(mega|primal)\b/i.test(ev.toForme)) {
+            gimmickUsed[ev.pos.side].push(`mega:${ev.toForme}`);
+            if (gimmickUsed[ev.pos.side].length > 1) {
+              flags.push({ turn: turn.index, kind: 'gimmick', who: speciesOf(t, ev.pos), detail: 'second gimmick activation in one battle' });
+            }
           }
           break;
         }
         case 'terastallize': {
           {
             const idx = teamIndexAt(ev.pos);
-            if (idx >= 0) teraSet.add(key(ev.pos.side, idx));
+            if (idx >= 0) teraTypeOf.set(key(ev.pos.side, idx), ev.teraType);
           }
           gimmickUsed[ev.pos.side].push(`tera:${ev.teraType}`);
-          notes.push(`turn ${turn.index}: ${speciesOf(t, ev.pos)} terastallized (${ev.teraType}) — not modelled by the Champions engine`);
+          notes.push(`turn ${turn.index}: ${speciesOf(t, ev.pos)} terastallized (${ev.teraType}) — not modelled by the Champions engine (damage checks DO model it)`);
           if (gimmickUsed[ev.pos.side].length > 1) {
             flags.push({ turn: turn.index, kind: 'gimmick', who: speciesOf(t, ev.pos), detail: 'second gimmick activation in one battle' });
           }
@@ -499,21 +570,23 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
             fainted[ev.pos.side].add(idx);
             boostsTruth.delete(key(ev.pos.side, idx));
             glaiveVuln.delete(key(ev.pos.side, idx));
+            boostedStatOf.delete(key(ev.pos.side, idx));
           }
           break;
         }
         case 'weather':
-          match.field = { ...(match.field ?? NEUTRAL_FIELD), weather: SIM_WEATHER[toId(ev.weather)] ?? null };
+          truthField.weather = SIM_WEATHER[toId(ev.weather)] ?? null;
+          match.field = { ...(match.field ?? NEUTRAL_FIELD), weather: truthField.weather };
           break;
         case 'fieldstart': {
           const ter = SIM_TERRAIN[toId(ev.effect.replace(/^move:\s*/, ''))];
-          if (ter) match.field = { ...(match.field ?? NEUTRAL_FIELD), terrain: ter };
-          if (toId(ev.effect).includes('trickroom')) match.field = { ...(match.field ?? NEUTRAL_FIELD), trickRoom: true };
+          if (ter) { truthField.terrain = ter; match.field = { ...(match.field ?? NEUTRAL_FIELD), terrain: ter }; }
+          if (toId(ev.effect).includes('trickroom')) { truthField.trickRoom = true; match.field = { ...(match.field ?? NEUTRAL_FIELD), trickRoom: true }; }
           break;
         }
         case 'fieldend': {
-          if (toId(ev.effect).includes('trickroom')) match.field = { ...(match.field ?? NEUTRAL_FIELD), trickRoom: false };
-          else if (SIM_TERRAIN[toId(ev.effect.replace(/^move:\s*/, ''))]) match.field = { ...(match.field ?? NEUTRAL_FIELD), terrain: null };
+          if (toId(ev.effect).includes('trickroom')) { truthField.trickRoom = false; match.field = { ...(match.field ?? NEUTRAL_FIELD), trickRoom: false }; }
+          else if (SIM_TERRAIN[toId(ev.effect.replace(/^move:\s*/, ''))]) { truthField.terrain = null; match.field = { ...(match.field ?? NEUTRAL_FIELD), terrain: null }; }
           break;
         }
         default: break;
@@ -537,6 +610,9 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
       : actions.map(a => ({ ...a, targetRemainingHpPercent: undefined, targetRemainingHpRaw: undefined }));
     const res = finalizeTurn({ match, turn: { actions: engineActions, field: startField }, activeIdx: startIdx });
     match = res.match;
+    // Re-assert transcript-truth field: the engine ticks its own durations and
+    // can expire a terrain/weather the replay says is still active.
+    match.field = { ...(match.field ?? NEUTRAL_FIELD), ...truthField };
     if (!opts?.inferSpreads) {
       // Annotate the recorded turn with the observed HP/damage for display
       // (summary / quick-replay tallies read damageHpPercent).

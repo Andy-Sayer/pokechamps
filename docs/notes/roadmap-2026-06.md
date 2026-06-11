@@ -243,6 +243,15 @@ Two halves of the same `replay.ts` investment (see
     modelled in the checker). Corpus: 18+ hits across 4 games, 0 false outs —
     asserted in CI. Strict containment joins with J.6's authored Champions
     transcripts; J.4 (inference round-trip) is the next layer.
+  - **J.5 ✅ shipped 2026-06-11.** Corpus grown to 16 real games (batch
+    `--search` fetch), `replay-corpus-report.ts` pass-rate metric (199 hits,
+    97% in, 0 crashes/flags). Triage fixed: multi-hit per-target aggregation,
+    full TERA modelling in the checker (was 30% skipped), Protosynthesis/Quark
+    Drive `boostedStat`, Focus Sash capping, `[spread]`-tag semantics, Ogerpon
+    tera-forme double-count, Triage priority, hidden-ability order-flag
+    suppression, transcript-truth field reassertion. One categorised KNOWN_OUT
+    regression fixture (a verified ~4% discrepancy in a 5-modifier stack —
+    documented in the corpus test, asserted to stay out).
   - **J.4 ✅ shipped 2026-06-10.** Sim-generated ground truth: a known-sets
     battle plays in `@pkmn/sim`, its omniscient log (|split| private lines =
     exact HP, now handled by the parser) runs through the production pipeline

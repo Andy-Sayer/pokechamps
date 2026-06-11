@@ -1,44 +1,73 @@
 /**
- * fetch-replay.ts — download a Pokémon Showdown replay log and cache it under
- * `packages/core/tests/replays/` so the ingest tests run offline (J.5's corpus
- * grows one fixture at a time).
+ * fetch-replay.ts — download Pokémon Showdown replay logs and cache them under
+ * `packages/core/tests/replays/` so the ingest tests run offline (J.5's corpus).
  *
  * Run: `npx tsx packages/core/src/scripts/fetch-replay.ts <id-or-url>`
- *   e.g. npx tsx … fetch-replay.ts gen9vgc2026regfbo3-2573268519
- *        npx tsx … fetch-replay.ts https://replay.pokemonshowdown.com/xyz-123
+ *   or  `npx tsx … fetch-replay.ts --search <format> [count]`
+ *   e.g. fetch-replay.ts gen9vgc2026regfbo3-2573268519
+ *        fetch-replay.ts --search gen9vgc2026regfbo3 8
  *
- * Prints a parse + ingest summary so a bad fixture is obvious before commit.
+ * Prints a parse + ingest summary per game so a bad fixture is obvious before
+ * commit. Search mode skips ids already cached.
  */
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseReplayLog } from '../domain/showdownReplay.js';
 import { ingestTranscript } from '../domain/replayDriver.js';
 
+const outDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'tests', 'replays');
+
 async function main() {
   const arg = process.argv[2];
   if (!arg) {
-    console.error('usage: fetch-replay.ts <replay-id-or-url>');
+    console.error('usage: fetch-replay.ts <replay-id-or-url> | --search <format> [count]');
     process.exit(1);
   }
+  mkdirSync(outDir, { recursive: true });
+  if (arg === '--search') {
+    const format = process.argv[3];
+    const count = parseInt(process.argv[4] ?? '5', 10);
+    if (!format) { console.error('--search needs a format id'); process.exit(1); }
+    const res = await fetch(`https://replay.pokemonshowdown.com/search.json?format=${encodeURIComponent(format)}`);
+    if (!res.ok) { console.error(`[fetch-replay] search HTTP ${res.status}`); process.exit(1); }
+    const list = (await res.json()) as { id: string }[];
+    let fetched = 0;
+    for (const entry of list) {
+      if (fetched >= count) break;
+      if (existsSync(join(outDir, `${entry.id}.log`))) continue;
+      await fetchOne(entry.id);
+      fetched += 1;
+    }
+    return;
+  }
   const id = arg.replace(/^https?:\/\/replay\.pokemonshowdown\.com\//, '').replace(/\.(json|log)$/, '');
+  await fetchOne(id);
+}
+
+async function fetchOne(id: string) {
   const url = `https://replay.pokemonshowdown.com/${id}.log`;
   console.log(`[fetch-replay] GET ${url}`);
   const res = await fetch(url);
   if (!res.ok) {
     console.error(`[fetch-replay] HTTP ${res.status}`);
-    process.exit(1);
+    return;
   }
   const log = await res.text();
-
-  const outDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'tests', 'replays');
-  mkdirSync(outDir, { recursive: true });
   const outFile = join(outDir, `${id}.log`);
   writeFileSync(outFile, log, 'utf8');
   console.log(`[fetch-replay] wrote ${outFile} (${log.split('\n').length} lines)`);
 
   // Sanity: parse + ingest and summarise, so a fixture that breaks the
   // pipeline is caught at fetch time, not in CI.
+  try {
+    summarize(log);
+  } catch (e) {
+    console.error(`[fetch-replay] ${id} CRASHED the pipeline: ${e instanceof Error ? e.message : String(e)} — fixture kept for triage`);
+  }
+}
+
+function summarize(log: string) {
   const t = parseReplayLog(log);
   console.log(`[fetch-replay] format: ${t.format ?? '?'} · ${t.players.p1 ?? '?'} vs ${t.players.p2 ?? '?'}`);
   console.log(`[fetch-replay] teams: p1 ${t.teams.p1.length} mons, p2 ${t.teams.p2.length} mons · ${t.turns.length} turns · winner: ${t.winner ?? '-'}`);

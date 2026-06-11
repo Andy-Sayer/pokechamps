@@ -59,6 +59,8 @@ export type TranscriptEvent =
   | { kind: 'singleturn'; pos: Pos; effect: string }
   /** Until-next-move effects (`|-singlemove|`): Glaive Rush, Destiny Bond… */
   | { kind: 'singlemove'; pos: Pos; effect: string }
+  /** Volatile started (`|-start|`): protosynthesisspa, Substitute, confusion… */
+  | { kind: 'volstart'; pos: Pos; effect: string }
   /** `|-end|` of a volatile/delayed effect — Future Sight's hit lands right
    *  after its `-end`, so the driver uses it as a move-block boundary. */
   | { kind: 'moveend'; pos: Pos; effect: string }
@@ -387,6 +389,10 @@ export function parseReplayLog(log: string): BattleTranscript {
           }
           case 'end': {
             if (pos) current.push({ kind: 'moveend', pos, effect: arg(2) });
+            break;
+          }
+          case 'start': {
+            if (pos) current.push({ kind: 'volstart', pos, effect: arg(2) });
             break;
           }
           case 'miss': {

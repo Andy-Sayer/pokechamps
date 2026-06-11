@@ -257,12 +257,23 @@ Two consequences shape the design:
   the sweep overwrites the swept stat, so chained observations
   multiplied duplicates geometrically (one real replay turn measured
   71s; the 15-turn inferSpreads ingest is now 182ms, candidates ≤5).
-- **J.5 — Corpus + CI + triage.** Checked-in replay fixtures (cached
-  JSON — tests run offline/deterministic, never hit the network in
-  CI). Out-of-range damage events get categorised (crit / spread /
-  item / ability / field / weather / our-bug) as regression fixtures.
-  Run under `npm test`; gate in GitHub Actions (ties into I.1). Track a
-  pass-rate metric.
+- **J.5 — Corpus + CI + triage. ✅ shipped 2026-06-11.** 16 real VGC
+  games cached under `tests/replays/` (batch `--search` mode on
+  `fetch-replay.ts`), all running offline in `npm test` + GitHub
+  Actions; `replay-corpus-report.ts` is the pass-rate metric
+  (currently 199 hits: 97% in, 1 categorised known-out, 5 named
+  skips). The triage loop earned its keep immediately — fixed from
+  corpus evidence: multi-hit per-target damage aggregation (Surging
+  Strikes), TERA fully modelled in the checker (type from the event →
+  calc `teraType`; was 30% of hits skipped), Protosynthesis/Quark
+  Drive ×1.3 (`boostedStat`), Focus Sash damage capping, `[spread]`
+  tag semantics (modifier applies even when immunities leave one
+  target), Ogerpon tera-forme gimmick double-count, Triage priority,
+  order-flag suppression when the earlier mover's ability is hidden,
+  and transcript-truth field reassertion (the engine was expiring a
+  replay's still-active terrain). One unresolved hit is checked in as
+  a KNOWN_OUT regression fixture with its investigation note — the
+  test asserts it stays out, so a future fix surfaces itself.
 - **J.6 — Authored Champions transcripts.** Once J.0–J.5 hold,
   hand/script-author full-fidelity Champions battles (known sets, Mega,
   SP scale) to cover the mechanics real gen9 replays can't reach.
