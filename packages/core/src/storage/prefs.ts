@@ -13,6 +13,8 @@ export interface UiPrefs {
   showAllMoves?: boolean;
   /** Pika sprite preview mode ('run' | 'idle' | null). */
   pikaPreview?: string | null;
+  /** Battle grid: sixel sprites of the active opponents (/sprites). */
+  showSprites?: boolean;
 }
 
 const FILE = 'prefs.json';

@@ -29,6 +29,10 @@ import { switchInAbilityEffect, intimidateReaction, certainAbility, resolveDownl
 import { deriveSuggestionContext, getSuggestions, applySuggestion, type SuggestionKind } from '@pokechamps/core/domain/actionSuggest.js';
 import { predictOffense, predictOffenseAll, predictThreat, predictThreatAll, speedVerdict, type SpeedVerdict, type MatchupCell, type Confidence } from '@pokechamps/core/domain/predictions.js';
 import { PikaSpinner } from './PikaSpinner.js';
+import { SixelImage } from './SixelImage.js';
+import { sixelSupported } from './sixelSupport.js';
+import { spriteFor, spriteIfLoaded } from './spriteCache.js';
+import { composeStrip } from './spriteStrip.js';
 import { ExportPanel } from './ExportPanel.js';
 import { OverridePanel } from './OverridePanel.js';
 import { useTerminalSize } from './useTerminalSize.js';
@@ -659,6 +663,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   const [pikaPreview, setPikaPreview] = useState<'run' | 'idle' | null>(
     stickyPrefs.pikaPreview === 'run' || stickyPrefs.pikaPreview === 'idle' ? stickyPrefs.pikaPreview : null,
   );
+  // `/sprites` — opt-in sixel sprites of the active opponents above the
+  // matchup grid (Theme 6). Sticky; default off. `spriteTick` re-renders when
+  // an async fetch lands. Iterate visuals via scripts/preview-sprites.ts.
+  const [showSprites, setShowSprites] = useState(!!stickyPrefs.showSprites);
+  const [, setSpriteTick] = useState(0);
   // `/export` overlay — shows the current team as a Showdown export so the
   // user can copy it without leaving the match. Esc closes.
   const [exportPanelText, setExportPanelText] = useState<string | null>(null);
@@ -806,6 +815,23 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // Grows over the match — starts as the 2 leads, each opp switch may add
   // a new index up to a cap of 4 distinct mons.
   const oppBroughtIndices = match.opponentBrought ?? [];
+
+  // Fetch active-opponent sprites when the toggle is on; bump a tick when each
+  // lands so the strip re-renders. Best-effort all the way down.
+  const activeOppSpecies = activeIdx.theirs
+    .map(j => (j != null ? (match.opponentTeam[j]?.megaForme ?? match.opponentTeam[j]?.species) : null))
+    .filter((s): s is string => !!s);
+  useEffect(() => {
+    if (!showSprites || !sixelSupported()) return;
+    let alive = true;
+    for (const sp of activeOppSpecies) {
+      void spriteFor(sp).then(() => { if (alive) setSpriteTick(t => t + 1); });
+    }
+    return () => { alive = false; };
+  }, [showSprites, activeOppSpecies.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
+  const spriteStrip = showSprites && sixelSupported()
+    ? composeStrip(activeOppSpecies.map(spriteIfLoaded).filter((s): s is NonNullable<ReturnType<typeof spriteIfLoaded>> => !!s))
+    : null;
 
   // Parser context that resolves m1/o2 to team indices via current active slots.
   const ctx: ParseContext = {
@@ -2497,6 +2523,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       }
       case 'summary': setSummaryOpen(s => !s); return true;
       case 'override': setOverrideOpen(true); return true;
+      case 'sprites': {
+        if (!sixelSupported()) { setMessage('/sprites needs a sixel-capable terminal (try /pika to check).'); return true; }
+        setShowSprites(s => { savePrefs({ showSprites: !s }); return !s; });
+        return true;
+      }
       case 'crit': setShowCrits(c => { savePrefs({ showCrits: !c }); return !c; }); return true;
       case 'allmoves': setShowAllMoves(a => { savePrefs({ showAllMoves: !a }); return !a; }); return true;
       case 'info': setInfoPickerOpen(true); return true;
@@ -3111,6 +3142,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             </Text>
           )}
           <Text bold>Matchups</Text>
+          {spriteStrip && (
+            <SixelImage bitmap={spriteStrip.bitmap} palette={spriteStrip.palette} />
+          )}
           {matchups.every(m => m == null) && (
             <Text dimColor>No active slots — pick leads to begin.</Text>
           )}
@@ -3175,7 +3209,19 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
 
       {/* Opp info detail panel — populated after the picker selects an opp. */}
       {infoOpenForOpp != null && (
-        <OppInfoPanel stores={stores} index={infoOpenForOpp} entry={match.opponentTeam[infoOpenForOpp]!} />
+        <Box flexDirection="column">
+          {(() => {
+            // Sprite in the info panel (when /sprites is on and it's cached —
+            // the grid effect already fetched the actives; bench mons load on
+            // first inspect via a fire-and-forget fetch).
+            if (!showSprites || !sixelSupported()) return null;
+            const sp = match.opponentTeam[infoOpenForOpp]!.megaForme ?? match.opponentTeam[infoOpenForOpp]!.species;
+            const s = spriteIfLoaded(sp);
+            if (!s) { void spriteFor(sp).then(() => setSpriteTick(t => t + 1)); return null; }
+            return <SixelImage bitmap={s.bitmap} palette={s.palette} />;
+          })()}
+          <OppInfoPanel stores={stores} index={infoOpenForOpp} entry={match.opponentTeam[infoOpenForOpp]!} />
+        </Box>
       )}
 
       {/* /override — manual state editor. Owns its own input while open;

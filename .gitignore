@@ -6,6 +6,8 @@ data/exports/
 data/my-teams/
 # Sticky UI preferences sidecar (storage/prefs.ts) — per-machine.
 data/prefs.json
+# Fetched sprite PNG cache (tui spriteCache.ts) — refetched on demand.
+data/sprites/
 *.tsbuildinfo
 
 # Server runtime sqlite data (native dev) — Docker uses a named volume
