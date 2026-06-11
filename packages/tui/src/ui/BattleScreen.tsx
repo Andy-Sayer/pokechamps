@@ -34,6 +34,7 @@ import { OverridePanel } from './OverridePanel.js';
 import { useTerminalSize } from './useTerminalSize.js';
 import { MatchSummary } from './MatchSummary.js';
 import { formatShowdownTeamSP } from '@pokechamps/core/domain/showdown.js';
+import { loadPrefs, savePrefs } from '@pokechamps/core/storage/prefs.js';
 import { BATTLE_COMMANDS, parseCommand, type BattleCommandId } from './slashCommands.js';
 import { deriveActiveIdx } from '@pokechamps/core/match/engine.js';
 import { applyMegaAction } from '@pokechamps/core/domain/megaResolve.js';
@@ -635,10 +636,13 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   const [infoPickerOpen, setInfoPickerOpen] = useState(false);
   const [infoOpenForOpp, setInfoOpenForOpp] = useState<number | null>(null);
   // `c` toggles a parallel offense-with-crit column on the matchup grid.
-  const [showCrits, setShowCrits] = useState(false);
+  // Sticky toggles: seeded from the prefs sidecar and persisted on change, so
+  // /crit, /allmoves and /pika survive across sessions (Theme 6 polish).
+  const stickyPrefs = useMemo(() => loadPrefs(), []);
+  const [showCrits, setShowCrits] = useState(!!stickyPrefs.showCrits);
   // `a` expands the matchup grid to show ALL 4 of my moves per opp instead
   // of just the voted-best one. Off by default to keep the compact view.
-  const [showAllMoves, setShowAllMoves] = useState(false);
+  const [showAllMoves, setShowAllMoves] = useState(!!stickyPrefs.showAllMoves);
   // `/help` overlay — full syntax cheat-sheet. Closes on Esc or the next
   // /help invocation.
   const [helpOpen, setHelpOpen] = useState(false);
@@ -652,7 +656,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   const [moodyNagged, setMoodyNagged] = useState(false);
   // `/pika` preview — toggles a standalone Pikachu sprite so the user can
   // confirm sixel rendering without firing the AI review.
-  const [pikaPreview, setPikaPreview] = useState<'run' | 'idle' | null>(null);
+  const [pikaPreview, setPikaPreview] = useState<'run' | 'idle' | null>(
+    stickyPrefs.pikaPreview === 'run' || stickyPrefs.pikaPreview === 'idle' ? stickyPrefs.pikaPreview : null,
+  );
   // `/export` overlay — shows the current team as a Showdown export so the
   // user can copy it without leaving the match. Esc closes.
   const [exportPanelText, setExportPanelText] = useState<string | null>(null);
@@ -2491,8 +2497,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       }
       case 'summary': setSummaryOpen(s => !s); return true;
       case 'override': setOverrideOpen(true); return true;
-      case 'crit': setShowCrits(c => !c); return true;
-      case 'allmoves': setShowAllMoves(a => !a); return true;
+      case 'crit': setShowCrits(c => { savePrefs({ showCrits: !c }); return !c; }); return true;
+      case 'allmoves': setShowAllMoves(a => { savePrefs({ showAllMoves: !a }); return !a; }); return true;
       case 'info': setInfoPickerOpen(true); return true;
       case 'help':
         setHelpOpen(h => !h);
@@ -2500,7 +2506,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       case 'pika':
         // Cycle through: off → run → idle → off. Lets the user compare
         // both sprites and confirm sixel works.
-        setPikaPreview(p => p == null ? 'run' : p === 'run' ? 'idle' : null);
+        setPikaPreview(p => {
+          const next = p == null ? 'run' as const : p === 'run' ? 'idle' as const : null;
+          savePrefs({ pikaPreview: next });
+          return next;
+        });
         return true;
       case 'export':
         // Toggle the export overlay. Renders the current full team (not

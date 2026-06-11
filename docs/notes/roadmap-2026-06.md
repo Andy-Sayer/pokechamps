@@ -285,18 +285,22 @@ Two halves of the same `replay.ts` investment (see
 VM step (provision the Oracle VM, run compose, point DNS, end-to-end check).
 Everything code-side is ready; flag when you want to do it together.
 
-### Theme 6 — TUI polish *(filler between big items)*
+### Theme 6 — TUI polish *(3 of 4 shipped 2026-06-11)*
 
-From roadmap pillar D, what's still open after the recent draft-edit / Tab-cycle
-/ `/summary` / resize-aware / quick-replay work:
-
-- **Match-end summary completeness** — wins/losses vs each opp, MVPs, damage
-  taken per mon (extend `/summary`).
-- **Color-blind mode** — matchup glyphs convey info by symbol + position, not
-  just red/green/yellow.
-- **Sticky preferences** — per-user toggles for `/crit`, `/allmoves`, etc.
-- **Sprites in the matchup grid** — the sixel pipeline exists (spinner / `/pika`);
-  surface mon sprites in the grid + info panels.
+- ✅ **Match-end summary completeness** — per-mon damage dealt/taken (from the
+  quick-replay tallies), direct-KO credits (last-hit attribution from logged
+  actions; EOT/hazard deaths uncredited by design), ⭐MVP tag on my top dealer.
+- ✅ **Color-blind mode** — audited: the surfaces already encode by symbol +
+  position, with colour as redundant emphasis (speed verdicts ✓/✗/≈/⚡/?,
+  active mons ★m1/★m2 markers, KO/PAR½/status as text, verdicts spelled out
+  next to their colour). No colour-only signal found; nothing to change.
+- ✅ **Sticky preferences** — `storage/prefs.ts` sidecar (`data/prefs.json`,
+  gitignored, best-effort IO): `/crit`, `/allmoves`, `/pika` persist across
+  sessions.
+- ⏸ **Sprites in the matchup grid** — deliberately NOT built blind: per the
+  standing visual-iteration feedback (mockups + preview scripts before
+  building), this one needs a preview session with the user. The sixel
+  pipeline is ready when that happens.
 
 ### Theme 7 — Remaining search long-tail ✅ *(complete 2026-06-11)*
 

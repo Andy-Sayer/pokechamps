@@ -4,6 +4,8 @@ matches/
 data/exports/
 # Saved teams are personal/local — created at runtime, not shipped with the repo.
 data/my-teams/
+# Sticky UI preferences sidecar (storage/prefs.ts) — per-machine.
+data/prefs.json
 *.tsbuildinfo
 
 # Server runtime sqlite data (native dev) — Docker uses a named volume

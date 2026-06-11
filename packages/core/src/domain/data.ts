@@ -37,6 +37,12 @@ function resolveDataDir(): string {
 
 const dataDir = resolveDataDir();
 
+/** The resolved data directory (read-mostly game data; storage/prefs.ts also
+ *  drops its tiny prefs.json sidecar here). */
+export function dataDirPath(): string {
+  return dataDir;
+}
+
 function loadJsonIfExists<T>(filename: string): Record<string, T> | null {
   const p = join(dataDir, filename);
   if (!existsSync(p)) return null;
