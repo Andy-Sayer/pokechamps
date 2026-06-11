@@ -246,10 +246,17 @@ Two consequences shape the design:
   history BP, Tera). First catches: the latent `curHpPercent`-as-raw
   bug in damage.ts (Eruption BP), and Glaive Rush vulnerability (now
   modelled). 4-fixture corpus: 0 false `out`s, asserted in CI.
-- **J.4 — Inference round-trip property test.** Where the true spread
-  is known, assert it *survives every observation's filter across the
-  whole match* — the "true spread always satisfies the filter"
-  invariant. Catches over-aggressive narrowing.
+- **J.4 — Inference round-trip property test. ✅ shipped 2026-06-10.**
+  Ground truth comes from the sim itself: a battle with fully-known
+  on-grid sets plays out in `@pkmn/sim`, its omniscient protocol log
+  (`|split|` private lines = exact raw HP) feeds the replay parser +
+  production engine walk with inference enabled, and the test asserts
+  the TRUE spread survives every observation's filter while a frail
+  decoy is narrowed away (`replay-roundtrip.test.ts`). Prerequisite fix
+  shipped with it: `scoreOffensiveSpread` now dedupes its EV sweep —
+  the sweep overwrites the swept stat, so chained observations
+  multiplied duplicates geometrically (one real replay turn measured
+  71s; the 15-turn inferSpreads ingest is now 182ms, candidates ≤5).
 - **J.5 — Corpus + CI + triage.** Checked-in replay fixtures (cached
   JSON — tests run offline/deterministic, never hit the network in
   CI). Out-of-range damage events get categorised (crit / spread /

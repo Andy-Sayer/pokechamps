@@ -243,6 +243,16 @@ Two halves of the same `replay.ts` investment (see
     modelled in the checker). Corpus: 18+ hits across 4 games, 0 false outs —
     asserted in CI. Strict containment joins with J.6's authored Champions
     transcripts; J.4 (inference round-trip) is the next layer.
+  - **J.4 ✅ shipped 2026-06-10.** Sim-generated ground truth: a known-sets
+    battle plays in `@pkmn/sim`, its omniscient log (|split| private lines =
+    exact HP, now handled by the parser) runs through the production pipeline
+    with `inferSpreads` + seeded [true, decoys] candidates
+    (`mySetFor`/`oppCandidatesFor` ingest options), and the true spread must
+    survive every filter while the frail decoy narrows away. The blocking
+    growth bug is FIXED at the root: `scoreOffensiveSpread` dedupes its EV
+    sweep (sweep overwrites the swept stat → chained observations were pure
+    duplicate multiplication). The 15-turn fixture in inferSpreads mode:
+    88s → 182ms, candidate sets ≤5. `replay-roundtrip.test.ts` (3).
 
 ### Theme 5 — Ops: deploy validation + medium security
 

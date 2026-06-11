@@ -423,6 +423,23 @@ export function scoreOffensiveSpread(input: {
   const obs = observationToAbsoluteDamage(input.observation, input.defenderSet);
   // For each candidate, sweep the offensive-stat buckets that fit the budget and
   // keep the ones whose forward damage range contains the observed value.
+  //
+  // The sweep OVERWRITES the candidate's existing value for `stat`, so two
+  // candidates differing only in that stat map onto the SAME outputs — chained
+  // observations (two opp hits in one turn, or across turns) would otherwise
+  // multiply duplicates geometrically (the replay harness measured one real
+  // turn at 71s before this dedupe). Dedupe on the full candidate identity,
+  // keeping the first (best-likelihood) instance.
+  const dedupe = (scored: ScoredCandidate[]): ScoredCandidate[] => {
+    const seen = new Set<string>();
+    return scored.filter(s => {
+      const c = s.candidate;
+      const k = `${c.evs.hp}|${c.evs.atk}|${c.evs.def}|${c.evs.spa}|${c.evs.spd}|${c.evs.spe}|${c.nature}|${c.item ?? ''}|${c.ability ?? ''}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  };
   const solve = (cands: SpreadCandidate[]): ScoredCandidate[] => {
     const out: ScoredCandidate[] = [];
     for (const c of cands) {
@@ -453,7 +470,7 @@ export function scoreOffensiveSpread(input: {
     return out.sort((a, b) => b.likelihood - a.likelihood);
   };
 
-  let result = solve(input.startingCandidates);
+  let result = dedupe(solve(input.startingCandidates));
   if (!result.length) {
     // Confidence trigger: no current-nature spread can explain the hit even at
     // max investment → it's an extreme hit that forces the boosting nature. Only
@@ -461,7 +478,7 @@ export function scoreOffensiveSpread(input: {
     // special) — natures otherwise stay loose.
     const boost = stat === 'atk' ? 'Adamant' : 'Modest';
     const promoted = input.startingCandidates.filter(c => c.nature !== boost).map(c => ({ ...c, nature: boost }));
-    if (promoted.length) result = solve(promoted);
+    if (promoted.length) result = dedupe(solve(promoted));
   }
   return result.length ? result : passthrough(); // still nothing → keep prior belief
 }

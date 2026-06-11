@@ -189,7 +189,23 @@ export function parseReplayLog(log: string): BattleTranscript {
   let current: TranscriptEvent[] = t.leadEvents;
   let battleStarted = false;
 
-  for (const rawLine of log.split(/\r?\n/)) {
+  // Omniscient sim logs (Battle.log / getDebugLog) interleave `|split|SIDE`
+  // markers: the next line is that side's PRIVATE event (exact raw HP), the
+  // one after is the rounded PUBLIC duplicate. Keep the private line, drop the
+  // duplicate — ground-truth precision for free. Public replays have no splits.
+  const rawLines = log.split(/\r?\n/);
+  const lines: string[] = [];
+  for (let i = 0; i < rawLines.length; i++) {
+    const l = rawLines[i]!;
+    if (l.startsWith('|split|')) {
+      if (rawLines[i + 1] != null) lines.push(rawLines[i + 1]!);
+      i += 2; // consume private + skip the public duplicate
+      continue;
+    }
+    lines.push(l);
+  }
+
+  for (const rawLine of lines) {
     if (!rawLine.startsWith('|')) continue;
     const fields = rawLine.split('|').slice(1); // leading empty
     const cmd = fields[0] ?? '';

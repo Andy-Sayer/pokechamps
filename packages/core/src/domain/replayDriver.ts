@@ -49,6 +49,14 @@ export interface IngestOptions {
   inferSpreads?: boolean;
   /** HP gap (in %) between engine prediction and transcript truth worth a note. */
   hpNoteTolerance?: number;
+  /** J.4: my side's TRUE sets, when known outside the transcript (sim-generated
+   *  battles / authored Champions transcripts). The log never carries EVs, and
+   *  inference of the OPP needs my real stats to filter honestly. */
+  mySetFor?: (species: string) => PokemonSet | undefined;
+  /** J.4: seed candidates per opp species — typically [true spread, …decoys].
+   *  The round-trip property then asserts the true one SURVIVES every
+   *  observation's filter. Overrides the fast-walk auto-seed when provided. */
+  oppCandidatesFor?: (species: string) => PokemonSet[] | undefined;
 }
 
 // Learnset WITHOUT the Champions move bans — replays are standard gen9 VGC and
@@ -82,18 +90,23 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
 
   const myMons = t.teams[mySide];
   const oppMons = t.teams[oppSide];
-  const myTeam: PokemonSet[] = myMons.map(toSet);
-  const opponentTeam: OpponentEntry[] = oppMons.map(m => ({
-    species: m.species,
-    level: m.level || 50,
-    item: m.item ?? null,
-    ability: m.ability ?? null,
-    knownMoves: [...m.moves],
-    // Pre-seeded candidates keep the engine walk fast (chained inference over
-    // one candidate instead of the coarse grid). J.3+ drops this for the real
-    // inverse-solver validation.
-    ...(opts?.inferSpreads ? {} : { candidates: [toSet(m)] }),
-  }));
+  const myTeam: PokemonSet[] = myMons.map(m => opts?.mySetFor?.(m.species) ?? toSet(m));
+  const opponentTeam: OpponentEntry[] = oppMons.map(m => {
+    const seeded = opts?.oppCandidatesFor?.(m.species);
+    return {
+      species: m.species,
+      level: m.level || 50,
+      item: m.item ?? null,
+      ability: m.ability ?? null,
+      knownMoves: [...m.moves],
+      // Pre-seeded candidates keep the engine walk fast (chained inference over
+      // one candidate instead of the coarse grid); J.4 seeds true+decoys for
+      // the round-trip property instead.
+      ...(seeded ? { candidates: seeded }
+        : opts?.inferSpreads ? {}
+        : { candidates: [toSet(m)] }),
+    };
+  });
 
   const idxOf = (side: Side, species: string): number => {
     const list = side === mySide ? myMons : oppMons;
