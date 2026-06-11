@@ -1,0 +1,103 @@
+|j|☆hawkthijs
+|j|☆Pever3ll
+|html|<table width="100%"><tr><td align="left">hawkthijs</td><td align="right">Pever3ll</tr><tr><td align="left"><i class="fa fa-circle-o"></i> <i class="fa fa-circle-o"></i> </td><td align="right"><i class="fa fa-circle-o"></i> <i class="fa fa-circle-o"></i> </tr></table>
+|uhtml|bestof|<h2><strong>Game 1</strong> of <a href="/game-bestof3-gen9vgc2026regfbo3-2573266762">a best-of-3</a></h2>
+|t:|1775112099
+|gametype|doubles
+|player|p1|hawkthijs|steven|1106
+|player|p2|Pever3ll|miku-flying|1254
+|gen|9
+|tier|[Gen 9] VGC 2026 Reg F (Bo3)
+|rated|
+|rule|Species Clause: Limit one of each Pokémon
+|rule|Item Clause: Limit 1 of each item
+|clearpoke
+|poke|p1|Registeel, L50|
+|poke|p1|Regidrago, L50|
+|poke|p1|Regice, L50|
+|poke|p1|Ogerpon-Hearthflame, L50, F|
+|poke|p1|Tornadus, L50, M|
+|poke|p1|Flutter Mane, L50|
+|poke|p2|Kingambit, L50, F|
+|poke|p2|Chien-Pao, L50|
+|poke|p2|Dragonite, L50, F|
+|poke|p2|Sinistcha-Masterpiece, L50|
+|poke|p2|Munkidori, L50, M|
+|poke|p2|Primarina, L50, M|
+|teampreview|4
+|showteam|p1|Registeel||Leftovers|ClearBody|HeavySlam,BodyPress,IronDefense,Protect||||||50|,,,,,Flying]Regidrago||DragonFang|DragonsMaw|DragonEnergy,DragonPulse,EarthPower,Protect||||||50|,,,,,Steel]Regice||AssaultVest|ClearBody|Thunderbolt,Blizzard,IcyWind,TeraBlast||||||50|,,,,,Fire]Ogerpon-Hearthflame||HearthflameMask|MoldBreaker|IvyCudgel,WoodHammer,FollowMe,SpikyShield|||F|||50|,,,,,Fire]Tornadus||CovertCloak|Prankster|BleakwindStorm,Snowscape,Tailwind,Taunt|||M|||50|,,,,,Dark]Flutter Mane||BoosterEnergy|Protosynthesis|Moonblast,ShadowBall,CalmMind,Protect||||||50|,,,,,Grass
+|showteam|p2|Kingambit||LifeOrb|Defiant|KowtowCleave,IronHead,Protect,SuckerPunch|||F|||50|,,,,,Dark]Chien-Pao||FocusSash|SwordofRuin|IcicleCrash,IcyWind,Protect,Crunch||||||50|,,,,,Ghost]Dragonite||ChoiceBand|InnerFocus|ExtremeSpeed,Outrage,StompingTantrum,AerialAce|||F|||50|,,,,,Normal]Sinistcha-Masterpiece||RockyHelmet|Hospitality|MatchaGotcha,ShadowBall,RagePowder,TrickRoom||||||50|,,,,,Water]Munkidori||AssaultVest|ToxicChain|FakeOut,SludgeBomb,TeraBlast,Psychic|||M|||50|,,,,,Ground]Primarina||ThroatSpray|LiquidVoice|HyperVoice,Moonblast,Protect,IcyWind|||M|||50|,,,,,Steel
+|inactive|Battle timer is ON: inactive players will automatically lose when time's up. (requested by hawkthijs)
+|
+|t:|1775112140
+|teamsize|p1|4
+|teamsize|p2|4
+|start
+|switch|p1a: Tornadus|Tornadus, L50, M|100/100
+|switch|p1b: Regice|Regice, L50|100/100
+|switch|p2a: Kingambit|Kingambit, L50, F|100/100
+|switch|p2b: Primarina|Primarina, L50, M|100/100
+|turn|1
+|
+|t:|1775112155
+|move|p1a: Tornadus|Tailwind|p1a: Tornadus
+|-sidestart|p1: hawkthijs|move: Tailwind
+|move|p1b: Regice|Icy Wind|p2a: Kingambit|[spread] p2a,p2b
+|-resisted|p2a: Kingambit
+|-resisted|p2b: Primarina
+|-damage|p2a: Kingambit|91/100
+|-damage|p2b: Primarina|92/100
+|-unboost|p2a: Kingambit|spe|1
+|-ability|p2a: Kingambit|Defiant|boost
+|-boost|p2a: Kingambit|atk|2
+|-unboost|p2b: Primarina|spe|1
+|move|p2b: Primarina|Hyper Voice|p1a: Tornadus|[spread] p1a,p1b
+|-damage|p1a: Tornadus|64/100
+|-damage|p1b: Regice|84/100
+|-enditem|p2b: Primarina|Throat Spray
+|-boost|p2b: Primarina|spa|1|[from] item: Throat Spray
+|move|p2a: Kingambit|Iron Head|p1b: Regice
+|-supereffective|p1b: Regice
+|-damage|p1b: Regice|0 fnt
+|faint|p1b: Regice
+|-damage|p2a: Kingambit|82/100|[from] item: Life Orb
+|
+|upkeep
+|
+|t:|1775112177
+|switch|p1b: Ogerpon|Ogerpon-Hearthflame, L50, F|100/100
+|-ability|p1b: Ogerpon|Mold Breaker
+|turn|2
+|
+|t:|1775112202
+|move|p2a: Kingambit|Sucker Punch|p1b: Ogerpon
+|-damage|p1b: Ogerpon|0 fnt
+|faint|p1b: Ogerpon
+|-damage|p2a: Kingambit|72/100|[from] item: Life Orb
+|move|p1a: Tornadus|Bleakwind Storm|p2b: Primarina|[spread] p2a
+|-miss|p1a: Tornadus|p2b: Primarina
+|-resisted|p2a: Kingambit
+|-damage|p2a: Kingambit|55/100
+|move|p2b: Primarina|Moonblast|p1a: Tornadus
+|-damage|p1a: Tornadus|0 fnt
+|faint|p1a: Tornadus
+|
+|upkeep
+|
+|t:|1775112214
+|switch|p1b: Regidrago|Regidrago, L50|100/100
+|turn|3
+|
+|t:|1775112230
+|-terastallize|p1b: Regidrago|Steel
+|move|p2a: Kingambit|Sucker Punch|p1b: Regidrago
+|-damage|p1b: Regidrago|0 fnt
+|faint|p1b: Regidrago
+|-damage|p2a: Kingambit|45/100|[from] item: Life Orb
+|
+|win|Pever3ll
+||hawkthijs is ready for game 2.
+|l|☆Pever3ll
+|player|p2|
+||Pever3ll is ready for game 2.
+|uhtml|next|Next: <a href="/battle-gen9vgc2026regfbo3-2573267586"><strong>Game 2 of 3</strong></a>

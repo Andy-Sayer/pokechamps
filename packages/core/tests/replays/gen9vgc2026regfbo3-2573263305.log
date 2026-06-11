@@ -1,0 +1,137 @@
+|j|☆Pever3ll
+|j|☆spencerpegrum
+|html|<table width="100%"><tr><td align="left">Pever3ll</td><td align="right">spencerpegrum</tr><tr><td align="left"><i class="fa fa-circle-o"></i> <i class="fa fa-circle-o"></i> </td><td align="right"><i class="fa fa-circle-o"></i> <i class="fa fa-circle-o"></i> </tr></table>
+|uhtml|bestof|<h2><strong>Game 1</strong> of <a href="/game-bestof3-gen9vgc2026regfbo3-2573263304">a best-of-3</a></h2>
+|t:|1775111496
+|gametype|doubles
+|player|p1|Pever3ll|miku-flying|1279
+|player|p2|spencerpegrum|101|1276
+|gen|9
+|tier|[Gen 9] VGC 2026 Reg F (Bo3)
+|rated|
+|rule|Species Clause: Limit one of each Pokémon
+|rule|Item Clause: Limit 1 of each item
+|clearpoke
+|poke|p1|Kingambit, L50, M|
+|poke|p1|Chien-Pao, L50|
+|poke|p1|Dragonite, L50, M|
+|poke|p1|Sinistcha-Masterpiece, L50|
+|poke|p1|Munkidori, L50, M|
+|poke|p1|Primarina, L50, F|
+|poke|p2|Chien-Pao, L50|
+|poke|p2|Urshifu-*, L50, M|
+|poke|p2|Archaludon, L50, M|
+|poke|p2|Flutter Mane, L50|
+|poke|p2|Pelipper, L50, F|
+|poke|p2|Amoonguss, L50, F|
+|teampreview|4
+|showteam|p1|Kingambit||LifeOrb|Defiant|KowtowCleave,IronHead,Protect,SuckerPunch|||M|||50|,,,,,Dark]Chien-Pao||FocusSash|SwordofRuin|IcicleCrash,IcyWind,Protect,Crunch||||||50|,,,,,Ghost]Dragonite||ChoiceBand|InnerFocus|ExtremeSpeed,Outrage,StompingTantrum,AerialAce|||M|||50|,,,,,Normal]Sinistcha-Masterpiece||RockyHelmet|Hospitality|MatchaGotcha,ShadowBall,RagePowder,TrickRoom||||||50|,,,,,Water]Munkidori||AssaultVest|ToxicChain|FakeOut,SludgeBomb,TeraBlast,Psychic|||M|||50|,,,,,Ground]Primarina||ThroatSpray|LiquidVoice|HyperVoice,Moonblast,Protect,IcyWind|||F|||50|,,,,,Steel
+|showteam|p2|Chien-Pao||FocusSash|SwordofRuin|IceSpinner,IceShard,SacredSword,Protect||||||50|,,,,,Ghost]Urshifu-Rapid-Strike||ChoiceScarf|UnseenFist|SurgingStrikes,CloseCombat,AquaJet,Uturn|||M|||50|,,,,,Water]Archaludon||AssaultVest|Stamina|DracoMeteor,FlashCannon,ElectroShot,BodyPress|||M|||50|,,,,,Grass]Flutter Mane||BoosterEnergy|Protosynthesis|Moonblast,ShadowBall,DazzlingGleam,Protect||||||50|,,,,,Fairy]Pelipper||RockyHelmet|Drizzle|WeatherBall,Hurricane,WideGuard,Tailwind|||F|||50|,,,,,Steel]Amoonguss||MentalHerb|Regenerator|SludgeBomb,PollenPuff,Spore,RagePowder|||F|||50|,,,,,Water
+|inactive|Battle timer is ON: inactive players will automatically lose when time's up. (requested by spencerpegrum)
+|
+|t:|1775111538
+|teamsize|p1|4
+|teamsize|p2|4
+|start
+|switch|p1a: Sinistcha|Sinistcha-Masterpiece, L50|100/100
+|switch|p1b: Primarina|Primarina, L50, F|100/100
+|switch|p2a: Chien-Pao|Chien-Pao, L50|100/100
+|switch|p2b: Flutter Mane|Flutter Mane, L50|100/100
+|-ability|p2a: Chien-Pao|Sword of Ruin
+|-enditem|p2b: Flutter Mane|Booster Energy
+|-activate|p2b: Flutter Mane|ability: Protosynthesis|[fromitem]
+|-start|p2b: Flutter Mane|protosynthesisspa
+|turn|1
+|
+|t:|1775111558
+|switch|p1a: Kingambit|Kingambit, L50, M|100/100
+|move|p2a: Chien-Pao|Ice Spinner|p1a: Kingambit
+|-resisted|p1a: Kingambit
+|-damage|p1a: Kingambit|77/100
+|move|p2b: Flutter Mane|Dazzling Gleam|p1a: Kingambit|[spread] p1a,p1b
+|-crit|p1b: Primarina
+|-damage|p1a: Kingambit|39/100
+|-damage|p1b: Primarina|50/100
+|move|p1b: Primarina|Hyper Voice|p2a: Chien-Pao|[spread] p2a,p2b
+|-damage|p2a: Chien-Pao|39/100
+|-damage|p2b: Flutter Mane|68/100
+|-enditem|p1b: Primarina|Throat Spray
+|-boost|p1b: Primarina|spa|1|[from] item: Throat Spray
+|
+|upkeep
+|turn|2
+|inactive|Pever3ll has 30 seconds left.
+|
+|t:|1775111588
+|-terastallize|p2b: Flutter Mane|Fairy
+|-terastallize|p1b: Primarina|Steel
+|move|p1a: Kingambit|Sucker Punch|p2b: Flutter Mane
+|-resisted|p2b: Flutter Mane
+|-damage|p2b: Flutter Mane|10/100
+|-damage|p1a: Kingambit|29/100|[from] item: Life Orb
+|move|p2a: Chien-Pao|Sacred Sword|p1a: Kingambit
+|-supereffective|p1a: Kingambit
+|-crit|p1a: Kingambit
+|-damage|p1a: Kingambit|0 fnt
+|faint|p1a: Kingambit
+|move|p2b: Flutter Mane|Dazzling Gleam|p1b: Primarina
+|-resisted|p1b: Primarina
+|-damage|p1b: Primarina|18/100
+|move|p1b: Primarina|Hyper Voice|p2a: Chien-Pao|[spread] p2a,p2b
+|-damage|p2a: Chien-Pao|0 fnt
+|-damage|p2b: Flutter Mane|0 fnt
+|faint|p2a: Chien-Pao
+|faint|p2b: Flutter Mane
+|-end|p2b: Flutter Mane|Protosynthesis|[silent]
+|
+|upkeep
+|
+|t:|1775111602
+|switch|p2a: Urshifu|Urshifu-Rapid-Strike, L50, M|100/100
+|switch|p2b: Amoonguss|Amoonguss, L50, F|100/100
+|switch|p1a: Sinistcha|Sinistcha-Masterpiece, L50|100/100
+|-heal|p1b: Primarina|43/100|[from] ability: Hospitality|[of] p1a: Sinistcha
+|turn|3
+|inactive|spencerpegrum has 30 seconds left.
+|
+|t:|1775111634
+|move|p1a: Sinistcha|Rage Powder|p1a: Sinistcha
+|-singleturn|p1a: Sinistcha|move: Rage Powder
+|move|p2a: Urshifu|U-turn|p1a: Sinistcha
+|-damage|p1a: Sinistcha|76/100
+|-damage|p2a: Urshifu|84/100|[from] item: Rocky Helmet|[of] p1a: Sinistcha
+|move|p1b: Primarina|Moonblast|p2a: Urshifu
+|-supereffective|p2a: Urshifu
+|-damage|p2a: Urshifu|0 fnt
+|faint|p2a: Urshifu
+|move|p2b: Amoonguss|Spore|p1b: Primarina
+|-status|p1b: Primarina|slp|[from] move: Spore
+|
+|upkeep
+|turn|4
+|
+|t:|1775111644
+|move|p1a: Sinistcha|Shadow Ball|p2b: Amoonguss
+|-damage|p2b: Amoonguss|61/100
+|cant|p1b: Primarina|slp
+|move|p2b: Amoonguss|Sludge Bomb|p1a: Sinistcha
+|-damage|p1a: Sinistcha|44/100
+|
+|upkeep
+|turn|5
+|
+|t:|1775111649
+|move|p1a: Sinistcha|Shadow Ball|p2b: Amoonguss
+|-damage|p2b: Amoonguss|24/100
+|-curestatus|p1b: Primarina|slp|[msg]
+|move|p1b: Primarina|Moonblast|p2b: Amoonguss
+|-resisted|p2b: Amoonguss
+|-damage|p2b: Amoonguss|0 fnt
+|faint|p2b: Amoonguss
+|
+|win|Pever3ll
+||Pever3ll is ready for game 2.
+||spencerpegrum is ready for game 2.
+|uhtml|next|Next: <a href="/battle-gen9vgc2026regfbo3-2573264216"><strong>Game 2 of 3</strong></a>
+|l|☆Pever3ll
+|player|p1|

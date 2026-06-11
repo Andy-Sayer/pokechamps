@@ -1,0 +1,236 @@
+|j|☆Fell Kookie
+|j|☆AegisDraft
+|html|<table width="100%"><tr><td align="left">Fell Kookie</td><td align="right">AegisDraft</tr><tr><td align="left"><i class="fa fa-circle"></i> <i class="fa fa-circle-o"></i> </td><td align="right"><i class="fa fa-circle-o"></i> <i class="fa fa-circle-o"></i> </tr></table>
+|uhtml|bestof|<h2><strong>Game 2</strong> of <a href="/game-bestof3-gen9vgc2025regh-307427">a best-of-3</a></h2>
+|t:|1778545019
+|gametype|doubles
+|player|p1|Fell Kookie|guitarist|
+|player|p2|AegisDraft|winona|
+|gen|9
+|tier|[Gen 9] VGC 2025 Reg H
+|rule|Species Clause: Limit one of each Pokémon
+|rule|Item Clause: Limit 1 of each item
+|raw|<div class="infobox"><details class="readmore" open><summary><strong>1 custom rule:</strong></summary> Best of = 3</details></div>
+|clearpoke
+|poke|p1|Corviknight, L50, M|
+|poke|p1|Garchomp, L50, F|
+|poke|p1|Forretress, L50, M|
+|poke|p1|Tyranitar, L50, M|
+|poke|p1|Amoonguss, L50, F|
+|poke|p1|Rotom-Heat, L50|
+|poke|p2|Blaziken, L50, F|
+|poke|p2|Kingambit, L50, M|
+|poke|p2|Rillaboom, L50, M|
+|poke|p2|Clefable, L50, F|
+|poke|p2|Comfey, L50, M|
+|poke|p2|Wyrdeer, L50, F|
+|teampreview|4
+|j| swoobatfan2001
+Fell Kookie rejected open team sheets.
+|c|☆Fell Kookie|bwah
+|c| swoobatfan2001|absolute bwah
+|c| swoobatfan2001|insert image of director man here
+|
+|t:|1778545163
+|teamsize|p1|4
+|teamsize|p2|4
+|start
+|switch|p1a: Goonion|Amoonguss, L50, F|100/100
+|switch|p1b: Nonchalashout|Garchomp, L50, F|100/100
+|switch|p2a: Comfey|Comfey, L50, M|100/100
+|switch|p2b: Clefable|Clefable, L50, F|100/100
+|turn|1
+|c|☆Fell Kookie|bwahrtin scorsese
+|
+|t:|1778545195
+|move|p1a: Goonion|Rage Powder|p1a: Goonion
+|-singleturn|p1a: Goonion|move: Rage Powder
+|move|p1b: Nonchalashout|Swords Dance|p1b: Nonchalashout
+|-boost|p1b: Nonchalashout|atk|2
+|move|p2a: Comfey|Trick|p1a: Goonion
+|-activate|p2a: Comfey|move: Trick|[of] p1a: Goonion
+|-item|p1a: Goonion|Choice Specs|[from] move: Trick
+|-item|p2a: Comfey|Sitrus Berry|[from] move: Trick
+|move|p2b: Clefable|Encore|p1a: Goonion
+|-start|p1a: Goonion|Encore
+|
+|upkeep
+|turn|2
+|
+|t:|1778545277
+|switch|p2a: Rillaboom|Rillaboom, L50, M|100/100
+|-fieldstart|move: Grassy Terrain|[from] ability: Grassy Surge|[of] p2a: Rillaboom
+|-terastallize|p1b: Nonchalashout|Poison
+|-terastallize|p2b: Clefable|Steel
+|move|p1a: Goonion|Rage Powder|p1a: Goonion
+|-singleturn|p1a: Goonion|move: Rage Powder
+|move|p1b: Nonchalashout|Poison Jab|p2b: Clefable
+|-immune|p2b: Clefable
+|move|p2b: Clefable|Encore||[still]
+|-fail|p2b: Clefable
+|
+|upkeep
+|turn|3
+|c|☆Fell Kookie|IVE BEEN READ
+|
+|t:|1778545302
+|move|p2b: Clefable|Follow Me|p2b: Clefable
+|-singleturn|p2b: Clefable|move: Follow Me
+|move|p1a: Goonion|Rage Powder|p1a: Goonion
+|-singleturn|p1a: Goonion|move: Rage Powder
+|move|p1b: Nonchalashout|Poison Jab|p2b: Clefable
+|-immune|p2b: Clefable
+|move|p2a: Rillaboom|U-turn|p1a: Goonion
+|-damage|p1a: Goonion|72/100
+|
+|t:|1778545310
+|switch|p2a: Kingambit|Kingambit, L50, M|100/100|[from] U-turn
+|
+|-heal|p1a: Goonion|77/100|[from] Grassy Terrain
+|upkeep
+|turn|4
+|
+|t:|1778545364
+|switch|p1a: Quiche Loreain|Rotom-Heat, L50|100/100
+|move|p2a: Kingambit|Protect|p2a: Kingambit
+|-singleturn|p2a: Kingambit|Protect
+|move|p1b: Nonchalashout|Earthquake|p2b: Clefable|[spread] p2b
+|-activate|p2a: Kingambit|move: Protect
+|-immune|p1a: Quiche Loreain|[from] ability: Levitate
+|-supereffective|p2b: Clefable
+|-crit|p2b: Clefable
+|-damage|p2b: Clefable|46/100
+|move|p2b: Clefable|Moonblast|p1a: Quiche Loreain
+|-resisted|p1a: Quiche Loreain
+|-damage|p1a: Quiche Loreain|77/100
+|
+|-heal|p2b: Clefable|52/100|[from] Grassy Terrain
+|-heal|p2b: Clefable|58/100|[from] item: Leftovers
+|upkeep
+|turn|5
+|
+|t:|1778545467
+|move|p2b: Clefable|Follow Me|p2b: Clefable
+|-singleturn|p2b: Clefable|move: Follow Me
+|move|p1b: Nonchalashout|Earthquake|p2a: Kingambit|[spread] p2a,p2b
+|-immune|p1a: Quiche Loreain|[from] ability: Levitate
+|-supereffective|p2a: Kingambit
+|-supereffective|p2b: Clefable
+|-damage|p2a: Kingambit|42/100
+|-damage|p2b: Clefable|21/100
+|move|p1a: Quiche Loreain|Overheat|p2b: Clefable
+|-supereffective|p2b: Clefable
+|-damage|p2b: Clefable|0 fnt
+|-unboost|p1a: Quiche Loreain|spa|2
+|faint|p2b: Clefable
+|-damage|p1a: Quiche Loreain|67/100|[from] item: Life Orb
+|move|p2a: Kingambit|Kowtow Cleave|p1a: Quiche Loreain
+|-damage|p1a: Quiche Loreain|0 fnt
+|faint|p1a: Quiche Loreain
+|-damage|p2a: Kingambit|32/100|[from] item: Life Orb
+|
+|-heal|p2a: Kingambit|38/100|[from] Grassy Terrain
+|upkeep
+|
+|t:|1778545514
+|switch|p1a: Goonion|Amoonguss, L50, F|100/100
+|switch|p2b: Comfey|Comfey, L50, M|100/100
+|turn|6
+|
+|t:|1778545555
+|move|p2b: Comfey|Floral Healing|p2a: Kingambit
+|-heal|p2a: Kingambit|100/100
+|move|p1a: Goonion|Rage Powder|p1a: Goonion
+|-singleturn|p1a: Goonion|move: Rage Powder
+|move|p1b: Nonchalashout|Poison Jab|p2b: Comfey
+|-supereffective|p2b: Comfey
+|-damage|p2b: Comfey|0 fnt
+|faint|p2b: Comfey
+|move|p2a: Kingambit|Kowtow Cleave|p1a: Goonion
+|-damage|p1a: Goonion|51/100
+|-damage|p2a: Kingambit|91/100|[from] item: Life Orb
+|
+|-heal|p2a: Kingambit|97/100|[from] Grassy Terrain
+|-heal|p1a: Goonion|57/100|[from] Grassy Terrain
+|-fieldend|move: Grassy Terrain
+|upkeep
+|
+|t:|1778545569
+|switch|p2b: Rillaboom|Rillaboom, L50, M|100/100
+|-fieldstart|move: Grassy Terrain|[from] ability: Grassy Surge|[of] p2b: Rillaboom
+|turn|7
+|c| swoobatfan2001|really quite terrible timing
+|c|☆Fell Kookie|for what
+|c| swoobatfan2001|actually nvm
+|c| swoobatfan2001|im stupid
+|c|☆Fell Kookie|oh ok
+|
+|t:|1778545657
+|switch|p1a: Mysterpeanemis|Tyranitar, L50, M|100/100
+|-weather|Sandstorm|[from] ability: Sand Stream|[of] p1a: Mysterpeanemis
+|move|p1b: Nonchalashout|Poison Jab|p2b: Rillaboom
+|-supereffective|p2b: Rillaboom
+|-damage|p2b: Rillaboom|0 fnt
+|faint|p2b: Rillaboom
+|move|p2a: Kingambit|Kowtow Cleave|p1b: Nonchalashout
+|-damage|p1b: Nonchalashout|40/100
+|-damage|p2a: Kingambit|87/100|[from] item: Life Orb
+|
+|-weather|Sandstorm|[upkeep]
+|-heal|p1b: Nonchalashout|46/100|[from] Grassy Terrain
+|-heal|p2a: Kingambit|93/100|[from] Grassy Terrain
+|upkeep
+|turn|8
+|
+|t:|1778545680
+|move|p1a: Mysterpeanemis|Protect|p1a: Mysterpeanemis
+|-singleturn|p1a: Mysterpeanemis|Protect
+|move|p2a: Kingambit|Sucker Punch|p1b: Nonchalashout|[miss]
+|-miss|p2a: Kingambit|p1b: Nonchalashout
+|move|p1b: Nonchalashout|Earthquake|p2a: Kingambit|[spread] p2a
+|-activate|p1a: Mysterpeanemis|move: Protect
+|-supereffective|p2a: Kingambit
+|-damage|p2a: Kingambit|31/100
+|
+|-weather|Sandstorm|[upkeep]
+|-heal|p1b: Nonchalashout|52/100|[from] Grassy Terrain
+|-heal|p2a: Kingambit|37/100|[from] Grassy Terrain
+|upkeep
+|turn|9
+|c|☆Fell Kookie|LOL
+|c| swoobatfan2001|sand veil...
+|c|☆AegisDraft|Me when I receive the miss of agony and despair
+|
+|t:|1778545718
+|move|p2a: Kingambit|Protect|p2a: Kingambit
+|-singleturn|p2a: Kingambit|Protect
+|move|p1b: Nonchalashout|Iron Head|p2a: Kingambit
+|-activate|p2a: Kingambit|move: Protect
+|move|p1a: Mysterpeanemis|Fire Punch|p2a: Kingambit
+|-activate|p2a: Kingambit|move: Protect
+|
+|-weather|Sandstorm|[upkeep]
+|-heal|p1b: Nonchalashout|58/100|[from] Grassy Terrain
+|-heal|p2a: Kingambit|43/100|[from] Grassy Terrain
+|upkeep
+|turn|10
+|c| swoobatfan2001|you've met a terrible fate, haven't you
+|c|☆Fell Kookie|i love sand veil
+|c|☆AegisDraft|GG lol
+|
+|t:|1778545747
+|move|p2a: Kingambit|Sucker Punch|p1b: Nonchalashout
+|-damage|p1b: Nonchalashout|7/100
+|-damage|p2a: Kingambit|33/100|[from] item: Life Orb
+|move|p1b: Nonchalashout|Iron Head|p2a: Kingambit
+|-resisted|p2a: Kingambit
+|-damage|p2a: Kingambit|14/100
+|move|p1a: Mysterpeanemis|Fire Punch|p2a: Kingambit
+|-supereffective|p2a: Kingambit
+|-damage|p2a: Kingambit|0 fnt
+|faint|p2a: Kingambit
+|-end|p2a: Kingambit|fallenundefined|[silent]
+|
+|win|Fell Kookie
+|c|☆Fell Kookie|gg!!!
+|c| swoobatfan2001|ohn mein gott

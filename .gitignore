@@ -15,6 +15,8 @@ packages/server/.data-test/
 .env
 .env.local
 *.log
+# …but the replay-validation corpus fixtures ARE tracked (offline CI tests).
+!packages/core/tests/replays/*.log
 
 # editor / OS cruft
 .DS_Store

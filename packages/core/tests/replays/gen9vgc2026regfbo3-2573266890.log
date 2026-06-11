@@ -1,0 +1,173 @@
+|j|☆Yikes_Ltd
+|j|☆spencerpegrum
+|html|<table width="100%"><tr><td align="left">Yikes_Ltd</td><td align="right">spencerpegrum</tr><tr><td align="left"><i class="fa fa-circle-o"></i> <i class="fa fa-circle-o"></i> </td><td align="right"><i class="fa fa-circle-o"></i> <i class="fa fa-circle-o"></i> </tr></table>
+|uhtml|bestof|<h2><strong>Game 1</strong> of <a href="/game-bestof3-gen9vgc2026regfbo3-2573266889">a best-of-3</a></h2>
+|t:|1775112119
+|gametype|doubles
+|player|p1|Yikes_Ltd|1|1302
+|player|p2|spencerpegrum|101|1301
+|gen|9
+|tier|[Gen 9] VGC 2026 Reg F (Bo3)
+|rated|
+|rule|Species Clause: Limit one of each Pokémon
+|rule|Item Clause: Limit 1 of each item
+|clearpoke
+|poke|p1|Iron Crown, L50|
+|poke|p1|Landorus-Therian, L50, M|
+|poke|p1|Indeedee-F, L50, F|
+|poke|p1|Urshifu-*, L50, M|
+|poke|p1|Tornadus, L50, M|
+|poke|p1|Ogerpon-Hearthflame, L50, F|
+|poke|p2|Chien-Pao, L50|
+|poke|p2|Urshifu-*, L50, F|
+|poke|p2|Archaludon, L50, F|
+|poke|p2|Flutter Mane, L50|
+|poke|p2|Pelipper, L50, F|
+|poke|p2|Amoonguss, L50, M|
+|teampreview|4
+|showteam|p1|Iron Crown||BoosterEnergy|QuarkDrive|Protect,TachyonCutter,ExpandingForce,CalmMind||||||50|,,,,,Dragon]Landorus-Therian||ChoiceBand|Intimidate|StompingTantrum,Uturn,Earthquake,RockSlide|||M|||50|,,,,,Steel]Indeedee-F||RockyHelmet|PsychicSurge|TrickRoom,FollowMe,HelpingHand,Psychic|||F|||50|,,,,,Fairy]Urshifu-Rapid-Strike||ChoiceScarf|UnseenFist|SurgingStrikes,CloseCombat,Coaching,Uturn|||M|||50|,,,,,Water]Tornadus||CovertCloak|Prankster|BleakwindStorm,Tailwind,IcyWind,RainDance|||M|||50|,,,,,Steel]Ogerpon-Hearthflame||HearthflameMask|MoldBreaker|IvyCudgel,WoodHammer,FollowMe,SpikyShield|||F|||50|,,,,,Fire
+|showteam|p2|Chien-Pao||FocusSash|SwordofRuin|IceSpinner,IceShard,SacredSword,Protect||||||50|,,,,,Ghost]Urshifu-Rapid-Strike||ChoiceScarf|UnseenFist|SurgingStrikes,CloseCombat,AquaJet,Uturn|||F|||50|,,,,,Water]Archaludon||AssaultVest|Stamina|DracoMeteor,FlashCannon,ElectroShot,BodyPress|||F|||50|,,,,,Grass]Flutter Mane||BoosterEnergy|Protosynthesis|Moonblast,ShadowBall,DazzlingGleam,Protect||||||50|,,,,,Fairy]Pelipper||RockyHelmet|Drizzle|WeatherBall,Hurricane,WideGuard,Tailwind|||F|||50|,,,,,Steel]Amoonguss||MentalHerb|Regenerator|SludgeBomb,PollenPuff,Spore,RagePowder|||M|||50|,,,,,Water
+|inactive|Battle timer is ON: inactive players will automatically lose when time's up. (requested by spencerpegrum)
+|inactive|spencerpegrum has 60 seconds left.
+|
+|t:|1775112160
+|teamsize|p1|4
+|teamsize|p2|4
+|start
+|switch|p1a: Urshifu|Urshifu-Rapid-Strike, L50, M|100/100
+|switch|p1b: Landorus|Landorus-Therian, L50, M|100/100
+|switch|p2a: Urshifu|Urshifu-Rapid-Strike, L50, F|100/100
+|switch|p2b: Pelipper|Pelipper, L50, F|100/100
+|-ability|p1b: Landorus|Intimidate|boost
+|-unboost|p2a: Urshifu|atk|1
+|-unboost|p2b: Pelipper|atk|1
+|-weather|RainDance|[from] ability: Drizzle|[of] p2b: Pelipper
+|turn|1
+|
+|t:|1775112183
+|switch|p1b: Indeedee|Indeedee-F, L50, F|100/100
+|-fieldstart|move: Psychic Terrain|[from] ability: Psychic Surge|[of] p1b: Indeedee
+|move|p1a: Urshifu|U-turn|p2a: Urshifu
+|-resisted|p2a: Urshifu
+|-damage|p2a: Urshifu|89/100
+|
+|t:|1775112189
+|switch|p1a: Iron Crown|Iron Crown, L50|100/100|[from] U-turn
+|-enditem|p1a: Iron Crown|Booster Energy
+|-activate|p1a: Iron Crown|ability: Quark Drive|[fromitem]
+|-start|p1a: Iron Crown|quarkdrivespa
+|move|p2a: Urshifu|Surging Strikes|p1b: Indeedee
+|-crit|p1b: Indeedee
+|-damage|p1b: Indeedee|59/100
+|-damage|p2a: Urshifu|73/100|[from] item: Rocky Helmet|[of] p1b: Indeedee
+|-crit|p1b: Indeedee
+|-damage|p1b: Indeedee|11/100
+|-damage|p2a: Urshifu|56/100|[from] item: Rocky Helmet|[of] p1b: Indeedee
+|-crit|p1b: Indeedee
+|-damage|p1b: Indeedee|0 fnt
+|-damage|p2a: Urshifu|40/100|[from] item: Rocky Helmet|[of] p1b: Indeedee
+|faint|p1b: Indeedee
+|-hitcount|p1: Indeedee|3
+|move|p2b: Pelipper|Hurricane|p1a: Iron Crown
+|-resisted|p1a: Iron Crown
+|-damage|p1a: Iron Crown|78/100
+|-start|p1a: Iron Crown|confusion
+|
+|-weather|RainDance|[upkeep]
+|upkeep
+|
+|t:|1775112209
+|switch|p1b: Urshifu|Urshifu-Rapid-Strike, L50, M|100/100
+|turn|2
+|
+|t:|1775112224
+|-terastallize|p2b: Pelipper|Steel
+|move|p1b: Urshifu|Surging Strikes|p2a: Urshifu
+|-resisted|p2a: Urshifu
+|-crit|p2a: Urshifu
+|-damage|p2a: Urshifu|26/100
+|-resisted|p2a: Urshifu
+|-crit|p2a: Urshifu
+|-damage|p2a: Urshifu|11/100
+|-resisted|p2a: Urshifu
+|-crit|p2a: Urshifu
+|-damage|p2a: Urshifu|0 fnt
+|faint|p2a: Urshifu
+|-hitcount|p2: Urshifu|3
+|-activate|p1a: Iron Crown|confusion
+|move|p1a: Iron Crown|Calm Mind|p1a: Iron Crown
+|-boost|p1a: Iron Crown|spa|1
+|-boost|p1a: Iron Crown|spd|1
+|move|p2b: Pelipper|Tailwind|p2b: Pelipper
+|-sidestart|p2: spencerpegrum|move: Tailwind
+|
+|-weather|RainDance|[upkeep]
+|upkeep
+|
+|t:|1775112232
+|switch|p2a: Chien-Pao|Chien-Pao, L50|100/100
+|-ability|p2a: Chien-Pao|Sword of Ruin
+|turn|3
+|
+|t:|1775112245
+|-terastallize|p1a: Iron Crown|Dragon
+|move|p2a: Chien-Pao|Ice Spinner|p1a: Iron Crown
+|-supereffective|p1a: Iron Crown
+|-damage|p1a: Iron Crown|0 fnt
+|-fieldend|move: Psychic Terrain
+|faint|p1a: Iron Crown
+|-end|p1a: Iron Crown|Quark Drive|[silent]
+|move|p1b: Urshifu|Surging Strikes|p2b: Pelipper
+|-crit|p2b: Pelipper
+|-damage|p2b: Pelipper|57/100
+|-damage|p1b: Urshifu|84/100|[from] item: Rocky Helmet|[of] p2b: Pelipper
+|-crit|p2b: Pelipper
+|-damage|p2b: Pelipper|10/100
+|-damage|p1b: Urshifu|67/100|[from] item: Rocky Helmet|[of] p2b: Pelipper
+|-crit|p2b: Pelipper
+|-damage|p2b: Pelipper|0 fnt
+|-damage|p1b: Urshifu|51/100|[from] item: Rocky Helmet|[of] p2b: Pelipper
+|faint|p2b: Pelipper
+|-hitcount|p2: Pelipper|3
+|
+|-weather|RainDance|[upkeep]
+|upkeep
+|
+|t:|1775112262
+|switch|p1a: Landorus|Landorus-Therian, L50, M|100/100
+|switch|p2b: Archaludon|Archaludon, L50, F|100/100
+|-ability|p1a: Landorus|Intimidate|boost
+|-unboost|p2a: Chien-Pao|atk|1
+|-unboost|p2b: Archaludon|atk|1
+|turn|4
+|
+|t:|1775112274
+|move|p2a: Chien-Pao|Ice Spinner|p1a: Landorus
+|-supereffective|p1a: Landorus
+|-damage|p1a: Landorus|0 fnt
+|faint|p1a: Landorus
+|move|p1b: Urshifu|Surging Strikes|p2a: Chien-Pao
+|-crit|p2a: Chien-Pao
+|-damage|p2a: Chien-Pao|59/100
+|-crit|p2a: Chien-Pao
+|-damage|p2a: Chien-Pao|19/100
+|-crit|p2a: Chien-Pao
+|-damage|p2a: Chien-Pao|0 fnt
+|faint|p2a: Chien-Pao
+|-hitcount|p2: Chien-Pao|3
+|move|p2b: Archaludon|Electro Shot||[still]
+|-prepare|p2b: Archaludon|Electro Shot
+|-boost|p2b: Archaludon|spa|1
+|-anim|p2b: Archaludon|Electro Shot|p1b: Urshifu
+|-supereffective|p1b: Urshifu
+|-damage|p1b: Urshifu|0 fnt
+|faint|p1b: Urshifu
+|
+|win|spencerpegrum
+||spencerpegrum is ready for game 2.
+||Yikes_Ltd is ready for game 2.
+|uhtml|next|Next: <a href="/battle-gen9vgc2026regfbo3-2573267830"><strong>Game 2 of 3</strong></a>
+|l|☆Yikes_Ltd
+|player|p1|
+|l|☆spencerpegrum
+|player|p2|

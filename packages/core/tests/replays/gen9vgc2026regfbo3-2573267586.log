@@ -1,0 +1,185 @@
+|j|☆hawkthijs
+|j|☆Pever3ll
+|html|<table width="100%"><tr><td align="left">hawkthijs</td><td align="right">Pever3ll</tr><tr><td align="left"><i class="fa fa-circle-o"></i> <i class="fa fa-circle-o"></i> </td><td align="right"><i class="fa fa-circle-o"></i> <i class="fa fa-circle"></i> </tr></table>
+|uhtml|bestof|<h2><strong>Game 2</strong> of <a href="/game-bestof3-gen9vgc2026regfbo3-2573266762">a best-of-3</a></h2>
+|t:|1775112237
+|gametype|doubles
+|player|p1|hawkthijs|steven|1106
+|player|p2|Pever3ll|miku-flying|1254
+|gen|9
+|tier|[Gen 9] VGC 2026 Reg F (Bo3)
+|rated|
+|rule|Species Clause: Limit one of each Pokémon
+|rule|Item Clause: Limit 1 of each item
+|clearpoke
+|poke|p1|Registeel, L50|
+|poke|p1|Regidrago, L50|
+|poke|p1|Regice, L50|
+|poke|p1|Ogerpon-Hearthflame, L50, F|
+|poke|p1|Tornadus, L50, M|
+|poke|p1|Flutter Mane, L50|
+|poke|p2|Kingambit, L50, F|
+|poke|p2|Chien-Pao, L50|
+|poke|p2|Dragonite, L50, M|
+|poke|p2|Sinistcha-Masterpiece, L50|
+|poke|p2|Munkidori, L50, M|
+|poke|p2|Primarina, L50, M|
+|teampreview|4
+|showteam|p1|Registeel||Leftovers|ClearBody|HeavySlam,BodyPress,IronDefense,Protect||||||50|,,,,,Flying]Regidrago||DragonFang|DragonsMaw|DragonEnergy,DragonPulse,EarthPower,Protect||||||50|,,,,,Steel]Regice||AssaultVest|ClearBody|Thunderbolt,Blizzard,IcyWind,TeraBlast||||||50|,,,,,Fire]Ogerpon-Hearthflame||HearthflameMask|MoldBreaker|IvyCudgel,WoodHammer,FollowMe,SpikyShield|||F|||50|,,,,,Fire]Tornadus||CovertCloak|Prankster|BleakwindStorm,Snowscape,Tailwind,Taunt|||M|||50|,,,,,Dark]Flutter Mane||BoosterEnergy|Protosynthesis|Moonblast,ShadowBall,CalmMind,Protect||||||50|,,,,,Grass
+|showteam|p2|Kingambit||LifeOrb|Defiant|KowtowCleave,IronHead,Protect,SuckerPunch|||F|||50|,,,,,Dark]Chien-Pao||FocusSash|SwordofRuin|IcicleCrash,IcyWind,Protect,Crunch||||||50|,,,,,Ghost]Dragonite||ChoiceBand|InnerFocus|ExtremeSpeed,Outrage,StompingTantrum,AerialAce|||M|||50|,,,,,Normal]Sinistcha-Masterpiece||RockyHelmet|Hospitality|MatchaGotcha,ShadowBall,RagePowder,TrickRoom||||||50|,,,,,Water]Munkidori||AssaultVest|ToxicChain|FakeOut,SludgeBomb,TeraBlast,Psychic|||M|||50|,,,,,Ground]Primarina||ThroatSpray|LiquidVoice|HyperVoice,Moonblast,Protect,IcyWind|||M|||50|,,,,,Steel
+|
+|t:|1775112251
+|teamsize|p1|4
+|teamsize|p2|4
+|start
+|switch|p1a: Tornadus|Tornadus, L50, M|100/100
+|switch|p1b: Regice|Regice, L50|100/100
+|switch|p2a: Kingambit|Kingambit, L50, F|100/100
+|switch|p2b: Munkidori|Munkidori, L50, M|100/100
+|turn|1
+|inactive|Battle timer is ON: inactive players will automatically lose when time's up. (requested by hawkthijs)
+|
+|t:|1775112263
+|move|p1a: Tornadus|Snowscape|p1a: Tornadus
+|-weather|Snowscape
+|move|p2b: Munkidori|Sludge Bomb|p1a: Tornadus
+|-damage|p1a: Tornadus|59/100
+|move|p2a: Kingambit|Iron Head|p1b: Regice
+|-supereffective|p1b: Regice
+|-damage|p1b: Regice|24/100
+|-damage|p2a: Kingambit|91/100|[from] item: Life Orb
+|move|p1b: Regice|Blizzard|p2b: Munkidori|[spread] p2a,p2b
+|-resisted|p2a: Kingambit
+|-damage|p2a: Kingambit|73/100
+|-damage|p2b: Munkidori|76/100
+|-status|p2a: Kingambit|frz
+|-status|p2b: Munkidori|frz
+|
+|-weather|Snowscape|[upkeep]
+|upkeep
+|turn|2
+|
+|t:|1775112286
+|-terastallize|p1b: Regice|Fire
+|move|p1a: Tornadus|Tailwind|p1a: Tornadus
+|-sidestart|p1: hawkthijs|move: Tailwind
+|cant|p2b: Munkidori|frz
+|move|p1b: Regice|Tera Blast|p2a: Kingambit|[anim] Tera Blast Fire
+|-supereffective|p2a: Kingambit
+|-damage|p2a: Kingambit|0 fnt
+|faint|p2a: Kingambit
+|
+|-weather|Snowscape|[upkeep]
+|upkeep
+|inactive|Pever3ll has 30 seconds left.
+|
+|t:|1775112311
+|switch|p2a: Chien-Pao|Chien-Pao, L50|100/100
+|-ability|p2a: Chien-Pao|Sword of Ruin
+|turn|3
+|
+|t:|1775112321
+|move|p2a: Chien-Pao|Protect|p2a: Chien-Pao
+|-singleturn|p2a: Chien-Pao|Protect
+|move|p1a: Tornadus|Bleakwind Storm|p2b: Munkidori|[spread] p2b
+|-activate|p2a: Chien-Pao|move: Protect
+|-crit|p2b: Munkidori
+|-damage|p2b: Munkidori|39/100 frz
+|cant|p2b: Munkidori|frz
+|move|p1b: Regice|Tera Blast|p2a: Chien-Pao|[anim] Tera Blast Fire
+|-activate|p2a: Chien-Pao|move: Protect
+|
+|-weather|Snowscape|[upkeep]
+|upkeep
+|turn|4
+|
+|t:|1775112337
+|move|p1a: Tornadus|Bleakwind Storm|p2a: Chien-Pao|[spread] p2a,p2b
+|-crit|p2b: Munkidori
+|-damage|p2a: Chien-Pao|48/100
+|-damage|p2b: Munkidori|7/100 frz
+|move|p2a: Chien-Pao|Crunch|p1b: Regice
+|-damage|p1b: Regice|0 fnt
+|faint|p1b: Regice
+|-curestatus|p2b: Munkidori|frz|[msg]
+|move|p2b: Munkidori|Sludge Bomb|p1a: Tornadus
+|-damage|p1a: Tornadus|14/100
+|
+|-weather|Snowscape|[upkeep]
+|upkeep
+|
+|t:|1775112348
+|switch|p1b: Ogerpon|Ogerpon-Hearthflame, L50, F|100/100
+|-ability|p1b: Ogerpon|Mold Breaker
+|turn|5
+|
+|t:|1775112356
+|move|p2a: Chien-Pao|Protect|p2a: Chien-Pao
+|-singleturn|p2a: Chien-Pao|Protect
+|move|p1b: Ogerpon|Ivy Cudgel|p2a: Chien-Pao|[anim] Ivy Cudgel Fire
+|-activate|p2a: Chien-Pao|move: Protect
+|move|p1a: Tornadus|Bleakwind Storm|p2b: Munkidori|[spread] p2b
+|-activate|p2a: Chien-Pao|move: Protect
+|-damage|p2b: Munkidori|0 fnt
+|faint|p2b: Munkidori
+|
+|-weather|none
+|-sideend|p1: hawkthijs|move: Tailwind
+|upkeep
+|
+|t:|1775112363
+|switch|p2b: Dragonite|Dragonite, L50, M|100/100
+|turn|6
+|
+|t:|1775112377
+|move|p2b: Dragonite|Extreme Speed|p1a: Tornadus
+|-damage|p1a: Tornadus|0 fnt
+|faint|p1a: Tornadus
+|move|p2a: Chien-Pao|Icicle Crash|p1b: Ogerpon
+|-damage|p1b: Ogerpon|27/100
+|cant|p1b: Ogerpon|flinch
+|
+|upkeep
+|
+|t:|1775112385
+|switch|p1a: Registeel|Registeel, L50, shiny|100/100
+|turn|7
+|
+|t:|1775112395
+|move|p2a: Chien-Pao|Protect|p2a: Chien-Pao
+|-singleturn|p2a: Chien-Pao|Protect
+|move|p1b: Ogerpon|Follow Me|p1b: Ogerpon
+|-singleturn|p1b: Ogerpon|move: Follow Me
+|move|p2b: Dragonite|Extreme Speed|p1b: Ogerpon
+|-damage|p1b: Ogerpon|0 fnt
+|faint|p1b: Ogerpon
+|move|p1a: Registeel|Iron Defense|p1a: Registeel
+|-boost|p1a: Registeel|def|2
+|
+|upkeep
+|turn|8
+|
+|t:|1775112413
+|move|p2b: Dragonite|Extreme Speed|p1a: Registeel
+|-resisted|p1a: Registeel
+|-damage|p1a: Registeel|92/100
+|move|p2a: Chien-Pao|Crunch|p1a: Registeel
+|-damage|p1a: Registeel|76/100
+|move|p1a: Registeel|Body Press|p2a: Chien-Pao
+|-supereffective|p2a: Chien-Pao
+|-damage|p2a: Chien-Pao|0 fnt
+|faint|p2a: Chien-Pao
+|
+|-heal|p1a: Registeel|82/100|[from] item: Leftovers
+|upkeep
+|turn|9
+|-message|Pever3ll forfeited.
+|
+|win|hawkthijs
+|l|☆Pever3ll
+|player|p2|
+||Pever3ll is ready for game 3.
+||hawkthijs is ready for game 3.
+|uhtml|next|Next: <a href="/battle-gen9vgc2026regfbo3-2573268662"><strong>Game 3 of 3</strong></a>
+|l|☆hawkthijs
+|player|p1|

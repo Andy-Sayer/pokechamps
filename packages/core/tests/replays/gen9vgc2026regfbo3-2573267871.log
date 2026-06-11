@@ -1,0 +1,112 @@
+|j|☆IceColdZekrom
+|j|☆tangerine01
+|html|<table width="100%"><tr><td align="left">IceColdZekrom</td><td align="right">tangerine01</tr><tr><td align="left"><i class="fa fa-circle-o"></i> <i class="fa fa-circle-o"></i> </td><td align="right"><i class="fa fa-circle-o"></i> <i class="fa fa-circle-o"></i> </tr></table>
+|uhtml|bestof|<h2><strong>Game 1</strong> of <a href="/game-bestof3-gen9vgc2026regfbo3-2573267870">a best-of-3</a></h2>
+|t:|1775112286
+|gametype|doubles
+|player|p1|IceColdZekrom|eusine|1278
+|player|p2|tangerine01|102|1035
+|gen|9
+|tier|[Gen 9] VGC 2026 Reg F (Bo3)
+|rated|
+|rule|Species Clause: Limit one of each Pokémon
+|rule|Item Clause: Limit 1 of each item
+|clearpoke
+|poke|p1|Whimsicott, L50, M|
+|poke|p1|Moltres-Galar, L50|
+|poke|p1|Sinistcha, L50|
+|poke|p1|Arcanine-Hisui, L50, M|
+|poke|p1|Regieleki, L50|
+|poke|p1|Okidogi, L50, M|
+|poke|p2|Regidrago, L50|
+|poke|p2|Tornadus, L50, M|
+|poke|p2|Ogerpon-Hearthflame, L50, F|
+|poke|p2|Urshifu-*, L50, M|
+|poke|p2|Rillaboom, L50, M|
+|poke|p2|Gholdengo, L50|
+|teampreview|4
+|showteam|p1|Whimsicott||FocusSash|Prankster|Tailwind,Endeavor,Encore,Moonblast|||M|||50|,,,,,Ghost]Moltres-Galar||Leftovers|Berserk|NastyPlot,Protect,FieryWrath,Taunt||||||50|,,,,,Dark]Sinistcha||SitrusBerry|Hospitality|MatchaGotcha,Scald,RagePowder,TrickRoom||||||50|,,,,,Water]Arcanine-Hisui||ChoiceBand|Intimidate|RockSlide,FlareBlitz,ExtremeSpeed,WildCharge|||M|||50|,,,,,Normal]Regieleki||Magnet|Transistor|Thunderbolt,Electroweb,Protect,TeraBlast||||||50|,,,,,Ice]Okidogi||CovertCloak|GuardDog|KnockOff,Protect,PoisonJab,DrainPunch|||M|||50|,,,,,Dark
+|showteam|p2|Regidrago||LifeOrb|DragonsMaw|DragonEnergy,Protect,EarthPower,DracoMeteor||||||50|,,,,,Ghost]Tornadus||FocusSash|Prankster|BleakwindStorm,Tailwind,IcyWind,Protect|||M|||50|,,,,,Ghost]Ogerpon-Hearthflame||HearthflameMask|MoldBreaker|HornLeech,IvyCudgel,FollowMe,SpikyShield|||F|||50|,,,,,Fire]Urshifu-Rapid-Strike||ChoiceScarf|UnseenFist|SurgingStrikes,CloseCombat,AquaJet,Uturn|||M|||50|,,,,,Steel]Rillaboom||AssaultVest|GrassySurge|WoodHammer,FakeOut,HighHorsepower,GrassyGlide|||M|||50|,,,,,Fire]Gholdengo||ChoiceSpecs|GoodasGold|MakeItRain,ShadowBall,Trick,PowerGem||||||50|,,,,,Steel
+|
+|t:|1775112329
+|teamsize|p1|4
+|teamsize|p2|4
+|start
+|switch|p1a: Whims Wenders|Whimsicott, L50, M|100/100
+|switch|p1b: Martin Scorsregi|Regieleki, L50|100/100
+|switch|p2a: Rillaboom|Rillaboom, L50, M|100/100
+|switch|p2b: Gholdengo|Gholdengo, L50|100/100
+|-fieldstart|move: Grassy Terrain|[from] ability: Grassy Surge|[of] p2a: Rillaboom
+|turn|1
+|
+|t:|1775112350
+|-terastallize|p2b: Gholdengo|Steel
+|move|p2a: Rillaboom|Fake Out|p1b: Martin Scorsregi
+|-damage|p1b: Martin Scorsregi|75/100
+|cant|p1b: Martin Scorsregi|flinch
+|move|p1a: Whims Wenders|Moonblast|p2b: Gholdengo
+|-resisted|p2b: Gholdengo
+|-damage|p2b: Gholdengo|86/100
+|move|p2b: Gholdengo|Make It Rain|p1b: Martin Scorsregi|[spread] p1a,p1b
+|-supereffective|p1a: Whims Wenders
+|-resisted|p1b: Martin Scorsregi
+|-enditem|p1a: Whims Wenders|Focus Sash
+|-damage|p1a: Whims Wenders|1/100
+|-damage|p1b: Martin Scorsregi|0 fnt
+|-unboost|p2b: Gholdengo|spa|1
+|faint|p1b: Martin Scorsregi
+|
+|-heal|p1a: Whims Wenders|7/100|[from] Grassy Terrain
+|-heal|p2b: Gholdengo|92/100|[from] Grassy Terrain
+|upkeep
+|
+|t:|1775112367
+|switch|p1b: Sinis Chan-wook|Sinistcha, L50|100/100
+|-heal|p1a: Whims Wenders|32/100|[from] ability: Hospitality|[of] p1b: Sinis Chan-wook
+|turn|2
+|
+|t:|1775112376
+|move|p2a: Rillaboom|Grassy Glide|p1a: Whims Wenders
+|-resisted|p1a: Whims Wenders
+|-damage|p1a: Whims Wenders|14/100
+|move|p1a: Whims Wenders|Endeavor|p2b: Gholdengo
+|-damage|p2b: Gholdengo|10/100
+|move|p2b: Gholdengo|Make It Rain|p1b: Sinis Chan-wook|[spread] p1a,p1b
+|-supereffective|p1a: Whims Wenders
+|-crit|p1b: Sinis Chan-wook
+|-damage|p1a: Whims Wenders|0 fnt
+|-damage|p1b: Sinis Chan-wook|0 fnt
+|-unboost|p2b: Gholdengo|spa|1
+|faint|p1a: Whims Wenders
+|faint|p1b: Sinis Chan-wook
+|
+|-heal|p2b: Gholdengo|16/100|[from] Grassy Terrain
+|upkeep
+|
+|t:|1775112389
+|switch|p1b: David Flynch|Arcanine-Hisui, L50, M|100/100
+|-ability|p1b: David Flynch|Intimidate|boost
+|-unboost|p2a: Rillaboom|atk|1
+|-unboost|p2b: Gholdengo|atk|1
+|turn|3
+|
+|t:|1775112399
+|switch|p2a: Ogerpon|Ogerpon-Hearthflame, L50, F|100/100
+|-ability|p2a: Ogerpon|Mold Breaker
+|move|p1b: David Flynch|Flare Blitz|p2a: Ogerpon
+|-damage|p2a: Ogerpon|20/100
+|-damage|p1b: David Flynch|71/100|[from] Recoil
+|move|p2b: Gholdengo|Make It Rain|p1b: David Flynch
+|-damage|p1b: David Flynch|0 fnt
+|-unboost|p2b: Gholdengo|spa|1
+|faint|p1b: David Flynch
+|
+|win|tangerine01
+|l|☆IceColdZekrom
+|player|p1|
+||IceColdZekrom is ready for game 2.
+|inactive|tangerine01 has 30 seconds to confirm battle start!
+||tangerine01 is ready for game 2.
+|uhtml|next|Next: <a href="/battle-gen9vgc2026regfbo3-2573268589"><strong>Game 2 of 3</strong></a>
+|l|☆tangerine01
+|player|p2|

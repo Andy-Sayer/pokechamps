@@ -1,0 +1,161 @@
+|j|☆sunshineglade
+|j|☆swoobatfan2001
+|html|<table width="100%"><tr><td align="left">sunshineglade</td><td align="right">swoobatfan2001</tr><tr><td align="left"><i class="fa fa-circle-o"></i> <i class="fa fa-circle-o"></i> </td><td align="right"><i class="fa fa-circle-o"></i> <i class="fa fa-circle"></i> </tr></table>
+|uhtml|bestof|<h2><strong>Game 2</strong> of <a href="/game-bestof3-gen9vgc2025regh-307724">a best-of-3</a></h2>
+|t:|1778716155
+|gametype|doubles
+|player|p1|sunshineglade|anabel|
+|player|p2|swoobatfan2001|richboy|
+|gen|9
+|tier|[Gen 9] VGC 2025 Reg H
+|rule|Species Clause: Limit one of each Pokémon
+|rule|Item Clause: Limit 1 of each item
+|raw|<div class="infobox"><details class="readmore" open><summary><strong>1 custom rule:</strong></summary> Best of = 3</details></div>
+|clearpoke
+|poke|p1|Ursaluna-Bloodmoon, L50, M|
+|poke|p1|Typhlosion-Hisui, L50, F|
+|poke|p1|Glimmora, L50, F|
+|poke|p1|Lilligant, L50, F|
+|poke|p1|Sneasler, L50, F|
+|poke|p1|Gholdengo, L50|
+|poke|p2|Gurdurr, L50, F|
+|poke|p2|Incineroar, L50, F|
+|poke|p2|Ursaluna, L50, M|
+|poke|p2|Grumpig, L50, F|
+|poke|p2|Indeedee, L50, M|
+|poke|p2|Farigiraf, L50, F|
+|teampreview|4
+|j| Fell Kookie
+swoobatfan2001 rejected open team sheets.
+|c| Fell Kookie|I wonder what emma's ability is
+|c|☆sunshineglade|unburden?
+|c|☆swoobatfan2001|uhhhhhhhhhh
+|c|☆swoobatfan2001|oh
+|
+|t:|1778716236
+|teamsize|p1|4
+|teamsize|p2|4
+|start
+|switch|p1a: Profiteer|Gholdengo, L50|100/100
+|switch|p1b: In Extremis|Sneasler, L50, F|100/100
+|switch|p2a: Nurse Bust Down|Grumpig, L50, F|100/100
+|switch|p2b: Catalyst|Indeedee, L50, M|100/100
+|-fieldstart|move: Psychic Terrain|[from] ability: Psychic Surge|[of] p2b: Catalyst
+|turn|1
+|c| Fell Kookie|Dragon ball staredown
+|c|☆sunshineglade|kookie who do i bench
+|c| Fell Kookie|Wait i need the list hold on
+|c|☆sunshineglade|https://x.com/sunshineglade/status/2054698162053435782?s=20
+|c| Fell Kookie|Takumi 
+|
+|t:|1778716347
+|move|p2b: Catalyst|Protect|p2b: Catalyst
+|-singleturn|p2b: Catalyst|Protect
+|move|p1b: In Extremis|Fake Out|p2a: Nurse Bust Down
+|-activate|p2a: Nurse Bust Down|move: Psychic Terrain
+|move|p1a: Profiteer|Trick|p2b: Catalyst
+|-activate|p2b: Catalyst|move: Protect
+|move|p2a: Nurse Bust Down|Snarl|p1a: Profiteer|[spread] p1a,p1b
+|-supereffective|p1a: Profiteer
+|-resisted|p1b: In Extremis
+|-damage|p1a: Profiteer|78/100
+|-damage|p1b: In Extremis|93/100
+|-unboost|p1a: Profiteer|spa|1
+|-unboost|p1b: In Extremis|spa|1
+|
+|upkeep
+|turn|2
+|c| Fell Kookie|Popple said we dont use takumi in 2026
+|
+|t:|1778716397
+|switch|p1a: Garon|Ursaluna-Bloodmoon, L50, M|100/100
+|-terastallize|p1b: In Extremis|Dark
+|move|p1b: In Extremis|Dire Claw|p2b: Catalyst
+|-damage|p2b: Catalyst|13/100
+|move|p2a: Nurse Bust Down|Expanding Force|p1a: Garon|[spread] p1a
+|-immune|p1b: In Extremis
+|-crit|p1a: Garon
+|-damage|p1a: Garon|28/100
+|move|p2b: Catalyst|Trick Room|p2b: Catalyst
+|-fieldstart|move: Trick Room|[of] p2b: Catalyst
+|
+|upkeep
+|turn|3
+|c|☆sunshineglade|i would feel so bad for abandoning him though
+|c| Fell Kookie|What the fuck is in extremis
+|c|☆sunshineglade|scarlet's personal
+|c| Fell Kookie|Would never have guessed that with a gun to my head LMAO
+|
+|t:|1778716461
+|switch|p2b: Intim Merchant|Incineroar, L50, F|100/100
+|-ability|p2b: Intim Merchant|Intimidate|boost
+|-unboost|p1a: Garon|atk|1
+|-unboost|p1b: In Extremis|atk|1
+|move|p1a: Garon|Blood Moon|p2a: Nurse Bust Down
+|-damage|p2a: Nurse Bust Down|44/100
+|-damage|p1a: Garon|18/100|[from] item: Life Orb
+|move|p2a: Nurse Bust Down|Grass Knot|p1a: Garon
+|-supereffective|p1a: Garon
+|-damage|p1a: Garon|0 fnt
+|faint|p1a: Garon
+|move|p1b: In Extremis|Dire Claw|p2b: Intim Merchant
+|-damage|p2b: Intim Merchant|72/100
+|-status|p2b: Intim Merchant|par
+|
+|upkeep
+|c|☆sunshineglade|Heh. I'm a better fire emblem fan than kookie.
+|c|☆sunshineglade|I'm morally superior
+|c|☆sunshineglade|i love dire claw
+|c|☆swoobatfan2001|DIE
+|c|☆sunshineglade|YOU HAVE TRICK ROOM
+|
+|t:|1778716498
+|switch|p1a: Pyrotechnics|Typhlosion-Hisui, L50, F|100/100
+|turn|4
+|c| Fell Kookie|Pyrotechnics is saizo right 
+|c| Fell Kookie|Im not a fraud i swear
+|c|☆sunshineglade|yeh!
+|c|☆sunshineglade|i could have done all personals
+|c| Fell Kookie|Garon
+|
+|t:|1778716536
+|move|p2b: Intim Merchant|Flare Blitz|p1b: In Extremis
+|-damage|p1b: In Extremis|0 fnt
+|faint|p1b: In Extremis
+|-damage|p2b: Intim Merchant|49/100 par|[from] Recoil
+|move|p2a: Nurse Bust Down|Expanding Force|p1a: Pyrotechnics
+|-damage|p1a: Pyrotechnics|20/100
+|move|p1a: Pyrotechnics|Heat Wave|p2b: Intim Merchant|[spread] p2a,p2b
+|-resisted|p2b: Intim Merchant
+|-damage|p2a: Nurse Bust Down|29/100
+|-damage|p2b: Intim Merchant|22/100 par
+|
+|upkeep
+|c|☆sunshineglade|glimmora is literally pyehoison strike though
+|
+|t:|1778716547
+|switch|p1b: Profiteer|Gholdengo, L50|78/100
+|turn|5
+|c| Fell Kookie|Sunny you're getting cooked
+|c|☆swoobatfan2001|that's one frail typhlo
+|
+|t:|1778716572
+|move|p2b: Intim Merchant|Knock Off|p1b: Profiteer
+|-supereffective|p1b: Profiteer
+|-damage|p1b: Profiteer|0 fnt
+|-enditem|p1b: Profiteer|Choice Specs|[from] move: Knock Off|[of] p2b: Intim Merchant
+|faint|p1b: Profiteer
+|move|p2a: Nurse Bust Down|Snarl|p1a: Pyrotechnics
+|-supereffective|p1a: Pyrotechnics
+|-damage|p1a: Pyrotechnics|0 fnt
+|faint|p1a: Pyrotechnics
+|
+|win|swoobatfan2001
+|c|☆sunshineglade|suicice
+|c|☆sunshineglade|can i shower now
+|c|☆swoobatfan2001|ggs sunny m. dog
+|c|☆swoobatfan2001|yeah
+|c|☆sunshineglade|ggs pan c. ake
+|c| Fell Kookie|Bwah
+|c|☆swoobatfan2001|absolute BWAH
+|c|☆sunshineglade|bwah

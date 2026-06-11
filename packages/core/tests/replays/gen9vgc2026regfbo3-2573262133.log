@@ -1,0 +1,144 @@
+|j|☆bobovgc121
+|j|☆Yikes_Ltd
+|html|<table width="100%"><tr><td align="left">bobovgc121</td><td align="right">Yikes_Ltd</tr><tr><td align="left"><i class="fa fa-circle-o"></i> <i class="fa fa-circle-o"></i> </td><td align="right"><i class="fa fa-circle-o"></i> <i class="fa fa-circle"></i> </tr></table>
+|uhtml|bestof|<h2><strong>Game 2</strong> of <a href="/game-bestof3-gen9vgc2026regfbo3-2573260777">a best-of-3</a></h2>
+|t:|1775111293
+|gametype|doubles
+|player|p1|bobovgc121|266|1257
+|player|p2|Yikes_Ltd|1|1315
+|gen|9
+|tier|[Gen 9] VGC 2026 Reg F (Bo3)
+|rated|
+|rule|Species Clause: Limit one of each Pokémon
+|rule|Item Clause: Limit 1 of each item
+|clearpoke
+|poke|p1|Flutter Mane, L50|
+|poke|p1|Ogerpon-Hearthflame, L50, F|
+|poke|p1|Incineroar, L50, F|
+|poke|p1|Gholdengo, L50|
+|poke|p1|Tornadus, L50, M|
+|poke|p1|Great Tusk, L50|
+|poke|p2|Amoonguss, L50, M|
+|poke|p2|Pelipper, L50, M|
+|poke|p2|Landorus, L50, M|
+|poke|p2|Rillaboom, L50, F|
+|poke|p2|Primarina, L50, M|
+|poke|p2|Tornadus, L50, M|
+|teampreview|4
+|showteam|p1|Flutter Mane||ChoiceSpecs|Protosynthesis|Moonblast,DazzlingGleam,ShadowBall,PowerGem||||||50|,,,,,Fairy]Ogerpon-Hearthflame||HearthflameMask|MoldBreaker|IvyCudgel,WoodHammer,FollowMe,SpikyShield|||F|||50|,,,,,Fire]Incineroar||AssaultVest|Intimidate|FlareBlitz,KnockOff,Uturn,FakeOut|||F|||50|,,,,,Water]Gholdengo||MetalCoat|GoodasGold|MakeItRain,NastyPlot,ShadowBall,Protect||||||50|,,,,,Water]Tornadus||CovertCloak|Prankster|BleakwindStorm,SunnyDay,Tailwind,Protect|||M|||50|,,,,,Steel]Great Tusk||ClearAmulet|Protosynthesis|Earthquake,HeadlongRush,Protect,IceSpinner||||||50|,,,,,Ghost
+|showteam|p2|Amoonguss||RockyHelmet|Regenerator|PollenPuff,Spore,Protect,RagePowder|||M|||50|,,,,,Dark]Pelipper||FocusSash|Drizzle|WideGuard,Hurricane,WeatherBall,Tailwind|||M|||50|,,,,,Ghost]Landorus||LifeOrb|SheerForce|SandsearStorm,CalmMind,SludgeBomb,Protect|||M|||50|,,,,,Ghost]Rillaboom||AssaultVest|GrassySurge|HighHorsepower,Uturn,GrassyGlide,WoodHammer|||F|||50|,,,,,Grass]Primarina||ThroatSpray|LiquidVoice|HyperVoice,CalmMind,Moonblast,Protect|||M|||50|,,,,,Grass]Tornadus||CovertCloak|Prankster|Taunt,Tailwind,RainDance,BleakwindStorm|||M|||50|,,,,,Dark
+|
+|t:|1775111314
+|teamsize|p1|4
+|teamsize|p2|4
+|start
+|switch|p1a: Tornadus|Tornadus, L50, M|100/100
+|switch|p1b: Gholdengo|Gholdengo, L50|100/100
+|switch|p2a: Landorus|Landorus, L50, M|100/100
+|switch|p2b: Pelipper|Pelipper, L50, M|100/100
+|-weather|RainDance|[from] ability: Drizzle|[of] p2b: Pelipper
+|turn|1
+|
+|t:|1775111331
+|-terastallize|p1b: Gholdengo|Water
+|move|p2b: Pelipper|Wide Guard|p2b: Pelipper
+|-singleturn|p2b: Pelipper|Wide Guard
+|move|p1a: Tornadus|Sunny Day|p1a: Tornadus
+|-weather|SunnyDay
+|move|p2a: Landorus|Calm Mind|p2a: Landorus
+|-boost|p2a: Landorus|spa|1
+|-boost|p2a: Landorus|spd|1
+|move|p1b: Gholdengo|Nasty Plot|p1b: Gholdengo
+|-boost|p1b: Gholdengo|spa|2
+|
+|-weather|SunnyDay|[upkeep]
+|upkeep
+|turn|2
+|
+|t:|1775111348
+|switch|p2b: Rillaboom|Rillaboom, L50, F|100/100
+|-fieldstart|move: Grassy Terrain|[from] ability: Grassy Surge|[of] p2b: Rillaboom
+|move|p2a: Landorus|Calm Mind|p2a: Landorus
+|-boost|p2a: Landorus|spa|1
+|-boost|p2a: Landorus|spd|1
+|move|p1a: Tornadus|Bleakwind Storm|p2a: Landorus|[spread] p2a,p2b
+|-supereffective|p2b: Rillaboom
+|-damage|p2a: Landorus|79/100
+|-damage|p2b: Rillaboom|55/100
+|move|p1b: Gholdengo|Nasty Plot|p1b: Gholdengo
+|-boost|p1b: Gholdengo|spa|2
+|
+|-weather|SunnyDay|[upkeep]
+|-heal|p2b: Rillaboom|60/100|[from] Grassy Terrain
+|upkeep
+|turn|3
+|
+|t:|1775111373
+|-terastallize|p2b: Rillaboom|Grass
+|move|p1b: Gholdengo|Protect|p1b: Gholdengo
+|-singleturn|p1b: Gholdengo|Protect
+|move|p1a: Tornadus|Tailwind|p1a: Tornadus
+|-sidestart|p1: bobovgc121|move: Tailwind
+|move|p2b: Rillaboom|Grassy Glide|p1b: Gholdengo
+|-activate|p1b: Gholdengo|move: Protect
+|move|p2a: Landorus|Sludge Bomb|p1a: Tornadus
+|-damage|p1a: Tornadus|0 fnt
+|faint|p1a: Tornadus
+|
+|-weather|SunnyDay|[upkeep]
+|-heal|p2b: Rillaboom|66/100|[from] Grassy Terrain
+|upkeep
+|
+|t:|1775111386
+|switch|p1a: Ogerpon|Ogerpon-Hearthflame, L50, F|100/100
+|-ability|p1a: Ogerpon|Mold Breaker
+|turn|4
+|
+|t:|1775111402
+|move|p2a: Landorus|Protect|p2a: Landorus
+|-singleturn|p2a: Landorus|Protect
+|move|p1a: Ogerpon|Follow Me|p1a: Ogerpon
+|-singleturn|p1a: Ogerpon|move: Follow Me
+|move|p2b: Rillaboom|Grassy Glide|p1a: Ogerpon
+|-resisted|p1a: Ogerpon
+|-damage|p1a: Ogerpon|88/100
+|move|p1b: Gholdengo|Make It Rain|p2a: Landorus|[spread] p2b
+|-activate|p2a: Landorus|move: Protect
+|-damage|p2b: Rillaboom|0 fnt
+|-unboost|p1b: Gholdengo|spa|1
+|faint|p2b: Rillaboom
+|
+|-weather|SunnyDay|[upkeep]
+|-heal|p1a: Ogerpon|94/100|[from] Grassy Terrain
+|upkeep
+|
+|t:|1775111417
+|switch|p2b: Tornadus|Tornadus, L50, M|100/100
+|turn|5
+|
+|t:|1775111430
+|move|p2b: Tornadus|Tailwind|p2b: Tornadus
+|-sidestart|p2: Yikes_Ltd|move: Tailwind
+|move|p2a: Landorus|Sandsear Storm|p1a: Ogerpon|[spread] p1a
+|-miss|p2a: Landorus|p1b: Gholdengo
+|-damage|p1a: Ogerpon|0 fnt
+|faint|p1a: Ogerpon
+|move|p1b: Gholdengo|Make It Rain|p2b: Tornadus|[spread] p2a,p2b
+|-damage|p2a: Landorus|0 fnt
+|-damage|p2b: Tornadus|0 fnt
+|-unboost|p1b: Gholdengo|spa|1
+|faint|p2a: Landorus
+|faint|p2b: Tornadus
+|
+|-weather|none
+|upkeep
+|-message|Yikes_Ltd forfeited.
+|
+|win|bobovgc121
+|l|☆Yikes_Ltd
+|player|p2|
+||Yikes_Ltd is ready for game 3.
+||bobovgc121 is ready for game 3.
+|uhtml|next|Next: <a href="/battle-gen9vgc2026regfbo3-2573263045"><strong>Game 3 of 3</strong></a>
+|l|☆bobovgc121
+|player|p1|

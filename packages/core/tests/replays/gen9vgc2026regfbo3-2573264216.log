@@ -1,0 +1,159 @@
+|j|☆Pever3ll
+|j|☆spencerpegrum
+|html|<table width="100%"><tr><td align="left">Pever3ll</td><td align="right">spencerpegrum</tr><tr><td align="left"><i class="fa fa-circle"></i> <i class="fa fa-circle-o"></i> </td><td align="right"><i class="fa fa-circle-o"></i> <i class="fa fa-circle-o"></i> </tr></table>
+|uhtml|bestof|<h2><strong>Game 2</strong> of <a href="/game-bestof3-gen9vgc2026regfbo3-2573263304">a best-of-3</a></h2>
+|t:|1775111654
+|gametype|doubles
+|player|p1|Pever3ll|miku-flying|1279
+|player|p2|spencerpegrum|101|1276
+|gen|9
+|tier|[Gen 9] VGC 2026 Reg F (Bo3)
+|rated|
+|rule|Species Clause: Limit one of each Pokémon
+|rule|Item Clause: Limit 1 of each item
+|clearpoke
+|poke|p1|Kingambit, L50, F|
+|poke|p1|Chien-Pao, L50|
+|poke|p1|Dragonite, L50, F|
+|poke|p1|Sinistcha-Masterpiece, L50|
+|poke|p1|Munkidori, L50, M|
+|poke|p1|Primarina, L50, F|
+|poke|p2|Chien-Pao, L50|
+|poke|p2|Urshifu-*, L50, M|
+|poke|p2|Archaludon, L50, M|
+|poke|p2|Flutter Mane, L50|
+|poke|p2|Pelipper, L50, F|
+|poke|p2|Amoonguss, L50, M|
+|teampreview|4
+|showteam|p1|Kingambit||LifeOrb|Defiant|KowtowCleave,IronHead,Protect,SuckerPunch|||F|||50|,,,,,Dark]Chien-Pao||FocusSash|SwordofRuin|IcicleCrash,IcyWind,Protect,Crunch||||||50|,,,,,Ghost]Dragonite||ChoiceBand|InnerFocus|ExtremeSpeed,Outrage,StompingTantrum,AerialAce|||F|||50|,,,,,Normal]Sinistcha-Masterpiece||RockyHelmet|Hospitality|MatchaGotcha,ShadowBall,RagePowder,TrickRoom||||||50|,,,,,Water]Munkidori||AssaultVest|ToxicChain|FakeOut,SludgeBomb,TeraBlast,Psychic|||M|||50|,,,,,Ground]Primarina||ThroatSpray|LiquidVoice|HyperVoice,Moonblast,Protect,IcyWind|||F|||50|,,,,,Steel
+|showteam|p2|Chien-Pao||FocusSash|SwordofRuin|IceSpinner,IceShard,SacredSword,Protect||||||50|,,,,,Ghost]Urshifu-Rapid-Strike||ChoiceScarf|UnseenFist|SurgingStrikes,CloseCombat,AquaJet,Uturn|||M|||50|,,,,,Water]Archaludon||AssaultVest|Stamina|DracoMeteor,FlashCannon,ElectroShot,BodyPress|||M|||50|,,,,,Grass]Flutter Mane||BoosterEnergy|Protosynthesis|Moonblast,ShadowBall,DazzlingGleam,Protect||||||50|,,,,,Fairy]Pelipper||RockyHelmet|Drizzle|WeatherBall,Hurricane,WideGuard,Tailwind|||F|||50|,,,,,Steel]Amoonguss||MentalHerb|Regenerator|SludgeBomb,PollenPuff,Spore,RagePowder|||M|||50|,,,,,Water
+|inactive|Battle timer is ON: inactive players will automatically lose when time's up. (requested by spencerpegrum)
+|
+|t:|1775111681
+|teamsize|p1|4
+|teamsize|p2|4
+|start
+|switch|p1a: Kingambit|Kingambit, L50, F|100/100
+|switch|p1b: Primarina|Primarina, L50, F|100/100
+|switch|p2a: Urshifu|Urshifu-Rapid-Strike, L50, M|100/100
+|switch|p2b: Flutter Mane|Flutter Mane, L50|100/100
+|-enditem|p2b: Flutter Mane|Booster Energy
+|-activate|p2b: Flutter Mane|ability: Protosynthesis|[fromitem]
+|-start|p2b: Flutter Mane|protosynthesisspa
+|turn|1
+|
+|t:|1775111696
+|-terastallize|p2b: Flutter Mane|Fairy
+|move|p1a: Kingambit|Sucker Punch|p2b: Flutter Mane
+|-resisted|p2b: Flutter Mane
+|-damage|p2b: Flutter Mane|61/100
+|-damage|p1a: Kingambit|91/100|[from] item: Life Orb
+|move|p2a: Urshifu|Surging Strikes|p1a: Kingambit
+|-crit|p1a: Kingambit
+|-damage|p1a: Kingambit|76/100
+|-crit|p1a: Kingambit
+|-damage|p1a: Kingambit|60/100
+|-crit|p1a: Kingambit
+|-damage|p1a: Kingambit|45/100
+|-hitcount|p1a: Kingambit|3
+|move|p2b: Flutter Mane|Dazzling Gleam|p1b: Primarina|[spread] p1a,p1b
+|-damage|p1a: Kingambit|0 fnt
+|-damage|p1b: Primarina|52/100
+|faint|p1a: Kingambit
+|move|p1b: Primarina|Hyper Voice|p2a: Urshifu|[spread] p2a,p2b
+|-resisted|p2a: Urshifu
+|-damage|p2a: Urshifu|80/100
+|-damage|p2b: Flutter Mane|28/100
+|-enditem|p1b: Primarina|Throat Spray
+|-boost|p1b: Primarina|spa|1|[from] item: Throat Spray
+|
+|upkeep
+|
+|t:|1775111701
+|switch|p1a: Dragonite|Dragonite, L50, F|100/100
+|turn|2
+|inactive|spencerpegrum has 30 seconds left.
+|
+|t:|1775111731
+|-end|p2b: Flutter Mane|Protosynthesis|[silent]
+|switch|p2b: Archaludon|Archaludon, L50, M|100/100
+|move|p1a: Dragonite|Extreme Speed|p2b: Archaludon
+|-resisted|p2b: Archaludon
+|-damage|p2b: Archaludon|85/100
+|-ability|p2b: Archaludon|Stamina|boost
+|-boost|p2b: Archaludon|def|1
+|move|p2a: Urshifu|Surging Strikes|p1a: Dragonite
+|-resisted|p1a: Dragonite
+|-crit|p1a: Dragonite
+|-damage|p1a: Dragonite|90/100
+|-resisted|p1a: Dragonite
+|-crit|p1a: Dragonite
+|-damage|p1a: Dragonite|80/100
+|-resisted|p1a: Dragonite
+|-crit|p1a: Dragonite
+|-damage|p1a: Dragonite|70/100
+|-hitcount|p1a: Dragonite|3
+|move|p1b: Primarina|Moonblast|p2a: Urshifu
+|-supereffective|p2a: Urshifu
+|-damage|p2a: Urshifu|0 fnt
+|faint|p2a: Urshifu
+|
+|upkeep
+|
+|t:|1775111748
+|switch|p2a: Pelipper|Pelipper, L50, F|100/100
+|-weather|RainDance|[from] ability: Drizzle|[of] p2a: Pelipper
+|turn|3
+|inactive|Pever3ll has 30 seconds left.
+|
+|t:|1775111781
+|move|p1b: Primarina|Protect|p1b: Primarina
+|-singleturn|p1b: Primarina|Protect
+|move|p2a: Pelipper|Wide Guard|p2a: Pelipper
+|-singleturn|p2a: Pelipper|Wide Guard
+|move|p1a: Dragonite|Extreme Speed|p2a: Pelipper
+|-damage|p2a: Pelipper|54/100
+|-damage|p1a: Dragonite|54/100|[from] item: Rocky Helmet|[of] p2a: Pelipper
+|move|p2b: Archaludon|Electro Shot||[still]
+|-prepare|p2b: Archaludon|Electro Shot
+|-boost|p2b: Archaludon|spa|1
+|-anim|p2b: Archaludon|Electro Shot|p1a: Dragonite
+|-damage|p1a: Dragonite|0 fnt
+|faint|p1a: Dragonite
+|
+|-weather|RainDance|[upkeep]
+|upkeep
+|
+|t:|1775111786
+|switch|p1a: Sinistcha|Sinistcha-Masterpiece, L50|100/100
+|-heal|p1b: Primarina|77/100|[from] ability: Hospitality|[of] p1a: Sinistcha
+|turn|4
+|
+|t:|1775111802
+|move|p2a: Pelipper|Wide Guard|p2a: Pelipper
+|-singleturn|p2a: Pelipper|Wide Guard
+|move|p2b: Archaludon|Electro Shot||[still]
+|-prepare|p2b: Archaludon|Electro Shot
+|-boost|p2b: Archaludon|spa|1
+|-anim|p2b: Archaludon|Electro Shot|p1b: Primarina
+|-supereffective|p1b: Primarina
+|-damage|p1b: Primarina|0 fnt
+|faint|p1b: Primarina
+|move|p1a: Sinistcha|Shadow Ball|p2b: Archaludon
+|-damage|p2b: Archaludon|59/100
+|-ability|p2b: Archaludon|Stamina|boost
+|-boost|p2b: Archaludon|def|1
+|
+|-weather|RainDance|[upkeep]
+|upkeep
+|turn|5
+|-message|Pever3ll forfeited.
+|
+|win|spencerpegrum
+|l|☆Pever3ll
+|player|p1|
+||Pever3ll is ready for game 3.
+||spencerpegrum is ready for game 3.
+|uhtml|next|Next: <a href="/battle-gen9vgc2026regfbo3-2573265115"><strong>Game 3 of 3</strong></a>
+|l|☆spencerpegrum
+|player|p2|

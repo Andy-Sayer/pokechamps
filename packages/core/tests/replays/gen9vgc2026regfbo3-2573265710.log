@@ -1,0 +1,117 @@
+|j|☆LODYYYYY
+|j|☆Yikes_Ltd
+|html|<table width="100%"><tr><td align="left">LODYYYYY</td><td align="right">Yikes_Ltd</tr><tr><td align="left"><i class="fa fa-circle-o"></i> <i class="fa fa-circle-o"></i> </td><td align="right"><i class="fa fa-circle-o"></i> <i class="fa fa-circle-o"></i> </tr></table>
+|uhtml|bestof|<h2><strong>Game 1</strong> of <a href="/game-bestof3-gen9vgc2026regfbo3-2573265709">a best-of-3</a></h2>
+|t:|1775111918
+|gametype|doubles
+|player|p1|LODYYYYY|265|1046
+|player|p2|Yikes_Ltd|1|1292
+|gen|9
+|tier|[Gen 9] VGC 2026 Reg F (Bo3)
+|rated|
+|rule|Species Clause: Limit one of each Pokémon
+|rule|Item Clause: Limit 1 of each item
+|clearpoke
+|poke|p1|Dragapult, L50, F|
+|poke|p1|Sableye, L50, F|
+|poke|p1|Iron Valiant, L50|
+|poke|p1|Whimsicott, L50, M|
+|poke|p1|Kingambit, L50, F|
+|poke|p1|Ogerpon-Wellspring, L50, F|
+|poke|p2|Amoonguss, L50, M|
+|poke|p2|Pelipper, L50, F|
+|poke|p2|Landorus, L50, M|
+|poke|p2|Rillaboom, L50, F|
+|poke|p2|Primarina, L50, M|
+|poke|p2|Tornadus, L50, M|
+|teampreview|4
+|showteam|p1|Dragapult||LifeOrb|Infiltrator|DracoMeteor,Hex,Flamethrower,Uturn|||F|||50|,,,,,Dragon]Sableye||MentalHerb|Prankster|FakeOut,WillOWisp,Quash,FoulPlay|||F|||50|,,,,,Dark]Iron Valiant||BoosterEnergy|QuarkDrive|Moonblast,CloseCombat,KnockOff,Protect||||||50|,,,,,Fairy]Whimsicott||FocusSash|Prankster|Tailwind,Taunt,Encore,FakeTears|||M|||50|,,,,,Grass]Kingambit||BlackGlasses|SupremeOverlord|KowtowCleave,SuckerPunch,IronHead,Protect|||F|||50|,,,,,Dark]Ogerpon-Wellspring||WellspringMask|WaterAbsorb|IvyCudgel,FollowMe,HornLeech,SpikyShield|||F|||50|,,,,,Water
+|showteam|p2|Amoonguss||RockyHelmet|Regenerator|PollenPuff,Spore,Protect,RagePowder|||M|||50|,,,,,Dark]Pelipper||FocusSash|Drizzle|WideGuard,Hurricane,WeatherBall,Tailwind|||F|||50|,,,,,Ghost]Landorus||LifeOrb|SheerForce|SandsearStorm,CalmMind,SludgeBomb,Protect|||M|||50|,,,,,Ghost]Rillaboom||AssaultVest|GrassySurge|HighHorsepower,Uturn,GrassyGlide,WoodHammer|||F|||50|,,,,,Grass]Primarina||ThroatSpray|LiquidVoice|HyperVoice,CalmMind,Moonblast,Protect|||M|||50|,,,,,Grass]Tornadus||CovertCloak|Prankster|Taunt,Tailwind,RainDance,BleakwindStorm|||M|||50|,,,,,Dark
+|
+|t:|1775111957
+|teamsize|p1|4
+|teamsize|p2|4
+|start
+|switch|p1a: Dragapult|Dragapult, L50, F|100/100
+|switch|p1b: Sableye|Sableye, L50, F|100/100
+|switch|p2a: Tornadus|Tornadus, L50, M|100/100
+|switch|p2b: Landorus|Landorus, L50, M|100/100
+|turn|1
+|
+|t:|1775111991
+|move|p2b: Landorus|Protect|p2b: Landorus
+|-singleturn|p2b: Landorus|Protect
+|move|p1b: Sableye|Fake Out|p2b: Landorus
+|-activate|p2b: Landorus|move: Protect
+|move|p2a: Tornadus|Tailwind|p2a: Tornadus
+|-sidestart|p2: Yikes_Ltd|move: Tailwind
+|move|p1a: Dragapult|Hex|p2b: Landorus
+|-activate|p2b: Landorus|move: Protect
+|
+|upkeep
+|turn|2
+|
+|t:|1775112013
+|move|p1b: Sableye|Fake Out||[still]
+|-hint|Fake Out only works on your first turn out.
+|-fail|p1b: Sableye
+|move|p2a: Tornadus|Rain Dance|p2a: Tornadus
+|-weather|RainDance
+|move|p2b: Landorus|Calm Mind|p2b: Landorus
+|-boost|p2b: Landorus|spa|1
+|-boost|p2b: Landorus|spd|1
+|move|p1a: Dragapult|Hex|p2b: Landorus
+|-damage|p2b: Landorus|71/100
+|-damage|p1a: Dragapult|91/100|[from] item: Life Orb
+|
+|-weather|RainDance|[upkeep]
+|upkeep
+|turn|3
+|l|☆LODYYYYY
+|player|p1|
+|inactive|Battle timer is ON: inactive players will automatically lose when time's up. (requested by Yikes_Ltd)
+|j|☆LODYYYYY
+|inactive|LODYYYYY reconnected and has 85 seconds left.
+|player|p1|LODYYYYY|265|
+|
+|t:|1775112083
+|move|p2b: Landorus|Protect|p2b: Landorus
+|-singleturn|p2b: Landorus|Protect
+|move|p1b: Sableye|Fake Out||[still]
+|-hint|Fake Out only works on your first turn out.
+|-fail|p1b: Sableye
+|move|p2a: Tornadus|Bleakwind Storm|p1b: Sableye|[spread] p1a,p1b
+|-damage|p1a: Dragapult|32/100
+|-damage|p1b: Sableye|49/100
+|move|p1a: Dragapult|Hex|p2b: Landorus
+|-activate|p2b: Landorus|move: Protect
+|
+|-weather|RainDance|[upkeep]
+|upkeep
+|turn|4
+|
+|t:|1775112097
+|move|p1b: Sableye|Fake Out||[still]
+|-hint|Fake Out only works on your first turn out.
+|-fail|p1b: Sableye
+|move|p2b: Landorus|Calm Mind|p2b: Landorus
+|-boost|p2b: Landorus|spa|1
+|-boost|p2b: Landorus|spd|1
+|move|p2a: Tornadus|Bleakwind Storm|p1a: Dragapult|[spread] p1a,p1b
+|-damage|p1a: Dragapult|0 fnt
+|-damage|p1b: Sableye|0 fnt
+|faint|p1a: Dragapult
+|faint|p1b: Sableye
+|
+|-weather|RainDance|[upkeep]
+|-sideend|p2: Yikes_Ltd|move: Tailwind
+|upkeep
+|-message|LODYYYYY forfeited.
+|raw|LODYYYYY's rating: 1046 &rarr; <strong>1039</strong><br />(-7 for losing)
+|raw|Yikes_Ltd's rating: 1292 &rarr; <strong>1302</strong><br />(+10 for winning)
+|
+|win|Yikes_Ltd
+|l|☆LODYYYYY
+|player|p1|
+|l|☆Yikes_Ltd
+|player|p2|
