@@ -11,6 +11,7 @@ import { getDb } from '../db/connection.js';
 import { hashPassword, verifyPassword } from './passwords.js';
 import { newId, newTokenSecret } from './ids.js';
 import { readTokenVersion, type JwtPayload } from './jwt.js';
+import { isLocked, recordFailure, clearFailures } from './loginThrottle.js';
 
 const credentialsSchema = z.object({
   email: z.string().email().max(255),
@@ -56,7 +57,10 @@ function badRequest(reply: FastifyReply, err: z.ZodError) {
 }
 
 // Strict bucket on the credential endpoints — separate from the global limit.
+// Credentials are tiny; a 4KB body limit stops anyone streaming junk at the
+// bcrypt-backed endpoints.
 const credentialRateLimit = {
+  bodyLimit: 4 * 1024,
   config: {
     rateLimit: {
       max: 5,
@@ -111,6 +115,13 @@ const authRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     if (!parsed.success) return badRequest(reply, parsed.error);
     const { email, password } = parsed.data;
 
+    // Per-ACCOUNT throttle: the per-IP bucket above is defeated by rotating
+    // IPs; this locks the targeted account after repeated failures. Checked
+    // before the bcrypt spend so a locked account costs us nothing.
+    if (isLocked(email)) {
+      return reply.code(429).send({ error: 'too many failed attempts — try again later' });
+    }
+
     const row = db
       .prepare<[string], UserRow>(
         'SELECT id, email, password_hash, created_at FROM users WHERE email = ? COLLATE NOCASE',
@@ -122,8 +133,10 @@ const authRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       '$2b$12$abcdefghijklmnopqrstuuKZ0FtY9C6vV6c0p9Yqo4SX1XvKxqyAW';
     const ok = await verifyPassword(password, row?.password_hash ?? placeholderHash);
     if (!row || !ok) {
+      recordFailure(email);
       return reply.code(401).send({ error: 'invalid email or password' });
     }
+    clearFailures(email);
 
     const tv = readTokenVersion(db, row.id) ?? 0;
     const token = await reply.jwtSign({ sub: row.id, email: row.email, tv });

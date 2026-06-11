@@ -272,10 +272,18 @@ Two halves of the same `replay.ts` investment (see
   a cert, have a friend `node tui/tui.mjs` against it end-to-end. Likely
   shakeout: arm64 `better-sqlite3` build on the A1 shape, `.env`/CORS origin,
   firewall. (Needs a manual `! gcloud`/`ssh`-style step from the user — flag it.)
-- **Medium security items** (branch `security/hardening` exists): per-route body
-  limits, per-account login throttle, WS payload caps, generic error responses.
+- **Medium security items ✅ shipped 2026-06-11** (the old `security/hardening`
+  branch is gone — implemented fresh on main): 4KB body limit on the
+  credential endpoints; per-ACCOUNT login throttle (`auth/loginThrottle.ts` —
+  10 fails/15min locks the account for 15min, complements the per-IP bucket an
+  attacker defeats by rotating IPs; in-memory by design for the single-VM
+  deploy); WS frames capped at 256KB (`maxPayload`); generic 5xx error handler
+  (real error logged, constant body returned — no path/SQL leakage; 4xx
+  messages pass through).
 
-*Effort:* small–medium; mostly the user's hands-on VM step + a tidy PR.
+**Deploy validation remains the one open item** — it needs the user's hands-on
+VM step (provision the Oracle VM, run compose, point DNS, end-to-end check).
+Everything code-side is ready; flag when you want to do it together.
 
 ### Theme 6 — TUI polish *(filler between big items)*
 

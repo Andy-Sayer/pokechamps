@@ -145,7 +145,22 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<BuiltApp> {
 
   // WebSocket plugin must register before any route that uses { websocket: true }.
   // The hub itself (src/ws/hub.ts) is plain-module pub/sub — no plugin needed.
-  await app.register(fastifyWebsocket);
+  // maxPayload caps a single WS frame: live-share frames are full Match
+  // snapshots (~tens of KB), so 256KB is generous headroom while stopping a
+  // client from streaming multi-MB frames at the hub.
+  await app.register(fastifyWebsocket, { options: { maxPayload: 256 * 1024 } });
+
+  // Generic error responses: 5xx never leak internals (err.message can carry
+  // file paths / SQL fragments) — log the real error, return a constant body.
+  // Intentional 4xx (validation, rate limit, body limit) pass through.
+  app.setErrorHandler((err: Error & { statusCode?: number }, request, reply) => {
+    const status = err.statusCode ?? 500;
+    if (status >= 500) {
+      request.log.error({ err }, 'unhandled error');
+      return reply.code(500).send({ error: 'internal server error' });
+    }
+    return reply.code(status).send({ error: err.message });
+  });
 
   // Decorator: routes use { preHandler: app.authenticate } to require auth.
   app.decorate('authenticate', authenticateFactory(app));
