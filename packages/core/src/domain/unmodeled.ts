@@ -41,14 +41,12 @@ interface GapRule {
 // Each rule names a class the search approximates today. Keep in lockstep with the
 // GAP/PARTIAL rows of docs/notes/mechanics-coverage.md.
 const RULES: GapRule[] = [
-  // Spore/Sleep Powder/Hypnosis sleep is now MODELLED (status 'slp' = can't-act +
-  // wake counter); only delayed Yawn remains unmodelled.
-  { kind: 'yawn', label: 'Yawn (delayed sleep)', moves: ['yawn'] },
-  // Follow Me / Rage Powder redirection is now MODELLED; ability redirection
-  // (Storm Drain/Lightning Rod) and Ally Switch are not.
-  { kind: 'redirection', label: 'ability redirection / Ally Switch',
-    moves: ['allyswitch', 'spotlight'],
-    abilities: ['stormdrain', 'lightningrod'] },
+  // Sleep (incl. delayed Yawn) is now MODELLED. Follow Me / Rage Powder AND
+  // ability redirection (Storm Drain/Lightning Rod absorb) are MODELLED; only
+  // the position-shuffling moves remain — our slot-less model can't represent
+  // them, so they stay informational.
+  { kind: 'redirection', label: 'position shuffle (Ally Switch / Spotlight)',
+    moves: ['allyswitch', 'spotlight'] },
   // Wide / Quick Guard are now MODELLED (side-wide protect actions). Mat Block /
   // Crafty Shield remain a gap.
   { kind: 'teamprotect', label: 'team protect (Mat Block / Crafty Shield)',
@@ -57,26 +55,29 @@ const RULES: GapRule[] = [
   // Bug/Breaking Swipe/Low Sweep/Bulldoze/Lunge/Acid Spray/Mystical Fire/…) are now
   // MODELLED (Cell.foeDrop). Only the dedicated 0-damage stat-lowering moves remain
   // a gap — the search has no SET_DEBUFF action for them yet.
-  // Single-target stat-lowering moves (Charm/Scary Face/Eerie Impulse/…) are now
-  // MODELLED via the SET_DEBUFF action. Only spread debuffs (Growl/Leer/String Shot),
-  // accuracy/evasion drops, and situational ones remain a gap.
-  { kind: 'foedebuff', label: 'spread/acc stat-lowering move (Growl / Leer / Sand Attack)',
-    moves: ['growl', 'leer', 'stringshot', 'tearfullook', 'sandattack', 'venomdrench', 'flash', 'kinesis'] },
+  // Single-target AND spread stat-lowering moves are now MODELLED via
+  // SET_DEBUFF. Accuracy/evasion droppers stay excluded by the same policy as
+  // probabilistic accuracy itself (maximin never prices hit chance) — flagged
+  // as informational so the user weighs the dice.
+  { kind: 'foedebuff', label: 'accuracy/evasion drop (informational — hit chance is never priced)',
+    moves: ['sandattack', 'venomdrench', 'flash', 'kinesis', 'smokescreen', 'mudslap'] },
   { kind: 'twoturn', label: 'two-turn / charge move',
     moves: ['solarbeam', 'solarblade', 'fly', 'dig', 'dive', 'bounce', 'phantomforce', 'shadowforce',
       'skyattack', 'meteorbeam', 'electroshot', 'geomancy', 'skullbash', 'razorwind', 'freezeshock', 'iceburn'] },
-  // Taunt + Encore are now MODELLED (option restriction). Disable/Torment/Imprison
-  // /Spite remain a gap.
-  { kind: 'restriction', label: 'move restriction (Disable / Torment / Imprison)',
-    moves: ['disable', 'torment', 'imprison', 'spite'] },
+  // Taunt + Encore are MODELLED (option restriction), and a live-match Disable
+  // now root-carries into the search pools. Torment/Imprison/Spite remain (no
+  // live tracking to carry, no in-tree cast model).
+  { kind: 'restriction', label: 'move restriction (Torment / Imprison / Spite)',
+    moves: ['torment', 'imprison', 'spite'] },
   // Explosion / Self-Destruct / Misty Explosion are MODELLED (isSelfdestruct → user
   // faints). The HP-based / sacrifice-pivot ones are not.
   { kind: 'selffaint', label: 'self-faint move (Final Gambit / Memento / Healing Wish)',
     moves: ['finalgambit', 'healingwish', 'lunardance', 'memento'] },
-  // on-KO boost (Moxie/Beast Boost) and hazard clear (Defog/Rapid Spin) are MODELLED.
-  // Weakness Policy is MODELLED (procWp); the other reactive items are not.
-  { kind: 'reactiveitem', label: 'reactive item (Booster Energy / Throat Spray / …)',
-    items: ['blunderpolicy', 'throatspray', 'boosterenergy', 'roomservice', 'snowball', 'luminousmoss', 'cellbattery', 'absorbbulb'] },
+  // on-KO boost (Moxie/Beast Boost), hazard clear, Weakness Policy (procWp) and
+  // Booster Energy (Protosynthesis/Quark Drive via the calc's boostedStat +
+  // search Spe ×1.5) are MODELLED; the rest of the reactive items are not.
+  { kind: 'reactiveitem', label: 'reactive item (Throat Spray / Blunder Policy / …)',
+    items: ['blunderpolicy', 'throatspray', 'roomservice', 'snowball', 'luminousmoss', 'cellbattery', 'absorbbulb'] },
   { kind: 'itemswap', label: 'item swap/loss (Trick / Knock Off)',
     moves: ['trick', 'switcheroo', 'bestow', 'knockoff', 'thief', 'covet', 'corrosivegas'] },
   // Confusion is a PROBABILISTIC secondary (33% self-hit) — deliberately NOT

@@ -68,6 +68,9 @@ export interface SearchMyMon {
   /** True if this mon is on its FIRST turn out (just switched in / battle start) —
    *  gates Fake Out's guaranteed flinch. Threaded from the live match's tracking. */
   firstTurnOut?: boolean;
+  /** Move currently Disabled on this mon (live-match root-carry) — stripped
+   *  from its table pools for the search horizon. */
+  disabledMove?: string;
   /** Substitute HP remaining (% of max), if this mon is behind a sub. */
   subHpPercent?: number;
   /** Choice lock from the live match: the move this Choice-item holder is locked
@@ -648,7 +651,7 @@ interface Tables {
   myPivotCell: (Cell[] | null)[]; oppPivotCell: (Cell[] | null)[];
   myPivotDebuff: (BoostMap | null)[]; oppPivotDebuff: (BoostMap | null)[];
   // Dedicated debuff move (Charm/Scary Face/…): move + the foe boost-drop it applies.
-  myDebuffMove: ({ move: string; boosts: BoostMap } | null)[]; oppDebuffMove: ({ move: string; boosts: BoostMap } | null)[];
+  myDebuffMove: ({ move: string; boosts: BoostMap; spread?: boolean } | null)[]; oppDebuffMove: ({ move: string; boosts: BoostMap; spread?: boolean } | null)[];
   // Taunt / Encore moves (option-restriction), or null.
   myTauntMove: (string | null)[]; oppTauntMove: (string | null)[];
   myEncoreMove: (string | null)[]; oppEncoreMove: (string | null)[];
@@ -975,6 +978,10 @@ interface State {
    *  Inflicted sleep starts at 2 (Gen 9 is 1-3 turns; the middle is a fair model). */
   mySleepTurns: number[];
   oppSleepTurns: number[];
+  /** Yawn pending per mon: 2 = yawned this turn, 1 = falls asleep at THIS
+   *  turn's end (unless it switched out / got statused first). 0 = none. */
+  myYawn: number[];
+  oppYawn: number[];
   /** Taunt turns remaining per mon (>0 = can't use status moves). */
   myTaunt: number[];
   oppTaunt: number[];
@@ -1169,19 +1176,30 @@ function recoverPct(kind: RecoverMove['kind'], w: Weather): number {
 
 // --- End-of-turn residuals --------------------------------------------------
 /** Per-mon info for the EOT residual pass (status chip, sand/heal eligibility). */
-interface ResidualInfo { status: string; magicGuard: boolean; leftovers: boolean; sandImmune: boolean }
+interface ResidualInfo {
+  status: string; magicGuard: boolean; leftovers: boolean; sandImmune: boolean;
+  /** Black Sludge: +1/16 for Poison-types, −1/8 otherwise (the hurt is
+   *  residual damage, so Magic Guard blocks it; the heal goes through). */
+  sludgeHeal: boolean; sludgeHurt: boolean;
+}
 function residualInfo(species: string, ability: string | null | undefined, item: string | null | undefined, status: string | undefined): ResidualInfo {
   const ab = toId(ability ?? '');
   const magicGuard = ab === 'magicguard';
   const leftovers = /leftovers/i.test(item ?? '');
+  const sludge = /black\s*sludge/i.test(item ?? '');
+  const poison = isType(species, 'Poison');
   const sandImmune = magicGuard || ['sandveil', 'sandrush', 'sandforce', 'overcoat'].includes(ab)
     || isType(species, 'Rock') || isType(species, 'Ground') || isType(species, 'Steel');
-  return { status: status ?? '', magicGuard, leftovers, sandImmune };
+  return {
+    status: status ?? '', magicGuard, leftovers, sandImmune,
+    sludgeHeal: sludge && poison, sludgeHurt: sludge && !poison,
+  };
 }
 
 // --- Inflicted status -------------------------------------------------------
-/** A status-inflicting move + the status it applies (sleep deferred). */
-interface StatusMove { move: string; status: string }
+/** A status-inflicting move + the status it applies. `delayed` = Yawn-style
+ *  (lands at the end of the turn after the cast, escapable by switching). */
+interface StatusMove { move: string; status: string; delayed?: boolean }
 function findStatusMove(moves: string[]): StatusMove | null {
   for (const m of moves) {
     switch (toId(m)) {
@@ -1192,6 +1210,9 @@ function findStatusMove(moves: string[]): StatusMove | null {
       case 'poisonpowder': case 'poisongas': return { move: m, status: 'psn' };
       case 'spore': case 'sleeppowder': case 'hypnosis': case 'lovelykiss':
       case 'sing': case 'grasswhistle': case 'darkvoid': return { move: m, status: 'slp' };
+      // Yawn: DELAYED sleep — lands at the end of the NEXT turn unless the
+      // target switches out or picks up another status first.
+      case 'yawn': return { move: m, status: 'slp', delayed: true };
     }
   }
   return null;
@@ -1224,8 +1245,17 @@ const DEBUFF_MOVES: Record<string, BoostMap> = {
   screech: { def: -2 }, metalsound: { spd: -2 }, faketears: { spd: -2 },
   tickle: { atk: -1, def: -1 }, nobleroar: { atk: -1, spa: -1 },
 };
-function findDebuffMove(moves: string[]): { move: string; boosts: BoostMap } | null {
-  for (const m of moves) { const b = DEBUFF_MOVES[toId(m)]; if (b) return { move: m, boosts: b }; }
+// Spread variants hit BOTH live foes (Growl/Leer/Tail Whip/String Shot).
+// Accuracy/evasion droppers (Sand Attack…) stay excluded by the same policy as
+// probabilistic accuracy itself — maximin never prices hit chance.
+const SPREAD_DEBUFF_MOVES: Record<string, BoostMap> = {
+  growl: { atk: -1 }, leer: { def: -1 }, tailwhip: { def: -1 }, stringshot: { spe: -2 },
+};
+function findDebuffMove(moves: string[]): { move: string; boosts: BoostMap; spread?: boolean } | null {
+  for (const m of moves) {
+    const b = DEBUFF_MOVES[toId(m)]; if (b) return { move: m, boosts: b };
+    const sb = SPREAD_DEBUFF_MOVES[toId(m)]; if (sb) return { move: m, boosts: sb, spread: true };
+  }
   return null;
 }
 // Taunt (target can't use status moves for ~3 turns) / Encore (target locked into
@@ -1460,6 +1490,27 @@ function movePriority(move: string): number {
   return m?.priority ?? 0;
 }
 
+// Redirection ability for a move type: Storm Drain pulls Water, Lightning Rod
+// pulls Electric (single-target moves only; the holder absorbs for no damage).
+function drainAbilityFor(type: string | undefined): string | null {
+  if (type === 'Water') return 'stormdrain';
+  if (type === 'Electric') return 'lightningrod';
+  return null;
+}
+
+// Booster Energy Protosynthesis/Quark Drive: the holder procs its ability on
+// entry without the supporting weather/terrain. Damage-stat boosts flow through
+// the calc (damage.ts auto-sets boostedStat); the SPEED case (×1.5 when Spe is
+// the holder's strictly-highest stat) lives here, in the turn-order tables.
+function boosterSpeMult(set: PokemonSet): number {
+  if (!/booster\s*energy/i.test(set.item ?? '')) return 1;
+  const ab = toId(set.ability ?? '');
+  if (ab !== 'protosynthesis' && ab !== 'quarkdrive') return 1;
+  const spe = actualStat(set, 'spe');
+  const others = (['atk', 'def', 'spa', 'spd'] as const).map(st => actualStat(set, st));
+  return spe > Math.max(...others) ? 1.5 : 1;
+}
+
 // Multi-hit moves (Dual Wingbeat, Bullet Seed, Rock Blast…) strike 2+ times, so
 // they break through Focus Sash / Sturdy (the first hit drops the survival, the
 // next KOs). Truthy `multihit` (a number or [min,max]) marks them.
@@ -1544,7 +1595,14 @@ function megaifyOppEntry(entry: OpponentEntry): OpponentEntry {
 interface MegaPlan { myMega: number | null; oppMega: number | null }
 
 function buildTables(input: SearchInput, plan: MegaPlan): Tables {
-  const mine = input.mine;
+  // Disable root-carry: a move Disabled in the live match is unusable for the
+  // search horizon (4 turns ≥ our depth) — strip it from the set ONCE so every
+  // downstream table (per-move cells, spread, prio, Fake Out, pivot) skips it.
+  // The opp side needs no strip: predictions already filters the entry's
+  // disabledMove from the threat pool.
+  const mine = input.mine.map(m => m.disabledMove && m.set.moves.some(x => toId(x) === toId(m.disabledMove!))
+    ? { ...m, set: { ...m.set, moves: m.set.moves.filter(x => toId(x) !== toId(m.disabledMove!)) } }
+    : m);
   const opp = input.opp;
   // My mon is mega in this branch if the plan megas it OR it already mega'd.
   const myMega = (mi: number) => mi === plan.myMega || !!mine[mi]!.megaActive;
@@ -1689,11 +1747,11 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppSpecies: opp.map(o => o.entry.species),
     // Spe stat stage folds into the base speed (a stat-level change); Tailwind
     // and paralysis are applied at sort time in resolveTurn.
-    mySpeed: mine.map((m, mi) => actualSpeed(m.set, myMega(mi) ? (myMegaForme(m.set) ?? undefined) : undefined) * speStageMult(m.boosts?.spe)),
+    mySpeed: mine.map((m, mi) => actualSpeed(m.set, myMega(mi) ? (myMegaForme(m.set) ?? undefined) : undefined) * speStageMult(m.boosts?.spe) * boosterSpeMult(m.set)),
     // Hypothetical opp mega → mega-speed cap; otherwise oppBaseSpeed, which
     // already returns mega speed for an already-mega'd opp (effectiveSpeedRange
     // keys off its mega forme).
-    oppSpeed: opp.map((o, oj) => (oj === plan.oppMega ? (megaMaxSpeed(o.entry.species) ?? oppBaseSpeed(o.entry, input.field)) : oppBaseSpeed(o.entry, input.field)) * speStageMult(o.boosts?.spe)),
+    oppSpeed: opp.map((o, oj) => (oj === plan.oppMega ? (megaMaxSpeed(o.entry.species) ?? oppBaseSpeed(o.entry, input.field)) : oppBaseSpeed(o.entry, input.field)) * speStageMult(o.boosts?.spe) * (o.entry.candidates?.[0] && !o.entry.itemConsumed ? boosterSpeMult(o.entry.candidates[0]!) : 1)),
     myPar: mine.map(m => m.status === 'par'),
     oppPar: opp.map(o => o.status === 'par'),
     off, thr, offMoves, thrMoves, mySpread, mySpreadActors, oppSpread, oppSpreadActors,
@@ -1878,6 +1936,8 @@ function initialState(input: SearchInput): State {
     // A mon already asleep at the root: we don't know the remaining count, so assume
     // ~2 turns (the middle of Gen 9's 1-3).
     mySleepTurns: input.mine.map(m => (m.status === 'slp' ? 2 : 0)),
+    myYawn: input.mine.map(() => 0),
+    oppYawn: input.opp.map(() => 0),
     oppSleepTurns: input.opp.map(o => (o.status === 'slp' ? 2 : 0)),
     // Taunt/Encore volatiles aren't carried on SearchInput yet → start clear.
     myTaunt: input.mine.map(() => 0),
@@ -2464,6 +2524,12 @@ function resolveTurn(
       if (psychicBlocked(oc.priority, t.oppGrounded[oTgt]!)) continue; // Psychic Terrain blocks priority
       if (oppQuickGuard && oc.priority > 0) continue;  // Quick Guard blocks priority moves
       if (isSuckerLike(oc.move) && !targetWillAttack('opp', oTgt)) continue; // Sucker Punch whiffs vs a non-attacker
+      // Ability redirection: a live foe with Storm Drain (Water) / Lightning
+      // Rod (Electric) pulls single-target moves of that type onto itself and
+      // ABSORBS them — no damage (the +1 SpA gain is left unmodelled). Only a
+      // KNOWN opp ability triggers, per the usual opp-conservatism. The tree
+      // then avoids such moves on its own (they value at zero).
+      if (drainAbilityFor(oc.type) && oppActiveNow.some(j => (oppHp[j] ?? 0) > 0 && toId(t.oppAbility[j] ?? '') === drainAbilityFor(oc.type))) continue;
       if (isFutureMove(oc.move)) {                    // Future Sight: schedule, no damage now
         if ((oppFutureTurns[oTgt] ?? 0) <= 0) { oppFutureTurns[oTgt] = 2; oppFutureDmg[oTgt] = myDmg(act.actor, oTgt, oc.dmgMid, oc.physical, oc.type, oc.groundMove); }
         continue;
@@ -2576,6 +2642,10 @@ function resolveTurn(
       if (psychicBlocked(tc.priority, t.myGrounded[mTgt]!)) continue; // Psychic Terrain blocks priority
       if (myQuickGuard && tc.priority > 0) continue;  // Quick Guard blocks priority moves
       if (isSuckerLike(tc.move) && !targetWillAttack('mine', mTgt)) continue; // Sucker Punch whiffs vs a non-attacker
+      // Ability redirection onto MY side: my Storm Drain/Lightning Rod holder
+      // absorbs the foes' single-target moves of its type (mirror of above —
+      // my abilities are always known).
+      if (drainAbilityFor(tc.type) && myActiveNow.some(i => (myHp[i] ?? 0) > 0 && toId(t.myAbility[i] ?? '') === drainAbilityFor(tc.type))) continue;
       if (isFutureMove(tc.move)) {                    // opp Future Sight: schedule, no damage now
         if ((myFutureTurns[mTgt] ?? 0) <= 0) { myFutureTurns[mTgt] = 2; myFutureDmg[mTgt] = oppDmg(act.actor, mTgt, tc.dmgMid, tc.physical, tc.type, tc.groundMove); }
         continue;
@@ -2828,8 +2898,10 @@ function resolveTurn(
       else if (status === 'psn') delta -= 100 / 8;
       else if (status === 'tox') { const n = toxicN[idx] || 1; delta -= n * (100 / 16); toxicN[idx] = n + 1; }
       if (sand && !info.sandImmune) delta -= 100 / 16;
+      if (info.sludgeHurt) delta -= 100 / 8;           // Black Sludge on a non-Poison
     }
     if (info.leftovers) delta += 100 / 16;             // heals ignore Magic Guard
+    if (info.sludgeHeal) delta += 100 / 16;            // Black Sludge on a Poison-type
     if (grassy && grounded) delta += 100 / 16;
     if (delta !== 0) hp[idx] = Math.max(0, Math.min(100, hp[idx]! + delta));
   };
@@ -2889,12 +2961,14 @@ function resolveTurn(
   const myStatus = s.myStatus.slice();
   const oppStatus = s.oppStatus.slice();
   const mySleepTurns = s.mySleepTurns.slice();
+  const myYawn = s.myYawn.slice();
+  const oppYawn = s.oppYawn.slice();
   const oppSleepTurns = s.oppSleepTurns.slice();
   const myBerryUsed = s.myBerryUsed.slice();
   const oppBerryUsed = s.oppBerryUsed.slice();
   // Status persists on a mon that switches out; a switch-in arrives clean (awake).
-  for (const inn of mySwitchIn.values()) { myStatus[inn] = ''; myToxicN[inn] = 0; mySleepTurns[inn] = 0; myDisguise[inn] = hasDisguise(t.myAbility[inn]); myRecharge[inn] = false; myLocked[inn] = 0; myChoiceMove[inn] = null; mySubHp[inn] = 0; myWish[inn] = 0; }
-  for (const inn of oppSwitchIn.values()) { oppStatus[inn] = ''; oppToxicN[inn] = 0; oppSleepTurns[inn] = 0; oppDisguise[inn] = hasDisguise(t.oppAbility[inn]); oppRecharge[inn] = false; oppLocked[inn] = 0; oppChoiceMove[inn] = null; oppSubHp[inn] = 0; oppWish[inn] = 0; }
+  for (const inn of mySwitchIn.values()) { myStatus[inn] = ''; myToxicN[inn] = 0; mySleepTurns[inn] = 0; myYawn[inn] = 0; myDisguise[inn] = hasDisguise(t.myAbility[inn]); myRecharge[inn] = false; myLocked[inn] = 0; myChoiceMove[inn] = null; mySubHp[inn] = 0; myWish[inn] = 0; }
+  for (const inn of oppSwitchIn.values()) { oppStatus[inn] = ''; oppToxicN[inn] = 0; oppSleepTurns[inn] = 0; oppYawn[inn] = 0; oppDisguise[inn] = hasDisguise(t.oppAbility[inn]); oppRecharge[inn] = false; oppLocked[inn] = 0; oppChoiceMove[inn] = null; oppSubHp[inn] = 0; oppWish[inn] = 0; }
   // Wake: a mon that started the turn asleep ticks its counter down (it couldn't act
   // this turn); it wakes when the counter hits 0. Runs BEFORE this turn's infliction
   // so a freshly-slept mon keeps its full count.
@@ -2924,8 +2998,11 @@ function resolveTurn(
       continue;
     }
     if (!oppStatus[foe] && (oppSubHp[foe] ?? 0) <= 0 && statusLands(sm.status, sm.move, t.oppSpecies[foe]!, t.oppAbility[foe], t.oppGrounded[foe]!, s.terrain)) {
-      inflict(foe, sm.status, oppToxicN, oppStatus, oppBerryUsed, t.oppItem);
-      if (sm.status === 'slp' && oppStatus[foe] === 'slp') oppSleepTurns[foe] = 2;
+      if (sm.delayed) { if ((oppYawn[foe] ?? 0) <= 0) oppYawn[foe] = 2; } // Yawn: sleeps end of NEXT turn
+      else {
+        inflict(foe, sm.status, oppToxicN, oppStatus, oppBerryUsed, t.oppItem);
+        if (sm.status === 'slp' && oppStatus[foe] === 'slp') oppSleepTurns[foe] = 2;
+      }
     }
   }
   for (const [actor, target] of oppTargets) {
@@ -2941,8 +3018,11 @@ function resolveTurn(
       continue;
     }
     if (!myStatus[foe] && (mySubHp[foe] ?? 0) <= 0 && statusLands(sm.status, sm.move, t.mySpecies[foe]!, t.myAbility[foe], t.myGrounded[foe]!, s.terrain)) {
-      inflict(foe, sm.status, myToxicN, myStatus, myBerryUsed, t.myItem);
-      if (sm.status === 'slp' && myStatus[foe] === 'slp') mySleepTurns[foe] = 2;
+      if (sm.delayed) { if ((myYawn[foe] ?? 0) <= 0) myYawn[foe] = 2; } // Yawn: sleeps end of NEXT turn
+      else {
+        inflict(foe, sm.status, myToxicN, myStatus, myBerryUsed, t.myItem);
+        if (sm.status === 'slp' && myStatus[foe] === 'slp') mySleepTurns[foe] = 2;
+      }
     }
   }
   // Protect-variant contact punish that inflicts status (Baneful Bunker poison /
@@ -2953,25 +3033,44 @@ function resolveTurn(
   for (const [atk, st] of myPunishStatus) {
     if ((myHp[atk] ?? 0) > 0 && !myStatus[atk] && statusLands(st, '', t.mySpecies[atk]!, t.myAbility[atk], t.myGrounded[atk]!, s.terrain)) inflict(atk, st, myToxicN, myStatus, myBerryUsed, t.myItem);
   }
+  // Yawn resolution (end of turn): a pending yawn ticks down; at 0 the drowsy
+  // mon falls asleep unless it picked up another status meanwhile. Switching
+  // out already cleared it at the switch-in reset above.
+  const yawnTick = (idx: number, yawn: number[], statusArr: string[], sleepArr: number[], toxicN: number[], berryUsed: boolean[], item: (string | undefined)[], species: string, ability: string | null | undefined, grounded: boolean) => {
+    if ((yawn[idx] ?? 0) <= 0) return;
+    yawn[idx]!--;
+    if (yawn[idx] === 0 && !statusArr[idx] && statusLands('slp', '', species, ability, grounded, s.terrain)) {
+      inflict(idx, 'slp', toxicN, statusArr, berryUsed, item);
+      if (statusArr[idx] === 'slp') sleepArr[idx] = 2;
+    }
+  };
+  for (const i of myActiveNow) yawnTick(i, myYawn, myStatus, mySleepTurns, myToxicN, myBerryUsed, t.myItem, t.mySpecies[i]!, t.myAbility[i], t.myGrounded[i]!);
+  for (const j of oppActiveNow) yawnTick(j, oppYawn, oppStatus, oppSleepTurns, oppToxicN, oppBerryUsed, t.oppItem, t.oppSpecies[j]!, t.oppAbility[j], t.oppGrounded[j]!);
   // Dedicated debuff moves (Charm/Scary Face/…): lower the (post-switch) foe's stats,
   // routed through the foe-drop accumulator below so Clear Body immunity + Defiant apply.
   for (const [actor, target] of myTargets) {
     if (!isDebuffTarget(target)) continue;
     const dm = t.myDebuffMove[actor]; if (!dm) continue;
-    const foe = redirect(debuffFoeIdx(target), oppSwitchIn);
-    if ((oppHp[foe] ?? 0) <= 0) continue;
-    // Magic Bounce reflects the debuff back onto the caster (via the foe-drop-on-me
-    // path so the caster's Defiant/immunity still resolve).
-    if (toId(t.oppAbility[foe] ?? '') === 'magicbounce') accDrop(oppToFoeDrop, actor, dm.boosts);
-    else accDrop(myToFoeDrop, foe, dm.boosts);
+    // Spread debuffs (Growl/Leer) land on EVERY live foe; single-target ones
+    // on the (post-switch) chosen foe.
+    const foes = dm.spread ? oppActiveNow : [redirect(debuffFoeIdx(target), oppSwitchIn)];
+    for (const foe of foes) {
+      if ((oppHp[foe] ?? 0) <= 0) continue;
+      // Magic Bounce reflects the debuff back onto the caster (via the foe-drop-on-me
+      // path so the caster's Defiant/immunity still resolve).
+      if (toId(t.oppAbility[foe] ?? '') === 'magicbounce') accDrop(oppToFoeDrop, actor, dm.boosts);
+      else accDrop(myToFoeDrop, foe, dm.boosts);
+    }
   }
   for (const [actor, target] of oppTargets) {
     if (!isDebuffTarget(target)) continue;
     const dm = t.oppDebuffMove[actor]; if (!dm) continue;
-    const foe = redirect(debuffFoeIdx(target), mySwitchIn);
-    if ((myHp[foe] ?? 0) <= 0) continue;
-    if (toId(t.myAbility[foe] ?? '') === 'magicbounce') accDrop(myToFoeDrop, actor, dm.boosts);
-    else accDrop(oppToFoeDrop, foe, dm.boosts);
+    const foes = dm.spread ? myActiveNow : [redirect(debuffFoeIdx(target), mySwitchIn)];
+    for (const foe of foes) {
+      if ((myHp[foe] ?? 0) <= 0) continue;
+      if (toId(t.myAbility[foe] ?? '') === 'magicbounce') accDrop(myToFoeDrop, actor, dm.boosts);
+      else accDrop(oppToFoeDrop, foe, dm.boosts);
+    }
   }
 
   // Taunt / Encore (option restriction). Tick down what was active at the start
@@ -3139,7 +3238,7 @@ function resolveTurn(
     myReflect, myLightScreen, theirReflect, theirLightScreen,
     myReflectTurns, myLightScreenTurns, theirReflectTurns, theirLightScreenTurns,
     weather, weatherTurns, terrain, terrainTurns, myToxicN, oppToxicN, myStatus, oppStatus,
-    myBerryUsed, oppBerryUsed, myHazards, oppHazards, mySleepTurns, oppSleepTurns,
+    myBerryUsed, oppBerryUsed, myHazards, oppHazards, mySleepTurns, oppSleepTurns, myYawn, oppYawn,
     myTaunt, oppTaunt, myEncore, oppEncore, myEncoreAct, oppEncoreAct,
     myUnburden, oppUnburden, myResistBerryUsed, oppResistBerryUsed, myFirstTurn, oppFirstTurn,
     myDisguise, oppDisguise, myRecharge, oppRecharge, myLocked, oppLocked, myChoiceMove, oppChoiceMove, mySubHp, oppSubHp,
@@ -3495,7 +3594,7 @@ function ttKey(s: State, depth: number, maxDepth: number, pass: Pass): string {
   return [
     depth, maxDepth, pass.regime, bl(pass.survOpp), bl(pass.survMy),
     nb(s.myHp), nb(s.oppHp), nb(s.myActive), nb(s.oppActive), bl(s.oppSeen),
-    s.myStatus.join(''), s.oppStatus.join(''), nb(s.myToxicN), nb(s.oppToxicN), nb(s.mySleepTurns), nb(s.oppSleepTurns),
+    s.myStatus.join(''), s.oppStatus.join(''), nb(s.myToxicN), nb(s.oppToxicN), nb(s.mySleepTurns), nb(s.oppSleepTurns), nb(s.myYawn), nb(s.oppYawn),
     bs(s.myBoost), bs(s.oppBoost), nn(s.mySeeded), nn(s.oppSeeded),
     nb(s.myProtectStreak), nb(s.oppProtectStreak),
     `${s.trickRoom ? 1 : 0}${s.myTailwind ? 1 : 0}${s.theirTailwind ? 1 : 0}`,
@@ -3661,6 +3760,8 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
       // Choice lock: holder moved since its last entry (a knocked-off item lifts it).
       choiceLockedMove: myActive.has(idx) && isChoiceItem(set.item) && !match.myItemConsumed?.[idx]
         ? lockedMoveSinceEntry(match, 'mine', idx) ?? undefined : undefined,
+      // Disable root-carry (opp side rides the entry into predictions already).
+      disabledMove: match.myDisabledMove?.[idx],
     });
     myTeamIdx.push(idx);
   }

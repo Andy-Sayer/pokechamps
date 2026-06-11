@@ -64,6 +64,15 @@ function toCalcPokemon(set: PokemonSet, opts: {
   // base forme for the mega forme when a stone is held — @smogon/calc does
   // not auto-resolve this) and mutate calcOpts (e.g. set teraType + isTera,
   // isDynamaxed).
+  // Booster Energy + Protosynthesis/Quark Drive: the ability procs on ENTRY
+  // without its weather/terrain (×1.3 highest stat, ×1.5 if Spe). The calc
+  // auto-applies the ability under Sun/Electric Terrain but needs boostedStat
+  // for the Booster variant — 'auto' picks the highest stat like the game.
+  // A consumed Booster is the caller's job to clear from the set's item.
+  if (!calcOpts.boostedStat && /booster\s*energy/i.test(set.item ?? '')) {
+    const ab = (set.ability ?? '').toLowerCase().replace(/[^a-z]/g, '');
+    if (ab === 'protosynthesis' || ab === 'quarkdrive') calcOpts.boostedStat = 'auto';
+  }
   const gimmick = activeGimmick();
   const resolvedSpecies = gimmick.resolveSpecies?.({ set, active: !!opts.gimmickActive }) ?? set.species;
   gimmick.enrichCalcPokemon?.({ set, active: !!opts.gimmickActive, opts: calcOpts });

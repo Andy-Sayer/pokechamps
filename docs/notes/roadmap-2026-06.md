@@ -290,18 +290,30 @@ From roadmap pillar D, what's still open after the recent draft-edit / Tab-cycle
 - **Sprites in the matchup grid** — the sixel pipeline exists (spinner / `/pika`);
   surface mon sprites in the grid + info panels.
 
-### Theme 7 — Remaining search long-tail *(low priority, batch as filler)*
+### Theme 7 — Remaining search long-tail ✅ *(complete 2026-06-11)*
 
-All rare in Reg M-A; each a small, self-contained, no-regression diff (the
-established pattern). Pick up only if a theme above stalls:
-
-- Black Sludge in search (currently PARTIAL — poison-heal/else-hurt EOT).
-- Grassy-terrain heal residual in search.
-- Booster Energy proc-on-switch (Protosynthesis/Quark Drive without weather).
-- Disable / Torment / Imprison root-carry from the live match.
-- Ability redirection (Storm Drain / Lightning Rod) + Ally Switch.
-- Spread debuffs (Growl / Leer) + accuracy/evasion drops.
-- Yawn (delayed sleep).
+- ✅ Black Sludge in search (residualInfo: +1/16 Poison-types, −1/8 others,
+  Magic Guard blocks the hurt).
+- ✅ Grassy-terrain heal residual (was already shipped — stale entry).
+- ✅ Booster Energy (Protosynthesis/Quark Drive): damage via the calc's
+  `boostedStat` auto-derived in damage.ts (flows to search cells, predictions,
+  inference, TUI alike); Spe ×1.5 in the search speed tables when Spe is the
+  holder's strictly-highest stat.
+- ✅ Disable root-carry: `match.myDisabledMove` → SearchMyMon.disabledMove →
+  stripped from the set once in buildTables (opp side already rode the entry
+  into predictions' pool filter). Torment/Imprison/Spite stay flagged — no
+  live tracking exists to carry.
+- ✅ Ability redirection: a live, KNOWN Storm Drain/Lightning Rod holder
+  absorbs single-target Water/Electric moves at apply() (the tree then avoids
+  them on its own); the +1 SpA gain is left unmodelled. Ally Switch/Spotlight
+  stay informational — a slot-less model can't represent position shuffles.
+- ✅ Spread debuffs (Growl/Leer/Tail Whip/String Shot) hit both live foes via
+  the SET_DEBUFF path. Accuracy/evasion droppers stay excluded by the same
+  policy as probabilistic accuracy itself (maximin never prices hit chance) —
+  reworded as an informational flag.
+- ✅ Yawn: delayed sleep as State.myYawn/oppYawn (2 on cast → sleeps at the
+  end of the NEXT turn unless switched/statused; in ttKey; cleared on
+  switch-in).
 
 **Deliberately excluded (policy, not gaps):** confusion, 25% full-para,
 probabilistic secondaries — surfaced as risks / Hail-Mary inputs, never baked

@@ -2169,7 +2169,10 @@ describe('unmodeled-mechanics detector (self-flagging)', () => {
       field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
     });
     expect(searchToDepth(make(['Hurricane']), 1).unmodeled?.some(u => u.kind === 'foedebuff')).toBeFalsy();
-    expect(searchToDepth(make(['Growl']), 1).unmodeled?.some(u => u.kind === 'foedebuff')).toBe(true);
+    // Growl is MODELLED now (spread debuff); the accuracy-droppers remain the
+    // informational flag class.
+    expect(searchToDepth(make(['Growl']), 1).unmodeled?.some(u => u.kind === 'foedebuff')).toBeFalsy();
+    expect(searchToDepth(make(['Sand Attack']), 1).unmodeled?.some(u => u.kind === 'foedebuff')).toBe(true);
   });
 });
 
