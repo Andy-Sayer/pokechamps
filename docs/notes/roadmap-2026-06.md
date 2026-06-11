@@ -207,15 +207,31 @@ Two halves of the same `replay.ts` investment (see
   side); one-active-with-live-bench / 2v1 fail with a clear message — the
   known v1 limitation. Custom Champions megas don't exist in the sim → probe
   rejects them honestly. `sim-oracle.test.ts` (5).
-- **Replay ingest + legality (J.0–J.2).** Parse a Showdown replay
-  (`|`-protocol) into a `BattleTranscript`, walk it through the *production*
-  `match/engine.ts`, and assert move-possibility (learnset / target / gimmick /
-  turn-order brackets). Independently useful (paste-a-replay → saved match) and
-  low-risk — it flags, doesn't hard-fail. J.3+ (damage consistency, inference
-  round-trip) layer on later.
-
-*Effort:* large — do the oracle first (smaller, directly user-facing), then J.0–J.2
-ingest. Stage; don't try to finish all of J this month.
+- **Replay ingest + legality (J.0–J.2). ✅ shipped 2026-06-10.**
+  - **J.0** `showdownReplay.ts`: `|`-protocol → `BattleTranscript` (typed
+    events, lead block, per-turn groups; nickname→species pinned to first
+    sight so mega re-switches don't fork team entries). Open team sheets
+    (`|showteam|` packed format) resolve to display-name sets; item/ability
+    reveals (`[from] item:`, `|-ability|`, `|-enditem|`) fold into the teams.
+  - **J.1** `replayDriver.ts`: walks the transcript through the production
+    `finalizeTurn`/`applyStateUpdate`. Transcript HP/field is GROUND TRUTH —
+    reconciled after every turn so drift never compounds. The fast walk
+    (default) strips per-action HP observations before the engine call and
+    annotates damage back onto the recorded actions afterwards: feeding them
+    through ran spread inference per hit, and consecutive opp hits chained
+    `scoreOffensiveSpread`'s ×9 EV expansion into a geometric blow-up against
+    the driver's 0-EV placeholder sets (measured 71s for ONE turn; now 27ms
+    for a 15-turn game). `inferSpreads: true` re-enables real observations —
+    that's J.3/J.4's lever, where the inverse solver itself is under test.
+  - **J.2** flags (never hard-fail): learnset membership (format-ban-free;
+    missing-forme learnsets skip rather than false-flag), switch-while-
+    fainted/active, >1 gimmick per side (mega + tera both counted; tera also
+    emits a "not modelled" note), and priority-bracket order (base priority +
+    Prankster/Gale Wings when the ability is revealed).
+  - `scripts/fetch-replay.ts` downloads + caches fixtures under
+    `tests/replays/` and prints a parse/ingest summary; a corpus smoke test
+    runs every cached fixture (2 real VGC games so far — both parse, drive,
+    and produce ZERO false flags). `showdown-replay.test.ts` (16).
 
 ### Theme 5 — Ops: deploy validation + medium security
 

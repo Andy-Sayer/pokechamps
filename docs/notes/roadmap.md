@@ -211,24 +211,27 @@ Two consequences shape the design:
 
 ### Phases
 
-- **J.0 — Replay ingest.** Fetch a replay
-  (`https://replay.pokemonshowdown.com/<id>.json` / `.log`) and parse
-  the `|`-protocol into an internal `BattleTranscript`: ordered turns,
-  each a list of events (`|switch|`, `|move|`, `|-damage|`, `|-heal|`,
-  `|-status|`, `|faint|`, `|-boost|`, `|-weather|`, `|-sidestart|`
-  hazards, `|detailschange|` / mega). Capture revealed sets + any
-  open-team-sheet data. New `replay.ts` parser + `fetch-replay.ts`.
-- **J.1 — Transcript → engine driver.** Walk the transcript turn by
-  turn through `match/engine.ts` — the *same* `applyAction` /
-  `endOfTurn` / `applyHazardOnSwitchInto` the TUI calls (largely the
-  inverse of `turnparser.ts`). Reusing production code paths is the
-  point: bugs surface where they live, not in a parallel stub.
-- **J.2 — Move-possibility assertions.** Per action: move ∈ species
-  learnset (`getLearnset`), switch target valid + alive, target-slot
-  adjacency valid, gimmick legal (≤1 mega/battle), and turn order
-  consistent with `effectivePriority` brackets (flag, don't hard-fail
-  — items/abilities are hidden). Failures = parser or legality-model
-  gaps.
+- **J.0 — Replay ingest. ✅ shipped 2026-06-10.** `showdownReplay.ts`
+  (named so because `replay.ts` was already the TUI quick-replay tally)
+  parses the `|`-protocol into a `BattleTranscript`: typed events per
+  turn, lead block, open-team-sheet sets from `|showteam|` (packed
+  format), item/ability reveals folded into the teams. Fetch + fixture
+  caching via `scripts/fetch-replay.ts` → `tests/replays/`.
+- **J.1 — Transcript → engine driver. ✅ shipped 2026-06-10.**
+  `replayDriver.ts` walks turns through the production
+  `finalizeTurn`/`applyStateUpdate`; transcript HP/field is ground
+  truth, reconciled per turn so drift never compounds. The default fast
+  walk strips HP observations pre-engine (running inference per hit
+  against placeholder 0-EV sets blew up geometrically) and annotates
+  damage back onto the recorded actions; `inferSpreads: true` is the
+  J.3/J.4 lever that feeds the real observations to the inverse solver.
+- **J.2 — Move-possibility assertions. ✅ shipped 2026-06-10.**
+  Flag-only: learnset membership (ban-free format; missing-forme
+  learnsets skip), switch-while-fainted/active, ≤1 gimmick per side
+  (tera counted + noted as unmodelled), priority-bracket order (base
+  priority + Prankster/Gale Wings when the ability is revealed). A
+  corpus smoke test in `npm test` runs every cached fixture — 2 real
+  VGC games so far, zero false flags.
 - **J.3 — Damage consistency.** Per `|-damage|` with known
   attacker/defender/move: **(a) known spread (open sheet)** → strict
   containment, any miss is a calc bug or unmodelled modifier;
