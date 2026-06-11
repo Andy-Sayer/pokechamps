@@ -46,6 +46,16 @@ async function main() {
   console.log(`[fetch-replay] ingest: ${r.match.turns.length} turns driven, ${r.flags.length} legality flag(s), ${r.notes.length} note(s)`);
   for (const f of r.flags) console.log(`  flag [${f.kind}] turn ${f.turn}: ${f.who} — ${f.detail}`);
   for (const n of r.notes.slice(0, 10)) console.log(`  note: ${n}`);
+  // J.3 damage-consistency summary: every observed hit vs the reachable envelope.
+  const counts = { in: 0, out: 0, skipped: 0 };
+  for (const d of r.damage) counts[d.verdict] += 1;
+  console.log(`[fetch-replay] damage checks: ${counts.in} in · ${counts.out} OUT · ${counts.skipped} skipped (of ${r.damage.length})`);
+  for (const d of r.damage.filter(x => x.verdict === 'out')) {
+    console.log(`  OUT turn ${d.turn}: ${d.attacker} ${d.move} → ${d.defender}: observed ${d.observedPct.toFixed(0)}%, envelope ${d.minPct.toFixed(0)}–${d.maxPct.toFixed(0)}% — ${d.note ?? ''}`);
+  }
+  for (const d of r.damage.filter(x => x.verdict === 'skipped')) {
+    console.log(`  skip turn ${d.turn}: ${d.attacker} ${d.move} → ${d.defender} — ${d.note ?? ''}`);
+  }
 }
 
 main().catch(e => { console.error(e); process.exit(1); });

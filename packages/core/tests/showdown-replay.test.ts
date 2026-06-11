@@ -179,6 +179,9 @@ describe('corpus smoke — every cached replay parses and ingests clean', () => 
     const r = ingestTranscript(t);
     expect(r.match.turns.length).toBe(t.turns.length);
     expect(r.flags).toEqual([]);
+    // J.3: every observed hit must be reachable (out = our model is wrong /
+    // missing a modifier — exactly what this corpus exists to catch).
+    expect(r.damage.filter(d => d.verdict === 'out')).toEqual([]);
   });
 });
 

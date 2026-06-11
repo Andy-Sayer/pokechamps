@@ -20,6 +20,7 @@ import { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } from './types.js';
 import type { BattleTranscript, TranscriptEvent, TranscriptMon, Pos, Side } from './showdownReplay.js';
 import { finalizeTurn, applyStateUpdate, type ActiveIdx } from '../match/engine.js';
 import { getLearnset, getMove, toId, loadFormat } from './data.js';
+import { checkDamageEvent, type DamageCheck, type CheckMon } from './replayDamageCheck.js';
 
 export interface LegalityFlag {
   /** Turn index (0 = the lead/send-out phase). */
@@ -34,6 +35,9 @@ export interface ReplayIngestResult {
   flags: LegalityFlag[];
   /** Informational: HP reconciliation gaps, unmodelled gimmicks, parse oddities. */
   notes: string[];
+  /** J.3 — per observed hit: is the damage reachable by ANY legal spread,
+   *  given the known items/abilities and transcript-truth state? */
+  damage: DamageCheck[];
 }
 
 export interface IngestOptions {
@@ -163,6 +167,59 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
   // Last transcript-confirmed HP per mon, across turns — feeds the post-hoc
   // damage annotation on recorded actions in fast-walk mode.
   const lastKnownHp = new Map<string, number>();
+  // J.3 transcript-truth state at hit time (independent of the engine walk —
+  // the damage check tests the CALC, not the engine's state inference).
+  const damage: DamageCheck[] = [];
+  const runningHp = new Map<string, number>();             // updated on every observed HP
+  const boostsTruth = new Map<string, Record<string, number>>();
+  const statusTruth = new Map<string, string>();
+  const teraSet = new Set<string>();
+  const itemGone = new Set<string>();
+  const glaiveVuln = new Set<string>();                    // Glaive Rush ×2-taken volatile
+  const formeNow = new Map<string, string>();              // detailschange (mega) formes
+  const screens: Record<Side, { reflect: boolean; lightScreen: boolean }> = {
+    p1: { reflect: false, lightScreen: false }, p2: { reflect: false, lightScreen: false },
+  };
+  // Pre-battle statuses/HP from the lead block.
+  for (const ev of t.leadEvents) {
+    if (ev.kind === 'switch') {
+      const idx = teamIndexAt(ev.pos);
+      if (idx >= 0) {
+        runningHp.set(key(ev.pos.side, idx), ev.hpPct);
+        if (ev.status) statusTruth.set(key(ev.pos.side, idx), ev.status);
+      }
+    } else if (ev.kind === 'boost') {
+      const idx = teamIndexAt(ev.pos);
+      if (idx >= 0) {
+        const b = boostsTruth.get(key(ev.pos.side, idx)) ?? {};
+        b[ev.stat] = Math.max(-6, Math.min(6, (b[ev.stat] ?? 0) + ev.delta));
+        boostsTruth.set(key(ev.pos.side, idx), b);
+      }
+    }
+  }
+  // CheckMon snapshot for the J.3 envelope check.
+  const checkMonAt = (pos: Pos): { mon: CheckMon; k: string } | null => {
+    const idx = teamIndexAt(pos);
+    if (idx < 0) return null;
+    const k = key(pos.side, idx);
+    const sheet = (pos.side === mySide ? myMons : oppMons)[idx]!;
+    return {
+      k,
+      mon: {
+        species: formeNow.get(k) ?? sheet.species,
+        level: sheet.level || 50,
+        // OTS/reveals make the item KNOWN; consumed → known none; otherwise unknown.
+        item: itemGone.has(k) ? '' : sheet.item,
+        ability: sheet.ability,
+        moves: sheet.moves,
+        boosts: boostsTruth.get(k) as CheckMon['boosts'],
+        status: statusTruth.get(k),
+        curHpPct: runningHp.get(k) ?? 100,
+        tera: teraSet.has(k),
+        doubleDamageTaken: glaiveVuln.has(k),
+      },
+    };
+  };
   const learnsetCache = new Map<string, Set<string>>();
   const learnsetOf = (species: string): Set<string> => {
     let s = learnsetCache.get(species);
@@ -196,12 +253,15 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
       const idx = teamIndexAt(pos);
       if (idx < 0) return;
       truthHp.set(key(pos.side, idx), hpPct);
+      runningHp.set(key(pos.side, idx), hpPct);
       if (faintedNow) truthFaint.add(key(pos.side, idx));
     };
 
     let order = 0;
     let afterUpkeep = false;
     const moveOrderSeen: { species: string; side: Side; move: string; prio: number }[] = [];
+    // Helping Hand recipients this turn (cleared at turn end).
+    const hhActive = new Set<string>();
 
     for (let e = 0; e < turn.events.length; e++) {
       const ev = turn.events[e]!;
@@ -209,8 +269,17 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
         case 'upkeep': afterUpkeep = true; break;
 
         case 'switch': {
+          // The outgoing occupant's boosts + volatiles clear on switch-out
+          // (status sticks).
+          const prevOccupant = active[ev.pos.side][ev.pos.slot];
+          if (prevOccupant != null) {
+            boostsTruth.delete(key(ev.pos.side, prevOccupant));
+            glaiveVuln.delete(key(ev.pos.side, prevOccupant));
+          }
           const idx = recordSwitchIn(ev.pos, ev.species, turn.index, ev.forced);
           if (idx == null || idx < 0) break;
+          boostsTruth.delete(key(ev.pos.side, idx)); // fresh arrival, no stages
+          if (ev.status) statusTruth.set(key(ev.pos.side, idx), ev.status);
           noteHp(ev.pos, ev.hpPct, false);
           if (afterUpkeep) {
             // Replacement send-in after a faint — a state update, not a chosen action.
@@ -231,6 +300,9 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
           const species = speciesOf(t, ev.pos);
           const atkIdx = teamIndexAt(ev.pos);
           if (atkIdx < 0) break;
+          // Acting ends a Glaive Rush vulnerability (a fresh use re-applies it
+          // via its own |-singlemove| right after).
+          glaiveVuln.delete(key(ev.pos.side, atkIdx));
           // J.2 learnset check (skip Struggle / transcript oddities).
           if (toId(ev.move) !== 'struggle') {
             const ls = learnsetOf(species);
@@ -260,6 +332,10 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
           for (let j = e + 1; j < turn.events.length; j++) {
             const nx = turn.events[j]!;
             if (nx.kind === 'move' || nx.kind === 'switch' || nx.kind === 'upkeep') break;
+            // Future Sight / Doom Desire land via their own `-end` right after
+            // someone else's move — terminate the block so the delayed damage
+            // doesn't get attributed to that move.
+            if (nx.kind === 'moveend' && /future\s*sight|doom\s*desire/i.test(nx.effect)) break;
             block.push(nx);
           }
           const side = ev.pos.side === mySide ? 'mine' : 'theirs';
@@ -287,7 +363,31 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
             return a;
           };
           if (damages.length) {
+            const atkInfo = checkMonAt(ev.pos);
             for (const d of damages) {
+              // J.3: envelope check at hit time — BEFORE noteHp moves the truth.
+              const defInfo = checkMonAt(d.pos);
+              if (atkInfo && defInfo && !ev.missed) {
+                const defScr = screens[d.pos.side];
+                damage.push(checkDamageEvent({
+                  turn: turn.index, move: ev.move,
+                  critical: critTargets.has(key(d.pos.side, teamIndexAt(d.pos))),
+                  spreadHit: !!ev.spreadTargets && damages.length >= 2,
+                  helpingHand: hhActive.has(atkInfo.k),
+                  // attackerSide is always 'mine' in the check, so the
+                  // defender's screens ride the `their*` flags.
+                  field: {
+                    ...NEUTRAL_FIELD,
+                    weather: match.field?.weather ?? null,
+                    terrain: match.field?.terrain ?? null,
+                    theirReflect: defScr.reflect,
+                    theirLightScreen: defScr.lightScreen,
+                  },
+                  attacker: atkInfo.mon, defender: defInfo.mon,
+                  beforePct: runningHp.get(defInfo.k) ?? 100,
+                  afterPct: d.hpPct, fainted: d.fainted,
+                }));
+              }
               actions.push(mkAction(d.pos, d));
               noteHp(d.pos, d.hpPct, d.fainted);
             }
@@ -297,9 +397,64 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
           break;
         }
 
+        case 'singleturn': {
+          if (/helping\s*hand/i.test(ev.effect)) {
+            const idx = teamIndexAt(ev.pos);
+            if (idx >= 0) hhActive.add(key(ev.pos.side, idx));
+          }
+          break;
+        }
+        case 'singlemove': {
+          if (/glaive\s*rush/i.test(ev.effect)) {
+            const idx = teamIndexAt(ev.pos);
+            if (idx >= 0) glaiveVuln.add(key(ev.pos.side, idx));
+          }
+          break;
+        }
+        case 'boost': {
+          const idx = teamIndexAt(ev.pos);
+          if (idx >= 0) {
+            const k = key(ev.pos.side, idx);
+            const b = boostsTruth.get(k) ?? {};
+            b[ev.stat] = Math.max(-6, Math.min(6, (b[ev.stat] ?? 0) + ev.delta));
+            boostsTruth.set(k, b);
+          }
+          break;
+        }
+        case 'status': {
+          const idx = teamIndexAt(ev.pos);
+          if (idx >= 0) statusTruth.set(key(ev.pos.side, idx), ev.status);
+          break;
+        }
+        case 'curestatus': {
+          const idx = teamIndexAt(ev.pos);
+          if (idx >= 0) statusTruth.delete(key(ev.pos.side, idx));
+          break;
+        }
+        case 'itemreveal': {
+          if (ev.consumed) {
+            const idx = teamIndexAt(ev.pos);
+            if (idx >= 0) itemGone.add(key(ev.pos.side, idx));
+          }
+          break;
+        }
+        case 'sidestart': case 'sideend': {
+          const on = ev.kind === 'sidestart';
+          const eff = toId(ev.effect);
+          if (eff.includes('reflect')) screens[ev.side].reflect = on;
+          if (eff.includes('lightscreen')) screens[ev.side].lightScreen = on;
+          if (eff.includes('auroraveil')) { screens[ev.side].reflect = on; screens[ev.side].lightScreen = on; }
+          break;
+        }
+
         case 'detailschange': {
           // Mega evolution: count for the one-gimmick check; the engine's mega
           // path needs Champions stones, so a real-replay mega is note-only.
+          // The J.3 check DOES use the new forme (real stats/typing).
+          {
+            const idx = teamIndexAt(ev.pos);
+            if (idx >= 0) formeNow.set(key(ev.pos.side, idx), ev.toForme);
+          }
           gimmickUsed[ev.pos.side].push(`mega:${ev.toForme}`);
           if (gimmickUsed[ev.pos.side].length > 1) {
             flags.push({ turn: turn.index, kind: 'gimmick', who: speciesOf(t, ev.pos), detail: 'second gimmick activation in one battle' });
@@ -307,6 +462,10 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
           break;
         }
         case 'terastallize': {
+          {
+            const idx = teamIndexAt(ev.pos);
+            if (idx >= 0) teraSet.add(key(ev.pos.side, idx));
+          }
           gimmickUsed[ev.pos.side].push(`tera:${ev.teraType}`);
           notes.push(`turn ${turn.index}: ${speciesOf(t, ev.pos)} terastallized (${ev.teraType}) — not modelled by the Champions engine`);
           if (gimmickUsed[ev.pos.side].length > 1) {
@@ -321,7 +480,13 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
           break;
         case 'faint': {
           const idx = teamIndexAt(ev.pos);
-          if (idx >= 0) { truthFaint.add(key(ev.pos.side, idx)); truthHp.set(key(ev.pos.side, idx), 0); fainted[ev.pos.side].add(idx); }
+          if (idx >= 0) {
+            truthFaint.add(key(ev.pos.side, idx)); truthHp.set(key(ev.pos.side, idx), 0);
+            runningHp.set(key(ev.pos.side, idx), 0);
+            fainted[ev.pos.side].add(idx);
+            boostsTruth.delete(key(ev.pos.side, idx));
+            glaiveVuln.delete(key(ev.pos.side, idx));
+          }
           break;
         }
         case 'weather':
@@ -412,7 +577,7 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
     match.outcome = t.winner === t.players[mySide] ? 'victory'
       : t.winner === t.players[oppSide] ? 'defeat' : undefined;
   }
-  return { match, flags, notes };
+  return { match, flags, notes, damage };
 
   function hpPctOfMine(m: Match, idx: number): number {
     // engine.ts stores myCurrentHp as a PERCENT (every input path normalises

@@ -232,11 +232,20 @@ Two consequences shape the design:
   priority + Prankster/Gale Wings when the ability is revealed). A
   corpus smoke test in `npm test` runs every cached fixture — 2 real
   VGC games so far, zero false flags.
-- **J.3 — Damage consistency.** Per `|-damage|` with known
-  attacker/defender/move: **(a) known spread (open sheet)** → strict
-  containment, any miss is a calc bug or unmodelled modifier;
-  **(b) hidden spread** → reachability, observed must be satisfiable
-  by some grid spread (inference filter stays non-empty).
+- **J.3 — Damage consistency. ✅ shipped 2026-06-10** (reachability
+  half). Reality check on the original spec: VGC open team sheets hide
+  EVs/nature/IVs too, so "known spread" containment is only reachable
+  via authored transcripts (J.6). What shipped: `replayDamageCheck.ts`
+  gives every observed hit an ENVELOPE verdict — damage is monotonic in
+  attacker investment / defender bulk, so two calc calls (min-invest vs
+  max-bulk, max-invest vs frail) bound everything a legal spread can do,
+  with items/abilities from OTS/reveals and transcript-truth boosts /
+  status / weather / screens / Helping Hand / crit / curHP-scaled BP /
+  Glaive Rush ×2. `out` = the model is missing something; `skipped`
+  names what we can't bound (Gyro Ball-class speed BP, Rage Fist-class
+  history BP, Tera). First catches: the latent `curHpPercent`-as-raw
+  bug in damage.ts (Eruption BP), and Glaive Rush vulnerability (now
+  modelled). 4-fixture corpus: 0 false `out`s, asserted in CI.
 - **J.4 — Inference round-trip property test.** Where the true spread
   is known, assert it *survives every observation's filter across the
   whole match* — the "true spread always satisfies the filter"

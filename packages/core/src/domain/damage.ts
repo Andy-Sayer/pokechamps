@@ -40,8 +40,6 @@ function toCalcPokemon(set: PokemonSet, opts: {
   boosts?: Partial<Record<string, number>>;
   gimmickActive?: boolean;
 } = {}): CalcPokemon {
-  const max = 100; // placeholder; calc derives real max from species
-  const curHP = opts.curHpPercent != null ? Math.round((opts.curHpPercent / 100) * max) : undefined;
   const calcOpts: Record<string, unknown> = {
     level: set.level,
     item: set.item,
@@ -52,7 +50,6 @@ function toCalcPokemon(set: PokemonSet, opts: {
     moves: set.moves as any,
     boosts: (opts.boosts as any) ?? undefined,
     status: (opts.status as any) ?? '',
-    ...(curHP != null ? { curHP } : {}),
   };
   // Let the active gimmick override the species name (e.g. Mega swaps the
   // base forme for the mega forme when a stone is held — @smogon/calc does
@@ -61,7 +58,15 @@ function toCalcPokemon(set: PokemonSet, opts: {
   const gimmick = activeGimmick();
   const resolvedSpecies = gimmick.resolveSpecies?.({ set, active: !!opts.gimmickActive }) ?? set.species;
   gimmick.enrichCalcPokemon?.({ set, active: !!opts.gimmickActive, opts: calcOpts });
-  return new CalcPokemon(GEN, calcSpeciesName(resolvedSpecies), calcOpts as any);
+  const p = new CalcPokemon(GEN, calcSpeciesName(resolvedSpecies), calcOpts as any);
+  // Current HP is given as a PERCENT; scale it by the species' REAL max HP
+  // after construction (HP-fraction BP moves: Eruption/Water Spout). Passing a
+  // /100 value as raw curHP undercounted the fraction by ~maxHP/100.
+  if (opts.curHpPercent != null) {
+    (p as unknown as { originalCurHP: number }).originalCurHP =
+      Math.max(1, Math.min(p.maxHP(), Math.round((opts.curHpPercent / 100) * p.maxHP())));
+  }
+  return p;
 }
 
 function toCalcField(state: FieldState, attackerSide: 'mine' | 'theirs', helpingHand = false): Field {
@@ -93,6 +98,10 @@ export function damageRange(args: {
   defenderOpts?: Parameters<typeof toCalcPokemon>[1];
   helpingHand?: boolean;
   critical?: boolean;
+  /** Override the automatic spread-modifier detection: a spread-target move
+   *  that actually connected with only ONE foe takes no 0.75× reduction
+   *  (replay ground truth knows the hit count; live calcs auto-detect). */
+  spreadOverride?: boolean;
 }): DamageRange {
   const atk = toCalcPokemon(args.attacker, args.attackerOpts);
   const def = toCalcPokemon(args.defender, args.defenderOpts);
@@ -127,7 +136,9 @@ export function damageRange(args: {
   // Single-target moves (normal, any) leave isSpread unset (single hit, no
   // reduction).
   const moveData = getMove(args.move) as any;
-  if (moveData?.target === 'allAdjacentFoes' || moveData?.target === 'allAdjacent') {
+  if (args.spreadOverride != null) {
+    if (args.spreadOverride) moveOpts.isSpread = true;
+  } else if (moveData?.target === 'allAdjacentFoes' || moveData?.target === 'allAdjacent') {
     moveOpts.isSpread = true;
   }
   activeGimmick().enrichCalcMove?.({

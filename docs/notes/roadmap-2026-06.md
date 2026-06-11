@@ -230,8 +230,19 @@ Two halves of the same `replay.ts` investment (see
     Prankster/Gale Wings when the ability is revealed).
   - `scripts/fetch-replay.ts` downloads + caches fixtures under
     `tests/replays/` and prints a parse/ingest summary; a corpus smoke test
-    runs every cached fixture (2 real VGC games so far — both parse, drive,
+    runs every cached fixture (4 real VGC games so far — all parse, drive,
     and produce ZERO false flags). `showdown-replay.test.ts` (16).
+  - **J.3 (reachability half) ✅ shipped 2026-06-10.** Replays hide spreads
+    even with OTS, so the per-hit check is an ENVELOPE: two calc calls bound
+    what any legal spread can do (items/abilities known; transcript-truth
+    boosts/status/weather/screens/HH/crit/curHP/Glaive-Rush ×2 threaded in by
+    the driver), `out` = model gap, `skipped` honestly named (speed-BP,
+    history-BP, Tera). First real catches: the latent damage.ts
+    `curHpPercent`-treated-as-raw bug (Eruption/Water Spout BP was computed
+    from ~30% HP at "56%") and Glaive Rush's ×2-taken vulnerability (now
+    modelled in the checker). Corpus: 18+ hits across 4 games, 0 false outs —
+    asserted in CI. Strict containment joins with J.6's authored Champions
+    transcripts; J.4 (inference round-trip) is the next layer.
 
 ### Theme 5 — Ops: deploy validation + medium security
 

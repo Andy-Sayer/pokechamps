@@ -55,6 +55,13 @@ export type TranscriptEvent =
   | { kind: 'crit'; pos: Pos }
   | { kind: 'miss'; source: Pos; target?: Pos }
   | { kind: 'cant'; pos: Pos; reason: string }
+  /** One-turn move effects (`|-singleturn|`): Helping Hand, Protect, Roost… */
+  | { kind: 'singleturn'; pos: Pos; effect: string }
+  /** Until-next-move effects (`|-singlemove|`): Glaive Rush, Destiny Bond… */
+  | { kind: 'singlemove'; pos: Pos; effect: string }
+  /** `|-end|` of a volatile/delayed effect — Future Sight's hit lands right
+   *  after its `-end`, so the driver uses it as a move-block boundary. */
+  | { kind: 'moveend'; pos: Pos; effect: string }
   | { kind: 'upkeep' }
   | { kind: 'other'; line: string };
 
@@ -145,13 +152,30 @@ export function parseReplayLog(log: string): BattleTranscript {
 
   // Find-or-create a team slot for (side, species) and return it. Replays
   // without team preview grow the team on first sight.
+  // Team-preview entries whose forme was MASKED (`Urshifu-*`) — only these may
+  // fold with a later-revealed real forme. Unmasked base/forme pairs that
+  // legitimately coexist (Ursaluna + Ursaluna-Bloodmoon) stay separate.
+  const maskedEntries = new Set<TranscriptMon>();
   const monFor = (side: Side, species: string, level?: number): TranscriptMon => {
-    const canon = speciesName(species);
-    // Formes change mid-battle (mega/tera keeps base species in `teams`):
-    // match on the base species token before the first forme suffix too.
-    let m = t.teams[side].find(x => toId(x.species) === toId(canon));
+    const isMask = species.endsWith('-*');
+    const canon = speciesName(species.replace(/-\*$/, ''));
+    const canonId = toId(canon);
+    let m = t.teams[side].find(x => toId(x.species) === canonId);
+    if (!m) {
+      const baseOf = (s: string): string => {
+        const sp = getSpecies(s) as { baseSpecies?: string; name?: string } | undefined;
+        return toId(sp?.baseSpecies || sp?.name || s);
+      };
+      const canonBase = baseOf(canon);
+      m = t.teams[side].find(x => (maskedEntries.has(x) || isMask) && baseOf(x.species) === canonBase);
+      if (m && !isMask) {
+        m.species = canon; // masked preview → revealed forme
+        maskedEntries.delete(m);
+      }
+    }
     if (!m) {
       m = { species: canon, level: level ?? 100, moves: [] };
+      if (isMask) maskedEntries.add(m);
       t.teams[side].push(m);
     }
     return m;
@@ -335,6 +359,18 @@ export function parseReplayLog(log: string): BattleTranscript {
           }
           case 'crit': {
             if (pos) current.push({ kind: 'crit', pos });
+            break;
+          }
+          case 'singleturn': {
+            if (pos) current.push({ kind: 'singleturn', pos, effect: arg(2) });
+            break;
+          }
+          case 'singlemove': {
+            if (pos) current.push({ kind: 'singlemove', pos, effect: arg(2) });
+            break;
+          }
+          case 'end': {
+            if (pos) current.push({ kind: 'moveend', pos, effect: arg(2) });
             break;
           }
           case 'miss': {
