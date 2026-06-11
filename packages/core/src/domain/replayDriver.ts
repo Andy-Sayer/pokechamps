@@ -248,6 +248,9 @@ export function ingestTranscript(t: BattleTranscript, opts?: IngestOptions): Rep
         teraType: teraTypeOf.get(k),
         doubleDamageTaken: glaiveVuln.has(k),
         boostedStat: boostedStatOf.get(k),
+        // Full spread when the packed team carried one (authored transcripts):
+        // collapses that side of the J.3 check to strict containment.
+        evs: sheet.evs, ivs: sheet.ivs, nature: sheet.nature,
       },
     };
   };

@@ -28,6 +28,11 @@ export interface TranscriptMon {
   teraType?: string;
   /** True when item/ability/moves came from an open team sheet (`|showteam|`). */
   fromTeamSheet?: boolean;
+  /** FULL spread when the packed team carries it (authored Champions
+   *  transcripts / non-OTS exports). VGC open team sheets blank these. */
+  evs?: Record<'hp' | 'atk' | 'def' | 'spa' | 'spd' | 'spe', number>;
+  ivs?: Record<'hp' | 'atk' | 'def' | 'spa' | 'spd' | 'spe', number>;
+  nature?: string;
 }
 
 export type Side = 'p1' | 'p2';
@@ -125,6 +130,13 @@ const speciesName = (s: string) => { const sp = getSpecies(s) as { name?: string
 /** Parse one side's `|showteam|` packed team (open team sheets). OTS hides
  *  EVs/IVs/nature, so only species/item/ability/moves/level/tera carry data. */
 export function parsePackedTeam(packed: string): TranscriptMon[] {
+  // hp,atk,def,spa,spd,spe — blanks default per `def` (EVs 0, IVs 31).
+  const statList = (raw: string | undefined, def: number) => {
+    if (raw == null || raw === '') return undefined;
+    const parts = raw.split(',').map(x => (x === '' ? def : parseInt(x, 10)));
+    const [hp = def, atk = def, defn = def, spa = def, spd = def, spe = def] = parts;
+    return { hp, atk, def: defn, spa, spd, spe };
+  };
   return packed.split(']').filter(Boolean).map(entry => {
     const f = entry.split('|');
     const nick = f[0] ?? '';
@@ -138,6 +150,9 @@ export function parsePackedTeam(packed: string): TranscriptMon[] {
       item: f[2] ? itemName(f[2]) : undefined,
       ability: f[3] ? abilityName(f[3]) : undefined,
       moves: (f[4] ?? '').split(',').filter(Boolean).map(moveName),
+      nature: f[5] || undefined,
+      evs: statList(f[6], 0),
+      ivs: statList(f[8], 31),
       teraType: extras[extras.length - 1] || undefined,
       fromTeamSheet: true,
     };

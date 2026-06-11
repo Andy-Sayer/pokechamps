@@ -1,0 +1,48 @@
+|gametype|doubles
+|player|p1|alice|1
+|player|p2|bob|2
+|gen|9
+|tier|[Gen 9] Champions Authored
+|clearpoke
+|poke|p1|Charizard, L50, M|
+|poke|p1|Blissey, L50, F|
+|poke|p2|Bronzong, L50|
+|poke|p2|Slowbro, L50, M|
+|teampreview
+|showteam|p1|Charizard||CharizarditeY|Blaze|HeatWave,AirSlash|Modest|4,0,0,252,0,252|M|||50|]Blissey|||NaturalCure|SeismicToss|Calm|252,0,0,0,156,0|F|||50|
+|showteam|p2|Bronzong||AssaultVest|Heatproof|GyroBall,Psychic|Sassy|252,0,0,0,124,0||||50|]Slowbro|||OwnTempo|Surf,Psyshock|Bold|252,0,252,0,0,0|M|||50|
+|teamsize|p1|2
+|teamsize|p2|2
+|start
+|switch|p1a: Charizard|Charizard, L50, M|154/154
+|switch|p1b: Blissey|Blissey, L50, F|362/362
+|switch|p2a: Bronzong|Bronzong, L50|174/174
+|switch|p2b: Slowbro|Slowbro, L50, M|202/202
+|turn|1
+|detailschange|p1a: Charizard|Charizard-Mega-Y, L50, M
+|-weather|SunnyDay|[from] ability: Drought|[of] p1a: Charizard
+|move|p1a: Charizard|Heat Wave|p2a: Bronzong|[spread] p2a,p2b
+|-resisted|p2a: Bronzong
+|-damage|p2a: Bronzong|108/174
+|-damage|p2b: Slowbro|127/202
+|move|p1b: Blissey|Seismic Toss|p2b: Slowbro
+|-damage|p2b: Slowbro|77/202
+|move|p2a: Bronzong|Psychic|p1b: Blissey
+|-damage|p1b: Blissey|332/362
+|move|p2b: Slowbro|Psyshock|p1b: Blissey
+|-damage|p1b: Blissey|137/362
+|
+|-weather|SunnyDay|[upkeep]
+|upkeep
+|turn|2
+|move|p1a: Charizard|Air Slash|p2b: Slowbro
+|-damage|p2b: Slowbro|0 fnt
+|faint|p2b: Slowbro
+|move|p1b: Blissey|Seismic Toss|p2a: Bronzong
+|-damage|p2a: Bronzong|58/174
+|move|p2a: Bronzong|Psychic|p1a: Charizard
+|-damage|p1a: Charizard|112/154
+|
+|-weather|SunnyDay|[upkeep]
+|upkeep
+|win|alice

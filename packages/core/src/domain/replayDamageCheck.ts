@@ -77,6 +77,12 @@ export interface CheckMon {
   doubleDamageTaken?: boolean;
   /** Protosynthesis/Quark Drive active on this stat (×1.3, no stage event). */
   boostedStat?: 'atk' | 'def' | 'spa' | 'spd' | 'spe';
+  /** FULL known spread (authored transcripts / packed teams with EVs): the
+   *  check collapses to STRICT containment on this side — any miss is a calc
+   *  or pipeline bug, not a spread unknown. */
+  evs?: Record<'hp' | 'atk' | 'def' | 'spa' | 'spd' | 'spe', number>;
+  ivs?: Record<'hp' | 'atk' | 'def' | 'spa' | 'spd' | 'spe', number>;
+  nature?: string;
 }
 
 // Moves whose BP/damage depends on state the envelope can't bound: speed
@@ -174,13 +180,27 @@ export function checkDamageEvent(input: DamageCheckInput): DamageCheck {
     boostedStat: m.boostedStat,
   });
 
+  // A mon with a FULL known spread uses it for BOTH envelope ends (strict
+  // containment on that side — authored Champions transcripts).
+  const knownSet = (m: CheckMon): PokemonSet | null =>
+    m.evs && m.nature
+      ? {
+          species: m.species, level: m.level || 50, item: m.item || undefined,
+          ability: m.ability, nature: m.nature,
+          evs: { ...m.evs }, ivs: { ...MAX_IVS, ...(m.ivs ?? {}) },
+          moves: m.moves.length ? m.moves : [],
+        }
+      : null;
+
   // Envelope for one offensive-stat hypothesis. Tera Blast on a tera'd
   // attacker uses the HIGHER of Atk/SpA, so the caller merges both.
   const envFor = (stat: 'atk' | 'spa' | 'def'): { minPct: number; maxPct: number } => {
-    const atkMax = buildSet(attacker, { nature: NATURES[stat][0], evs: { [stat]: 252 }, item: atkItemMax });
-    const atkMin = buildSet(attacker, { nature: NATURES[stat][1], evs: {}, zeroIvStat: stat, item: atkItemMin });
-    const defBulky = buildSet(defender, { nature: NATURES[defStat][0], evs: { hp: 252, [defStat]: 252 }, item: defItemBulky });
-    const defFrail = buildSet(defender, { nature: NATURES[defStat][1], evs: {}, item: defItemFrail });
+    const atkKnown = knownSet(attacker);
+    const defKnown = knownSet(defender);
+    const atkMax = atkKnown ?? buildSet(attacker, { nature: NATURES[stat][0], evs: { [stat]: 252 }, item: atkItemMax });
+    const atkMin = atkKnown ?? buildSet(attacker, { nature: NATURES[stat][1], evs: {}, zeroIvStat: stat, item: atkItemMin });
+    const defBulky = defKnown ?? buildSet(defender, { nature: NATURES[defStat][0], evs: { hp: 252, [defStat]: 252 }, item: defItemBulky });
+    const defFrail = defKnown ?? buildSet(defender, { nature: NATURES[defStat][1], evs: {}, item: defItemFrail });
     // Sides: 'mine'/'theirs' only routes screens; the caller builds the field
     // with attackerSide-relative screens, so 'mine' is always the attacker.
     const hi = damageRange({ ...common, attacker: atkMax, defender: defFrail, attackerSide: 'mine', attackerOpts: opts(attacker), defenderOpts: opts(defender) });

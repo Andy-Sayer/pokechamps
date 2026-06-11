@@ -274,9 +274,18 @@ Two consequences shape the design:
   replay's still-active terrain). One unresolved hit is checked in as
   a KNOWN_OUT regression fixture with its investigation note — the
   test asserts it stays out, so a future fix surfaces itself.
-- **J.6 — Authored Champions transcripts.** Once J.0–J.5 hold,
-  hand/script-author full-fidelity Champions battles (known sets, Mega,
-  SP scale) to cover the mechanics real gen9 replays can't reach.
+- **J.6 — Authored Champions transcripts. ✅ shipped 2026-06-11.**
+  Packed teams now parse full EVs/IVs/nature; a known spread collapses
+  that side of the J.3 check to STRICT containment (the 16-roll band,
+  ~16% relative width vs 3-10× for reachability envelopes). The
+  authored fixture (`tests/replays/authored-champions-1.log`, numbers
+  computed with our own calc → validates the PIPELINE: EVs, the
+  Charizardite-Y mega forme, sun, spread, AV all reach the calc intact)
+  runs in the corpus; tamper tests prove the teeth (stripped mega event
+  → out; quartered SpA EVs → out). Poetic validation: the strict check
+  caught the fixture's own authoring bug on the first run (Seismic Toss
+  is level-damage, 50 — not 100). **The J north-star arc (J.0–J.6) is
+  complete.**
 
 **Sequencing.** J leans on **A.2** (ability triggers) and **A.3** (item
 inference) to cut false out-of-range flags, and naturally forces
