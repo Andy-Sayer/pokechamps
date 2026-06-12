@@ -6,7 +6,7 @@ import {
   detectTactics, profileFromSet, profileFromSpecies, profileFromOpponentEntry,
   profileFromMegaStone, tacticLabel,
 } from '../src/domain/tactics.js';
-import { scoreBrings } from '../src/domain/bring.js';
+import { scoreBrings, predictOppLeads } from '../src/domain/bring.js';
 import type { PokemonSet, OpponentEntry } from '../src/domain/types.js';
 import { ZERO_EVS, MAX_IVS } from '../src/domain/types.js';
 
@@ -141,5 +141,17 @@ describe('no-guard detector', () => {
     const set = mon({ species: 'Hawlucha', ability: 'No Guard', item: 'Hawluchanite', moves: ['Acrobatics', 'Protect'] });
     const out = detectTactics([profileFromSet(set)]);
     expect(out.some(t => t.pattern === 'no-guard')).toBe(false);
+  });
+});
+
+describe('predictOppLeads', () => {
+  test('a perish-trap-capable six predicts the trap pair as the lead', () => {
+    const opp: OpponentEntry[] = ['Politoed', 'Steelix', 'Garchomp', 'Talonflame', 'Espathra', 'Sneasler']
+      .map(species => ({ species, knownMoves: [] }));
+    const lead = predictOppLeads(opp);
+    expect(lead).toBeTruthy();
+    expect(lead!.species).toHaveLength(2);
+    expect(lead!.species[0]).not.toBe(lead!.species[1]);
+    expect(lead!.tactic.pieces).toHaveLength(2);
   });
 });

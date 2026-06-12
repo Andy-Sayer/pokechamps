@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { PokemonSet, OpponentEntry } from '@pokechamps/core/domain/types.js';
-import { scoreBrings, matchupGrid, type BringScore } from '@pokechamps/core/domain/bring.js';
+import { scoreBrings, matchupGrid, predictOppLeads, type BringScore } from '@pokechamps/core/domain/bring.js';
+import { tacticLabel } from '@pokechamps/core/domain/tactics.js';
 import { speciesTypes } from '@pokechamps/core/domain/typechart.js';
 import { pikalyticsAvailable } from '@pokechamps/core/domain/pikalytics.js';
 import { explainBring } from '@pokechamps/core/ai/prompts.js';
@@ -63,6 +64,10 @@ export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: B
     setBrings(scoreBrings(myTeam, opponent).slice(0, 5));
     setCursor(0);
   }, [myTeam, opponent]);
+
+  // Lead prediction runs full learnset-potential tactic detection — memoized
+  // so it doesn't re-run on every keystroke render.
+  const oppLead = useMemo(() => predictOppLeads(opponent), [opponent]);
 
   // Effective selection: custom picks (when valid) override the suggestion
   // cursor. Used for the matchup preview and Enter-to-confirm.
@@ -198,6 +203,11 @@ export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: B
             </Box>
           ) : (
             <>
+              {oppLead && (
+                <Text color="magenta">
+                  Likely opp lead: {oppLead.species[0]} + {oppLead.species[1]} <Text dimColor>— their strongest pair combo: {oppLead.tactic.name} ({tacticLabel(oppLead.tactic)})</Text>
+                </Text>
+              )}
               <Text bold>Suggested brings (type-matchup weighted)</Text>
               {brings.length === 0 && <Text dimColor>Scoring brings…</Text>}
               {brings.map((b, i) => {

@@ -144,6 +144,23 @@ function bestPerPatternWithin(instances: TacticInstance[], species: Set<string>)
   return [...best.values()].sort((a, b) => b.score - a.score);
 }
 
+/** Predicted opponent lead pair from their combo space: the strongest
+ *  two-mon tactic their six could run wants its pieces on the field together
+ *  from turn 1. Null when nothing pair-shaped clears the bar — predicting
+ *  leads off a weak signal is worse than staying quiet. */
+export function predictOppLeads(opponent: OpponentEntry[]): { species: [string, string]; tactic: TacticInstance } | null {
+  const tactics = detectTactics(opponent.map(o => profileFromSpecies(o.species)), { minScore: 60 });
+  // Setup-shaped pair combos want to LEAD; pure damage cores less reliably so.
+  const leady = new Set(['perish-trap', 'trick-room', 'tailwind', 'weather', 'terrain', 'redirection', 'fake-out-setup', 'aurora-veil', 'baton-pass', 'beat-up-justified', 'crit-anger-point']);
+  for (const t of tactics) {
+    if (t.pieces.length !== 2 || !leady.has(t.pattern)) continue;
+    const [a, b] = t.pieces;
+    if (a!.species === b!.species) continue;
+    return { species: [a!.species, b!.species], tactic: t };
+  }
+  return null;
+}
+
 function comb4(n: number): number[][] {
   const out: number[][] = [];
   for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++)
