@@ -648,11 +648,22 @@ Shipped:
   immunity, Shed Shell, pivot bypass). The engine now plans around
   perish-trap on both sides of the board.
 
+Completed 2026-06-12 (perish-trap closeout):
+- Perish Song CAST as a search action (SET_PERISH, Soundproof exclusion) +
+  trapping-move casts (TRAP_BASE) — the search PLANS the trap: tests prove it
+  opens with the song when songs are the only win and finds sing+Block vs a
+  foe with a bench escape. Perish-doomed mons count as count/4 material in
+  the leaf eval so the payoff registers inside practical depths.
+- Engine auto-bookkeeping: logged Perish Song sets the clock on all four
+  actives (4 → same-turn tick = display 3); switch-out clears; manual
+  `perish N` overrides skip that turn's auto-tick. Baton Pass carry is a
+  known manual-relog limitation.
+- Move-trap volatiles (Block / Mean Look / Octolock / Jaw Lock / Anchor Shot /
+  Spirit Shackle / Thousand Waves): trappedBy on both sides, Ghost immunity,
+  lazily validated (trapper active+alive), ⛓pinned markers, threaded into the
+  search's switch gate.
+
 Next (not yet modeled):
-- Perish Song CAST as a search action (offense planning: "sing now, stall 3"),
-  with Soundproof exclusion — the defensive/forecast half is done.
-- Mean Look / Block volatile tracking in the live match state (search models
-  ability trapping only; move-based trap status isn't logged yet).
 - Tactic-aware oppLine explanations ("they're setting up X — deny with Y").
 - Bring-time lead prediction from opponent combo cores (if their best combo
   needs Politoed+Steelix, expect that lead pair; pick anti-leads).
