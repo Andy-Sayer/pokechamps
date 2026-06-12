@@ -2590,9 +2590,13 @@ function resolveTurn(
         oTgt = alt;
         oc = sub;
       }
+      // Piercing Drill (Excadrill-Mega custom): contact moves go THROUGH
+      // protection at 1/4 damage instead of fizzling.
+      let pierceScale = 1;
       if (oppProtected.has(oTgt)) {                  // target protecting → fizzle (+ King's Shield etc. punish)
         if (oc?.contact) applyProtectPunish(t.oppProtectMove[oTgt], 'mine', act.actor);
-        continue;
+        if (!(oc?.contact && toId(t.myAbility[act.actor] ?? '') === 'piercingdrill')) continue;
+        pierceScale = 0.25;
       }
       if (!oc) continue;                              // no priority move vs this foe
       if (psychicBlocked(oc.priority, t.oppGrounded[oTgt]!)) continue; // Psychic Terrain blocks priority
@@ -2631,7 +2635,7 @@ function resolveTurn(
         }
       }
       const oBefore = oppHp[oTgt]!;
-      apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r) * rageScale(oc.move, myHitsTaken[act.actor] ?? 0), oc.physical, oc.type, oc.groundMove), oppSurv, oc.multiHit, oppDg(oTgt));
+      apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r) * rageScale(oc.move, myHitsTaken[act.actor] ?? 0) * pierceScale, oc.physical, oc.type, oc.groundMove), oppSurv, oc.multiHit, oppDg(oTgt));
       const oDealt = oBefore - oppHp[oTgt]!;
       trackHit(oppBigHit, oTgt, act.actor, oDealt, oc.physical);   // for the opp's Counter
       if (oc.setsHazard) oppHazards = addHazard(oppHazards, oc.setsHazard); // Stone Axe → SR, Ceaseless Edge → Spikes (on their side)
@@ -2708,9 +2712,12 @@ function resolveTurn(
         mTgt = alt;
         tc = sub;
       }
+      // Piercing Drill mirror (a KNOWN opp Excadrill-Mega pierces my Protect).
+      let oppPierceScale = 1;
       if (myProtected.has(mTgt)) {                    // my mon protecting → fizzle (+ King's Shield etc. punish)
         if (tc?.contact) applyProtectPunish(t.myProtectMove[mTgt], 'opp', act.actor);
-        continue;
+        if (!(tc?.contact && toId(t.oppAbility[act.actor] ?? '') === 'piercingdrill')) continue;
+        oppPierceScale = 0.25;
       }
       if (!tc) continue;                              // no priority move vs this foe
       if (psychicBlocked(tc.priority, t.myGrounded[mTgt]!)) continue; // Psychic Terrain blocks priority
@@ -2745,7 +2752,7 @@ function resolveTurn(
         }
       }
       const mBefore = myHp[mTgt]!;
-      apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r) * rageScale(tc.move, oppHitsTaken[act.actor] ?? 0), tc.physical, tc.type, tc.groundMove), mySurv, tc.multiHit, myDg(mTgt));
+      apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r) * rageScale(tc.move, oppHitsTaken[act.actor] ?? 0) * oppPierceScale, tc.physical, tc.type, tc.groundMove), mySurv, tc.multiHit, myDg(mTgt));
       const mDealt = mBefore - myHp[mTgt]!;
       trackHit(myBigHit, mTgt, act.actor, mDealt, tc.physical);   // for my Counter
       if (tc.setsHazard) myHazards = addHazard(myHazards, tc.setsHazard); // their Stone Axe / Ceaseless Edge → hazard on my side
