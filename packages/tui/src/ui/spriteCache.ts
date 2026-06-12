@@ -144,11 +144,15 @@ function cropRgba(width: number, height: number, rgba: Uint8Array): { width: num
 }
 
 /** Both renderer variants from one decode: `sixel` at 48px (crisp pixels for
- *  real sixel terminals) and `small` for the half-block fallback — content-
- *  cropped, area-averaged to SMALL_H, palette-snapped (smooth but flat). */
+ *  real sixel terminals) and `small` for the half-block fallback. */
 export interface SpriteVariants { sixel: Sprite; small: Sprite | null }
 
-const SMALL_H = 14; // 7 text rows of half-blocks, pre-crop
+// Half-block sizing: reduce the FULL frame by an exact INTEGER factor first
+// (6:1 on the 96px canvas → 16px), then crop. Integer blocks alias far less
+// than crop-first arbitrary ratios (the 14px crop-first attempt was fuzzy),
+// and since sprites rarely fill the canvas the cropped content lands around
+// 10-13px ≈ 5-6 text rows — minimal AND clean.
+const SMALL_FACTOR = 6;
 
 function decodeToVariants(png: Uint8Array): SpriteVariants | null {
   try {
@@ -156,9 +160,10 @@ function decodeToVariants(png: Uint8Array): SpriteVariants | null {
     const half = downsample(d.width, d.height, d.rgba);
     const sixel = quantise(half.width, half.height, half.rgba);
     if (!sixel) return null;
-    const cropped = cropRgba(d.width, d.height, d.rgba);
-    const resized = areaResize(cropped.width, cropped.height, cropped.rgba, Math.min(SMALL_H, cropped.height));
-    const small = snapToPalette(resized.width, resized.height, resized.rgba, sixel.palette);
+    const targetH = Math.max(8, Math.round(d.height / SMALL_FACTOR));
+    const resized = areaResize(d.width, d.height, d.rgba, targetH);
+    const cropped = cropRgba(resized.width, resized.height, resized.rgba);
+    const small = snapToPalette(cropped.width, cropped.height, cropped.rgba, sixel.palette);
     return { sixel, small };
   } catch {
     return null;
