@@ -121,9 +121,13 @@ export function MatchHistory({ stores, onExit }: MatchHistoryProps) {
     const t = m.turns[turnCursor];
     const hasTurns = m.turns.length > 0;
     const lastTurn = m.turns.length - 1;
-    // Progressive board: approximate HP from cumulative LOGGED damage through this
-    // turn (heals/EOT aren't reconstructible from a snapshot — labelled approx).
+    // Board state: turns finalized since 2026-06-12 carry an EXACT post-turn
+    // snapshot (t.post); older saves fall back to the approximate cumulative
+    // logged-damage tally (heals/EOT not reconstructible — labelled approx).
+    const post = hasTurns ? m.turns[turnCursor]?.post : undefined;
     const tally = replayTallyUpTo(m, turnCursor);
+    const myHpAt = (i: number) => post ? (post.myHpPercent[i] ?? 100) : approxHpFromTaken(tally.myTaken, i);
+    const oppHpAt = (i: number) => post ? (post.oppHpPercent[i] ?? 100) : approxHpFromTaken(tally.oppTaken, i);
     const barW = narrow ? 8 : 14;
     const myIdxs = (m.bring && m.bring.length ? m.bring : m.myTeam.map((_, i) => i)) as number[];
     const oppIdxs = (m.opponentBrought && m.opponentBrought.length ? m.opponentBrought : m.opponentTeam.map((_, i) => i)) as number[];
@@ -154,10 +158,14 @@ export function MatchHistory({ stores, onExit }: MatchHistoryProps) {
               <Text bold>Turn {t!.index} of {m.turns.length}{turnCursor >= lastTurn ? ' (end)' : ''}{fld ? <Text color="cyan"> · {fld}</Text> : null}</Text>
               <Box marginTop={1} flexDirection="column">
                 <Text color="green">You</Text>
-                {myIdxs.map(i => monRow(m.myTeam[i]?.species ?? `#${i}`, approxHpFromTaken(tally.myTaken, i), tally.myDealt[i] ?? 0, `my-${i}`))}
+                {myIdxs.map(i => monRow(m.myTeam[i]?.species ?? `#${i}`, myHpAt(i), tally.myDealt[i] ?? 0, `my-${i}`))}
                 <Box marginTop={1}><Text color="red">Opponent</Text></Box>
-                {oppIdxs.map(i => monRow(m.opponentTeam[i]?.species ?? `#${i}`, approxHpFromTaken(tally.oppTaken, i), tally.oppDealt[i] ?? 0, `opp-${i}`))}
-                <Text dimColor>{'  '}(HP approximate — from logged damage; heals/residual not shown)</Text>
+                {oppIdxs.map(i => monRow(m.opponentTeam[i]?.species ?? `#${i}`, oppHpAt(i), tally.oppDealt[i] ?? 0, `opp-${i}`))}
+                {post
+                  ? post.eotNotes?.length
+                    ? <Text dimColor>{'  '}EOT: {post.eotNotes.join(', ')}</Text>
+                    : null
+                  : <Text dimColor>{'  '}(HP approximate — from logged damage; heals/residual not shown)</Text>}
               </Box>
               <Box marginTop={1} flexDirection="column">
                 {t!.actions.map((a, i) => (

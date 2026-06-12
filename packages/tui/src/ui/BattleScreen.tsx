@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
-import type { Match, FieldState, DamageObservation, MoveAction, OpponentEntry, PokemonSet } from '@pokechamps/core/domain/types.js';
+import type { Match, FieldState, DamageObservation, MoveAction, OpponentEntry, PokemonSet, Turn } from '@pokechamps/core/domain/types.js';
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
 import { scoreSpread, scoreOffensiveSpread, mostLikely, recoilDrainHpEvs, reconcileCandidates, abilitiesRuledOutByHit } from '@pokechamps/core/domain/inference.js';
 import { detectTactics, profileFromOpponentEntry, tacticLabel } from '@pokechamps/core/domain/tactics.js';
@@ -43,7 +43,7 @@ import { MatchSummary } from './MatchSummary.js';
 import { formatShowdownTeamSP } from '@pokechamps/core/domain/showdown.js';
 import { loadPrefs, savePrefs } from '@pokechamps/core/storage/prefs.js';
 import { BATTLE_COMMANDS, parseCommand, type BattleCommandId } from './slashCommands.js';
-import { deriveActiveIdx } from '@pokechamps/core/match/engine.js';
+import { deriveActiveIdx, snapshotTurn } from '@pokechamps/core/match/engine.js';
 import { applyMegaAction } from '@pokechamps/core/domain/megaResolve.js';
 import { getMegaOptions } from '@pokechamps/core/domain/gimmicks/mega.js';
 import { solveEndgame } from '@pokechamps/core/domain/endgame.js';
@@ -874,7 +874,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       return;
     }
     const turnIndex = match.turns.length + 1;
-    const newTurn = { index: turnIndex, actions: draftActions, field };
+    const newTurn: Turn = { index: turnIndex, actions: draftActions, field };
     // Grow the brought set with any opp-side switches this turn (voluntary
     // or forced post-faint — both surface as a switch action in the log).
     const broughtSet = new Set(match.opponentBrought ?? []);
@@ -1979,6 +1979,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     }
 
     next.outcome = detectOutcome(next);
+    // Exact replay snapshot — newTurn is already referenced from next.turns.
+    // Mirror of engine.ts (runs after boost lines so stored HP/status final).
+    newTurn.post = snapshotTurn(next, nextActive, eotResult.notes);
     setMatch(next);
     setActiveIdx(nextActive);
     setDraftActions([]);

@@ -282,6 +282,22 @@ export interface Turn {
   actions: MoveAction[];
   // Snapshot of field after turn resolves.
   field: FieldState;
+  // Full post-turn state snapshot (HP/status/actives + EOT notes), written by
+  // finalizeTurn since 2026-06-12. Makes match-history replay EXACT — older
+  // saves lack it and fall back to the approximate logged-damage tally.
+  post?: TurnSnapshot;
+}
+
+export interface TurnSnapshot {
+  /** Active slot occupants AFTER the turn (post-faint clearing). */
+  active: { mine: [number | null, number | null]; theirs: [number | null, number | null] };
+  /** HP % per team index (my side keyed by myTeam index, opp by opponentTeam index). */
+  myHpPercent: Record<number, number>;
+  oppHpPercent: Record<number, number>;
+  myStatus?: Record<number, string>;
+  oppStatus?: Record<number, string>;
+  /** End-of-turn notes (weather chip, perish ticks, …) for replay display. */
+  eotNotes?: string[];
 }
 
 export interface DamageObservation {

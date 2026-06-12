@@ -214,3 +214,20 @@ describe('trapping move volatile', () => {
     expect(r.match.opponentTeam[0]!.trappedBy).toBeUndefined();
   });
 });
+
+describe('turn snapshot (exact replay)', () => {
+  test('finalizeTurn writes a post-turn snapshot onto the Turn record', () => {
+    const r = finalizeTurn({
+      match: fullMatch({ myCurrentHp: { 0: 80, 1: 100, 2: 100, 3: 100 } }),
+      turn: { actions: [act({ side: 'mine', move: 'Perish Song', attackerTeamIndex: 0 })], field: NEUTRAL_FIELD },
+      activeIdx: ACTIVE,
+    });
+    const post = r.match.turns[r.match.turns.length - 1]!.post;
+    expect(post).toBeTruthy();
+    expect(post!.myHpPercent[0]).toBe(80);
+    expect(post!.oppHpPercent[0]).toBe(100);
+    expect(post!.active.mine).toEqual([0, 1]);
+    // The perish notes from this turn's EOT ride along for replay display.
+    expect(post!.eotNotes?.some(n => n.includes('Perish'))).toBe(true);
+  });
+});

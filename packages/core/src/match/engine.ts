@@ -18,6 +18,7 @@ import type {
   OpponentEntry,
   PokemonSet,
   Turn,
+  TurnSnapshot,
 } from '../domain/types.js';
 import { NEUTRAL_FIELD } from '../domain/types.js';
 import { scoreSpread, scoreOffensiveSpread, recoilDrainHpEvs, reconcileCandidates, abilitiesRuledOutByHit } from '../domain/inference.js';
@@ -139,6 +140,33 @@ function applyHazardOnSwitchInto(
       match.field = { ...match.field, theirHazards: { ...match.field.theirHazards, toxicSpikes: 0 } };
     }
   }
+}
+
+// Post-turn state snapshot for the Turn record — makes match-history replay
+// exact instead of reconstructed from logged damage. Shared by both
+// finalizeTurn mirrors (engine + BattleScreen).
+export function snapshotTurn(
+  match: Match,
+  active: { mine: [number | null, number | null]; theirs: [number | null, number | null] },
+  eotNotes: string[],
+): TurnSnapshot {
+  const myHpPercent: Record<number, number> = {};
+  for (const i of match.bring ?? []) {
+    myHpPercent[i] = match.myFainted?.includes(i) ? 0 : Math.round(match.myCurrentHp?.[i] ?? 100);
+  }
+  const oppHpPercent: Record<number, number> = {};
+  const oppStatus: Record<number, string> = {};
+  match.opponentTeam.forEach((o, i) => {
+    oppHpPercent[i] = o.fainted ? 0 : Math.round(o.currentHpPercent ?? 100);
+    if (o.status) oppStatus[i] = o.status;
+  });
+  const myStatus: Record<number, string> = {};
+  for (const [k, v] of Object.entries(match.myStatus ?? {})) if (v) myStatus[Number(k)] = v;
+  return {
+    active: { mine: [...active.mine], theirs: [...active.theirs] },
+    myHpPercent, oppHpPercent, myStatus, oppStatus,
+    eotNotes: eotNotes.length ? eotNotes : undefined,
+  };
 }
 
 // Clear my-side move-restricting volatiles for a team index (on switch-out).
@@ -1669,6 +1697,10 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
   }
 
   next.outcome = detectOutcome(next);
+
+  // Exact replay snapshot — newTurn is already referenced from next.turns, so
+  // mutating it here lands in the saved match.
+  newTurn.post = snapshotTurn(next, nextActive, eotResult.notes);
 
   return { match: next, activeIdx: nextActive, inferenceNotes, eotNotes: eotResult.notes };
 }
