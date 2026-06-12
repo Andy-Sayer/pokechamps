@@ -3286,14 +3286,16 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       {pikaPreview && (
         <Box flexDirection="column" marginTop={1}>
           <Text dimColor>
-            /pika preview · {pikaPreview} sprite · force=sixel ·
+            /pika preview · {pikaPreview} sprite · force={showSprites && sixelSupported() ? 'halfblock (sprite strip owns sixel)' : 'sixel'} ·
             {' '}TERM_PROGRAM={process.env.TERM_PROGRAM ?? '(unset)'} ·
             {' '}WT_SESSION={process.env.WT_SESSION ? 'yes' : 'no'} ·
             {' '}TERM={process.env.TERM ?? '(unset)'}
           </Text>
           <PikaSpinner
             sprite={pikaPreview}
-            force="sixel"
+            // The /pika sixel check can't run while the sprite strip owns the
+            // frame bottom — the two cursor dances collide. Half-block then.
+            force={showSprites && sixelSupported() ? 'halfblock' : 'sixel'}
             label={`(/pika again to switch to ${pikaPreview === 'run' ? 'idle' : pikaPreview === 'idle' ? 'off' : 'run'})`}
           />
         </Box>
@@ -3456,10 +3458,14 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
 
       {finalizing && (
         <Box marginTop={1}>
-          <PikaSpinner sprite="run" label="Crunching the turn — narrowing opp spreads…" />
+          {/* When the sixel sprite strip owns the frame bottom, the spinner
+              must NOT also draw sixels (two "I'm last" cursor dances collide
+              — pika painted over the sprites). Half-block chibi is mid-layout
+              safe, so pika still shows whenever it's relevant. */}
+          <PikaSpinner sprite="run" label="Crunching the turn — narrowing opp spreads…" force={showSprites && sixelSupported() ? 'halfblock' : undefined} />
         </Box>
       )}
-      {aiReviewBusy && <Box marginTop={1}><PikaSpinner label="Pikachu is reviewing the last turn…" /></Box>}
+      {aiReviewBusy && <Box marginTop={1}><PikaSpinner label="Pikachu is reviewing the last turn…" force={showSprites && sixelSupported() ? 'halfblock' : undefined} /></Box>}
       {aiReview && !aiReviewBusy && (
         <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor="magenta" paddingX={1}>
           <Text bold color="magenta">Claude's read on turn {match.turns.length}</Text>
