@@ -21,14 +21,10 @@
 // `0;1q` (P1=0 = default aspect, P2=1 = transparent background) so the
 // sprite doesn't repaint cells outside its bounding box.
 //
-// Approximate cell height — Ink doesn't expose font metrics, so we use
-// a conservative average. Slightly overshooting the row reservation is
-// fine (small gap below the sprite); undershooting leaves ghosts.
-const APPROX_CELL_PX = 14;
-
 import React, { useEffect, useMemo, useRef } from 'react';
 import { Box, Text, useStdout } from 'ink';
 import { encodeSixel, type Bitmap, type Palette } from './sixel.js';
+import { cellPixelHeight } from './sixelSupport.js';
 
 export interface SixelImageProps {
   bitmap: Bitmap;
@@ -70,13 +66,28 @@ export function SixelImage({ bitmap, palette, scale = 1, rows }: SixelImageProps
 
   // Auto-compute rows from sprite height, +1 row safety pad.
   const pxHeight = bitmap.height * scale;
-  const reservedRows = rows ?? Math.ceil(pxHeight / APPROX_CELL_PX) + 1;
+  // Cell height: the terminal's own answer (XTWINOPS probe at startup) when
+  // available, else a conservative 14px. Over-reserving leaves a small gap;
+  // under-reserving leaves sixel ghosts on repaint.
+  const cellPx = cellPixelHeight();
+  const reservedRows = rows ?? Math.ceil(pxHeight / cellPx) + 1;
 
   useEffect(() => {
     if (!stdout) return;
     // Locate our reservation within the frame via the yoga tree; fall back to
     // the old "we're the last thing rendered" assumption if that fails.
     const up = rowsFromFrameBottom(boxRef.current as DomIsh | null) ?? reservedRows;
+    // SAFETY GUARDS — a wrong cursor dance doesn't just misplace the image,
+    // it desyncs Ink's paint anchor and erases the UI (seen live):
+    //  · up ≥ viewport rows: the target row is scrolled off-screen; ESC[A
+    //    clamps at the top but the walk-back still descends the full count,
+    //    leaving the cursor below where Ink expects. Skip entirely.
+    //  · image touching the bottom margin: sixel scrolling would shift the
+    //    whole frame under Ink. Require the image to fit strictly above the
+    //    cursor line.
+    const viewport = stdout.rows ?? 0;
+    const imageRows = Math.ceil(pxHeight / cellPx);
+    if (viewport <= 0 || up >= viewport || imageRows >= up) return;
     stdout.write(`\x1b[${up}A`);  // up to the top of our reservation
     stdout.write('\x1b7');         // save cursor (VT100 — widest support)
     stdout.write(seq);             // draw sixel

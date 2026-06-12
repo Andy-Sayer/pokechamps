@@ -15,17 +15,28 @@
 // Conservative default: ON only when we recognise a sixel-supporting terminal.
 // Fall back to half-block in unknown environments.
 
-// Result of the ACTIVE terminal probe (Primary Device Attributes). Null until
-// probeSixel() has run; takes precedence over the env-var heuristics below
-// because it's the terminal's own answer.
+// Results of the ACTIVE terminal probe. Null until probeSixel() has run; the
+// sixel answer takes precedence over the env-var heuristics below because
+// it's the terminal's own word.
 let probed: boolean | null = null;
+let cellHeightPx: number | null = null;
+
+/** Terminal cell height in pixels (XTWINOPS 16 reply), or the conservative
+ *  default when the terminal didn't answer. Drives how many text rows a
+ *  sixel image needs reserved. */
+export function cellPixelHeight(): number {
+  return cellHeightPx ?? 14;
+}
 
 /**
- * Ask the terminal directly whether it renders sixels: write the Primary
- * Device Attributes query (CSI c) and look for capability `4` (sixel
- * graphics) in the `CSI ? …;4;… c` reply. Must run BEFORE Ink takes over
- * stdin/stdout (cli.tsx calls it at startup). Falls back silently — a
- * non-answering terminal just leaves the env heuristics in charge.
+ * Ask the terminal directly (a) whether it renders sixels — Primary Device
+ * Attributes query (CSI c), capability `4` in the `CSI ? …;4;… c` reply —
+ * and (b) its cell size in pixels (XTWINOPS `CSI 16 t` → `CSI 6;H;W t`).
+ * The cell query goes first and the DA query second: every terminal answers
+ * DA, and replies come in order, so when the DA reply lands any cell-size
+ * answer is already in the buffer. Must run BEFORE Ink takes over stdin
+ * (cli.tsx calls it at startup). Falls back silently on non-answering
+ * terminals — the env heuristics below stay in charge.
  */
 export function probeSixel(timeoutMs = 200): Promise<boolean | null> {
   return new Promise(resolve => {
@@ -38,12 +49,17 @@ export function probeSixel(timeoutMs = 200): Promise<boolean | null> {
       if (!wasRaw) stdin.setRawMode?.(false);
       stdin.pause();
       if (answer != null) probed = answer;
+      const cell = buf.match(/\x1b\[6;(\d+);(\d+)t/);
+      if (cell) {
+        const h = parseInt(cell[1]!, 10);
+        if (h >= 4 && h <= 64) cellHeightPx = h;
+      }
       resolve(answer);
     };
     const timer = setTimeout(() => done(null), timeoutMs);
     const onData = (chunk: Buffer) => {
       buf += chunk.toString('utf8');
-      // Reply shape: ESC [ ? <attrs separated by ;> c
+      // DA reply shape: ESC [ ? <attrs separated by ;> c
       const m = buf.match(/\x1b\[\?([\d;]*)c/);
       if (m) {
         clearTimeout(timer);
@@ -54,7 +70,7 @@ export function probeSixel(timeoutMs = 200): Promise<boolean | null> {
       stdin.setRawMode?.(true);
       stdin.resume();
       stdin.on('data', onData);
-      stdout.write('\x1b[c');
+      stdout.write('\x1b[16t\x1b[c');
     } catch {
       clearTimeout(timer);
       done(null);
