@@ -148,7 +148,7 @@ function cropRgba(width: number, height: number, rgba: Uint8Array): { width: num
  *  cropped, area-averaged to SMALL_H, palette-snapped (smooth but flat). */
 export interface SpriteVariants { sixel: Sprite; small: Sprite | null }
 
-const SMALL_H = 18; // 9 text rows of half-blocks, pre-crop
+const SMALL_H = 14; // 7 text rows of half-blocks, pre-crop
 
 function decodeToVariants(png: Uint8Array): SpriteVariants | null {
   try {
