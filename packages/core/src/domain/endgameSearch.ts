@@ -3921,9 +3921,13 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
     const set = match.myTeam[idx];
     if (!set) continue;
     if (match.myFainted?.includes(idx)) continue;
-    const raw = match.myCurrentHp?.[idx];
-    const max = maxHpFor(set);
-    const hpPercent = raw == null || max <= 0 ? 100 : Math.max(0, Math.min(100, (raw / max) * 100));
+    // myCurrentHp stores PERCENT (both finalizeTurn mirrors + endOfTurn write
+    // 0-100 values; raw user inputs are converted at the parse boundary). A
+    // previous raw/max conversion here DOUBLE-converted, so every damaged
+    // my-side mon entered the live search at (pct/maxHp)·100 — e.g. 50% of a
+    // 170-HP mon read as 29% — making recommendations far too pessimistic.
+    const pct = match.myCurrentHp?.[idx];
+    const hpPercent = pct == null ? 100 : Math.max(0, Math.min(100, pct));
     mine.push({
       set, hpPercent, active: myActive.has(idx), megaActive: match.myMegaUsed?.includes(idx),
       boosts: match.myBoosts?.[idx], status: match.myStatus?.[idx], survival: mySurvival(set),

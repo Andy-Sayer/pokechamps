@@ -293,10 +293,13 @@ describe('searchInputFromMatch', () => {
     expect(input.myMegaSpent).toBeFalsy();
   });
 
-  test('maps actives, bench, raw→% HP, and seen opponents', () => {
+  test('maps actives, bench, % HP, and seen opponents', () => {
     const m = freshMatch();
     m.myFainted = [2];                          // Incineroar fainted → excluded
-    m.myCurrentHp = { 1: Math.round(maxHpFor(garchomp) / 2) }; // Garchomp at 50%
+    // myCurrentHp stores PERCENT (raw inputs are converted at the parse
+    // boundary in applyStateUpdate) — the old raw-valued fixture here baked in
+    // the very double-conversion bug this suite now guards against.
+    m.myCurrentHp = { 1: 50 };                  // Garchomp at 50%
     m.opponentTeam[1]!.currentHpPercent = 30;
     const input = searchInputFromMatch(m, { mine: [0, 1], theirs: [0, 1] });
 
@@ -2375,5 +2378,20 @@ describe('Step D: deep (lookahead) switch coverage', () => {
     expect(narrow).toBe(1);
     expect(full).toBeGreaterThan(narrow);
     expect(full).toBeLessThanOrEqual(3);   // default SEARCH_PROFILE_K
+  });
+});
+
+describe('searchInputFromMatch HP units', () => {
+  test('myCurrentHp is PERCENT — no double conversion against max HP', () => {
+    const set = mon({ species: 'Incineroar', ability: 'Intimidate', moves: ['Knock Off'] });
+    const match = {
+      id: 't', startedAt: '', myTeam: [set],
+      opponentTeam: [{ species: 'Garchomp', knownMoves: [] }],
+      bring: [0], opponentBrought: [0], turns: [], field: { ...NEUTRAL_FIELD },
+      active: { mine: [0, null], theirs: [0, null] },
+      myCurrentHp: { 0: 50 },
+    } as unknown as Match;
+    const input = searchInputFromMatch(match, { mine: [0, null], theirs: [0, null] });
+    expect(input.mine[0]!.hpPercent).toBe(50);
   });
 });
