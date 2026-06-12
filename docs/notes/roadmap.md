@@ -663,7 +663,16 @@ Completed 2026-06-12 (perish-trap closeout):
   lazily validated (trapper active+alive), ⛓pinned markers, threaded into the
   search's switch gate.
 
-Next (not yet modeled):
-- Tactic-aware oppLine explanations ("they're setting up X — deny with Y").
-- Bring-time lead prediction from opponent combo cores (if their best combo
-  needs Politoed+Steelix, expect that lead pair; pick anti-leads).
+Also completed 2026-06-12:
+- no-guard detector (Machamp / Golurk / Mega Hawlucha today; Mega Raichu Y
+  joins under Reg M-B) — recharge/charge moves filtered out of the nuke list.
+- Bring-time lead prediction (predictOppLeads): strongest setup-shaped pair
+  combo from the opponent's six shown as "Likely opp lead: X + Y" in the
+  BringPicker. Opp tactic CASTS (Perish Song, Block, ...) now also appear by
+  name in the search's oppLine plays, which covers most of the "they're
+  setting up X" explanation idea organically.
+
+Next:
+- Richer tactic-aware oppLine prose ("deny with Y" counter suggestions inline
+  in the battle screen — combo watch already lists counters statically).
+- Reg M-B switch on 2026-06-17 — runbook in regulation-m-b.md.
