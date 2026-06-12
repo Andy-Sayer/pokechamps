@@ -116,3 +116,30 @@ describe('scoreBrings tactic integration', () => {
     expect(brings[0]!.rationale.some(r => r.startsWith('Covers opp') || r.startsWith('⚠ No answer'))).toBe(true);
   });
 });
+
+describe('no-guard detector', () => {
+  test('Mega Raichu Y (stone profile): Zap Cannon never misses', () => {
+    const p = profileFromMegaStone('raichunitey');
+    expect(p).toBeTruthy();
+    expect(p!.abilities).toContain('noguard');
+    const out = detectTactics([p!]);
+    const ng = out.find(t => t.pattern === 'no-guard');
+    expect(ng).toBeTruthy();
+    expect(ng!.payoff).toContain('Zap Cannon');
+  });
+
+  test('Mega Hawlucha (legal M-A stone): High Jump Kick crash-free', () => {
+    const p = profileFromMegaStone('hawluchanite');
+    expect(p).toBeTruthy();
+    const out = detectTactics([p!]);
+    const ng = out.find(t => t.pattern === 'no-guard');
+    expect(ng).toBeTruthy();
+    expect(ng!.pieces[0]!.move).toContain('High Jump Kick');
+  });
+
+  test('accurate-only movesets produce no instance', () => {
+    const set = mon({ species: 'Hawlucha', ability: 'No Guard', item: 'Hawluchanite', moves: ['Acrobatics', 'Protect'] });
+    const out = detectTactics([profileFromSet(set)]);
+    expect(out.some(t => t.pattern === 'no-guard')).toBe(false);
+  });
+});

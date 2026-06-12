@@ -15,7 +15,7 @@
 //
 // Scores are explainable 0–100 heuristics from base stats — they rank combos
 // within a pattern; cross-pattern comparison is rough by design.
-import { getSpecies, getItem, getLearnset, loadFormat, toId } from './data.js';
+import { getSpecies, getItem, getMove, getLearnset, loadFormat, toId } from './data.js';
 import type { PokemonSet } from './types.js';
 
 export interface MonProfile {
@@ -603,6 +603,35 @@ const detectUnburden: Detector = (a, b) => {
   }];
 };
 
+const detectNoGuard: Detector = (a, b) => {
+  if (b) return [];
+  if (!hasAbility(a, 'noguard')) return [];
+  // Inaccurate heavy moves the holder turns into guaranteed hits (Zap Cannon,
+  // Dynamic Punch, High Jump Kick — No Guard also skips HJK's crash, Focus
+  // Blast, Hurricane, …).
+  const nukes: { move: string; bp: number; acc: number }[] = [];
+  for (const mv of a.moves) {
+    const m = getMove(mv) as { basePower?: number; accuracy?: number | true; name?: string; flags?: Record<string, number> } | undefined;
+    if (!m?.basePower || m.basePower < 90) continue;
+    if (m.accuracy === true || (m.accuracy as number) > 90) continue;
+    // Recharge/charge moves aren't realistic nukes regardless of accuracy.
+    if (m.flags?.recharge || m.flags?.charge) continue;
+    nukes.push({ move: m.name ?? mv, bp: m.basePower, acc: m.accuracy as number });
+  }
+  if (!nukes.length) return [];
+  nukes.sort((x, y) => y.bp - x.bp || x.acc - y.acc);
+  const top = nukes[0]!;
+  const s = statsOf(a);
+  return [{
+    pattern: 'no-guard', name: 'No Guard + inaccurate nukes',
+    pieces: [{ species: a.species, role: 'holder', ability: 'noguard', move: nukes.slice(0, 3).map(n => n.move).join(' / ') }],
+    setupTurns: 0,
+    payoff: `${top.move} (${top.bp} BP, normally ${top.acc}%) and ${nukes.length - 1} more never miss${nukes.some(n => n.move === 'Zap Cannon') ? ' — Zap Cannon guarantees paralysis too' : ''}.`,
+    counters: ['No Guard cuts both ways — your inaccurate moves also always hit it', 'Protect still blocks', 'Wide Guard vs spread nukes'],
+    score: clamp(32 + nukes.length * 5 + (100 - top.acc) / 4 + (s ? offense(s) / 5 : 0)),
+  }];
+};
+
 const detectAuroraVeil: Detector = (a, b) => {
   const out: TacticInstance[] = [];
   const profiles = b ? [a, b] : [a];
@@ -643,7 +672,7 @@ const DETECTORS: Detector[] = [
   detectPerishTrap, detectBatonPass, detectStoredPowerSnowball, detectTrickRoom,
   detectTailwind, detectWeather, detectTerrain, detectRedirection, detectFakeOutSetup,
   detectSpreadImmune, detectBeatUpJustified, detectCritAngerPoint, detectUnburden,
-  detectAuroraVeil,
+  detectNoGuard, detectAuroraVeil,
 ];
 
 /** Compact one-line label: 'Politoed (Perish Song) + Steelix-Mega (block)'. */
