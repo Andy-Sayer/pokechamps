@@ -1,0 +1,64 @@
+# Regulation Set M-B — what we know + switch-day runbook
+
+Researched 2026-06-12. Reg M-A ends **June 17, 2026**; Regulation Set M-B runs
+**June 17 → September 2, 2026** (Season M-3). The full legal roster is NOT
+published yet — it drops with the update on the 17th. This note holds the
+confirmed facts and the exact steps to flip the app over on day one.
+
+## Confirmed (official announcements)
+
+- **Gimmick stays Mega Evolution** — no Terastallization. Our `gimmick: "mega"`
+  layer carries over unchanged.
+- **Mobile launch same day** (June 17, iOS/Android) — expect a player surge and
+  a meta shake-up bigger than a normal rotation.
+- **New megas: Mega Raichu X and Mega Raichu Y** (login gift Raichu + both
+  stones, claimable June 17 → Sept 1).
+  - **Mega Raichu X — Electric Surge** (auto Electric Terrain on entry).
+  - **Mega Raichu Y — No Guard** (every move by/against it hits).
+  - Both Electric-type. Stones: `raichunitex` / `raichunitey` — already in our
+    dex dump along with `raichumegax`/`raichumegay` formes. Upstream had a
+    placeholder ability (Surge Surfer) on both; `refresh-data.ts` now patches
+    the official abilities into every dump (`SPECIES_PATCHES`), and the current
+    `data/species.json` is already corrected.
+- "Multiple Pokémon and Mega Evolutions" join the roster; the rest of the list
+  is unannounced. Serebii's M-B page currently lists only the two Raichu formes.
+- Singles: 3-6 mons; Doubles: 4-6 brings — same shapes as M-A. Level 50 flat.
+
+## Tactics implications (already supported by the engine)
+
+- **Raichu X is an auto terrain setter**: the `terrain` tactic detector picks
+  it up via Electric Surge the moment it's profiled (Rising Voltage abusers,
+  Quark Drive, Surge Surfer partners — Alolan Raichu itself if legal). Raichu's
+  learnset has Rising Voltage, Volt Switch, Fake Out, Nuzzle.
+- **Raichu Y + No Guard**: Zap Cannon (learnset-confirmed) becomes a 100%
+  accurate 120 BP guaranteed-paralysis nuke; Focus Blast/Thunder never miss.
+  Flip side: everything aimed at it also never misses — Hail-Mary miss outs
+  vanish against it (the search's miss-out logic keys off accuracy, which No
+  Guard pins to 100).
+- Add a `no-guard-inaccurate` tactic detector once M-B lands (No Guard holder +
+  ≤80%-accuracy high-BP moves) — cheap pattern, surprise value.
+
+## Switch-day runbook (June 17)
+
+1. `npm run refresh-data` — pull the updated `@pkmn/dex` (bump the dep first if
+   needed: `npm i @pkmn/dex@latest -w @pokechamps/core`). The `SPECIES_PATCHES`
+   map re-applies Champions corrections; verify the patch log lines print.
+2. Update `data/format.champions.json`:
+   - `__notes`: new dates + source link.
+   - `legality.allow`: add the new species ids (MetaVGC / Serebii M-B list).
+   - `items.allow`: add new items — at minimum `raichunitex`, `raichunitey`.
+   - Check for removals — rotations can drop species/items too.
+3. `npm run validate-format` — every id must resolve.
+4. Pikalytics: the format id moves from `gen9championsvgc2026regma` to (likely)
+   `gen9championsvgc2026regmb` — update the fetch id in the pikalytics store
+   and refresh `data/pikalytics.*.json`; meta-priors (usage, common spreads)
+   reset with the new meta.
+5. `npx tsx packages/core/src/scripts/tactics-catalog.ts` — regenerate the
+   combo catalog over the new legal lists (new Raichu cores will appear).
+6. `npx tsx packages/core/src/scripts/smoketest.ts` + `npm test`.
+7. Sanity: damage-calc a Mega Raichu X Rising Voltage in terrain vs a known
+   spread against the Pikalytics calc.
+
+Sources: pokemon.com news (mobile launch + Raichu reveal, 2026-06-03),
+serebii.net/pokemonchampions/rankedbattle/regulationm-b.shtml,
+victoryroad.pro/champions-regulations, game8 season schedule.

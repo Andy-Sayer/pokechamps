@@ -13,18 +13,31 @@ mkdirSync(dataDir, { recursive: true });
 
 const gen = Dex.forGen(9).includeData();
 
-function dump<T>(filename: string, entries: Iterable<T>, getId: (e: T) => string) {
+// Champions corrections @pkmn/dex doesn't have (yet). Upstream ships the
+// custom megas tagged isNonstandard:'Future', occasionally with placeholder
+// abilities; the OFFICIAL announcements win. Applied after every dump so a
+// refresh never silently regresses them. Verified 2026-06: Mega Raichu X =
+// Electric Surge, Mega Raichu Y = No Guard (pokemon.com, 2026-06-03 news).
+const SPECIES_PATCHES: Record<string, { abilities?: Record<string, string> }> = {
+  raichumegax: { abilities: { 0: 'Electric Surge' } },
+  raichumegay: { abilities: { 0: 'No Guard' } },
+};
+
+function dump<T>(filename: string, entries: Iterable<T>, getId: (e: T) => string, patches?: Record<string, Partial<T>>) {
   const out: Record<string, T> = {};
   for (const e of entries) {
     const id = getId(e);
     if (!id) continue;
     out[id] = e;
   }
+  for (const [id, patch] of Object.entries(patches ?? {})) {
+    if (out[id]) { out[id] = { ...out[id], ...patch }; console.log(`patched ${filename}/${id}`); }
+  }
   writeFileSync(join(dataDir, filename), JSON.stringify(out, null, 2));
   console.log(`wrote ${filename} (${Object.keys(out).length} entries)`);
 }
 
-dump('species.json', gen.species.all(), s => s.id as string);
+dump('species.json', gen.species.all(), s => s.id as string, SPECIES_PATCHES as never);
 dump('moves.json', gen.moves.all(), m => m.id as string);
 dump('items.json', gen.items.all(), i => i.id as string);
 dump('abilities.json', gen.abilities.all(), a => a.id as string);

@@ -3310,7 +3310,7 @@
       "spe": 110
     },
     "abilities": {
-      "0": "Surge Surfer"
+      "0": "Electric Surge"
     },
     "weightkg": 38,
     "eggGroups": [
@@ -3371,7 +3371,7 @@
       "spe": 130
     },
     "abilities": {
-      "0": "Surge Surfer"
+      "0": "No Guard"
     },
     "weightkg": 26,
     "eggGroups": [
