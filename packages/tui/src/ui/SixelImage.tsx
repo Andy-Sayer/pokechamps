@@ -26,7 +26,7 @@
 // fine (small gap below the sprite); undershooting leaves ghosts.
 const APPROX_CELL_PX = 14;
 
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { Box, Text, useStdout } from 'ink';
 import { encodeSixel, type Bitmap, type Palette } from './sixel.js';
 
@@ -39,9 +39,34 @@ export interface SixelImageProps {
   rows?: number;
 }
 
+// Walk the Ink/yoga layout tree from our Box up to the root: the sum of
+// computed tops is the component's absolute ROW within the rendered frame,
+// and the root's computed height is the frame's total rows. After Ink paints,
+// the cursor sits just below the frame — so "rows to walk up" is
+// total − absoluteTop, REGARDLESS of where in the layout we live. (The old
+// version walked up only our own reservation, which was correct solely when
+// the image was the last thing on screen — mid-layout images painted at the
+// bottom of the frame instead.)
+interface YogaIsh { getComputedTop(): number; getComputedHeight(): number }
+interface DomIsh { yogaNode?: YogaIsh; parentNode?: DomIsh | null }
+function rowsFromFrameBottom(node: DomIsh | null): number | null {
+  if (!node?.yogaNode) return null;
+  let top = 0;
+  let cur: DomIsh | null | undefined = node;
+  let root: DomIsh = node;
+  while (cur) {
+    if (cur.yogaNode) { top += cur.yogaNode.getComputedTop(); root = cur; }
+    cur = cur.parentNode;
+  }
+  const total = root.yogaNode!.getComputedHeight();
+  const up = total - top;
+  return Number.isFinite(up) && up > 0 ? up : null;
+}
+
 export function SixelImage({ bitmap, palette, scale = 1, rows }: SixelImageProps) {
   const seq = useMemo(() => encodeSixel(bitmap, palette, { scale }), [bitmap, palette, scale]);
   const { stdout } = useStdout();
+  const boxRef = useRef(null);
 
   // Auto-compute rows from sprite height, +1 row safety pad.
   const pxHeight = bitmap.height * scale;
@@ -49,22 +74,20 @@ export function SixelImage({ bitmap, palette, scale = 1, rows }: SixelImageProps
 
   useEffect(() => {
     if (!stdout) return;
-    // After Ink finishes painting, the cursor is below the last row we
-    // reserved (Ink writes blank lines top-to-bottom). Walk up to the top
-    // of our reservation, save cursor, draw, restore. Save/restore via
-    // ESC 7 / ESC 8 (the classic VT100 form — more terminals honour it
-    // than ESC [ s / ESC [ u).
-    stdout.write(`\x1b[${reservedRows}A`); // up to top of reservation
-    stdout.write('\x1b7');                  // save cursor (VT100)
-    stdout.write(seq);                      // draw sixel
-    stdout.write('\x1b8');                  // restore cursor
-    stdout.write(`\x1b[${reservedRows}B`);  // down to where Ink expects
-    stdout.write('\r');                     // column 0
+    // Locate our reservation within the frame via the yoga tree; fall back to
+    // the old "we're the last thing rendered" assumption if that fails.
+    const up = rowsFromFrameBottom(boxRef.current as DomIsh | null) ?? reservedRows;
+    stdout.write(`\x1b[${up}A`);  // up to the top of our reservation
+    stdout.write('\x1b7');         // save cursor (VT100 — widest support)
+    stdout.write(seq);             // draw sixel
+    stdout.write('\x1b8');         // restore cursor
+    stdout.write(`\x1b[${up}B`);   // back down to where Ink expects
+    stdout.write('\r');            // column 0
   });
 
   // Reserve rows of vertical space — blank lines that Ink lays out and
   // clears between paints. The sixel overlays this region.
   const blanks: React.ReactElement[] = [];
   for (let i = 0; i < reservedRows; i++) blanks.push(<Text key={i}>{' '}</Text>);
-  return <Box flexDirection="column">{blanks}</Box>;
+  return <Box ref={boxRef} flexDirection="column">{blanks}</Box>;
 }
