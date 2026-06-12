@@ -32,7 +32,8 @@ import { PikaSpinner } from './PikaSpinner.js';
 import { SixelImage } from './SixelImage.js';
 import { sixelSupported } from './sixelSupport.js';
 import { spriteFor, spriteIfLoaded } from './spriteCache.js';
-import { composeStrip } from './spriteStrip.js';
+import { composeStrip, downsampleIndexed } from './spriteStrip.js';
+import { HalfBlockImage } from './HalfBlockImage.js';
 import { ExportPanel } from './ExportPanel.js';
 import { OverridePanel } from './OverridePanel.js';
 import { useTerminalSize } from './useTerminalSize.js';
@@ -822,14 +823,14 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     .map(j => (j != null ? (match.opponentTeam[j]?.megaForme ?? match.opponentTeam[j]?.species) : null))
     .filter((s): s is string => !!s);
   useEffect(() => {
-    if (!showSprites || !sixelSupported()) return;
+    if (!showSprites) return;
     let alive = true;
     for (const sp of activeOppSpecies) {
       void spriteFor(sp).then(() => { if (alive) setSpriteTick(t => t + 1); });
     }
     return () => { alive = false; };
   }, [showSprites, activeOppSpecies.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
-  const spriteStrip = showSprites && sixelSupported()
+  const spriteStrip = showSprites
     ? composeStrip(activeOppSpecies.map(spriteIfLoaded).filter((s): s is NonNullable<ReturnType<typeof spriteIfLoaded>> => !!s))
     : null;
 
@@ -2524,8 +2525,16 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       case 'summary': setSummaryOpen(s => !s); return true;
       case 'override': setOverrideOpen(true); return true;
       case 'sprites': {
-        if (!sixelSupported()) { setMessage('/sprites needs a sixel-capable terminal (try /pika to check).'); return true; }
-        setShowSprites(s => { savePrefs({ showSprites: !s }); return !s; });
+        setShowSprites(s => {
+          const next = !s;
+          savePrefs({ showSprites: next });
+          if (next) {
+            setMessage(sixelSupported()
+              ? 'Sprites on (sixel).'
+              : 'Sprites on (half-block — set POKECHAMPS_SIXEL=1 if your terminal renders real sixels).');
+          } else setMessage('Sprites off.');
+          return next;
+        });
         return true;
       }
       case 'crit': setShowCrits(c => { savePrefs({ showCrits: !c }); return !c; }); return true;
@@ -3142,8 +3151,10 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             </Text>
           )}
           <Text bold>Matchups</Text>
-          {spriteStrip && (
-            <SixelImage bitmap={spriteStrip.bitmap} palette={spriteStrip.palette} />
+          {spriteStrip && (sixelSupported()
+            ? <SixelImage bitmap={spriteStrip.bitmap} palette={spriteStrip.palette} />
+            // Half-block fallback: extra 2:1 so the strip stays ~12 rows.
+            : (() => { const s = downsampleIndexed(spriteStrip, 2); return <HalfBlockImage bitmap={s.bitmap} palette={s.palette} />; })()
           )}
           {matchups.every(m => m == null) && (
             <Text dimColor>No active slots — pick leads to begin.</Text>
@@ -3214,11 +3225,13 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             // Sprite in the info panel (when /sprites is on and it's cached —
             // the grid effect already fetched the actives; bench mons load on
             // first inspect via a fire-and-forget fetch).
-            if (!showSprites || !sixelSupported()) return null;
+            if (!showSprites) return null;
             const sp = match.opponentTeam[infoOpenForOpp]!.megaForme ?? match.opponentTeam[infoOpenForOpp]!.species;
             const s = spriteIfLoaded(sp);
             if (!s) { void spriteFor(sp).then(() => setSpriteTick(t => t + 1)); return null; }
-            return <SixelImage bitmap={s.bitmap} palette={s.palette} />;
+            if (sixelSupported()) return <SixelImage bitmap={s.bitmap} palette={s.palette} />;
+            const hb = downsampleIndexed(s, 2);
+            return <HalfBlockImage bitmap={hb.bitmap} palette={hb.palette} />;
           })()}
           <OppInfoPanel stores={stores} index={infoOpenForOpp} entry={match.opponentTeam[infoOpenForOpp]!} />
         </Box>

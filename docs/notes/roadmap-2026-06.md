@@ -315,6 +315,11 @@ Two halves of the same `replay.ts` investment (see
   the dex baseSpecies-forme split; disk + memory cache.
   `scripts/preview-sprites.ts` is the iteration tool (validated 4/4 live,
   incl. Charizard-Mega-Y) — tune scale/layout there, then judge in-app.
+  **Works on every terminal**: when sixel isn't detected, sprites render as
+  truecolor half-blocks (`HalfBlockImage`, extra 2:1 so the strip stays ~12
+  rows) instead of refusing — same dual-renderer pattern as /pika. Detection
+  only picks the renderer; `POKECHAMPS_SIXEL=1` forces real sixels on
+  terminals the env-var probe misses.
 
 ### Theme 7 — Remaining search long-tail ✅ *(complete 2026-06-11)*
 

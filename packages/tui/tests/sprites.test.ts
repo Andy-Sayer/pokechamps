@@ -5,7 +5,8 @@ import { describe, test, expect } from 'vitest';
 import { deflateSync } from 'node:zlib';
 import { decodePng } from '../src/ui/png.js';
 import { downsample, quantise } from '../src/ui/spriteCache.js';
-import { composeStrip } from '../src/ui/spriteStrip.js';
+import { composeStrip, downsampleIndexed } from '../src/ui/spriteStrip.js';
+import { halfBlockRows } from '../src/ui/HalfBlockImage.js';
 
 // Build a minimal non-interlaced 8-bit RGBA PNG in-memory. The decoder skips
 // CRC validation, so chunks carry zero CRCs.
@@ -60,6 +61,32 @@ describe('downsample + quantise', () => {
     const sprite = quantise(small.width, small.height, small.rgba)!;
     expect(sprite.palette.colors).toEqual([[255, 0, 0]]);
     expect(sprite.bitmap.pixels).toEqual([1, 0]);
+  });
+});
+
+describe('half-block fallback renderer', () => {
+  test('two pixel rows fold into ▀/▄/space segments with run-merging', () => {
+    // 2x2: top row red,red — bottom row transparent,blue.
+    const bitmap = { width: 2, height: 2, pixels: [1, 1, 0, 2] };
+    const palette = { colors: [[255, 0, 0], [0, 0, 255]] as [number, number, number][] };
+    const rows = halfBlockRows(bitmap, palette);
+    expect(rows).toHaveLength(1);
+    // Col 0: top red only → ▀ fg red; col 1: red over blue → ▀ fg red bg blue.
+    expect(rows[0]).toEqual([
+      { ch: '▀', fg: '#ff0000', bg: undefined },
+      { ch: '▀', fg: '#ff0000', bg: '#0000ff' },
+    ]);
+    // Bottom-only pixel renders ▄; fully transparent renders space.
+    const rows2 = halfBlockRows({ width: 2, height: 2, pixels: [0, 0, 2, 0] }, palette);
+    expect(rows2[0]).toEqual([{ ch: '▄', fg: '#0000ff', bg: undefined }, { ch: ' ', fg: undefined, bg: undefined }]);
+  });
+
+  test('downsampleIndexed halves while preserving the palette + outlines', () => {
+    const sprite = { bitmap: { width: 4, height: 2, pixels: [0, 1, 0, 0, 1, 0, 0, 0] }, palette: { colors: [[9, 9, 9]] as [number, number, number][] } };
+    const small = downsampleIndexed(sprite, 2);
+    expect([small.bitmap.width, small.bitmap.height]).toEqual([2, 1]);
+    expect(small.bitmap.pixels).toEqual([1, 0]); // opaque pixel survives the block
+    expect(small.palette).toBe(sprite.palette);
   });
 });
 

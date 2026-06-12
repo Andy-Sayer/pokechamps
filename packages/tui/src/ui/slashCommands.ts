@@ -51,7 +51,7 @@ export const BATTLE_COMMANDS: readonly BattleCommand[] = [
   { id: 'allmoves', aliases: ['allmoves', 'all', 'a'], description: 'Toggle all-my-moves view per opp' },
   { id: 'review',   aliases: ['review', 'r'],         description: 'Ask Pikachu (Claude) to review the last turn' },
   { id: 'pika',     aliases: ['pika', 'p'],           description: 'Toggle a Pikachu sprite (for sixel preview)' },
-  { id: 'sprites',  aliases: ['sprites', 'spr'],      description: 'Toggle sixel sprites of the active opponents above the matchup grid (sticky)' },
+  { id: 'sprites',  aliases: ['sprites', 'spr'],      description: 'Toggle sprites of the active opponents above the matchup grid (sixel, or half-block on any terminal; sticky)' },
   { id: 'export',   aliases: ['export', 'x'],         description: 'Show the current team as a Showdown export' },
   { id: 'ask',      aliases: ['ask'],                 description: 'Predict a hypothetical matchup: /ask m1 vs o3  or  /ask Delphox-Mega vs Sneasler' },
   { id: 'endgame',  aliases: ['endgame', 'eg'],       description: 'Best-play recommendation for the current actives (1-ply endgame solver)' },
