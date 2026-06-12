@@ -6,39 +6,6 @@ import type { Sprite } from './spriteCache.js';
 
 const GAP = 4; // transparent pixels between sprites
 
-/** Majority-vote downsample on an INDEXED bitmap (palette preserved). Each
- *  output pixel takes the MOST COMMON colour of its factor×factor block —
- *  transparent wins only when it covers more than ~60% of the block, so
- *  silhouettes stay solid while edges stop speckling (the old first-opaque
- *  pick made small sprites ragged). Used by the half-block renderer, which
- *  shows two pixel rows per text row and wants small, clean output. */
-export function downsampleIndexed(sprite: Sprite, factor: number): Sprite {
-  if (factor <= 1) return sprite;
-  const { bitmap } = sprite;
-  const w = Math.max(1, Math.floor(bitmap.width / factor));
-  const h = Math.max(1, Math.floor(bitmap.height / factor));
-  const pixels = new Array<number>(w * h).fill(0);
-  const counts = new Map<number, number>();
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      counts.clear();
-      let opaque = 0;
-      for (let dy = 0; dy < factor; dy++) {
-        for (let dx = 0; dx < factor; dx++) {
-          const p = bitmap.pixels[(y * factor + dy) * bitmap.width + (x * factor + dx)] ?? 0;
-          if (p > 0) { opaque++; counts.set(p, (counts.get(p) ?? 0) + 1); }
-        }
-      }
-      const block = factor * factor;
-      if (opaque <= block * 0.4) { pixels[y * w + x] = 0; continue; }
-      let best = 0, bestN = 0;
-      for (const [p, n] of counts) if (n > bestN) { best = p; bestN = n; }
-      pixels[y * w + x] = best;
-    }
-  }
-  return { bitmap: { width: w, height: h, pixels }, palette: sprite.palette };
-}
-
 /** Crop to the bounding box of opaque pixels — sprite canvases carry large
  *  transparent margins (a 96px box the mon rarely fills), which made strip
  *  spacing uneven and the on-screen footprint bigger than the art. */

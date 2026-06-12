@@ -4,8 +4,8 @@
 import { describe, test, expect } from 'vitest';
 import { deflateSync } from 'node:zlib';
 import { decodePng } from '../src/ui/png.js';
-import { downsample, quantise } from '../src/ui/spriteCache.js';
-import { composeStrip, downsampleIndexed } from '../src/ui/spriteStrip.js';
+import { downsample, quantise, areaResize } from '../src/ui/spriteCache.js';
+import { composeStrip } from '../src/ui/spriteStrip.js';
 import { halfBlockRows } from '../src/ui/HalfBlockImage.js';
 
 // Build a minimal non-interlaced 8-bit RGBA PNG in-memory. The decoder skips
@@ -81,14 +81,20 @@ describe('half-block fallback renderer', () => {
     expect(rows2[0]).toEqual([{ ch: '▄', fg: '#0000ff', bg: undefined }, { ch: ' ', fg: undefined, bg: undefined }]);
   });
 
-  test('downsampleIndexed: majority colour wins; mostly-transparent blocks stay empty', () => {
-    const palette = { colors: [[9, 9, 9], [200, 0, 0]] as [number, number, number][] };
-    // Block A: 3×colour1 + 1×colour2 → colour1. Block B: 1 opaque of 4 → transparent.
-    const sprite = { bitmap: { width: 4, height: 2, pixels: [1, 1, 1, 0, 2, 1, 0, 0] }, palette };
-    const small = downsampleIndexed(sprite, 2);
-    expect([small.bitmap.width, small.bitmap.height]).toEqual([2, 1]);
-    expect(small.bitmap.pixels).toEqual([1, 0]);
-    expect(small.palette).toBe(sprite.palette);
+  test('areaResize: solid regions stay solid (no pinholes), aspect preserved', () => {
+    // 4x4 fully red → resize to height 2: every output pixel opaque red.
+    const red = new Uint8Array(4 * 4 * 4);
+    for (let i = 0; i < 16; i++) red.set([255, 0, 0, 255], i * 4);
+    const r = areaResize(4, 4, red, 2);
+    expect([r.width, r.height]).toEqual([2, 2]);
+    for (let i = 0; i < 4; i++) {
+      expect([...r.rgba.slice(i * 4, i * 4 + 4)]).toEqual([255, 0, 0, 255]);
+    }
+    // A mostly-transparent region stays transparent (≤43% coverage threshold).
+    const sparse = new Uint8Array(4 * 4 * 4);
+    sparse.set([255, 0, 0, 255], 0); // one opaque pixel of 16
+    const s = areaResize(4, 4, sparse, 1);
+    expect(s.rgba[3]).toBe(0);
   });
 });
 

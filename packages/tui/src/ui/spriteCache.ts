@@ -15,8 +15,8 @@ import { toId, dataDirPath, getSpecies } from '@pokechamps/core/domain/data.js';
 
 export interface Sprite { bitmap: Bitmap; palette: Palette }
 
-const memory = new Map<string, Sprite | null>();
-const inflight = new Map<string, Promise<Sprite | null>>();
+const memory = new Map<string, SpriteVariants | null>();
+const inflight = new Map<string, Promise<SpriteVariants | null>>();
 
 const SPRITE_URL = (id: string) => `https://play.pokemonshowdown.com/sprites/gen5/${id}.png`;
 
@@ -79,27 +79,103 @@ export function downsample(width: number, height: number, rgba: Uint8Array): { w
   return { width: w, height: h, rgba: out };
 }
 
-function decodeToSprite(png: Uint8Array): Sprite | null {
+/** Alpha-weighted box resize to `targetH` (aspect preserved). Smooth output —
+ *  callers snap colours back to the source palette so flatness survives. */
+export function areaResize(width: number, height: number, rgba: Uint8Array, targetH: number): { width: number; height: number; rgba: Uint8Array } {
+  const targetW = Math.max(1, Math.round(width * (targetH / height)));
+  const out = new Uint8Array(targetW * targetH * 4);
+  for (let y = 0; y < targetH; y++) {
+    const y0 = Math.floor((y * height) / targetH), y1 = Math.max(y0 + 1, Math.floor(((y + 1) * height) / targetH));
+    for (let x = 0; x < targetW; x++) {
+      const x0 = Math.floor((x * width) / targetW), x1 = Math.max(x0 + 1, Math.floor(((x + 1) * width) / targetW));
+      let r = 0, g = 0, b = 0, a = 0, n = 0;
+      for (let sy = y0; sy < y1; sy++) {
+        for (let sx = x0; sx < x1; sx++) {
+          const s = (sy * width + sx) * 4;
+          const sa = rgba[s + 3]!;
+          r += rgba[s]! * sa; g += rgba[s + 1]! * sa; b += rgba[s + 2]! * sa; a += sa; n++;
+        }
+      }
+      const d = (y * targetW + x) * 4;
+      if (n && a / n >= 110) { // ≥~43% coverage → opaque (solid silhouettes, no pinholes)
+        out[d] = Math.round(r / a); out[d + 1] = Math.round(g / a); out[d + 2] = Math.round(b / a); out[d + 3] = 255;
+      }
+    }
+  }
+  return { width: targetW, height: targetH, rgba: out };
+}
+
+/** Snap smooth RGBA back onto an indexed palette (nearest colour) — keeps the
+ *  pixel-art flatness after area-averaging. */
+function snapToPalette(width: number, height: number, rgba: Uint8Array, palette: Palette): Sprite {
+  const pixels = new Array<number>(width * height).fill(0);
+  for (let i = 0; i < width * height; i++) {
+    if (rgba[i * 4 + 3]! < 128) continue;
+    const r = rgba[i * 4]!, g = rgba[i * 4 + 1]!, b = rgba[i * 4 + 2]!;
+    let best = 1, bestD = Infinity;
+    for (let c = 0; c < palette.colors.length; c++) {
+      const pc = palette.colors[c]!;
+      const d = (pc[0] - r) ** 2 + (pc[1] - g) ** 2 + (pc[2] - b) ** 2;
+      if (d < bestD) { bestD = d; best = c + 1; }
+    }
+    pixels[i] = best;
+  }
+  return { bitmap: { width, height, pixels }, palette };
+}
+
+/** Crop RGBA to its opaque bounding box. */
+function cropRgba(width: number, height: number, rgba: Uint8Array): { width: number; height: number; rgba: Uint8Array } {
+  let minX = width, minY = height, maxX = -1, maxY = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (rgba[(y * width + x) * 4 + 3]! >= 128) {
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return { width, height, rgba };
+  const w = maxX - minX + 1, h = maxY - minY + 1;
+  const out = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    out.set(rgba.subarray(((y + minY) * width + minX) * 4, ((y + minY) * width + maxX + 1) * 4), y * w * 4);
+  }
+  return { width: w, height: h, rgba: out };
+}
+
+/** Both renderer variants from one decode: `sixel` at 48px (crisp pixels for
+ *  real sixel terminals) and `small` for the half-block fallback — content-
+ *  cropped, area-averaged to SMALL_H, palette-snapped (smooth but flat). */
+export interface SpriteVariants { sixel: Sprite; small: Sprite | null }
+
+const SMALL_H = 18; // 9 text rows of half-blocks, pre-crop
+
+function decodeToVariants(png: Uint8Array): SpriteVariants | null {
   try {
     const d = decodePng(png);
-    const small = downsample(d.width, d.height, d.rgba);
-    return quantise(small.width, small.height, small.rgba);
+    const half = downsample(d.width, d.height, d.rgba);
+    const sixel = quantise(half.width, half.height, half.rgba);
+    if (!sixel) return null;
+    const cropped = cropRgba(d.width, d.height, d.rgba);
+    const resized = areaResize(cropped.width, cropped.height, cropped.rgba, Math.min(SMALL_H, cropped.height));
+    const small = snapToPalette(resized.width, resized.height, resized.rgba, sixel.palette);
+    return { sixel, small };
   } catch {
     return null;
   }
 }
 
-/** Resolve a species' sprite: memory → disk → network. Null = unavailable. */
-export async function spriteFor(species: string): Promise<Sprite | null> {
+/** Resolve a species' sprite variants: memory → disk → network. Null = unavailable. */
+export async function spriteFor(species: string): Promise<SpriteVariants | null> {
   const id = spriteId(species);
   if (memory.has(id)) return memory.get(id)!;
   const pending = inflight.get(id);
   if (pending) return pending;
-  const p = (async (): Promise<Sprite | null> => {
+  const p = (async (): Promise<SpriteVariants | null> => {
     const disk = join(diskDir(), `${id}.png`);
     try {
       if (existsSync(disk)) {
-        const s = decodeToSprite(readFileSync(disk));
+        const s = decodeToVariants(readFileSync(disk));
         memory.set(id, s);
         return s;
       }
@@ -109,7 +185,7 @@ export async function spriteFor(species: string): Promise<Sprite | null> {
       if (!res.ok) { memory.set(id, null); return null; }
       const png = new Uint8Array(await res.arrayBuffer());
       try { mkdirSync(diskDir(), { recursive: true }); writeFileSync(disk, png); } catch { /* cache is optional */ }
-      const s = decodeToSprite(png);
+      const s = decodeToVariants(png);
       memory.set(id, s);
       return s;
     } catch {
@@ -121,7 +197,7 @@ export async function spriteFor(species: string): Promise<Sprite | null> {
   return p;
 }
 
-/** Synchronous read of an already-resolved sprite (render path). */
-export function spriteIfLoaded(species: string): Sprite | null {
+/** Synchronous read of already-resolved variants (render path). */
+export function spriteIfLoaded(species: string): SpriteVariants | null {
   return memory.get(spriteId(species)) ?? null;
 }

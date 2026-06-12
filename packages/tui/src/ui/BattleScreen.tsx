@@ -32,7 +32,7 @@ import { PikaSpinner } from './PikaSpinner.js';
 import { SixelImage } from './SixelImage.js';
 import { sixelSupported } from './sixelSupport.js';
 import { spriteFor, spriteIfLoaded } from './spriteCache.js';
-import { composeStrip, downsampleIndexed, cropToContent } from './spriteStrip.js';
+import { composeStrip } from './spriteStrip.js';
 import { HalfBlockImage } from './HalfBlockImage.js';
 import { ExportPanel } from './ExportPanel.js';
 import { OverridePanel } from './OverridePanel.js';
@@ -830,8 +830,15 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     }
     return () => { alive = false; };
   }, [showSprites, activeOppSpecies.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Sixel terminals get the crisp 48px variant; everywhere else the smaller
+  // area-averaged + palette-snapped one tuned for half-block cells.
   const spriteStrip = showSprites
-    ? composeStrip(activeOppSpecies.map(spriteIfLoaded).filter((s): s is NonNullable<ReturnType<typeof spriteIfLoaded>> => !!s))
+    ? composeStrip(activeOppSpecies
+        .map(sp => {
+          const v = spriteIfLoaded(sp);
+          return v ? (sixelSupported() ? v.sixel : v.small) : null;
+        })
+        .filter((s): s is NonNullable<typeof s> => !!s))
     : null;
 
   // Parser context that resolves m1/o2 to team indices via current active slots.
@@ -3153,10 +3160,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
           <Text bold>Matchups</Text>
           {spriteStrip && (sixelSupported()
             ? <SixelImage bitmap={spriteStrip.bitmap} palette={spriteStrip.palette} />
-            // Half-block fallback: 3:1 majority-vote → 16px sprites ≈ 8 text
-            // rows, clean flat edges (screenshot feedback: 24px was too big
-            // and the first-opaque downsample too ragged).
-            : (() => { const s = downsampleIndexed(spriteStrip, 3); return <HalfBlockImage bitmap={s.bitmap} palette={s.palette} />; })()
+            : <HalfBlockImage bitmap={spriteStrip.bitmap} palette={spriteStrip.palette} />
           )}
           {matchups.every(m => m == null) && (
             <Text dimColor>No active slots — pick leads to begin.</Text>
@@ -3229,11 +3233,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             // first inspect via a fire-and-forget fetch).
             if (!showSprites) return null;
             const sp = match.opponentTeam[infoOpenForOpp]!.megaForme ?? match.opponentTeam[infoOpenForOpp]!.species;
-            const s = spriteIfLoaded(sp);
-            if (!s) { void spriteFor(sp).then(() => setSpriteTick(t => t + 1)); return null; }
-            if (sixelSupported()) return <SixelImage bitmap={s.bitmap} palette={s.palette} />;
-            const hb = downsampleIndexed(cropToContent(s), 2);
-            return <HalfBlockImage bitmap={hb.bitmap} palette={hb.palette} />;
+            const v = spriteIfLoaded(sp);
+            if (!v) { void spriteFor(sp).then(() => setSpriteTick(t => t + 1)); return null; }
+            if (sixelSupported()) return <SixelImage bitmap={v.sixel.bitmap} palette={v.sixel.palette} />;
+            if (!v.small) return null;
+            return <HalfBlockImage bitmap={v.small.bitmap} palette={v.small.palette} />;
           })()}
           <OppInfoPanel stores={stores} index={infoOpenForOpp} entry={match.opponentTeam[infoOpenForOpp]!} />
         </Box>
