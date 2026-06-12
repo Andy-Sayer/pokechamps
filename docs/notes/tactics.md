@@ -120,14 +120,14 @@ Sweep of all 245 legal species/mega-forme profiles (full learnsets, any legal ab
 - **86** Hippowdon [sandstream]  +  Garchomp-Mega [sandforce]
 - **86** Tyranitar [sandstream]  +  Garchomp-Mega [sandforce]
 - **86** Tyranitar-Mega [sandstream]  +  Garchomp-Mega [sandforce]
-- **81** Ninetales sunnyday [drought]  +  Chandelure-Mega solarbeam
-- **81** Torkoal sunnyday [drought]  +  Chandelure-Mega solarbeam
-- **81** Charizard-Mega-Y sunnyday [drought]  +  Chandelure-Mega solarbeam
-- **80** Ninetales sunnyday [drought]  +  Houndoom-Mega solarbeam [solarpower]
-- **80** Pelipper raindance [drizzle]  +  Gengar-Mega thunder
-- **80** Politoed raindance [drizzle]  +  Gengar-Mega thunder
-- **80** Torkoal sunnyday [drought]  +  Houndoom-Mega solarbeam [solarpower]
-- **80** Charizard-Mega-Y sunnyday [drought]  +  Houndoom-Mega solarbeam [solarpower]
+- **81** Ninetales [drought]  +  Chandelure-Mega solarbeam
+- **81** Torkoal [drought]  +  Chandelure-Mega solarbeam
+- **81** Charizard-Mega-Y [drought]  +  Chandelure-Mega solarbeam
+- **80** Ninetales [drought]  +  Houndoom-Mega solarbeam [solarpower]
+- **80** Pelipper [drizzle]  +  Gengar-Mega thunder
+- **80** Politoed [drizzle]  +  Gengar-Mega thunder
+- **80** Torkoal [drought]  +  Houndoom-Mega solarbeam [solarpower]
+- **80** Charizard-Mega-Y [drought]  +  Houndoom-Mega solarbeam [solarpower]
 - **79** Hippowdon [sandstream]  +  Excadrill [sandrush]
 
 ## Tailwind core (`tailwind`) — 300 instances

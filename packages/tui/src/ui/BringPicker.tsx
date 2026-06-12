@@ -207,7 +207,12 @@ export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: B
                     <Text color={i === cursor ? 'yellow' : undefined}>
                       {i === cursor ? '>' : ' '} {i + 1}. {mons}  <Text dimColor>[total {b.total}]</Text>
                     </Text>
-                    <Text dimColor>     match {b.matchup} · off {b.offense} · def {b.defense} · spd {b.speed} · roles {b.roles}{b.rationale.length ? ` · ${b.rationale.join('; ')}` : ''}</Text>
+                    <Text dimColor>     match {b.matchup} · off {b.offense} · def {b.defense} · spd {b.speed} · roles {b.roles} · tactics {b.tactics} · threats {b.threats}</Text>
+                    {/* Combo + threat detail only for the highlighted bring —
+                        inline-joining every rationale made rows unreadable. */}
+                    {i === cursor && b.rationale.map((r, k) => (
+                      <Text key={k} dimColor={!r.startsWith('⚠')} color={r.startsWith('⚠') ? 'red' : r.startsWith('Combo') ? 'cyan' : undefined}>       {r}</Text>
+                    ))}
                   </Box>
                 );
               })}

@@ -1,9 +1,10 @@
 import type { OpponentEntry, PokemonSet, FieldState } from './types.js';
 import { NEUTRAL_FIELD } from './types.js';
 import { damageRange, maxHpFor } from './damage.js';
-import { getSpecies } from './data.js';
+import { getSpecies, toId, isPivotMove } from './data.js';
 import { mostLikely } from './inference.js';
 import { bestOffensive, offensiveTypes, speciesTypes } from './typechart.js';
+import { detectTactics, profileFromSet, profileFromSpecies, type TacticInstance } from './tactics.js';
 
 // Scoring a 4-of-6 "bring":
 //  - offense:   for each opp mon, max % HP my best attacker can take in one move
@@ -18,6 +19,10 @@ export interface BringScore {
   speed: number;
   roles: number;
   matchup: number;
+  /** Synergy credit for complete multi-part combos inside this bring. */
+  tactics: number;
+  /** Net counter-credit vs the opponent's available combos (can be negative). */
+  threats: number;
   total: number;
   rationale: string[];
 }
@@ -103,6 +108,46 @@ function speedFor(set: PokemonSet): number {
   return Math.floor((Math.floor(((2 * base + 31 + evBonus) * set.level) / 100) + 5) * natureMult);
 }
 
+// ---------------------------------------------------------------------------
+// Tactic integration (see domain/tactics.ts).
+// ---------------------------------------------------------------------------
+
+// Does one of MY sets counter an opponent tactic pattern? Checked against the
+// set's real moves/ability/types — this is what earns counter-credit when the
+// opponent's six could run the combo.
+const PATTERN_COUNTERS: Record<string, (set: PokemonSet) => boolean> = {
+  'perish-trap': s => abilityIs(s, 'soundproof') || hasMove(s, 'taunt') || s.moves.some(isPivotMove),
+  'baton-pass': s => hasMove(s, 'haze') || hasMove(s, 'clearsmog') || hasMove(s, 'spectralthief') || hasMove(s, 'roar') || hasMove(s, 'whirlwind') || hasMove(s, 'taunt'),
+  'stored-power': s => speciesTypes(s.species).includes('Dark') || hasMove(s, 'haze') || hasMove(s, 'clearsmog') || hasMove(s, 'taunt'),
+  'trick-room': s => hasMove(s, 'trickroom') || hasMove(s, 'taunt'),
+  tailwind: s => hasMove(s, 'tailwind') || hasMove(s, 'icywind') || hasMove(s, 'electroweb') || hasMove(s, 'trickroom'),
+  weather: s => abilityIs(s, 'cloudnine') || abilityIs(s, 'airlock') || abilityIs(s, 'drought') || abilityIs(s, 'drizzle') || abilityIs(s, 'sandstream') || abilityIs(s, 'snowwarning') || hasMove(s, 'raindance') || hasMove(s, 'sunnyday') || hasMove(s, 'sandstorm') || hasMove(s, 'snowscape'),
+  terrain: s => abilityIs(s, 'electricsurge') || abilityIs(s, 'psychicsurge') || abilityIs(s, 'grassysurge') || abilityIs(s, 'mistysurge') || hasMove(s, 'steelroller') || hasMove(s, 'icespinner'),
+  'fake-out-setup': s => abilityIs(s, 'innerfocus') || abilityIs(s, 'shielddust') || abilityIs(s, 'psychicsurge') || speciesTypes(s.species).includes('Ghost'),
+  'spread-immune': s => hasMove(s, 'wideguard'),
+  'beat-up-justified': s => abilityIs(s, 'intimidate') || hasMove(s, 'haze') || hasMove(s, 'clearsmog'),
+  'crit-anger-point': s => abilityIs(s, 'intimidate') || hasMove(s, 'haze') || hasMove(s, 'clearsmog'),
+  unburden: s => hasMove(s, 'gastroacid') || abilityIs(s, 'neutralizinggas'),
+  'aurora-veil': s => hasMove(s, 'brickbreak') || hasMove(s, 'ragingbull') || hasMove(s, 'psychicfangs') || abilityIs(s, 'screencleaner') || abilityIs(s, 'infiltrator'),
+};
+
+const hasMove = (s: PokemonSet, id: string) => s.moves.some(m => toId(m) === id);
+const abilityIs = (s: PokemonSet, id: string) => !!s.ability && toId(s.ability) === id;
+
+function tacticLabel(t: TacticInstance): string {
+  return t.pieces.map(p => p.species + (p.move ? ` (${p.move})` : p.ability ? ` [${p.ability}]` : '')).join(' + ');
+}
+
+/** Best instance per pattern fully contained in the given species subset. */
+function bestPerPatternWithin(instances: TacticInstance[], species: Set<string>): TacticInstance[] {
+  const best = new Map<string, TacticInstance>();
+  for (const t of instances) {
+    if (!t.pieces.every(p => species.has(p.species))) continue;
+    if ((best.get(t.pattern)?.score ?? -1) < t.score) best.set(t.pattern, t);
+  }
+  return [...best.values()].sort((a, b) => b.score - a.score);
+}
+
 function comb4(n: number): number[][] {
   const out: number[][] = [];
   for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++)
@@ -145,6 +190,18 @@ export function scoreBrings(myTeam: PokemonSet[], opponent: OpponentEntry[], fie
   const teamHasSpeedControl = myTeam.some(s => hasRole(s, 'speedControl'));
   const teamHasRedirection = myTeam.some(s => hasRole(s, 'redirection'));
 
+  // Tactic synergy: combos my ACTUAL sets complete (real moves/items), once
+  // over all 6 — per-bring filtering below just checks containment.
+  const myTactics = detectTactics(myTeam.map(profileFromSet));
+  // Opponent threats: combos their six COULD run (full learnsets, any legal
+  // ability). Top instance per pattern, strong ones only.
+  const oppAll = detectTactics(opponent.map(o => profileFromSpecies(o.species)), { minScore: 50 });
+  const oppThreatByPattern = new Map<string, TacticInstance>();
+  for (const t of oppAll) {
+    if (!oppThreatByPattern.has(t.pattern)) oppThreatByPattern.set(t.pattern, t);
+  }
+  const oppThreats = [...oppThreatByPattern.values()].slice(0, 4);
+
   // Type-matchup tables, populated once per scoring pass.
   const offenseMatchup: number[][] = myTeam.map(my =>
     opponentSets.map(opp => pairOffense(my, opp)),
@@ -177,7 +234,21 @@ export function scoreBrings(myTeam: PokemonSet[], opponent: OpponentEntry[], fie
       const hasIt = indices.some(i => hasRole(myTeam[i]!, 'redirection'));
       if (hasIt) { roles += 20; rationale.push('Includes redirection'); }
     }
-    const total = offense * 0.4 + defense * 0.3 + speed * 5 + roles + matchup * 8;
+    // Synergy: best instance per pattern fully inside this bring, top 3.
+    const bringSpecies = new Set(indices.map(i => myTeam[i]!.species));
+    const combos = bestPerPatternWithin(myTactics, bringSpecies).slice(0, 3);
+    const tactics = Math.round(combos.reduce((s, t) => s + t.score * 0.35, 0));
+    for (const t of combos) rationale.push(`Combo: ${t.name} — ${tacticLabel(t)}`);
+    // Threats: ±12 per strong opponent combo depending on whether the bring
+    // packs a counter for it.
+    let threats = 0;
+    for (const t of oppThreats) {
+      const counter = PATTERN_COUNTERS[t.pattern];
+      const covered = !!counter && indices.some(i => counter(myTeam[i]!));
+      threats += covered ? 12 : -12;
+      rationale.push(`${covered ? 'Covers' : '⚠ No answer to'} opp ${t.name}: ${tacticLabel(t)}`);
+    }
+    const total = offense * 0.4 + defense * 0.3 + speed * 5 + roles + matchup * 8 + tactics + threats;
     out.push({
       myIndices: indices,
       offense: Math.round(offense),
@@ -185,6 +256,8 @@ export function scoreBrings(myTeam: PokemonSet[], opponent: OpponentEntry[], fie
       speed,
       roles,
       matchup: Math.round(matchup * 10) / 10,
+      tactics,
+      threats,
       total: Math.round(total),
       rationale,
     });

@@ -368,10 +368,11 @@ const detectWeather: Detector = (a, b) => {
     let setMove = Object.keys(WEATHER_SET_MOVES).find(m => has(setter, m));
     if (!setAb && !setMove) continue;
     const kind = setAb ? WEATHER_SET_ABILITIES[setAb]! : WEATHER_SET_MOVES[setMove!]!;
-    // Evidence must match the detected kind — an auto-weather ability wins,
-    // and an unrelated set-move (Hippowdon's Sunny Day under Sand Stream)
-    // must not be attached as supporting evidence.
-    if (setMove && WEATHER_SET_MOVES[setMove] !== kind) setMove = undefined;
+    // Evidence must match the detected kind — an auto-weather ability wins
+    // outright (drop the redundant move so labels read 'Torkoal [drought]'
+    // not 'Torkoal (sunnyday)'), and an unrelated set-move (Hippowdon's
+    // Sunny Day under Sand Stream) must not be attached as evidence.
+    if (setMove && (setAb || WEATHER_SET_MOVES[setMove] !== kind)) setMove = undefined;
     const personal = setAb === 'megasol';
     for (const abuser of profiles) {
       if (personal && abuser !== setter) continue; // Mega Sol's sun is holder-only
