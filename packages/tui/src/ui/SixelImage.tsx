@@ -35,30 +35,13 @@ export interface SixelImageProps {
   rows?: number;
 }
 
-// Walk the Ink/yoga layout tree from our Box up to the root: the sum of
-// computed tops is the component's absolute ROW within the rendered frame,
-// and the root's computed height is the frame's total rows. After Ink paints,
-// the cursor sits just below the frame — so "rows to walk up" is
-// total − absoluteTop, REGARDLESS of where in the layout we live. (The old
-// version walked up only our own reservation, which was correct solely when
-// the image was the last thing on screen — mid-layout images painted at the
-// bottom of the frame instead.)
-interface YogaIsh { getComputedTop(): number; getComputedHeight(): number }
-interface DomIsh { yogaNode?: YogaIsh; parentNode?: DomIsh | null }
-function rowsFromFrameBottom(node: DomIsh | null): number | null {
-  if (!node?.yogaNode) return null;
-  let top = 0;
-  let cur: DomIsh | null | undefined = node;
-  let root: DomIsh = node;
-  while (cur) {
-    if (cur.yogaNode) { top += cur.yogaNode.getComputedTop(); root = cur; }
-    cur = cur.parentNode;
-  }
-  const total = root.yogaNode!.getComputedHeight();
-  const up = total - top;
-  return Number.isFinite(up) && up > 0 ? up : null;
-}
-
+// POSITIONING CONTRACT: this component must be (one of) the LAST things in
+// the rendered frame. After Ink paints, the cursor sits just below the frame,
+// so walking up our OWN reservation lands exactly at its top — valid only
+// when nothing renders beneath us. (A yoga-tree walk to support mid-layout
+// placement was tried and reverted: any error in the computed distance
+// desyncs Ink's paint anchor and ERASES the UI — seen live twice. Callers
+// place sixel images at the frame bottom instead; see BattleScreen's strip.)
 export function SixelImage({ bitmap, palette, scale = 1, rows }: SixelImageProps) {
   const seq = useMemo(() => encodeSixel(bitmap, palette, { scale }), [bitmap, palette, scale]);
   const { stdout } = useStdout();
@@ -74,26 +57,17 @@ export function SixelImage({ bitmap, palette, scale = 1, rows }: SixelImageProps
 
   useEffect(() => {
     if (!stdout) return;
-    // Locate our reservation within the frame via the yoga tree; fall back to
-    // the old "we're the last thing rendered" assumption if that fails.
-    const up = rowsFromFrameBottom(boxRef.current as DomIsh | null) ?? reservedRows;
-    // SAFETY GUARDS — a wrong cursor dance doesn't just misplace the image,
-    // it desyncs Ink's paint anchor and erases the UI (seen live):
-    //  · up ≥ viewport rows: the target row is scrolled off-screen; ESC[A
-    //    clamps at the top but the walk-back still descends the full count,
-    //    leaving the cursor below where Ink expects. Skip entirely.
-    //  · image touching the bottom margin: sixel scrolling would shift the
-    //    whole frame under Ink. Require the image to fit strictly above the
-    //    cursor line.
+    // Guard: skip the draw when the reservation can't be reached exactly or
+    // the image could touch the bottom margin (sixel scrolling shifts the
+    // whole frame under Ink). Skipping is recoverable; desyncing is not.
     const viewport = stdout.rows ?? 0;
-    const imageRows = Math.ceil(pxHeight / cellPx);
-    if (viewport <= 0 || up >= viewport || imageRows >= up) return;
-    stdout.write(`\x1b[${up}A`);  // up to the top of our reservation
-    stdout.write('\x1b7');         // save cursor (VT100 — widest support)
-    stdout.write(seq);             // draw sixel
-    stdout.write('\x1b8');         // restore cursor
-    stdout.write(`\x1b[${up}B`);   // back down to where Ink expects
-    stdout.write('\r');            // column 0
+    if (viewport <= 0 || reservedRows >= viewport) return;
+    stdout.write(`\x1b[${reservedRows}A`); // up to the top of our reservation
+    stdout.write('\x1b7');                  // save cursor (VT100 — widest support)
+    stdout.write(seq);                      // draw sixel
+    stdout.write('\x1b8');                  // restore cursor
+    stdout.write(`\x1b[${reservedRows}B`);  // back down to where Ink expects
+    stdout.write('\r');                     // column 0
   });
 
   // Reserve rows of vertical space — blank lines that Ink lays out and

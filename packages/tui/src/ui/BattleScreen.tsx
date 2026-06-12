@@ -3158,9 +3158,12 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             </Text>
           )}
           <Text bold>Matchups</Text>
-          {spriteStrip && (sixelSupported()
-            ? <SixelImage bitmap={spriteStrip.bitmap} palette={spriteStrip.palette} />
-            : <HalfBlockImage bitmap={spriteStrip.bitmap} palette={spriteStrip.palette} />
+          {/* Half-block sprites are plain text → safe anywhere in the layout.
+              The SIXEL strip lives at the very END of the frame instead (see
+              the bottom of this component) — SixelImage's cursor math is only
+              valid as the last rendered element. */}
+          {spriteStrip && !sixelSupported() && (
+            <HalfBlockImage bitmap={spriteStrip.bitmap} palette={spriteStrip.palette} />
           )}
           {matchups.every(m => m == null) && (
             <Text dimColor>No active slots — pick leads to begin.</Text>
@@ -3235,7 +3238,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             const sp = match.opponentTeam[infoOpenForOpp]!.megaForme ?? match.opponentTeam[infoOpenForOpp]!.species;
             const v = spriteIfLoaded(sp);
             if (!v) { void spriteFor(sp).then(() => setSpriteTick(t => t + 1)); return null; }
-            if (sixelSupported()) return <SixelImage bitmap={v.sixel.bitmap} palette={v.sixel.palette} />;
+            // Always the half-block variant here: it's plain text, safe at any
+            // layout position. SixelImage mid-layout corrupts Ink's paint
+            // anchor (its cursor math only works at the frame bottom).
             if (!v.small) return null;
             return <HalfBlockImage bitmap={v.small.bitmap} palette={v.small.palette} />;
           })()}
@@ -3462,6 +3467,15 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         </Box>
       )}
       {message && <Box marginTop={1}><Text color="yellow">{message}</Text></Box>}
+      {/* SIXEL sprite strip — MUST stay the last element of the frame:
+          SixelImage positions itself by walking up its own reservation from
+          the post-paint cursor, which is only correct at the frame bottom. */}
+      {spriteStrip && sixelSupported() && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text dimColor>active opponents: {activeOppSpecies.join(' · ')}</Text>
+          <SixelImage bitmap={spriteStrip.bitmap} palette={spriteStrip.palette} />
+        </Box>
+      )}
     </Box>
   );
 }
