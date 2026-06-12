@@ -28,8 +28,8 @@ async function main() {
   const strip = composeStrip(loaded);
   if (!strip) { console.error('compose failed (palette overflow)'); process.exit(1); }
   if (halfblock) {
-    // Same extra 2:1 the battle screen applies in half-block mode.
-    const s = downsampleIndexed(strip, 2);
+    // Same 3:1 majority-vote reduction the battle screen grid applies.
+    const s = downsampleIndexed(strip, 3);
     const fg = (hex?: string) => hex ? `\x1b[38;2;${parseInt(hex.slice(1, 3), 16)};${parseInt(hex.slice(3, 5), 16)};${parseInt(hex.slice(5, 7), 16)}m` : '';
     const bg = (hex?: string) => hex ? `\x1b[48;2;${parseInt(hex.slice(1, 3), 16)};${parseInt(hex.slice(3, 5), 16)};${parseInt(hex.slice(5, 7), 16)}m` : '';
     for (const row of halfBlockRows(s.bitmap, s.palette)) {

@@ -3588,6 +3588,18 @@
       },
       "featuredSets": [
         {
+          "player": "vedantff12345",
+          "record": "7-0",
+          "item": "Spell Tag",
+          "ability": "Stance Change",
+          "moves": [
+            "Poltergeist",
+            "Shadow Sneak",
+            "Sacred Sword",
+            "King's Shield"
+          ]
+        },
+        {
           "player": "Samuel T",
           "record": "9-1",
           "item": "Spell Tag",
@@ -3609,6 +3621,18 @@
             "Iron Head",
             "Shadow Sneak",
             "King's Shield"
+          ]
+        },
+        {
+          "player": "JPXL",
+          "record": "6-1",
+          "item": "Spell Tag",
+          "ability": "Stance Change",
+          "moves": [
+            "King's Shield",
+            "Poltergeist",
+            "Sacred Sword",
+            "Shadow Sneak"
           ]
         },
         {
@@ -3660,18 +3684,6 @@
           ]
         },
         {
-          "player": "MarvVGC",
-          "record": "7-1",
-          "item": "Spell Tag",
-          "ability": "Stance Change",
-          "moves": [
-            "Poltergeist",
-            "Sacred Sword",
-            "Shadow Sneak",
-            "King's Shield"
-          ]
-        },
-        {
           "player": "Samuel T",
           "record": "10-1",
           "item": "Spell Tag",
@@ -3681,30 +3693,6 @@
             "Iron Head",
             "King's Shield",
             "Shadow Sneak"
-          ]
-        },
-        {
-          "player": "[DNR] Isaac Moreira",
-          "record": "7-1",
-          "item": "Spell Tag",
-          "ability": "Stance Change",
-          "moves": [
-            "King's Shield",
-            "Poltergeist",
-            "Sacred Sword",
-            "Shadow Sneak"
-          ]
-        },
-        {
-          "player": "rickinch",
-          "record": "4-0",
-          "item": "Colbur Berry",
-          "ability": "Stance Change",
-          "moves": [
-            "Poltergeist",
-            "Shadow Sneak",
-            "Sacred Sword",
-            "King's Shield"
           ]
         }
       ]
@@ -8995,138 +8983,10 @@
         "spd": 85,
         "spe": 60
       },
-      "moves": [
-        {
-          "name": "Blizzard",
-          "pct": 82.872
-        },
-        {
-          "name": "Aurora Veil",
-          "pct": 76.298
-        },
-        {
-          "name": "Protect",
-          "pct": 56.856
-        },
-        {
-          "name": "Giga Drain",
-          "pct": 37.358
-        },
-        {
-          "name": "Ice Shard",
-          "pct": 25.854
-        },
-        {
-          "name": "Energy Ball",
-          "pct": 22.963
-        },
-        {
-          "name": "Icy Wind",
-          "pct": 12.314
-        },
-        {
-          "name": "Earth Power",
-          "pct": 12.194
-        },
-        {
-          "name": "Wood Hammer",
-          "pct": 11.307
-        },
-        {
-          "name": "Leech Seed",
-          "pct": 9.518
-        }
-      ],
-      "abilities": [
-        {
-          "name": "Snow Warning",
-          "pct": 98.839
-        },
-        {
-          "name": "Soundproof",
-          "pct": 1.161
-        }
-      ],
-      "items": [
-        {
-          "name": "Focus Sash",
-          "pct": 25.398
-        },
-        {
-          "name": "Occa Berry",
-          "pct": 17.556
-        },
-        {
-          "name": "Choice Scarf",
-          "pct": 11.623
-        },
-        {
-          "name": "Leftovers",
-          "pct": 10.971
-        },
-        {
-          "name": "Never-Melt Ice",
-          "pct": 10.495
-        },
-        {
-          "name": "Mental Herb",
-          "pct": 5.342
-        },
-        {
-          "name": "Coba Berry",
-          "pct": 4.914
-        },
-        {
-          "name": "Sitrus Berry",
-          "pct": 3.851
-        },
-        {
-          "name": "Quick Claw",
-          "pct": 2.396
-        },
-        {
-          "name": "Bright Powder",
-          "pct": 2.071
-        }
-      ],
-      "teammates": [
-        {
-          "name": "Incineroar",
-          "pct": 33.12
-        },
-        {
-          "name": "Sneasler",
-          "pct": 28.588
-        },
-        {
-          "name": "Kingambit",
-          "pct": 27.08
-        },
-        {
-          "name": "Farigiraf",
-          "pct": 21.505
-        },
-        {
-          "name": "Crabominable-Mega",
-          "pct": 20.695
-        },
-        {
-          "name": "Sinistcha",
-          "pct": 19.879
-        }
-      ],
-      "topSpread": {
-        "nature": "Quiet",
-        "sp": [
-          32,
-          0,
-          2,
-          32,
-          0,
-          0
-        ],
-        "pct": 10.337
-      },
+      "moves": [],
+      "abilities": [],
+      "items": [],
+      "teammates": [],
       "featuredSets": []
     },
     "Charizard": {
@@ -9431,142 +9291,10 @@
         "spd": 60,
         "spe": 50
       },
-      "moves": [
-        {
-          "name": "Body Press",
-          "pct": 73.331
-        },
-        {
-          "name": "Heavy Slam",
-          "pct": 63.076
-        },
-        {
-          "name": "Protect",
-          "pct": 57.951
-        },
-        {
-          "name": "Rock Slide",
-          "pct": 51.596
-        },
-        {
-          "name": "Iron Defense",
-          "pct": 38.311
-        },
-        {
-          "name": "Iron Head",
-          "pct": 29.841
-        },
-        {
-          "name": "Head Smash",
-          "pct": 29.362
-        },
-        {
-          "name": "Stone Edge",
-          "pct": 6.669
-        },
-        {
-          "name": "Earthquake",
-          "pct": 6.333
-        },
-        {
-          "name": "Thunder Wave",
-          "pct": 4.002
-        }
-      ],
-      "abilities": [
-        {
-          "name": "Sturdy",
-          "pct": 56.085
-        },
-        {
-          "name": "Rock Head",
-          "pct": 31.475
-        },
-        {
-          "name": "Heavy Metal",
-          "pct": 12.44
-        }
-      ],
-      "items": [
-        {
-          "name": "Metal Coat",
-          "pct": 25.926
-        },
-        {
-          "name": "Leftovers",
-          "pct": 20.598
-        },
-        {
-          "name": "Hard Stone",
-          "pct": 15.02
-        },
-        {
-          "name": "Focus Sash",
-          "pct": 9.77
-        },
-        {
-          "name": "Chople Berry",
-          "pct": 5.577
-        },
-        {
-          "name": "Quick Claw",
-          "pct": 5.121
-        },
-        {
-          "name": "Lum Berry",
-          "pct": 3.277
-        },
-        {
-          "name": "Black Belt",
-          "pct": 3.102
-        },
-        {
-          "name": "Sitrus Berry",
-          "pct": 2.66
-        },
-        {
-          "name": "Choice Scarf",
-          "pct": 2.625
-        }
-      ],
-      "teammates": [
-        {
-          "name": "Incineroar",
-          "pct": 39.994
-        },
-        {
-          "name": "Farigiraf",
-          "pct": 37.845
-        },
-        {
-          "name": "Sinistcha",
-          "pct": 34.355
-        },
-        {
-          "name": "Drampa-Mega",
-          "pct": 24.435
-        },
-        {
-          "name": "Pelipper",
-          "pct": 23.637
-        },
-        {
-          "name": "Tyranitar-Mega",
-          "pct": 20.356
-        }
-      ],
-      "topSpread": {
-        "nature": "Adamant",
-        "sp": [
-          32,
-          32,
-          2,
-          0,
-          0,
-          0
-        ],
-        "pct": 22.799
-      },
+      "moves": [],
+      "abilities": [],
+      "items": [],
+      "teammates": [],
       "featuredSets": []
     },
     "Kleavor": {

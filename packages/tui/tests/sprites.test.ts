@@ -81,11 +81,13 @@ describe('half-block fallback renderer', () => {
     expect(rows2[0]).toEqual([{ ch: '▄', fg: '#0000ff', bg: undefined }, { ch: ' ', fg: undefined, bg: undefined }]);
   });
 
-  test('downsampleIndexed halves while preserving the palette + outlines', () => {
-    const sprite = { bitmap: { width: 4, height: 2, pixels: [0, 1, 0, 0, 1, 0, 0, 0] }, palette: { colors: [[9, 9, 9]] as [number, number, number][] } };
+  test('downsampleIndexed: majority colour wins; mostly-transparent blocks stay empty', () => {
+    const palette = { colors: [[9, 9, 9], [200, 0, 0]] as [number, number, number][] };
+    // Block A: 3×colour1 + 1×colour2 → colour1. Block B: 1 opaque of 4 → transparent.
+    const sprite = { bitmap: { width: 4, height: 2, pixels: [1, 1, 1, 0, 2, 1, 0, 0] }, palette };
     const small = downsampleIndexed(sprite, 2);
     expect([small.bitmap.width, small.bitmap.height]).toEqual([2, 1]);
-    expect(small.bitmap.pixels).toEqual([1, 0]); // opaque pixel survives the block
+    expect(small.bitmap.pixels).toEqual([1, 0]);
     expect(small.palette).toBe(sprite.palette);
   });
 });

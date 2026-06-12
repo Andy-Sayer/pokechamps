@@ -32,7 +32,7 @@ import { PikaSpinner } from './PikaSpinner.js';
 import { SixelImage } from './SixelImage.js';
 import { sixelSupported } from './sixelSupport.js';
 import { spriteFor, spriteIfLoaded } from './spriteCache.js';
-import { composeStrip, downsampleIndexed } from './spriteStrip.js';
+import { composeStrip, downsampleIndexed, cropToContent } from './spriteStrip.js';
 import { HalfBlockImage } from './HalfBlockImage.js';
 import { ExportPanel } from './ExportPanel.js';
 import { OverridePanel } from './OverridePanel.js';
@@ -3153,8 +3153,10 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
           <Text bold>Matchups</Text>
           {spriteStrip && (sixelSupported()
             ? <SixelImage bitmap={spriteStrip.bitmap} palette={spriteStrip.palette} />
-            // Half-block fallback: extra 2:1 so the strip stays ~12 rows.
-            : (() => { const s = downsampleIndexed(spriteStrip, 2); return <HalfBlockImage bitmap={s.bitmap} palette={s.palette} />; })()
+            // Half-block fallback: 3:1 majority-vote → 16px sprites ≈ 8 text
+            // rows, clean flat edges (screenshot feedback: 24px was too big
+            // and the first-opaque downsample too ragged).
+            : (() => { const s = downsampleIndexed(spriteStrip, 3); return <HalfBlockImage bitmap={s.bitmap} palette={s.palette} />; })()
           )}
           {matchups.every(m => m == null) && (
             <Text dimColor>No active slots — pick leads to begin.</Text>
@@ -3230,7 +3232,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             const s = spriteIfLoaded(sp);
             if (!s) { void spriteFor(sp).then(() => setSpriteTick(t => t + 1)); return null; }
             if (sixelSupported()) return <SixelImage bitmap={s.bitmap} palette={s.palette} />;
-            const hb = downsampleIndexed(s, 2);
+            const hb = downsampleIndexed(cropToContent(s), 2);
             return <HalfBlockImage bitmap={hb.bitmap} palette={hb.palette} />;
           })()}
           <OppInfoPanel stores={stores} index={infoOpenForOpp} entry={match.opponentTeam[infoOpenForOpp]!} />
