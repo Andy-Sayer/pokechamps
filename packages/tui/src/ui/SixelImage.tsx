@@ -26,6 +26,11 @@ import { Box, Text, useStdout } from 'ink';
 import { encodeSixel, type Bitmap, type Palette } from './sixel.js';
 import { cellPixelHeight } from './sixelSupport.js';
 
+// Cadence of the self-heal repaint. Fast enough that a layout shift (a
+// message appearing, the turn log growing) only blanks the sprite for a
+// blink; slow enough that the terminal isn't re-decoding sixels per frame.
+const SELF_HEAL_MS = 250;
+
 export interface SixelImageProps {
   bitmap: Bitmap;
   palette: Palette;
@@ -55,20 +60,38 @@ export function SixelImage({ bitmap, palette, scale = 1, rows }: SixelImageProps
   const cellPx = cellPixelHeight();
   const reservedRows = rows ?? Math.ceil(pxHeight / cellPx) + 1;
 
+  // REDRAW POLICY: with Ink's incrementalRendering (cli.tsx) unchanged lines
+  // are never rewritten, so typing doesn't erase the pixels — redrawing on
+  // every React render (the old dep-less effect) burned a full cursor dance +
+  // sixel decode per keystroke for nothing ("super jittery"). Instead:
+  //   - immediate draw when the image itself changes (deps below), and
+  //   - a slow self-heal repaint for the cases that DO clobber the pixels
+  //     (a layout shift rewrites the reservation rows positionally; resize).
+  // Each draw is one atomic write wrapped in DEC 2026 synchronized output so
+  // an in-place overdraw is invisible; terminals without 2026 ignore it.
   useEffect(() => {
     if (!stdout) return;
-    // Guard: skip the draw when the reservation can't be reached exactly or
-    // the image could touch the bottom margin (sixel scrolling shifts the
-    // whole frame under Ink). Skipping is recoverable; desyncing is not.
-    const viewport = stdout.rows ?? 0;
-    if (viewport <= 0 || reservedRows >= viewport) return;
-    stdout.write(`\x1b[${reservedRows}A`); // up to the top of our reservation
-    stdout.write('\x1b7');                  // save cursor (VT100 — widest support)
-    stdout.write(seq);                      // draw sixel
-    stdout.write('\x1b8');                  // restore cursor
-    stdout.write(`\x1b[${reservedRows}B`);  // back down to where Ink expects
-    stdout.write('\r');                     // column 0
-  });
+    const draw = () => {
+      // Guard: skip the draw when the reservation can't be reached exactly or
+      // the image could touch the bottom margin (sixel scrolling shifts the
+      // whole frame under Ink). Skipping is recoverable; desyncing is not.
+      const viewport = stdout.rows ?? 0;
+      if (viewport <= 0 || reservedRows >= viewport) return;
+      stdout.write(
+        '\x1b[?2026h' +              // begin synchronized update
+        `\x1b[${reservedRows}A` +    // up to the top of our reservation
+        '\x1b7' +                    // save cursor (VT100 — widest support)
+        seq +                        // draw sixel
+        '\x1b8' +                    // restore cursor
+        `\x1b[${reservedRows}B` +    // back down to where Ink expects
+        '\r' +                       // column 0
+        '\x1b[?2026l',               // end synchronized update
+      );
+    };
+    draw();
+    const heal = setInterval(draw, SELF_HEAL_MS);
+    return () => clearInterval(heal);
+  }, [stdout, seq, reservedRows]);
 
   // Reserve rows of vertical space — blank lines that Ink lays out and
   // clears between paints. The sixel overlays this region.

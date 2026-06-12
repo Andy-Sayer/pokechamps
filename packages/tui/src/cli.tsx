@@ -236,4 +236,9 @@ await probeSixel();
 // etc.) don't linger above the UI on startup. ESC[2J = clear screen,
 // ESC[H = cursor home. Cheap, no extra dependencies.
 process.stdout.write('\x1b[2J\x1b[H');
-render(<App />);
+// incrementalRendering: only changed lines are rewritten per frame. The
+// default renderer erases + rewrites the ENTIRE frame on every keystroke,
+// which wipes any sixel pixels sitting in their reserved rows and forces a
+// full redraw per key press (visible jitter). Incremental mode leaves
+// unchanged lines untouched, so sixels survive typing; see SixelImage.
+render(<App />, { incrementalRendering: true });
