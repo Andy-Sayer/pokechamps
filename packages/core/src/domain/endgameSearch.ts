@@ -3331,8 +3331,8 @@ function resolveTurn(
     if (isEjectItem(t.oppItem[tgt])) doForce(tgt, oppActiveForced, oppHp, t.oppN, t.thr, myHp, oppBoost, oppSeen);
     else if (isRedCardItem(t.oppItem[tgt])) doForce(big.atk, myActiveForced, myHp, t.myN, t.off, oppHp, myBoost);
   }
-  const myActive = refill(myActiveForced, myHp, t.myN, t.off, oppHp);
-  const oppActive = refill(oppActiveForced, oppHp, t.oppN, t.thr, myHp, oppSeen);
+  const myActive = refill(myActiveForced, myHp, t.myN, t.off, oppHp, undefined, t.thr);
+  const oppActive = refill(oppActiveForced, oppHp, t.oppN, t.thr, myHp, oppSeen, t.off);
   // A replacement brought in after a faint enters at EOT and eats the hazards
   // present NOW (the post-set copies) — this is what makes a hazard set this turn
   // (incl. Stone Axe's SR) actually bite the opponent's next mon.
@@ -3374,6 +3374,11 @@ function refill(
   dmgRows: Cell[][],     // dmgRows[mon][foe]
   foeHp: number[],
   eligible?: boolean[],
+  // The FOE's damage rows ([foe][mon]) — when provided, the pick weighs
+  // survivability: a candidate that nukes but gets nuked back scores below a
+  // slightly weaker pick that actually lives. Heuristic by design (refill is
+  // the "who walks in after a KO" model, not part of the exactness contract).
+  foeRows?: Cell[][],
 ): number[] {
   const live = active.filter(i => hp[i]! > 0);
   if (live.length >= MAX_ACTIVE) return live.slice(0, MAX_ACTIVE);
@@ -3381,12 +3386,18 @@ function refill(
   const liveFoes: number[] = foeHp.map((h, j) => (h > 0 ? j : -1)).filter(j => j >= 0);
   while (live.length < MAX_ACTIVE) {
     let best = -1;
-    let bestDmg = -1;
+    let bestScore = -Infinity;
     for (let i = 0; i < n; i++) {
       if (hp[i]! <= 0 || onField.has(i)) continue;
       if (eligible && !eligible[i]) continue;     // unrevealed phantom — not auto-brought
-      const total = liveFoes.reduce((acc, j) => acc + (dmgRows[i]?.[j]?.dmgMid ?? 0), 0);
-      if (total > bestDmg) { bestDmg = total; best = i; }
+      const out = liveFoes.reduce((acc, j) => acc + (dmgRows[i]?.[j]?.dmgMid ?? 0), 0);
+      // Incoming pressure, capped per foe at the candidate's remaining HP — a
+      // 300% overkill hit shouldn't dominate the comparison.
+      const incoming = foeRows
+        ? liveFoes.reduce((acc, j) => acc + Math.min(hp[i]!, foeRows[j]?.[i]?.dmgMid ?? 0), 0)
+        : 0;
+      const score = out - 0.6 * incoming;
+      if (score > bestScore) { bestScore = score; best = i; }
     }
     if (best < 0) break;       // no bench left
     live.push(best);
