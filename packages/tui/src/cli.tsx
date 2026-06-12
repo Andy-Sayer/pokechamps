@@ -18,6 +18,7 @@ import { TeamManagement } from './ui/TeamManagement.js';
 import { AddTeamPicker } from './ui/AddTeamPicker.js';
 import { SpectateConnect } from './ui/SpectateConnect.js';
 import { SpectatorScreen } from './ui/SpectatorScreen.js';
+import { probeSixel } from './ui/sixelSupport.js';
 import type { ShareTarget } from './spectate.js';
 
 type Route =
@@ -223,6 +224,12 @@ function App() {
   }
   return <Text>Unknown route</Text>;
 }
+
+// Ask the terminal whether it renders sixels (Primary Device Attributes)
+// BEFORE Ink takes over stdin — the env-var heuristics miss capable
+// terminals (Windows Terminal ≥1.22 answers `…;4;…` here even when
+// WT_SESSION got stripped by the launch context). 200ms worst case.
+await probeSixel();
 
 // Clear the screen + park the cursor at the top before Ink takes over,
 // so the wrapping `npm run` script banners ("> pokechamps@0.1.0 start"

@@ -1,10 +1,10 @@
-// Sprite pipeline (Theme 6): PNG decode → nearest-neighbour downsample →
-// palette quantise → strip compose. All offline — network fetch is exercised
-// by scripts/preview-sprites.ts, the visual-iteration tool.
+// Sprite pipeline (Theme 6): PNG decode → palette quantise (native sixel
+// variant) / area-resize (half-block variant) → strip compose. All offline —
+// network fetch is exercised by scripts/preview-sprites.ts, the iteration tool.
 import { describe, test, expect } from 'vitest';
 import { deflateSync } from 'node:zlib';
 import { decodePng } from '../src/ui/png.js';
-import { downsample, quantise, areaResize } from '../src/ui/spriteCache.js';
+import { quantise, areaResize } from '../src/ui/spriteCache.js';
 import { composeStrip } from '../src/ui/spriteStrip.js';
 import { halfBlockRows } from '../src/ui/HalfBlockImage.js';
 
@@ -50,17 +50,12 @@ describe('png decoder', () => {
   });
 });
 
-describe('downsample + quantise', () => {
-  test('2:1 nearest-neighbour keeps palette colours and transparency', () => {
-    // 4x2: left 2x2 block red-dominant, right block fully transparent.
-    const rgba = new Uint8Array([...R, ...R, ...T, ...T, ...R, ...B, ...T, ...T]);
-    const small = downsample(4, 2, rgba);
-    expect([small.width, small.height]).toEqual([2, 1]);
-    expect([...small.rgba.slice(0, 4)]).toEqual(R); // first opaque pick
-    expect(small.rgba[7]).toBe(0);                  // transparent block stays empty
-    const sprite = quantise(small.width, small.height, small.rgba)!;
-    expect(sprite.palette.colors).toEqual([[255, 0, 0]]);
-    expect(sprite.bitmap.pixels).toEqual([1, 0]);
+describe('quantise', () => {
+  test('builds a 1-based palette with 0 for transparency', () => {
+    const rgba = new Uint8Array([...R, ...B, ...T, ...R]);
+    const sprite = quantise(2, 2, rgba)!;
+    expect(sprite.palette.colors).toEqual([[255, 0, 0], [0, 0, 255]]);
+    expect(sprite.bitmap.pixels).toEqual([1, 2, 0, 1]);
   });
 });
 

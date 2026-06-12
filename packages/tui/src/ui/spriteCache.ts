@@ -1,8 +1,9 @@
 // Species sprite fetch + quantise for the matchup grid (Theme 6). Fetches
-// Showdown's gen5 96×96 sprites on demand, decodes (png.ts), box-downsamples
-// to half size, and quantises RGBA into the indexed Bitmap+Palette the sixel
-// encoder consumes. Everything is best-effort: no network / unsupported PNG /
-// too many colours all resolve to null and the UI simply shows no sprite.
+// Showdown's gen5 96×96 sprites on demand, decodes (png.ts), and produces the
+// two renderer variants: native-resolution for sixel terminals (1 art pixel =
+// 1 screen pixel) and a small palette-snapped one for the half-block
+// fallback. Everything is best-effort: no network / unsupported PNG / too
+// many colours all resolve to null and the UI simply shows no sprite.
 //
 // Cached in-memory per process AND on disk (data dir sprites/ sidecar,
 // gitignored) so a match doesn't refetch and offline sessions keep sprites
@@ -53,30 +54,6 @@ export function quantise(width: number, height: number, rgba: Uint8Array): Sprit
     pixels[i] = idx;
   }
   return { bitmap: { width, height, pixels }, palette: { colors } };
-}
-
-/** 2:1 nearest-neighbour downsample. Pixel art wants crisp edges and a
- *  PRESERVED palette — box averaging blends new colours (and blew the
- *  quantiser's cap on real sprites). Picks the first opaque pixel of each
- *  2×2 block so thin outlines survive. */
-export function downsample(width: number, height: number, rgba: Uint8Array): { width: number; height: number; rgba: Uint8Array } {
-  const w = Math.floor(width / 2), h = Math.floor(height / 2);
-  const out = new Uint8Array(w * h * 4);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const d = (y * w + x) * 4;
-      let opaque = 0;
-      let pick = -1;
-      for (const [dy, dx] of [[0, 0], [0, 1], [1, 0], [1, 1]] as const) {
-        const s = ((y * 2 + dy) * width + (x * 2 + dx)) * 4;
-        if (rgba[s + 3]! >= 128) { opaque++; if (pick < 0) pick = s; }
-      }
-      if (opaque >= 2 && pick >= 0) {
-        out[d] = rgba[pick]!; out[d + 1] = rgba[pick + 1]!; out[d + 2] = rgba[pick + 2]!; out[d + 3] = 255;
-      } // else transparent (zeros)
-    }
-  }
-  return { width: w, height: h, rgba: out };
 }
 
 /** Alpha-weighted box resize to `targetH` (aspect preserved). Smooth output —
@@ -143,8 +120,8 @@ function cropRgba(width: number, height: number, rgba: Uint8Array): { width: num
   return { width: w, height: h, rgba: out };
 }
 
-/** Both renderer variants from one decode: `sixel` at 48px (crisp pixels for
- *  real sixel terminals) and `small` for the half-block fallback. */
+/** Both renderer variants from one decode: `sixel` at NATIVE resolution
+ *  (cropped, unscaled) and `small` for the half-block fallback. */
 export interface SpriteVariants { sixel: Sprite; small: Sprite | null }
 
 // Half-block sizing: reduce the FULL frame by an exact INTEGER factor first
@@ -157,8 +134,11 @@ const SMALL_FACTOR = 6;
 function decodeToVariants(png: Uint8Array): SpriteVariants | null {
   try {
     const d = decodePng(png);
-    const half = downsample(d.width, d.height, d.rgba);
-    const sixel = quantise(half.width, half.height, half.rgba);
+    // Sixel = NATIVE resolution, 1 art pixel : 1 screen pixel — no scaling at
+    // all, just cropped to content. A 96px sprite spans ~5-7 text rows of
+    // real pixels, exactly the crisp-and-small the art was drawn for.
+    const native = cropRgba(d.width, d.height, d.rgba);
+    const sixel = quantise(native.width, native.height, native.rgba);
     if (!sixel) return null;
     const targetH = Math.max(8, Math.round(d.height / SMALL_FACTOR));
     const resized = areaResize(d.width, d.height, d.rgba, targetH);

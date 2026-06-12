@@ -15,10 +15,60 @@
 // Conservative default: ON only when we recognise a sixel-supporting terminal.
 // Fall back to half-block in unknown environments.
 
+// Result of the ACTIVE terminal probe (Primary Device Attributes). Null until
+// probeSixel() has run; takes precedence over the env-var heuristics below
+// because it's the terminal's own answer.
+let probed: boolean | null = null;
+
+/**
+ * Ask the terminal directly whether it renders sixels: write the Primary
+ * Device Attributes query (CSI c) and look for capability `4` (sixel
+ * graphics) in the `CSI ? …;4;… c` reply. Must run BEFORE Ink takes over
+ * stdin/stdout (cli.tsx calls it at startup). Falls back silently — a
+ * non-answering terminal just leaves the env heuristics in charge.
+ */
+export function probeSixel(timeoutMs = 200): Promise<boolean | null> {
+  return new Promise(resolve => {
+    const { stdin, stdout } = process;
+    if (!stdin.isTTY || !stdout.isTTY) { resolve(null); return; }
+    let buf = '';
+    const wasRaw = stdin.isRaw;
+    const done = (answer: boolean | null) => {
+      stdin.removeListener('data', onData);
+      if (!wasRaw) stdin.setRawMode?.(false);
+      stdin.pause();
+      if (answer != null) probed = answer;
+      resolve(answer);
+    };
+    const timer = setTimeout(() => done(null), timeoutMs);
+    const onData = (chunk: Buffer) => {
+      buf += chunk.toString('utf8');
+      // Reply shape: ESC [ ? <attrs separated by ;> c
+      const m = buf.match(/\x1b\[\?([\d;]*)c/);
+      if (m) {
+        clearTimeout(timer);
+        done(m[1]!.split(';').includes('4'));
+      }
+    };
+    try {
+      stdin.setRawMode?.(true);
+      stdin.resume();
+      stdin.on('data', onData);
+      stdout.write('\x1b[c');
+    } catch {
+      clearTimeout(timer);
+      done(null);
+    }
+  });
+}
+
 export function sixelSupported(): boolean {
   const force = process.env.POKECHAMPS_SIXEL;
   if (force === '1') return true;
   if (force === '0') return false;
+
+  // The terminal's own answer beats every env heuristic.
+  if (probed != null) return probed;
 
   const term = (process.env.TERM ?? '').toLowerCase();
   const termProgram = (process.env.TERM_PROGRAM ?? '').toLowerCase();
