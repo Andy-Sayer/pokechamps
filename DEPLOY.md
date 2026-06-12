@@ -158,6 +158,26 @@ docker compose -f docker-compose.prod.yml exec server \
 
 Restore by stopping the server, extracting back into the volume, and starting.
 
+## Validated locally (2026-06-11)
+
+The full stack has been run end-to-end with this exact compose file
+(`DOMAIN=localhost`, Caddy's internal CA standing in for Let's Encrypt):
+multi-stage image build (incl. the alpine tar bundle step), Caddy TLS →
+server proxying, `/health` + migrations, register/login/`/auth/me`, team CRUD,
+and the TUI bundle download — checksum verified against the served `.sha256`,
+extracted, booted. One real bug surfaced and is fixed in `Dockerfile.prod`:
+
+- **Root-owned `server_data` volume → `SQLITE_CANTOPEN` crash-loop.** A named
+  volume only inherits the image's `/data` ownership when the volume is first
+  created; a volume that predates the image (or was made by root tooling)
+  mounts root-owned and the non-root server can't open the database. The image
+  now fixes ownership in a root entrypoint and drops to `node` via `su-exec`,
+  so any pre-existing volume works.
+
+Still genuinely VM-specific on first real deploy: the arm64 build of
+`better-sqlite3` on Oracle's A1 shape, real-DNS Let's Encrypt issuance, and
+the host firewall (open 80/443).
+
 ## Fly.io (alternative)
 
 `fly.toml` + `Dockerfile.prod` still work on Fly if you prefer it. The short

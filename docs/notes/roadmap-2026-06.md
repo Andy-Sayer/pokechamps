@@ -281,9 +281,18 @@ Two halves of the same `replay.ts` investment (see
   (real error logged, constant body returned — no path/SQL leakage; 4xx
   messages pass through).
 
-**Deploy validation remains the one open item** — it needs the user's hands-on
-VM step (provision the Oracle VM, run compose, point DNS, end-to-end check).
-Everything code-side is ready; flag when you want to do it together.
+- **Deploy validation ✅ shipped 2026-06-11 (local end-to-end).** The exact
+  prod compose stack ran locally: multi-stage image build (first true test of
+  the alpine tar bundle step), Caddy TLS (internal CA for `localhost`) →
+  server, /health + migrations, register/login/me, team CRUD, TUI bundle
+  download with checksum verification + extraction + boot. **And it caught
+  the exact class of bug it existed to find**: a named `server_data` volume
+  predating the image mounts root-owned (volumes only inherit image ownership
+  at first creation) → `SQLITE_CANTOPEN` crash-loop. Fixed in Dockerfile.prod
+  with a root entrypoint that chowns /data then drops to `node` via su-exec.
+  See DEPLOY.md §"Validated locally". What's left is strictly VM-specific
+  (arm64 better-sqlite3 on the A1 shape, real-DNS Let's Encrypt, firewall) —
+  the first real `docker compose up` on the box, with DEPLOY.md in hand.
 
 ### Theme 6 — TUI polish *(3 of 4 shipped 2026-06-11)*
 
@@ -297,10 +306,15 @@ Everything code-side is ready; flag when you want to do it together.
 - ✅ **Sticky preferences** — `storage/prefs.ts` sidecar (`data/prefs.json`,
   gitignored, best-effort IO): `/crit`, `/allmoves`, `/pika` persist across
   sessions.
-- ⏸ **Sprites in the matchup grid** — deliberately NOT built blind: per the
-  standing visual-iteration feedback (mockups + preview scripts before
-  building), this one needs a preview session with the user. The sixel
-  pipeline is ready when that happens.
+- ✅ **Sprites in the matchup grid + info panel** (shipped 2026-06-11, built
+  WITH the preview-first method the standing feedback prescribes): `/sprites`
+  (sticky, default OFF) renders sixel sprites of the active opponents above
+  the grid and in the opponent info panel. Pipeline: Showdown gen5 PNGs →
+  dependency-free decoder (png.ts) → nearest-neighbour 2:1 downsample →
+  indexed strip with shared palette → SixelImage. Mega/forme filenames via
+  the dex baseSpecies-forme split; disk + memory cache.
+  `scripts/preview-sprites.ts` is the iteration tool (validated 4/4 live,
+  incl. Charizard-Mega-Y) — tune scale/layout there, then judge in-app.
 
 ### Theme 7 — Remaining search long-tail ✅ *(complete 2026-06-11)*
 

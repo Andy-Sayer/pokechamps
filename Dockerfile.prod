@@ -70,7 +70,7 @@ FROM node:22-alpine AS runtime
 # packages/server/src/index.ts actually fires on `fly deploy` rolling
 # restarts. Without this, signals can get swallowed by node's default
 # PID 1 behavior.
-RUN apk add --no-cache tini
+RUN apk add --no-cache tini su-exec
 
 # Non-root runtime user. node:22-alpine already ships a `node` user (uid
 # 1000) — reuse it rather than creating our own.
@@ -115,12 +115,16 @@ COPY data ./data
 COPY --from=builder /app/dist/pokechamps-tui.tar.gz        ./dist/pokechamps-tui.tar.gz
 COPY --from=builder /app/dist/pokechamps-tui.tar.gz.sha256 ./dist/pokechamps-tui.tar.gz.sha256
 
-# Fly mounts the persistent volume at /data (see fly.toml). The server's
-# DATABASE_URL defaults to that path — pre-create it so the first boot
-# doesn't race the volume mount.
-RUN mkdir -p /data && chown -R node:node /data /app
-
-USER node
+# The persistent volume mounts at /data (compose `server_data` / Fly volume).
+# Pre-create it in the image — but DON'T rely on build-time chown alone: a
+# named volume only inherits the image's ownership on its FIRST creation, so
+# a volume created by an earlier image (or by root tooling) mounts root-owned
+# and sqlite crash-loops with SQLITE_CANTOPEN. (Found by the local deploy
+# validation.) The entrypoint below fixes ownership at startup as root, then
+# drops to the unprivileged node user via su-exec.
+RUN mkdir -p /data && chown -R node:node /data /app \
+  && printf '#!/bin/sh\nset -e\nchown -R node:node /data 2>/dev/null || true\nexec su-exec node "$@"\n' > /usr/local/bin/entrypoint.sh \
+  && chmod +x /usr/local/bin/entrypoint.sh
 
 EXPOSE 3000
 
@@ -129,5 +133,6 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD wget --quiet --tries=1 --spider http://127.0.0.1:3000/health || exit 1
 
-ENTRYPOINT ["/sbin/tini", "--"]
+# tini (PID 1, signal forwarding) → entrypoint (chown /data, drop to node).
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["npm", "-w", "@pokechamps/server", "start"]
