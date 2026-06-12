@@ -53,7 +53,7 @@ import { statusBerryFor } from '../domain/statusBerries.js';
 import { resistBerryForType } from '../domain/resistBerries.js';
 import { effectiveness, speciesTypes } from '../domain/typechart.js';
 import { EFFECT_DURATIONS } from '../domain/durations.js';
-import { isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, getSpecies, getMove, getAbility, getItem, toId } from '../domain/data.js';
+import { isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, isTrappingMove, getSpecies, getMove, getAbility, getItem, toId } from '../domain/data.js';
 import type { StateUpdate, HazardUpdate } from '../domain/turnparser.js';
 
 export type ActiveIdx = {
@@ -155,6 +155,12 @@ function clearMyVolatiles(match: Match, idx: number): void {
   if (match.myPartialTrap) delete match.myPartialTrap[idx];
   if (match.myNightmare) delete match.myNightmare[idx];
   if (match.myCurrentSub) delete match.myCurrentSub[idx];
+  // Perish count clears on switch-out (real rules). Limitation: a Baton Pass
+  // SHOULD carry it to the incoming mon — auto-tracking can't tell a pass
+  // from a switch here, so re-log `perish N` manually after a pass.
+  if (match.myPerishCount) delete match.myPerishCount[idx];
+  // The move-trap volatile on THIS mon also dies with its departure.
+  if (match.myTrappedBy) delete match.myTrappedBy[idx];
   // Persists through switch: Salt Cure, Aqua Ring, Ingrain — not cleared here.
 }
 
@@ -165,6 +171,9 @@ function clearOppVolatiles(o: OpponentEntry): void {
   o.leechSeeded = undefined;
   // Clears on switch-out: Curse, partial trap, Nightmare, Substitute.
   o.cursed = undefined; o.partialTrap = undefined; o.nightmare = undefined; o.substitute = undefined;
+  // Perish count clears on switch-out (real rules; Baton Pass limitation —
+  // see clearMyVolatiles). The move-trap on this mon dies with its departure.
+  o.perishCount = undefined; o.trappedBy = undefined;
   // Persists: saltCured, aquaRing, ingrain — not cleared here.
 }
 
@@ -467,6 +476,10 @@ export interface FinalizeTurnInput {
   match: Match;
   turn: { actions: MoveAction[]; field: FieldState };
   activeIdx: ActiveIdx;
+  /** Mons whose perish count was MANUALLY logged this turn ('m:2' / 'o:0') —
+   *  the logged value is the end-of-turn display, so the EOT auto-tick must
+   *  skip them. */
+  skipPerishTick?: ReadonlySet<string>;
 }
 
 export interface FinalizeTurnResult {
@@ -1591,8 +1604,59 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     inferenceNotes.push(...applySwitchInAbility(next, a.side, a.targetTeamIndex, nextActive));
   }
 
-  // End-of-turn effects.
-  const eotResult = endOfTurn(next, field, nextActive);
+  // Perish Song cast: every POST-SWITCH active on BOTH sides gets the clock
+  // unless (confirmed) Soundproof or already counting. Stored as 4 so the EOT
+  // tick below lands it on 3 — the in-game display at the song turn's end.
+  // Mirror in BattleScreen.tsx.
+  const songSung = draftActions.some(a => a.kind !== 'switch' && a.kind !== 'mega' && toId(a.move ?? '') === 'perishsong');
+  if (songSung) {
+    for (const slot of [0, 1] as const) {
+      const mi = nextActive.mine[slot];
+      if (mi != null && !next.myFainted?.includes(mi) && toId(next.myTeam[mi]?.ability ?? '') !== 'soundproof') {
+        next.myPerishCount = { ...(next.myPerishCount ?? {}) };
+        if (next.myPerishCount[mi] == null) { next.myPerishCount[mi] = 4; inferenceNotes.push(`m${mi + 1} hears Perish Song`); }
+      }
+      const oi = nextActive.theirs[slot];
+      const o = oi != null ? next.opponentTeam[oi] : undefined;
+      if (oi != null && o && !o.fainted) {
+        const ab = certainAbility({ knownAbility: o.ability, species: o.species, ruledOut: o.abilitiesRuledOut });
+        if ((!ab || toId(ab) !== 'soundproof') && o.perishCount == null) {
+          next.opponentTeam[oi] = { ...o, perishCount: 4 };
+          inferenceNotes.push(`o${oi + 1} hears Perish Song`);
+        }
+      }
+    }
+  }
+
+  // Trapping moves (Block / Mean Look / …): pin the target while the trapper
+  // stays active. Ghost targets are immune (Gen 6+). Lazily validated on read
+  // (trapper must be active + alive), so no clear plumbing beyond switch-out.
+  // Mirror in BattleScreen.tsx.
+  for (const a of draftActions) {
+    if (a.kind === 'switch' || a.kind === 'mega') continue;
+    if (!isTrappingMove(a.move ?? '')) continue;
+    if (typeof a.target !== 'object' || a.targetTeamIndex == null || a.attackerTeamIndex == null) continue;
+    if (a.target.side === a.side) continue;       // only foes get pinned
+    if (a.target.side === 'theirs') {
+      const o = next.opponentTeam[a.targetTeamIndex];
+      if (!o || o.fainted) continue;
+      const forme = o.megaUsed && o.megaForme ? o.megaForme : o.species;
+      if (((getSpecies(forme) as { types?: string[] } | undefined)?.types ?? []).includes('Ghost')) continue;
+      next.opponentTeam[a.targetTeamIndex] = { ...o, trappedBy: a.attackerTeamIndex };
+      inferenceNotes.push(`o${a.targetTeamIndex + 1} trapped (${a.move})`);
+    } else {
+      const set = next.myTeam[a.targetTeamIndex];
+      if (!set || next.myFainted?.includes(a.targetTeamIndex)) continue;
+      const forme = (next.myMegaUsed?.includes(a.targetTeamIndex) ? next.myMegaForme?.[a.targetTeamIndex] : undefined) ?? set.species;
+      if (((getSpecies(forme) as { types?: string[] } | undefined)?.types ?? []).includes('Ghost')) continue;
+      next.myTrappedBy = { ...(next.myTrappedBy ?? {}), [a.targetTeamIndex]: a.attackerTeamIndex };
+      inferenceNotes.push(`m${a.targetTeamIndex + 1} trapped (${a.move})`);
+    }
+  }
+
+  // End-of-turn effects. Manual `perish N` logs this turn already carry the
+  // end-of-turn value — the caller passes them so the auto-tick exempts them.
+  const eotResult = endOfTurn(next, field, nextActive, { skipPerishTick: input.skipPerishTick });
   next = eotResult.match;
 
   // Clear emptied active slots after auto-faint.

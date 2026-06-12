@@ -27,7 +27,7 @@ import { ZERO_EVS, MAX_IVS } from './types.js';
 import { predictOffense, predictThreat, predictOffenseCells, predictThreatCells, pikalyticsMoves } from './predictions.js';
 import { representativeSpreadIndices } from './inference.js';
 import { actualSpeed, actualStat, effectiveSpeedRange } from './speed.js';
-import { getMove, getSpecies, getNature, toId, isSpreadMove, moveFlinchChance } from './data.js';
+import { getMove, getSpecies, getNature, toId, isSpreadMove, moveFlinchChance, isTrappingMove } from './data.js';
 import { getMegaOptions } from './gimmicks/mega.js';
 import { defaultOpponentSet } from './bring.js';
 import { maxHpFor } from './damage.js';
@@ -80,6 +80,10 @@ export interface SearchMyMon {
    *  search FORECASTS by real rules: ticks at EOT while on field, cleared by
    *  switching out, transferred by Baton Pass. */
   perishCount?: number;
+  /** Move-trapped (Block / Mean Look / …): the trapper's SEARCH index on the
+   *  other side, or -1 when the trapper isn't in the search set. Blocks this
+   *  mon's switch option while the trapper stays active. */
+  trappedByFoe?: number;
 }
 export interface SearchOppMon {
   entry: OpponentEntry;
@@ -105,6 +109,8 @@ export interface SearchOppMon {
   choiceLockedMove?: string;
   /** Perish Song count (see SearchMyMon.perishCount). */
   perishCount?: number;
+  /** Move-trapped (see SearchMyMon.trappedByFoe). */
+  trappedByFoe?: number;
 }
 export interface SearchInput {
   mine: SearchMyMon[];
@@ -319,6 +325,8 @@ const TAUNT_BASE = -80;   // Taunt → foe idx (foe can't use status moves for a
 const ENCORE_BASE = -90;  // Encore → foe idx (foe locked into its last move)
 const FAKEOUT_BASE = -100; // Fake Out → foe idx (chip + guaranteed flinch, first turn out only)
 const PRIO_BASE = -110;   // priority attack (Sucker Punch/Grassy Glide/Aqua Jet/…) → foe idx
+const TRAP_BASE = -120;   // trapping move (Block/Mean Look/…) → foe idx; victim can't use SWITCH
+const SET_PERISH = -130;  // Perish Song — every on-field non-Soundproof mon (BOTH sides) gets the clock
 function isSwitchTarget(t: number): boolean { return t <= SWITCH_BASE && t > LEECH_BASE; }
 function switchBenchIdx(t: number): number { return SWITCH_BASE - t; }
 function switchCode(benchIdx: number): number { return SWITCH_BASE - benchIdx; }
@@ -347,6 +355,9 @@ function isFakeOutTarget(t: number): boolean { return t <= FAKEOUT_BASE && t > P
 function fakeOutFoeIdx(t: number): number { return FAKEOUT_BASE - t; }
 function fakeOutCode(foeIdx: number): number { return FAKEOUT_BASE - foeIdx; }
 function isPrioTarget(t: number): boolean { return t <= PRIO_BASE && t > PRIO_BASE - 10; }
+function isTrapTarget(t: number): boolean { return t <= TRAP_BASE && t > TRAP_BASE - 10; }
+function trapFoeIdx(t: number): number { return TRAP_BASE - t; }
+function trapCode(foeIdx: number): number { return TRAP_BASE - foeIdx; }
 function prioFoeIdx(t: number): number { return PRIO_BASE - t; }
 function prioCode(foeIdx: number): number { return PRIO_BASE - foeIdx; }
 function isFieldTarget(t: number): boolean { return t === SET_TAILWIND || t === SET_TRICKROOM; }
@@ -631,6 +642,13 @@ interface Tables {
   // Baton Pass capability (passes boosts to a switch-in).
   myBatonMove: (string | null)[];
   oppBatonMove: (string | null)[];
+  // Perish Song capability (sets the clock on every on-field non-Soundproof mon).
+  myPerishMove: (string | null)[];
+  oppPerishMove: (string | null)[];
+  // Trapping-move capability (Block / Mean Look / Jaw Lock / …): blocks the
+  // victim's SWITCH action while the trapper stays active.
+  myTrapMove: (string | null)[];
+  oppTrapMove: (string | null)[];
   // Speed Boost ability (+1 Spe each EOT while active).
   mySpeedBoost: boolean[];
   oppSpeedBoost: boolean[];
@@ -993,6 +1011,12 @@ interface State {
    *  this is why trapping + Perish is a kill combo); Baton Pass transfers it. */
   myPerish: number[];
   oppPerish: number[];
+  /** Move-trap (Block / Mean Look / …): per mon, the FOE-side index of the
+   *  trapper (or null). Blocks the victim's SWITCH action while the trapper is
+   *  active + alive (validated at option-gen time — no clear plumbing needed).
+   *  -1 = trapped by something outside the search set (treated as permanent). */
+  myTrappedBy: (number | null)[];
+  oppTrappedBy: (number | null)[];
   /** Taunt turns remaining per mon (>0 = can't use status moves). */
   myTaunt: number[];
   oppTaunt: number[];
@@ -1123,6 +1147,15 @@ function isType(species: string, t: string): boolean {
 // Shed Shell always escapes; Shadow Tag doesn't trap other Shadow Tag holders;
 // Arena Trap only traps grounded mons; Magnet Pull only Steels. Pivot moves
 // (U-turn) and Baton Pass BYPASS trapping, so only the switch option is gated.
+/** Is a move-trap volatile still binding? The trapper must be active + alive
+ *  (Gen 8+: Mean Look releases when its user leaves). -1 = external trapper,
+ *  treated as permanently binding. */
+function moveTrapHolds(trapper: number | null | undefined, foeActive: number[], foeHp: number[]): boolean {
+  if (trapper == null) return false;
+  if (trapper < 0) return true;
+  return foeActive.includes(trapper) && (foeHp[trapper] ?? 0) > 0;
+}
+
 function trappedBy(
   actorSpecies: string, actorAbility: string | null | undefined, actorItem: string | null | undefined, actorGrounded: boolean,
   foeActive: number[], foeHp: number[], foeAbility: readonly (string | null | undefined)[],
@@ -1813,6 +1846,10 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppSetupMove: opp.map(o => findSetupMove(o.entry.knownMoves)?.move ?? null),
     myBatonMove: mine.map(m => findMoveId(m.set.moves ?? [], 'batonpass')),
     oppBatonMove: opp.map(o => findMoveId(o.entry.knownMoves, 'batonpass')),
+    myPerishMove: mine.map(m => findMoveId(m.set.moves ?? [], 'perishsong')),
+    oppPerishMove: opp.map(o => findMoveId(o.entry.knownMoves, 'perishsong')),
+    myTrapMove: mine.map(m => (m.set.moves ?? []).find(isTrappingMove) ?? null),
+    oppTrapMove: opp.map(o => o.entry.knownMoves.find(isTrappingMove) ?? null),
     mySpeedBoost: mine.map(m => hasSpeedBoost(m.set.ability)),
     oppSpeedBoost: opp.map(o => hasSpeedBoost(o.entry.ability)),
     myIntimidate: mine.map(m => hasIntimidate(m.set.ability)),
@@ -1973,6 +2010,8 @@ function initialState(input: SearchInput): State {
     oppYawn: input.opp.map(() => 0),
     myPerish: input.mine.map(m => m.perishCount ?? 0),
     oppPerish: input.opp.map(o => o.perishCount ?? 0),
+    myTrappedBy: input.mine.map(m => m.trappedByFoe ?? null),
+    oppTrappedBy: input.opp.map(o => o.trappedByFoe ?? null),
     oppSleepTurns: input.opp.map(o => (o.status === 'slp' ? 2 : 0)),
     // Taunt/Encore volatiles aren't carried on SearchInput yet → start clear.
     myTaunt: input.mine.map(() => 0),
@@ -2425,7 +2464,7 @@ function resolveTurn(
   const nonAttack = (target: number) =>
     isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isStatusTarget(target) || isFieldTarget(target)
     || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN || target === RECOVER || target === SET_HAZARD
-    || target === REDIRECT || target === SLEEP_SKIP || target === HELP_HAND || target === WIDE_GUARD || target === QUICK_GUARD || target === SAP || target === CLEAR_HAZARD || target === SET_SUB || target === COUNTER || target === SET_ROOM || isPivotTarget(target) || isDebuffTarget(target)
+    || target === REDIRECT || target === SLEEP_SKIP || target === HELP_HAND || target === WIDE_GUARD || target === QUICK_GUARD || target === SAP || target === CLEAR_HAZARD || target === SET_SUB || target === COUNTER || target === SET_ROOM || target === SET_PERISH || isTrapTarget(target) || isPivotTarget(target) || isDebuffTarget(target)
     || isTauntTarget(target) || isEncoreTarget(target);
   // Fake Out flinches: a mon hit by Fake Out (resolved at +3 before it acts) skips
   // its action this turn.
@@ -3000,6 +3039,8 @@ function resolveTurn(
   const oppYawn = s.oppYawn.slice();
   const myPerish = s.myPerish.slice();
   const oppPerish = s.oppPerish.slice();
+  const myTrappedBy = s.myTrappedBy.slice();
+  const oppTrappedBy = s.oppTrappedBy.slice();
   const oppSleepTurns = s.oppSleepTurns.slice();
   const myBerryUsed = s.myBerryUsed.slice();
   const oppBerryUsed = s.oppBerryUsed.slice();
@@ -3083,11 +3124,38 @@ function resolveTurn(
   };
   for (const i of myActiveNow) yawnTick(i, myYawn, myStatus, mySleepTurns, myToxicN, myBerryUsed, t.myItem, t.mySpecies[i]!, t.myAbility[i], t.myGrounded[i]!);
   for (const j of oppActiveNow) yawnTick(j, oppYawn, oppStatus, oppSleepTurns, oppToxicN, oppBerryUsed, t.oppItem, t.oppSpecies[j]!, t.oppAbility[j], t.oppGrounded[j]!);
+  // Perish bookkeeping, in turn order: (1) switching out REMOVES the count
+  // (the whole reason trapping + Perish Song is a kill combo) — Baton Pass
+  // TRANSFERS it to the incoming mon instead; (2) the EOT tick; (3) a cast
+  // this turn (runs after the tick so it stores the post-tick display value).
+  for (const [outI, inB] of mySwitchIn) { const pp = myBaton.has(outI) ? myPerish[outI]! : 0; myPerish[outI] = 0; myPerish[inB] = pp; }
+  for (const [outJ, inB] of oppSwitchIn) { const pp = oppBaton.has(outJ) ? oppPerish[outJ]! : 0; oppPerish[outJ] = 0; oppPerish[inB] = pp; }
   // Perish clock: ticks at EOT for ON-FIELD mons; faint at 0. Not residual
-  // damage — Magic Guard does NOT save you. (Counts were cleared/passed in the
-  // switch bookkeeping above, so a mon that escaped this turn doesn't tick.)
+  // damage — Magic Guard does NOT save you.
   for (const i of myActiveNow) if ((myPerish[i] ?? 0) > 0 && (myHp[i] ?? 0) > 0) { myPerish[i] = myPerish[i]! - 1; if (myPerish[i] === 0) myHp[i] = 0; }
   for (const j of oppActiveNow) if ((oppPerish[j] ?? 0) > 0 && (oppHp[j] ?? 0) > 0) { oppPerish[j] = oppPerish[j]! - 1; if (oppPerish[j] === 0) oppHp[j] = 0; }
+  // Perish Song CAST: every POST-SWITCH active on BOTH sides without Soundproof
+  // and without an existing count gets the clock. Set to 3 = the post-tick
+  // value for the cast turn (this block runs after the tick above, exactly the
+  // in-game display: 3 at the end of the song turn, faint 3 EOTs later).
+  const singPerish = () => {
+    for (const i of myActiveNow) if ((myHp[i] ?? 0) > 0 && (myPerish[i] ?? 0) === 0 && toId(t.myAbility[i] ?? '') !== 'soundproof') myPerish[i] = 3;
+    for (const j of oppActiveNow) if ((oppHp[j] ?? 0) > 0 && (oppPerish[j] ?? 0) === 0 && toId(t.oppAbility[j] ?? '') !== 'soundproof') oppPerish[j] = 3;
+  };
+  for (const [actor, target] of myTargets) if (target === SET_PERISH && (myHp[actor] ?? 0) > 0) singPerish();
+  for (const [actor, target] of oppTargets) if (target === SET_PERISH && (oppHp[actor] ?? 0) > 0) singPerish();
+  // Trapping-move CAST: pin the (post-switch) victim. The gate validates the
+  // trapper is still active+alive each ply, so no clear bookkeeping is needed.
+  for (const [actor, target] of myTargets) {
+    if (!isTrapTarget(target) || (myHp[actor] ?? 0) <= 0) continue;
+    const foe = redirect(trapFoeIdx(target), oppSwitchIn);
+    if ((oppHp[foe] ?? 0) > 0) oppTrappedBy[foe] = actor;
+  }
+  for (const [actor, target] of oppTargets) {
+    if (!isTrapTarget(target) || (oppHp[actor] ?? 0) <= 0) continue;
+    const foe = redirect(trapFoeIdx(target), mySwitchIn);
+    if ((myHp[foe] ?? 0) > 0) myTrappedBy[foe] = actor;
+  }
   // Dedicated debuff moves (Charm/Scary Face/…): lower the (post-switch) foe's stats,
   // routed through the foe-drop accumulator below so Clear Body immunity + Defiant apply.
   for (const [actor, target] of myTargets) {
@@ -3147,10 +3215,6 @@ function resolveTurn(
   const oppBoost = s.oppBoost.map(b => ({ ...b }));
   for (const [outI, inB] of mySwitchIn) { const passed = myBaton.has(outI) ? { ...myBoost[outI] } : {}; myBoost[outI] = {}; myBoost[inB] = passed; }
   for (const [outJ, inB] of oppSwitchIn) { const passed = oppBaton.has(outJ) ? { ...oppBoost[outJ] } : {}; oppBoost[outJ] = {}; oppBoost[inB] = passed; }
-  // Perish count follows the same shape: switching out REMOVES it (the whole
-  // reason trapping + Perish Song is a kill combo), Baton Pass TRANSFERS it.
-  for (const [outI, inB] of mySwitchIn) { const pp = myBaton.has(outI) ? myPerish[outI]! : 0; myPerish[outI] = 0; myPerish[inB] = pp; }
-  for (const [outJ, inB] of oppSwitchIn) { const pp = oppBaton.has(outJ) ? oppPerish[outJ]! : 0; oppPerish[outJ] = 0; oppPerish[inB] = pp; }
   for (const [actor, target] of myTargets) if (target === SET_BOOST && t.mySetup[actor]) myBoost[actor] = addBoosts(myBoost[actor]!, t.mySetup[actor]!);
   for (const [actor, target] of oppTargets) if (target === SET_BOOST && t.oppSetup[actor]) oppBoost[actor] = addBoosts(oppBoost[actor]!, t.oppSetup[actor]!);
   // Self-stat-drops from this turn's moves (Draco Meteor −2 SpA …) hit the user's
@@ -3284,7 +3348,7 @@ function resolveTurn(
     myReflect, myLightScreen, theirReflect, theirLightScreen,
     myReflectTurns, myLightScreenTurns, theirReflectTurns, theirLightScreenTurns,
     weather, weatherTurns, terrain, terrainTurns, myToxicN, oppToxicN, myStatus, oppStatus,
-    myBerryUsed, oppBerryUsed, myHazards, oppHazards, mySleepTurns, oppSleepTurns, myYawn, oppYawn, myPerish, oppPerish,
+    myBerryUsed, oppBerryUsed, myHazards, oppHazards, mySleepTurns, oppSleepTurns, myYawn, oppYawn, myPerish, oppPerish, myTrappedBy, oppTrappedBy,
     myTaunt, oppTaunt, myEncore, oppEncore, myEncoreAct, oppEncoreAct,
     myUnburden, oppUnburden, myResistBerryUsed, oppResistBerryUsed, myFirstTurn, oppFirstTurn,
     myDisguise, oppDisguise, myRecharge, oppRecharge, myLocked, oppLocked, myChoiceMove, oppChoiceMove, mySubHp, oppSubHp,
@@ -3441,9 +3505,16 @@ function jointActions(
   counterSet?: boolean[],
   // Room (root only): a true entry → the mon can set a not-yet-active field room.
   roomSet?: boolean[],
-  // Trapped mask (root only): a true entry → a foe's trapping ability blocks
-  // this actor's SWITCH option. Pivot moves and Baton Pass bypass trapping.
+  // Trapped mask (root only): a true entry → a foe's trapping ability or a
+  // live trap-move volatile blocks this actor's SWITCH option. Pivot moves and
+  // Baton Pass bypass trapping.
   trapped?: boolean[],
+  // Perish Song cast (root only): a true entry → the mon knows it AND at least
+  // one live foe would get a fresh clock.
+  perishSet?: boolean[],
+  // Trapping-move cast (root only): per-actor move + the foe indices that can
+  // still be pinned (live, not Ghost, not already trapped).
+  trapCast?: { move: (string | null)[]; foes: number[] },
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -3500,6 +3571,8 @@ function jointActions(
     const canCounter = counterSet?.[actor] === true;
     const canRoom = roomSet?.[actor] === true;
     const batonCodes = (baton && baton.move[actor] != null) ? baton.targets.map(batonCode) : [];
+    const canPerish = perishSet?.[actor] === true;
+    const trapCodes = (trapCast && trapCast.move[actor] != null) ? trapCast.foes.map(trapCode) : [];
     // SPREAD first so a spread that ties a single-target line is kept. PROTECT /
     // field / setup / screen / weather / Leech / SWITCH / Baton last — only chosen
     // when they strictly beat attacking.
@@ -3530,6 +3603,8 @@ function jointActions(
       ...debuffCodes,
       ...tauntCodes,
       ...encoreCodes,
+      ...(canPerish ? [SET_PERISH] : []),
+      ...trapCodes,
       ...fakeOutCodes,
       ...prioCodes,
       ...(trapped?.[actor] ? [] : switchCodes),
@@ -3600,9 +3675,39 @@ function terminal(s: State, depth: number): number | null {
   return null;
 }
 
+// Perish-doom weight for a live mon at the search horizon: a mon whose clock
+// is running AND that cannot escape (move-trapped by a live active trapper, or
+// no living bench to switch into) is nearly-dead material — count it at
+// count/4 of full value so the search credits a sealed perish trap even when
+// the faint itself lies beyond the horizon. A mon that can still switch out
+// keeps full value (switching clears the clock).
+function perishWeight(
+  idx: number, hp: number[], active: number[], perish: number[], trappedByArr: (number | null)[],
+  foeActive: number[], foeHp: number[],
+): number {
+  const count = perish[idx] ?? 0;
+  if (count <= 0 || !active.includes(idx)) return 1;
+  const trapped = moveTrapHolds(trappedByArr[idx], foeActive, foeHp);
+  const hasBench = hp.some((h, k) => h > 0 && k !== idx && !active.includes(k));
+  if (!trapped && hasBench) return 1;
+  return count / 4;
+}
+
 function leafScore(s: State): number {
-  return (liveCount(s.myHp) - liveCount(s.oppHp, s.oppSeen)) * MATERIAL
-    + (sumHp(s.myHp) - sumHp(s.oppHp, s.oppSeen));
+  let score = 0;
+  for (let i = 0; i < s.myHp.length; i++) {
+    const h = s.myHp[i]!;
+    if (h <= 0) continue;
+    const w = perishWeight(i, s.myHp, s.myActive, s.myPerish, s.myTrappedBy, s.oppActive, s.oppHp);
+    score += w * (MATERIAL + h);
+  }
+  for (let j = 0; j < s.oppHp.length; j++) {
+    const h = s.oppHp[j]!;
+    if (h <= 0 || !(s.oppSeen[j] ?? true)) continue;
+    const w = perishWeight(j, s.oppHp, s.oppActive, s.oppPerish, s.oppTrappedBy, s.myActive, s.myHp);
+    score -= w * (MATERIAL + h);
+  }
+  return score;
 }
 
 // Cheap immediate-damage heuristic for a joint action (sum of the baked cell
@@ -3643,7 +3748,7 @@ function ttKey(s: State, depth: number, maxDepth: number, pass: Pass): string {
   return [
     depth, maxDepth, pass.regime, bl(pass.survOpp), bl(pass.survMy),
     nb(s.myHp), nb(s.oppHp), nb(s.myActive), nb(s.oppActive), bl(s.oppSeen),
-    s.myStatus.join(''), s.oppStatus.join(''), nb(s.myToxicN), nb(s.oppToxicN), nb(s.mySleepTurns), nb(s.oppSleepTurns), nb(s.myYawn), nb(s.oppYawn), nb(s.myPerish), nb(s.oppPerish),
+    s.myStatus.join(''), s.oppStatus.join(''), nb(s.myToxicN), nb(s.oppToxicN), nb(s.mySleepTurns), nb(s.oppSleepTurns), nb(s.myYawn), nb(s.oppYawn), nb(s.myPerish), nb(s.oppPerish), nn(s.myTrappedBy), nn(s.oppTrappedBy),
     bs(s.myBoost), bs(s.oppBoost), nn(s.mySeeded), nn(s.oppSeeded),
     nb(s.myProtectStreak), nb(s.oppProtectStreak),
     `${s.trickRoom ? 1 : 0}${s.myTailwind ? 1 : 0}${s.theirTailwind ? 1 : 0}`,
@@ -3849,6 +3954,23 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
     if (seed) opp[oi]!.seededBy = seed.seederSide === 'mine' ? mySearchOf(seed.seederIndex) : -1;
   });
 
+  // Move-trap volatiles (Block / Mean Look …): binding only while the trapper
+  // is STILL active + alive — validated here, so a stale record after the
+  // trapper left simply doesn't thread through.
+  myTeamIdx.forEach((ti, si) => {
+    const trapper = match.myTrappedBy?.[ti];
+    if (trapper == null) return;
+    const e = match.opponentTeam[trapper];
+    if (!e || e.fainted || !oppActive.has(trapper)) return;
+    mine[si]!.trappedByFoe = oppSearchOf(trapper);
+  });
+  oppTeamIdx.forEach((ti, oi) => {
+    const trapper = match.opponentTeam[ti]?.trappedBy;
+    if (trapper == null) return;
+    if (match.myFainted?.includes(trapper) || !myActive.has(trapper)) return;
+    opp[oi]!.trappedByFoe = mySearchOf(trapper);
+  });
+
   // Known opponents we haven't seen brought in yet — potential switch-ins.
   const broughtSet = new Set<number>(match.opponentBrought ?? []);
   const oppBench: OpponentEntry[] = [];
@@ -3916,7 +4038,12 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     t.myHasSubMove.map((kn, i) => kn && (s.myHp[i] ?? 0) > 25 && (s.mySubHp[i] ?? 0) <= 0),
     t.myCounter.map(c => !!c),
     t.myRoomMove.map(rm => !!rm && !s[rm]),
-    t.mySpecies.map((sp, i) => trappedBy(sp, t.myAbility[i], t.myItem[i], t.myGrounded[i]!, s.oppActive, s.oppHp, t.oppAbility)));
+    t.mySpecies.map((sp, i) =>
+      trappedBy(sp, t.myAbility[i], t.myItem[i], t.myGrounded[i]!, s.oppActive, s.oppHp, t.oppAbility)
+      || moveTrapHolds(s.myTrappedBy[i], s.oppActive, s.oppHp)),
+    // Perish Song: useful only when some live foe would get a FRESH clock.
+    t.myPerishMove.map(pm => !!pm && s.oppActive.some(j => (s.oppHp[j] ?? 0) > 0 && (s.oppPerish[j] ?? 0) === 0 && toId(t.oppAbility[j] ?? '') !== 'soundproof')),
+    { move: t.myTrapMove, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0 && s.oppTrappedBy[j] == null && !isType(t.oppSpecies[j]!, 'Ghost')) });
 }
 function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
@@ -3953,7 +4080,11 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     t.oppHasSubMove.map((kn, j) => kn && (s.oppHp[j] ?? 0) > 25 && (s.oppSubHp[j] ?? 0) <= 0),
     t.oppCounter.map(c => !!c),
     t.oppRoomMove.map(rm => !!rm && !s[rm]),
-    t.oppSpecies.map((sp, j) => trappedBy(sp, t.oppAbility[j], t.oppItem[j], t.oppGrounded[j]!, s.myActive, s.myHp, t.myAbility)));
+    t.oppSpecies.map((sp, j) =>
+      trappedBy(sp, t.oppAbility[j], t.oppItem[j], t.oppGrounded[j]!, s.myActive, s.myHp, t.myAbility)
+      || moveTrapHolds(s.oppTrappedBy[j], s.myActive, s.myHp)),
+    t.oppPerishMove.map(pm => !!pm && s.myActive.some(i => (s.myHp[i] ?? 0) > 0 && (s.myPerish[i] ?? 0) === 0 && toId(t.myAbility[i] ?? '') !== 'soundproof')),
+    { move: t.oppTrapMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0 && s.myTrappedBy[i] == null && !isType(t.mySpecies[i]!, 'Ghost')) });
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -4048,6 +4179,10 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null, choiceMove
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Counter', targetSpecies: 'foe', self: true });
     } else if (target === SET_ROOM) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myRoomMove[actor] === 'gravity' ? 'Gravity' : t.myRoomMove[actor] === 'wonderRoom' ? 'Wonder Room' : 'Magic Room', targetSpecies: 'field', self: true });
+    } else if (target === SET_PERISH) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myPerishMove[actor] ?? 'Perish Song', targetSpecies: 'everyone on field', self: true });
+    } else if (isTrapTarget(target)) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myTrapMove[actor] ?? 'Block', targetSpecies: t.oppSpecies[trapFoeIdx(target)]! });
     } else if (target === SLEEP_SKIP) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'asleep', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (target === SET_TAILWIND) {
@@ -4089,6 +4224,10 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null, choiceM
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppPivotMove[actor] ?? 'U-turn', targetSpecies: t.mySpecies[pivotFoeIdx(target)]!, switch: true });
     } else if (isStatusTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppStatusMove[actor]?.move ?? 'status', targetSpecies: t.mySpecies[statusFoeIdx(target)]! });
+    } else if (target === SET_PERISH) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppPerishMove[actor] ?? 'Perish Song', targetSpecies: 'everyone on field', self: true });
+    } else if (isTrapTarget(target)) {
+      plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppTrapMove[actor] ?? 'Block', targetSpecies: t.mySpecies[trapFoeIdx(target)]! });
     } else if (isBatonTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppBatonMove[actor] ?? 'Baton Pass', targetSpecies: t.oppSpecies[batonBenchIdx(target)]!, switch: true });
     } else if (isLeechTarget(target)) {
@@ -4932,6 +5071,8 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
       const myBenchNow = benchSwitchTargets(s0.myActive, s0.myHp, expected.table.myN).length > 0;
       const oppBenchNow = benchSwitchTargets(s0.oppActive, s0.oppHp, expected.table.oppN).length > 0;
       if ((myBenchNow && canSet(expected.table.myBatonMove, s0.myActive)) || (oppBenchNow && canSet(expected.table.oppBatonMove, s0.oppActive))) actionClasses.push('batonpass');
+      if (canSet(expected.table.myPerishMove, s0.myActive) || canSet(expected.table.oppPerishMove, s0.oppActive)) actionClasses.push('perish');
+      if (canSet(expected.table.myTrapMove, s0.myActive) || canSet(expected.table.oppTrapMove, s0.oppActive)) actionClasses.push('trap');
       if (s0.myActive.some(i => expected.table.mySpeedBoost[i]) || s0.oppActive.some(j => expected.table.oppSpeedBoost[j])) actionClasses.push('speedboost');
       const screenable = (screens: (ScreenSet | null)[], active: number[], refUp: boolean, lsUp: boolean) =>
         active.some(i => { const sc = screens[i]; return !!sc && ((sc.reflect && !refUp) || (sc.lightScreen && !lsUp)); });

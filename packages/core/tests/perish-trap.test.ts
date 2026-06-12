@@ -93,3 +93,71 @@ describe('perish clock in search', () => {
     expect(play!.switch).toBe(true);
   });
 });
+
+describe('perish cast + trap cast in search', () => {
+  const politoed = mon({
+    species: 'Politoed', ability: 'Drizzle', nature: 'Calm',
+    evs: { hp: 252, atk: 0, def: 4, spa: 0, spd: 252, spe: 0 }, moves: ['Perish Song', 'Protect'],
+  });
+  const steelix = mon({
+    species: 'Steelix', ability: 'Sturdy', nature: 'Careful',
+    evs: { hp: 252, atk: 0, def: 4, spa: 0, spd: 252, spe: 0 }, moves: ['Block', 'Protect'],
+  });
+  const clef = mon({
+    species: 'Clefable', ability: 'Magic Guard', nature: 'Calm',
+    evs: { hp: 252, atk: 0, def: 4, spa: 0, spd: 252, spe: 0 }, moves: ['Moonblast', 'Protect'],
+  });
+
+  test('with no damage available, the search wins by singing (cast action found)', () => {
+    // My side cannot deal meaningful damage — the ONLY win is the Perish clock.
+    const input: SearchInput = {
+      mine: [
+        { set: politoed, hpPercent: 100, active: true },
+        { set: clef, hpPercent: 100, active: false },
+      ],
+      opp: [{ entry: oppOf(garchomp), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD },
+      allOppRevealed: true,
+    };
+    const r = searchToDepth(input, 5);
+    expect(r.score).toBeGreaterThan(0);
+    expect(r.plays.some(p => p.move === 'Perish Song')).toBe(true);
+  });
+
+  test('sing + Block together doom a foe that has a bench escape', () => {
+    // Opp could normally clear the clock by switching; Block pins whoever is
+    // in front — either way the search should read this as strongly winning
+    // and open with the song.
+    const input: SearchInput = {
+      mine: [
+        { set: politoed, hpPercent: 100, active: true },
+        { set: steelix, hpPercent: 100, active: true },
+        { set: clef, hpPercent: 100, active: false },
+      ],
+      opp: [
+        { entry: oppOf(garchomp), hpPercent: 100, active: true },
+        { entry: oppOf(amoonguss), hpPercent: 100, active: false },
+      ],
+      field: { ...NEUTRAL_FIELD },
+      allOppRevealed: true,
+    };
+    const r = searchToDepth(input, 4);
+    expect(r.plays.some(p => p.move === 'Perish Song')).toBe(true);
+    expect(r.score).toBeGreaterThan(0);
+  });
+
+  test('externally move-trapped mon (trappedByFoe -1) cannot switch to escape its clock', () => {
+    const input: SearchInput = {
+      mine: [
+        { set: incin, hpPercent: 100, active: true, perishCount: 1, trappedByFoe: -1 },
+        { set: amoonguss, hpPercent: 100, active: false },
+      ],
+      opp: [{ entry: oppOf(garchomp), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD },
+    };
+    const r = searchToDepth(input, 2);
+    const play = r.plays.find(p => p.mySpecies === 'Incineroar');
+    expect(play).toBeTruthy();
+    expect(play!.switch).not.toBe(true);
+  });
+});

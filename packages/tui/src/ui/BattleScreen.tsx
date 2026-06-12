@@ -15,7 +15,7 @@ import { inferOpponentSpeeds, applySpeedInference, actualSpeed, predictTurnOrder
 import { reviewLastTurn } from '@pokechamps/core/ai/prompts.js';
 import { isAvailable as aiAvailable } from '@pokechamps/core/ai/client.js';
 import type { Stores } from '@pokechamps/core/storage/index.js';
-import { getSpecies, getMove, getAbility, getItem, toId, isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, isSpreadMove, moveFlinchChance } from '@pokechamps/core/domain/data.js';
+import { getSpecies, getMove, getAbility, getItem, toId, isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, isSpreadMove, isTrappingMove, moveFlinchChance } from '@pokechamps/core/domain/data.js';
 import { defaultOpponentSet } from '@pokechamps/core/domain/bring.js';
 import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs, hazardClearEffect, applyHazardClear } from '@pokechamps/core/domain/hazards.js';
@@ -1870,6 +1870,10 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             next.myCurrentHp[outgoing] = Math.min(100, (next.myCurrentHp[outgoing] ?? 100) + 100 / 3);
           }
           delete next.myBoosts[outgoing]; next.myTaunted = (next.myTaunted ?? []).filter(i => i !== outgoing); if (next.myEncoreMove) delete next.myEncoreMove[outgoing]; if (next.myDisabledMove) delete next.myDisabledMove[outgoing]; if (next.myTauntTurns) delete next.myTauntTurns[outgoing]; if (next.myEncoreTurns) delete next.myEncoreTurns[outgoing]; if (next.myDisableTurns) delete next.myDisableTurns[outgoing]; if (next.myLeechSeeded) delete next.myLeechSeeded[outgoing]; if (next.myCursed) delete next.myCursed[outgoing]; if (next.myPartialTrap) delete next.myPartialTrap[outgoing]; if (next.myNightmare) delete next.myNightmare[outgoing]; if (next.myCurrentSub) delete next.myCurrentSub[outgoing];
+          // Perish count clears on switch-out (real rules; Baton Pass should
+          // carry it — re-log `perish N` after a pass). Move-trap dies too.
+          if (next.myPerishCount) { next.myPerishCount = { ...next.myPerishCount }; delete next.myPerishCount[outgoing]; }
+          if (next.myTrappedBy) { next.myTrappedBy = { ...next.myTrappedBy }; delete next.myTrappedBy[outgoing]; }
         }
         nextActive.mine[a.attackerSlot] = a.targetTeamIndex;
       } else {
@@ -1877,7 +1881,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         if (outgoing != null && next.opponentTeam[outgoing]) {
           const regen = next.opponentTeam[outgoing]!.ability && toId(next.opponentTeam[outgoing]!.ability!) === 'regenerator';
           const regenHp = regen ? Math.min(100, (next.opponentTeam[outgoing]!.currentHpPercent ?? 100) + 100 / 3) : undefined;
-          next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {}, taunted: undefined, encoreMove: undefined, disabledMove: undefined, tauntTurns: undefined, encoreTurns: undefined, disableTurns: undefined, leechSeeded: undefined, cursed: undefined, partialTrap: undefined, nightmare: undefined, substitute: undefined, ...(regenHp != null ? { currentHpPercent: regenHp } : {}) };
+          next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {}, taunted: undefined, encoreMove: undefined, disabledMove: undefined, tauntTurns: undefined, encoreTurns: undefined, disableTurns: undefined, leechSeeded: undefined, cursed: undefined, partialTrap: undefined, nightmare: undefined, substitute: undefined, perishCount: undefined, trappedBy: undefined, ...(regenHp != null ? { currentHpPercent: regenHp } : {}) };
         }
         nextActive.theirs[a.attackerSlot] = a.targetTeamIndex;
       }
@@ -1887,9 +1891,65 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       inferenceNotes.push(...applySwitchInAbilityInto(next, a.side, a.targetTeamIndex, nextActive));
     }
 
+    // Perish Song cast: every POST-SWITCH active on BOTH sides gets the clock
+    // unless (confirmed) Soundproof or already counting. Stored as 4 so the
+    // EOT tick lands it on 3 — the in-game display at the song turn's end.
+    // Mirror of engine.ts.
+    const songSung = draftActions.some(a => a.kind !== 'switch' && a.kind !== 'mega' && toId(a.move ?? '') === 'perishsong');
+    if (songSung) {
+      for (const slot of [0, 1] as const) {
+        const mi = nextActive.mine[slot];
+        if (mi != null && !next.myFainted?.includes(mi) && toId(next.myTeam[mi]?.ability ?? '') !== 'soundproof') {
+          next.myPerishCount = { ...(next.myPerishCount ?? {}) };
+          if (next.myPerishCount[mi] == null) { next.myPerishCount[mi] = 4; inferenceNotes.push(`m${mi + 1} hears Perish Song`); }
+        }
+        const oi = nextActive.theirs[slot];
+        const oEntry = oi != null ? next.opponentTeam[oi] : undefined;
+        if (oi != null && oEntry && !oEntry.fainted) {
+          const ab = certainAbility({ knownAbility: oEntry.ability, species: oEntry.species, ruledOut: oEntry.abilitiesRuledOut });
+          if ((!ab || toId(ab) !== 'soundproof') && oEntry.perishCount == null) {
+            next.opponentTeam[oi] = { ...oEntry, perishCount: 4 };
+            inferenceNotes.push(`o${oi + 1} hears Perish Song`);
+          }
+        }
+      }
+    }
+
+    // Trapping moves (Block / Mean Look / …): pin the target while the trapper
+    // stays active. Ghost targets immune; lazily validated on read. Mirror of
+    // engine.ts.
+    for (const a of draftActions) {
+      if (a.kind === 'switch' || a.kind === 'mega') continue;
+      if (!isTrappingMove(a.move ?? '')) continue;
+      if (typeof a.target !== 'object' || a.targetTeamIndex == null || a.attackerTeamIndex == null) continue;
+      if (a.target.side === a.side) continue;
+      if (a.target.side === 'theirs') {
+        const o = next.opponentTeam[a.targetTeamIndex];
+        if (!o || o.fainted) continue;
+        const forme = o.megaUsed && o.megaForme ? o.megaForme : o.species;
+        if (((getSpecies(forme) as { types?: string[] } | undefined)?.types ?? []).includes('Ghost')) continue;
+        next.opponentTeam[a.targetTeamIndex] = { ...o, trappedBy: a.attackerTeamIndex };
+        inferenceNotes.push(`o${a.targetTeamIndex + 1} trapped (${a.move})`);
+      } else {
+        const set = next.myTeam[a.targetTeamIndex];
+        if (!set || next.myFainted?.includes(a.targetTeamIndex)) continue;
+        const forme = (next.myMegaUsed?.includes(a.targetTeamIndex) ? next.myMegaForme?.[a.targetTeamIndex] : undefined) ?? set.species;
+        if (((getSpecies(forme) as { types?: string[] } | undefined)?.types ?? []).includes('Ghost')) continue;
+        next.myTrappedBy = { ...(next.myTrappedBy ?? {}), [a.targetTeamIndex]: a.attackerTeamIndex };
+        inferenceNotes.push(`m${a.targetTeamIndex + 1} trapped (${a.move})`);
+      }
+    }
+
     // Generalised end-of-turn: weather chip + status ticks (both sides) +
     // Leftovers / Black Sludge (mine only — opp items rarely confirmed).
-    const eotResult = endOfTurn(next, field, nextActive);
+    // Manual `perish N` logs this turn carry the end-of-turn value already —
+    // exempt them from the auto-tick.
+    const skipPerishTick = new Set<string>();
+    for (const ev of draftBoostEvents) {
+      if (ev.update.perish == null || !('teamIndex' in ev.update)) continue;
+      skipPerishTick.add(`${ev.update.side === 'mine' ? 'm' : 'o'}:${ev.update.teamIndex}`);
+    }
+    const eotResult = endOfTurn(next, field, nextActive, { skipPerishTick });
     next = eotResult.match;
     const eotNote = eotResult.notes.length ? ` · EOT: ${eotResult.notes.join(', ')}` : '';
     void eotNote; // included in the status message below
@@ -3093,6 +3153,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
                 {match.myPerishCount?.[teamIdx] != null && (
                   <Text color="red">      ☠Perish {match.myPerishCount[teamIdx]}</Text>
                 )}
+                {match.myTrappedBy?.[teamIdx] != null
+                  && [activeIdx.theirs[0], activeIdx.theirs[1]].includes(match.myTrappedBy[teamIdx]!)
+                  && !match.opponentTeam[match.myTrappedBy[teamIdx]!]?.fainted && (
+                  <Text color="yellow">      ⛓pinned by {match.opponentTeam[match.myTrappedBy[teamIdx]!]?.species}</Text>
+                )}
                 {match.mySaltCured?.[teamIdx] && (
                   <Text color="yellow">      ⬡Salt Cure</Text>
                 )}
@@ -3124,6 +3189,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
                 marker={slotMarker}
                 color={color}
                 choiceLock={detectChoiceLock(match, i)}
+                pinned={o.trappedBy != null
+                  && [activeIdx.mine[0], activeIdx.mine[1]].includes(o.trappedBy)
+                  && !match.myFainted?.includes(o.trappedBy)}
               />
             );
           })}
@@ -3671,8 +3739,10 @@ interface OppRowProps {
   marker: string;
   color?: string;
   choiceLock?: ChoiceLock | null;
+  /** Move-trap is binding right now (trapper validated active + alive). */
+  pinned?: boolean;
 }
-function OppRow({ stores, entry, marker, color, choiceLock }: OppRowProps) {
+function OppRow({ stores, entry, marker, color, choiceLock, pinned }: OppRowProps) {
   const pik = stores.pikalytics.get(entry.species);
   const fetching = !pik && stores.pikalytics.isFetching(entry.species);
   const topItem = pik?.items.find(i => i.name.toLowerCase() !== 'other');
@@ -3705,6 +3775,7 @@ function OppRow({ stores, entry, marker, color, choiceLock }: OppRowProps) {
         {entry.disabledMove ? <Text color="magenta"> 🚫Disable {entry.disabledMove}{entry.disableTurns ? `(${entry.disableTurns})` : ''}</Text> : null}
         {entry.substitute != null ? <Text color="cyan"> [Sub {Math.round(entry.substitute)}%]</Text> : null}
         {entry.perishCount != null ? <Text color="red"> ☠Perish {entry.perishCount}</Text> : null}
+        {pinned ? <Text color="yellow"> ⛓pinned</Text> : null}
         {entry.saltCured ? <Text color="yellow"> ⬡Salt Cure</Text> : null}
         {entry.partialTrap ? <Text color="yellow"> ⛓trapped({entry.partialTrap})</Text> : null}
       </Text>

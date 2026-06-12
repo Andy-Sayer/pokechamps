@@ -21,12 +21,20 @@ export function endOfTurn(
   match: Match,
   field: FieldState,
   activeIdx: { mine: [number | null, number | null]; theirs: [number | null, number | null] },
+  opts?: {
+    /** Mons whose perish count was MANUALLY logged this turn ('m:2' / 'o:0').
+     *  The logged value is the end-of-turn display, so the auto-tick must not
+     *  decrement it again. */
+    skipPerishTick?: ReadonlySet<string>;
+  },
 ): { match: Match; notes: string[] } {
+  const skipPerish = opts?.skipPerishTick ?? new Set<string>();
   const notes: string[] = [];
   const next: Match = {
     ...match,
     opponentTeam: match.opponentTeam.map(o => ({ ...o })),
     myCurrentHp: { ...(match.myCurrentHp ?? {}) },
+    myPerishCount: { ...(match.myPerishCount ?? {}) },
     myFainted: [...(match.myFainted ?? [])],
     myStatus: { ...(match.myStatus ?? {}) },
     myToxCounter: { ...(match.myToxCounter ?? {}) },
@@ -332,11 +340,13 @@ export function endOfTurn(
   applyLeechSeed('theirs', activeIdx.theirs[0]);
   applyLeechSeed('theirs', activeIdx.theirs[1]);
 
-  // Perish Song: count down each EOT for every active mon; KO at 0.
+  // Perish Song: count down each EOT for every active mon; KO at 0. A manual
+  // `perish N` log this turn already holds the end-of-turn value — skip those
+  // (the caller passes them via opts.skipPerishTick).
   for (const i of activeIdx.theirs) {
     if (i == null) continue;
     const o = next.opponentTeam[i];
-    if (!o || o.fainted || o.perishCount == null) continue;
+    if (!o || o.fainted || o.perishCount == null || skipPerish.has(`o:${i}`)) continue;
     o.perishCount -= 1;
     if (o.perishCount <= 0) {
       o.currentHpPercent = 0; o.fainted = true;
@@ -349,7 +359,7 @@ export function endOfTurn(
     if (i == null) continue;
     if (next.myFainted!.includes(i)) continue;
     const count = next.myPerishCount?.[i];
-    if (count == null) continue;
+    if (count == null || skipPerish.has(`m:${i}`)) continue;
     next.myPerishCount = { ...(next.myPerishCount ?? {}) };
     next.myPerishCount[i] = count - 1;
     if (next.myPerishCount[i]! <= 0) {

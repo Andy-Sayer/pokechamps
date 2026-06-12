@@ -120,8 +120,16 @@ export interface OpponentEntry {
   // Substitute move at 25% cost; all incoming non-sound damage routes to it.
   // Clears when sub HP hits 0 or on switch-out.
   substitute?: number;
-  // Perish Song: counts down each EOT (3→2→1→0); faint at 0. Does NOT clear on switch.
+  // Perish Song: auto-set (4 → ticks to 3 same turn) when a Perish Song is
+  // logged; counts down each EOT; faint at 0. Cleared on switch-out (real
+  // rules — Baton Pass SHOULD carry it, which auto-tracking can't see; re-log
+  // `perish N` manually after a pass). Manual `perish N` lines override and
+  // skip that turn's auto-tick (the logged value IS the end-of-turn display).
   perishCount?: number;
+  // Move-trap (Block / Mean Look / Jaw Lock / …): MY team index of the trapper.
+  // Binding only while the trapper is active + alive — consumers validate
+  // lazily, so there is no clear bookkeeping. Blocks switch-out (not pivots).
+  trappedBy?: number;
   // One-turn volatile set when this mon is flinched (cleared at EOT). Informational:
   // the flinched mon simply has no action in the turn. Fake Out auto-flinches on
   // first turn out; secondary flinch moves (Iron Head etc.) are user-logged.
@@ -345,8 +353,12 @@ export interface Match {
   myNightmare?: Record<number, boolean>;
   // Substitute HP (my side), keyed by team index. Parallel to OpponentEntry.substitute.
   myCurrentSub?: Record<number, number>;
-  // Perish Song (my side): counts down each EOT; faint at 0. Does NOT clear on switch.
+  // Perish Song (my side): same auto-set / auto-tick / switch-clear semantics
+  // as OpponentEntry.perishCount.
   myPerishCount?: Record<number, number>;
+  // Move-trap (my side): my team index → OPPONENT team index of the trapper.
+  // Lazily validated (trapper must be active + alive); see OpponentEntry.trappedBy.
+  myTrappedBy?: Record<number, number>;
   // One-turn flinch volatile (cleared at EOT). Informational — logged when user
   // observes a Fake Out or secondary flinch proc ("o1 flinch").
   myFlinched?: Record<number, boolean>;

@@ -1,12 +1,14 @@
-// Perish Song: all active mons get a countdown of 3; each EOT decrements the
-// counter; at 0 the mon faints. Counter persists through switch (does NOT clear
-// on switch-out). Shadow Tag (Mega Gengar) prevents non-Ghost types from
-// switching, but that trap logic is display/search-side — this test covers the
-// state tracking and EOT countdown.
+// Perish Song: a logged cast auto-sets the clock (4 → ticks to 3 the same
+// turn, the in-game display) on every on-field non-Soundproof mon; each EOT
+// decrements; at 0 the mon faints; switching out CLEARS the count (real rules
+// — Baton Pass should carry it, which auto-tracking can't see). Trapping
+// moves (Block / Mean Look …) pin the target via `trappedBy`, lazily
+// validated. Manual `perish N` logs override and skip that turn's auto-tick.
 import { describe, test, expect } from 'vitest';
 import { parseTurnLine, type ParseContext } from '../src/domain/turnparser.js';
 import { endOfTurn } from '../src/domain/endOfTurn.js';
-import type { Match, PokemonSet, OpponentEntry } from '../src/domain/types.js';
+import { finalizeTurn } from '../src/match/engine.js';
+import type { Match, MoveAction, PokemonSet, OpponentEntry } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } from '../src/domain/types.js';
 
 function mon(p: Partial<PokemonSet> & { species: string; moves: string[] }): PokemonSet {
@@ -102,5 +104,113 @@ describe('Perish Song EOT countdown', () => {
     expect(r.match.myPerishCount?.[0]).toBe(0);
     expect(r.match.myFainted).toContain(0);
     expect(r.notes.some(n => n.includes('Perish Song'))).toBe(true);
+  });
+});
+
+// ─── Engine: cast auto-set, switch-clear, trap volatile, manual override ──────
+
+function fullMatch(over: Partial<Match> = {}): Match {
+  return {
+    id: 't', startedAt: '',
+    myTeam: [
+      mon({ species: 'Politoed', ability: 'Drizzle', moves: ['Perish Song', 'Protect', 'Surf', 'Icy Wind'] }),
+      mon({ species: 'Steelix', ability: 'Sturdy', moves: ['Block', 'Iron Head', 'Protect', 'Earthquake'] }),
+      mon({ species: 'Clefable', ability: 'Magic Guard', moves: ['Moonblast'] }),
+      mon({ species: 'Talonflame', ability: 'Gale Wings', moves: ['Brave Bird'] }),
+    ],
+    opponentTeam: [
+      { species: 'Garchomp', knownMoves: [], currentHpPercent: 100 },
+      { species: 'Annihilape', knownMoves: [], currentHpPercent: 100 },
+      { species: 'Gengar', knownMoves: [], currentHpPercent: 100 },
+    ],
+    bring: [0, 1, 2, 3], opponentBrought: [0, 1, 2], turns: [], field: NEUTRAL_FIELD,
+    active: { mine: [0, 1], theirs: [0, 1] },
+    myCurrentHp: { 0: 100, 1: 100, 2: 100, 3: 100 },
+    ...over,
+  } as Match;
+}
+const act = (p: Partial<MoveAction> & { side: 'mine' | 'theirs'; move: string }): MoveAction => ({
+  attackerSlot: 0, kind: 'move', target: 'foes', ...p,
+} as MoveAction);
+const ACTIVE = { mine: [0, 1] as [number | null, number | null], theirs: [0, 1] as [number | null, number | null] };
+
+describe('Perish Song engine bookkeeping', () => {
+  test('logged cast sets the clock on all four actives (3 after the same-turn tick)', () => {
+    const r = finalizeTurn({
+      match: fullMatch(),
+      turn: { actions: [act({ side: 'mine', move: 'Perish Song', attackerTeamIndex: 0 })], field: NEUTRAL_FIELD },
+      activeIdx: ACTIVE,
+    });
+    expect(r.match.myPerishCount?.[0]).toBe(3);
+    expect(r.match.myPerishCount?.[1]).toBe(3);
+    expect(r.match.opponentTeam[0]!.perishCount).toBe(3);
+    expect(r.match.opponentTeam[1]!.perishCount).toBe(3);
+  });
+
+  test('switching out clears the count; the staying mon keeps ticking', () => {
+    const m = fullMatch({ myPerishCount: { 0: 3, 1: 3 } });
+    const r = finalizeTurn({
+      match: m,
+      turn: { actions: [{ side: 'mine', attackerSlot: 0, kind: 'switch', move: 'Clefable', target: 'self', targetTeamIndex: 2 } as MoveAction], field: NEUTRAL_FIELD },
+      activeIdx: ACTIVE,
+    });
+    expect(r.match.myPerishCount?.[0]).toBeUndefined();  // escaped — cleared
+    expect(r.match.myPerishCount?.[2]).toBeUndefined();  // fresh switch-in: no clock
+    expect(r.match.myPerishCount?.[1]).toBe(2);          // stayed — ticked
+  });
+
+  test('manual `perish N` log this turn skips the auto-tick', () => {
+    const m = fullMatch({ myPerishCount: { 1: 2 } });
+    const r = finalizeTurn({
+      match: m,
+      turn: { actions: [], field: NEUTRAL_FIELD },
+      activeIdx: ACTIVE,
+      skipPerishTick: new Set(['m:1']),
+    });
+    expect(r.match.myPerishCount?.[1]).toBe(2);          // logged value preserved
+  });
+
+  test('count 1 faints at EOT', () => {
+    const m = fullMatch({ myPerishCount: { 1: 1 } });
+    const r = finalizeTurn({ match: m, turn: { actions: [], field: NEUTRAL_FIELD }, activeIdx: ACTIVE });
+    expect(r.match.myFainted).toContain(1);
+  });
+});
+
+describe('trapping move volatile', () => {
+  test('Block pins the target (trappedBy = my team index)', () => {
+    const r = finalizeTurn({
+      match: fullMatch(),
+      turn: {
+        actions: [act({ side: 'mine', move: 'Block', attackerSlot: 1, attackerTeamIndex: 1, target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0 })],
+        field: NEUTRAL_FIELD,
+      },
+      activeIdx: ACTIVE,
+    });
+    expect(r.match.opponentTeam[0]!.trappedBy).toBe(1);
+  });
+
+  test('Ghost targets are immune to trapping moves', () => {
+    const m = fullMatch({ active: { mine: [0, 1], theirs: [2, 1] } });
+    const r = finalizeTurn({
+      match: m,
+      turn: {
+        actions: [act({ side: 'mine', move: 'Mean Look', attackerSlot: 0, attackerTeamIndex: 0, target: { side: 'theirs', slot: 0 }, targetTeamIndex: 2 })],
+        field: NEUTRAL_FIELD,
+      },
+      activeIdx: { mine: [0, 1], theirs: [2, 1] },
+    });
+    expect(r.match.opponentTeam[2]!.trappedBy).toBeUndefined();   // Gengar is Ghost
+  });
+
+  test('the pinned mon switching out drops its trap record', () => {
+    const m = fullMatch();
+    m.opponentTeam[0]!.trappedBy = 1;
+    const r = finalizeTurn({
+      match: m,
+      turn: { actions: [{ side: 'theirs', attackerSlot: 0, kind: 'switch', move: 'Gengar', target: 'self', targetTeamIndex: 2 } as MoveAction], field: NEUTRAL_FIELD },
+      activeIdx: ACTIVE,
+    });
+    expect(r.match.opponentTeam[0]!.trappedBy).toBeUndefined();
   });
 });

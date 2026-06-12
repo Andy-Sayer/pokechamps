@@ -117,6 +117,17 @@ export function isPivotMove(name: string): boolean {
   const m = getMove(name) as any;
   return !!m?.selfSwitch;
 }
+// Moves that pin the target (block its SWITCH action) while the trapper stays
+// on the field: status casts (Block / Mean Look / Octolock) and damaging
+// trap-on-hit moves (Jaw Lock / Anchor Shot / Spirit Shackle / Thousand
+// Waves). Ghost-type targets are immune (Gen 6+); pivot moves + Baton Pass
+// bypass the trap. Shared by the live engine and the lookahead search.
+const TRAPPING_MOVE_IDS = new Set([
+  'block', 'meanlook', 'octolock', 'jawlock', 'anchorshot', 'spiritshackle', 'thousandwaves',
+]);
+export function isTrappingMove(name: string): boolean {
+  return TRAPPING_MOVE_IDS.has(toId(name));
+}
 // Moves that remove (or consume) the target's held item on hit. Knock Off /
 // Thief / Covet / Corrosive Gas strip any item; Incinerate / Bug Bite / Pluck
 // destroy a held berry. We mark the target's item as gone for damage-calc
