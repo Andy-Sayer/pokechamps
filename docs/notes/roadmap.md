@@ -623,3 +623,36 @@ Keep the suite green at every commit. Current baseline: **492 tests** (was 359 w
 - Tournament-running features (we assist players, not organisers).
 - Round-tripping the scoutExport back into a Match (interesting but
   niche).
+
+## Tactics arc (2026-06-11) — strategic play layer
+
+Goal: win consistently — bring picking that weighs more than type matchups,
+fast best-move selection that models the opponent, and real understanding of
+multi-part tactics (perish trap, Speed Boost Espathra Baton Pass chains, …)
+including off-meta surprise lines.
+
+Shipped:
+- `domain/tactics.ts` — 14 data-driven combo pattern detectors over actual
+  sets / learnset-potential / hybrid battle profiles. No LLM judgement.
+- `scripts/tactics-catalog.ts` — full sweep of all 245 legal profiles
+  (186 species + 59 mega formes incl. custom abilities): 55k instances →
+  `data/tactics.champions.json` + `docs/notes/tactics.md`. This is the
+  surprise-strategy discovery list: ranked combos nobody may be running.
+- Bring picker: tactic-synergy credit (combos my bring completes) + opponent
+  threat counter-credit (±12 per strong combo their six could run, with a
+  per-pattern counter table). Rationale lines in the BringPicker UI.
+- Battle: "⚠ combo watch" panel — live opponent tactic availability that
+  NARROWS as moves/abilities/items are revealed.
+- Search: perish clock forecast (EOT tick, faint at 0, switch-out clears,
+  Baton Pass transfers) + trapping abilities gate the switch action (ghost
+  immunity, Shed Shell, pivot bypass). The engine now plans around
+  perish-trap on both sides of the board.
+
+Next (not yet modeled):
+- Perish Song CAST as a search action (offense planning: "sing now, stall 3"),
+  with Soundproof exclusion — the defensive/forecast half is done.
+- Mean Look / Block volatile tracking in the live match state (search models
+  ability trapping only; move-based trap status isn't logged yet).
+- Tactic-aware oppLine explanations ("they're setting up X — deny with Y").
+- Bring-time lead prediction from opponent combo cores (if their best combo
+  needs Politoed+Steelix, expect that lead pair; pick anti-leads).
