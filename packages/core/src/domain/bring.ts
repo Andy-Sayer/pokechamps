@@ -114,8 +114,9 @@ function speedFor(set: PokemonSet): number {
 
 // Does one of MY sets counter an opponent tactic pattern? Checked against the
 // set's real moves/ability/types — this is what earns counter-credit when the
-// opponent's six could run the combo.
-const PATTERN_COUNTERS: Record<string, (set: PokemonSet) => boolean> = {
+// opponent's six could run the combo. Exported so the battle screen's combo
+// watch can name WHICH of my brought mons answers a live threat.
+export const PATTERN_COUNTERS: Record<string, (set: PokemonSet) => boolean> = {
   'perish-trap': s => abilityIs(s, 'soundproof') || hasMove(s, 'taunt') || s.moves.some(isPivotMove),
   'baton-pass': s => hasMove(s, 'haze') || hasMove(s, 'clearsmog') || hasMove(s, 'spectralthief') || hasMove(s, 'roar') || hasMove(s, 'whirlwind') || hasMove(s, 'taunt'),
   'stored-power': s => speciesTypes(s.species).includes('Dark') || hasMove(s, 'haze') || hasMove(s, 'clearsmog') || hasMove(s, 'taunt'),

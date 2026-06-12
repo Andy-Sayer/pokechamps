@@ -6,6 +6,7 @@ import type { Match, FieldState, DamageObservation, MoveAction, OpponentEntry, P
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
 import { scoreSpread, scoreOffensiveSpread, mostLikely, recoilDrainHpEvs, reconcileCandidates, abilitiesRuledOutByHit } from '@pokechamps/core/domain/inference.js';
 import { detectTactics, profileFromOpponentEntry, tacticLabel } from '@pokechamps/core/domain/tactics.js';
+import { PATTERN_COUNTERS } from '@pokechamps/core/domain/bring.js';
 import { abilitiesRuledOutByStatus, ruleOutAbilities, confirmAbility, attackerIgnoresAbilities } from '@pokechamps/core/domain/abilityInference.js';
 import { applyItemClauseExclusion, claimedItemIdsExcept } from '@pokechamps/core/domain/itemClause.js';
 import { computeActionBoostContexts } from '@pokechamps/core/domain/turnBoosts.js';
@@ -2454,7 +2455,17 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       .filter((o, i) => (brought.length === 0 || brought.includes(i as never)) && !o.fainted)
       .map(o => profileFromOpponentEntry(o));
     if (!profiles.length) return [];
-    return detectTactics(profiles, { minScore: 55 }).slice(0, 3);
+    // For each threat, name which of MY brought, living mons can deny it.
+    const mySets = match.bring
+      .filter(i => !match.myFainted?.includes(i))
+      .map(i => match.myTeam[i]!)
+      .filter(Boolean);
+    return detectTactics(profiles, { minScore: 55 }).slice(0, 3).map(t => ({
+      tactic: t,
+      deniers: PATTERN_COUNTERS[t.pattern]
+        ? mySets.filter(s => PATTERN_COUNTERS[t.pattern]!(s)).map(s => s.species)
+        : [],
+    }));
   }, [match]);
 
   // The turn as ONE ordered timeline: move actions + queued boost lines, sorted by
@@ -3198,10 +3209,13 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
           {comboWatch.length > 0 && (
             <Box flexDirection="column" marginTop={1}>
               <Text bold color="yellow">⚠ combo watch</Text>
-              {comboWatch.map((t, i) => (
+              {comboWatch.map(({ tactic: t, deniers }, i) => (
                 <Box key={i} flexDirection="column">
                   <Text color="yellow">  {t.name}: {tacticLabel(t)}</Text>
                   <Text dimColor>    {t.payoff} Counters: {t.counters[0]}.</Text>
+                  {deniers.length > 0
+                    ? <Text color="green">    deny with: {deniers.join(', ')}</Text>
+                    : <Text color="red">    no counter among my brought mons</Text>}
                 </Box>
               ))}
             </Box>
