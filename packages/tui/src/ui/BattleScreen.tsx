@@ -5,6 +5,7 @@ import SelectInput from 'ink-select-input';
 import type { Match, FieldState, DamageObservation, MoveAction, OpponentEntry, PokemonSet } from '@pokechamps/core/domain/types.js';
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
 import { scoreSpread, scoreOffensiveSpread, mostLikely, recoilDrainHpEvs, reconcileCandidates, abilitiesRuledOutByHit } from '@pokechamps/core/domain/inference.js';
+import { detectTactics, profileFromOpponentEntry, tacticLabel } from '@pokechamps/core/domain/tactics.js';
 import { abilitiesRuledOutByStatus, ruleOutAbilities, confirmAbility, attackerIgnoresAbilities } from '@pokechamps/core/domain/abilityInference.js';
 import { applyItemClauseExclusion, claimedItemIdsExcept } from '@pokechamps/core/domain/itemClause.js';
 import { computeActionBoostContexts } from '@pokechamps/core/domain/turnBoosts.js';
@@ -2383,6 +2384,19 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     setMoodyNagged(false);
   };
 
+  // Combo watch: multi-part tactics the opponent's BROUGHT, living mons could
+  // still execute — revealed moves are certain, the rest comes from learnsets
+  // with ability rule-outs / known items pruning the space. Re-runs per match
+  // snapshot; detection over ≤4 profiles is sub-millisecond.
+  const comboWatch = useMemo(() => {
+    const brought = match.opponentBrought ?? [];
+    const profiles = match.opponentTeam
+      .filter((o, i) => (brought.length === 0 || brought.includes(i as never)) && !o.fainted)
+      .map(o => profileFromOpponentEntry(o));
+    if (!profiles.length) return [];
+    return detectTactics(profiles, { minScore: 55 }).slice(0, 3);
+  }, [match]);
+
   // The turn as ONE ordered timeline: move actions + queued boost lines, sorted by
   // `order`. Single source of truth for the draft display AND /undo + /edit, so the
   // numbers the user sees always match what those commands act on. Each entry is
@@ -3113,6 +3127,17 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
               />
             );
           })}
+          {comboWatch.length > 0 && (
+            <Box flexDirection="column" marginTop={1}>
+              <Text bold color="yellow">⚠ combo watch</Text>
+              {comboWatch.map((t, i) => (
+                <Box key={i} flexDirection="column">
+                  <Text color="yellow">  {t.name}: {tacticLabel(t)}</Text>
+                  <Text dimColor>    {t.payoff} Counters: {t.counters[0]}.</Text>
+                </Box>
+              ))}
+            </Box>
+          )}
           <Box marginTop={1}>
             <Text dimColor>★ = active slot (m1/m2 · o1/o2) · myN/opN = team ref, usable in any line (switch + edits) · gray = not yet brought</Text>
           </Box>

@@ -204,6 +204,39 @@ export function profileFromMegaStone(stoneId: string): MonProfile | null {
   };
 }
 
+/** Hybrid battle-time profile for an opponent: revealed moves are certain
+ *  (4 revealed = complete set), unrevealed fall back to the learnset;
+ *  confirmed ability pins the list, rule-outs prune it; a known item pins
+ *  item-dependent patterns (a revealed Choice item kills Unburden combos). */
+export function profileFromOpponentEntry(entry: {
+  species: string;
+  knownMoves: string[];
+  ability?: string | null;
+  item?: string | null;
+  abilitiesRuledOut?: string[];
+  megaUsed?: boolean;
+  megaForme?: string;
+}): MonProfile {
+  const speciesName = entry.megaUsed && entry.megaForme ? entry.megaForme : entry.species;
+  const sp = info(speciesName);
+  const known = entry.knownMoves.map(toId);
+  const moves = known.length >= 4
+    ? new Set(known)
+    // Megas keep the BASE species' learnset.
+    : new Set([...getLearnset(entry.species).map(toId), ...known]);
+  const ruledOut = new Set((entry.abilitiesRuledOut ?? []).map(toId));
+  const abilities = entry.ability
+    ? [toId(entry.ability)]
+    : Object.values(sp?.abilities ?? {}).map(toId).filter(a => !ruledOut.has(a));
+  return {
+    species: speciesName,
+    moves,
+    abilities,
+    item: entry.item ? toId(entry.item) : null,
+    potential: known.length < 4,
+  };
+}
+
 const has = (p: MonProfile, moveId: string) => p.moves.has(moveId);
 const hasAbility = (p: MonProfile, abilityId: string) => p.abilities.includes(abilityId);
 
@@ -554,7 +587,9 @@ const detectUnburden: Detector = (a, b) => {
   if (b) return [];
   if (!hasAbility(a, 'unburden')) return [];
   const consumables = consumableItemIds();
-  const itemOk = a.item ? consumables.includes(a.item) : a.potential;
+  // Unknown item = possible; a KNOWN non-consumable kills the combo. (Actual
+  // my-team sets always carry their item, so unknown only happens for opps.)
+  const itemOk = a.item ? consumables.includes(a.item) : true;
   if (!itemOk) return [];
   const s = statsOf(a);
   const acro = has(a, 'acrobatics');
@@ -610,6 +645,11 @@ const DETECTORS: Detector[] = [
   detectSpreadImmune, detectBeatUpJustified, detectCritAngerPoint, detectUnburden,
   detectAuroraVeil,
 ];
+
+/** Compact one-line label: 'Politoed (Perish Song) + Steelix-Mega (block)'. */
+export function tacticLabel(t: TacticInstance): string {
+  return t.pieces.map(p => p.species + (p.move ? ` (${p.move})` : p.ability ? ` [${p.ability}]` : '')).join(' + ');
+}
 
 /** Stable identity for deduping symmetric pair hits. */
 function instanceKey(t: TacticInstance): string {

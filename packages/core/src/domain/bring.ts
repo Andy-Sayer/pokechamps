@@ -4,7 +4,7 @@ import { damageRange, maxHpFor } from './damage.js';
 import { getSpecies, toId, isPivotMove } from './data.js';
 import { mostLikely } from './inference.js';
 import { bestOffensive, offensiveTypes, speciesTypes } from './typechart.js';
-import { detectTactics, profileFromSet, profileFromSpecies, type TacticInstance } from './tactics.js';
+import { detectTactics, profileFromSet, profileFromSpecies, tacticLabel, type TacticInstance } from './tactics.js';
 
 // Scoring a 4-of-6 "bring":
 //  - offense:   for each opp mon, max % HP my best attacker can take in one move
@@ -133,10 +133,6 @@ const PATTERN_COUNTERS: Record<string, (set: PokemonSet) => boolean> = {
 
 const hasMove = (s: PokemonSet, id: string) => s.moves.some(m => toId(m) === id);
 const abilityIs = (s: PokemonSet, id: string) => !!s.ability && toId(s.ability) === id;
-
-function tacticLabel(t: TacticInstance): string {
-  return t.pieces.map(p => p.species + (p.move ? ` (${p.move})` : p.ability ? ` [${p.ability}]` : '')).join(' + ');
-}
 
 /** Best instance per pattern fully contained in the given species subset. */
 function bestPerPatternWithin(instances: TacticInstance[], species: Set<string>): TacticInstance[] {

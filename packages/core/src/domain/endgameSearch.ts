@@ -76,6 +76,10 @@ export interface SearchMyMon {
   /** Choice lock from the live match: the move this Choice-item holder is locked
    *  into (used a move, hasn't left the field since). Ignored without a Choice item. */
   choiceLockedMove?: string;
+  /** Perish Song count from the live match (faints when it reaches 0). The
+   *  search FORECASTS by real rules: ticks at EOT while on field, cleared by
+   *  switching out, transferred by Baton Pass. */
+  perishCount?: number;
 }
 export interface SearchOppMon {
   entry: OpponentEntry;
@@ -99,6 +103,8 @@ export interface SearchOppMon {
   /** Choice lock from the live match — only meaningful when the entry's item is
    *  a KNOWN Choice item (revealed); soft suspicions never hard-lock the search. */
   choiceLockedMove?: string;
+  /** Perish Song count (see SearchMyMon.perishCount). */
+  perishCount?: number;
 }
 export interface SearchInput {
   mine: SearchMyMon[];
@@ -982,6 +988,11 @@ interface State {
    *  turn's end (unless it switched out / got statused first). 0 = none. */
   myYawn: number[];
   oppYawn: number[];
+  /** Perish count per mon (0 = none). Ticks down each EOT while on the field;
+   *  the mon FAINTS when it reaches 0. Cleared by switching out (real rules —
+   *  this is why trapping + Perish is a kill combo); Baton Pass transfers it. */
+  myPerish: number[];
+  oppPerish: number[];
   /** Taunt turns remaining per mon (>0 = can't use status moves). */
   myTaunt: number[];
   oppTaunt: number[];
@@ -1104,6 +1115,28 @@ function findWeatherMove(moves: string[]): { move: string; weather: Weather } | 
 }
 function isType(species: string, t: string): boolean {
   return ((getSpecies(species) as { types?: string[] } | undefined)?.types ?? []).includes(t);
+}
+
+// --- Trapping ----------------------------------------------------------------
+// Per-actor: is this mon prevented from using the SWITCH action by a live foe
+// active's trapping ability? Gen 6+ rules: Ghosts are immune to all trapping;
+// Shed Shell always escapes; Shadow Tag doesn't trap other Shadow Tag holders;
+// Arena Trap only traps grounded mons; Magnet Pull only Steels. Pivot moves
+// (U-turn) and Baton Pass BYPASS trapping, so only the switch option is gated.
+function trappedBy(
+  actorSpecies: string, actorAbility: string | null | undefined, actorItem: string | null | undefined, actorGrounded: boolean,
+  foeActive: number[], foeHp: number[], foeAbility: readonly (string | null | undefined)[],
+): boolean {
+  if (isType(actorSpecies, 'Ghost')) return false;
+  if (toId(actorItem ?? '') === 'shedshell') return false;
+  for (const j of foeActive) {
+    if ((foeHp[j] ?? 0) <= 0) continue;
+    const ab = toId(foeAbility[j] ?? '');
+    if (ab === 'shadowtag' && toId(actorAbility ?? '') !== 'shadowtag') return true;
+    if (ab === 'arenatrap' && actorGrounded) return true;
+    if (ab === 'magnetpull' && isType(actorSpecies, 'Steel')) return true;
+  }
+  return false;
 }
 
 // --- Terrain ----------------------------------------------------------------
@@ -1938,6 +1971,8 @@ function initialState(input: SearchInput): State {
     mySleepTurns: input.mine.map(m => (m.status === 'slp' ? 2 : 0)),
     myYawn: input.mine.map(() => 0),
     oppYawn: input.opp.map(() => 0),
+    myPerish: input.mine.map(m => m.perishCount ?? 0),
+    oppPerish: input.opp.map(o => o.perishCount ?? 0),
     oppSleepTurns: input.opp.map(o => (o.status === 'slp' ? 2 : 0)),
     // Taunt/Encore volatiles aren't carried on SearchInput yet → start clear.
     myTaunt: input.mine.map(() => 0),
@@ -2963,6 +2998,8 @@ function resolveTurn(
   const mySleepTurns = s.mySleepTurns.slice();
   const myYawn = s.myYawn.slice();
   const oppYawn = s.oppYawn.slice();
+  const myPerish = s.myPerish.slice();
+  const oppPerish = s.oppPerish.slice();
   const oppSleepTurns = s.oppSleepTurns.slice();
   const myBerryUsed = s.myBerryUsed.slice();
   const oppBerryUsed = s.oppBerryUsed.slice();
@@ -3046,6 +3083,11 @@ function resolveTurn(
   };
   for (const i of myActiveNow) yawnTick(i, myYawn, myStatus, mySleepTurns, myToxicN, myBerryUsed, t.myItem, t.mySpecies[i]!, t.myAbility[i], t.myGrounded[i]!);
   for (const j of oppActiveNow) yawnTick(j, oppYawn, oppStatus, oppSleepTurns, oppToxicN, oppBerryUsed, t.oppItem, t.oppSpecies[j]!, t.oppAbility[j], t.oppGrounded[j]!);
+  // Perish clock: ticks at EOT for ON-FIELD mons; faint at 0. Not residual
+  // damage — Magic Guard does NOT save you. (Counts were cleared/passed in the
+  // switch bookkeeping above, so a mon that escaped this turn doesn't tick.)
+  for (const i of myActiveNow) if ((myPerish[i] ?? 0) > 0 && (myHp[i] ?? 0) > 0) { myPerish[i] = myPerish[i]! - 1; if (myPerish[i] === 0) myHp[i] = 0; }
+  for (const j of oppActiveNow) if ((oppPerish[j] ?? 0) > 0 && (oppHp[j] ?? 0) > 0) { oppPerish[j] = oppPerish[j]! - 1; if (oppPerish[j] === 0) oppHp[j] = 0; }
   // Dedicated debuff moves (Charm/Scary Face/…): lower the (post-switch) foe's stats,
   // routed through the foe-drop accumulator below so Clear Body immunity + Defiant apply.
   for (const [actor, target] of myTargets) {
@@ -3105,6 +3147,10 @@ function resolveTurn(
   const oppBoost = s.oppBoost.map(b => ({ ...b }));
   for (const [outI, inB] of mySwitchIn) { const passed = myBaton.has(outI) ? { ...myBoost[outI] } : {}; myBoost[outI] = {}; myBoost[inB] = passed; }
   for (const [outJ, inB] of oppSwitchIn) { const passed = oppBaton.has(outJ) ? { ...oppBoost[outJ] } : {}; oppBoost[outJ] = {}; oppBoost[inB] = passed; }
+  // Perish count follows the same shape: switching out REMOVES it (the whole
+  // reason trapping + Perish Song is a kill combo), Baton Pass TRANSFERS it.
+  for (const [outI, inB] of mySwitchIn) { const pp = myBaton.has(outI) ? myPerish[outI]! : 0; myPerish[outI] = 0; myPerish[inB] = pp; }
+  for (const [outJ, inB] of oppSwitchIn) { const pp = oppBaton.has(outJ) ? oppPerish[outJ]! : 0; oppPerish[outJ] = 0; oppPerish[inB] = pp; }
   for (const [actor, target] of myTargets) if (target === SET_BOOST && t.mySetup[actor]) myBoost[actor] = addBoosts(myBoost[actor]!, t.mySetup[actor]!);
   for (const [actor, target] of oppTargets) if (target === SET_BOOST && t.oppSetup[actor]) oppBoost[actor] = addBoosts(oppBoost[actor]!, t.oppSetup[actor]!);
   // Self-stat-drops from this turn's moves (Draco Meteor −2 SpA …) hit the user's
@@ -3238,7 +3284,7 @@ function resolveTurn(
     myReflect, myLightScreen, theirReflect, theirLightScreen,
     myReflectTurns, myLightScreenTurns, theirReflectTurns, theirLightScreenTurns,
     weather, weatherTurns, terrain, terrainTurns, myToxicN, oppToxicN, myStatus, oppStatus,
-    myBerryUsed, oppBerryUsed, myHazards, oppHazards, mySleepTurns, oppSleepTurns, myYawn, oppYawn,
+    myBerryUsed, oppBerryUsed, myHazards, oppHazards, mySleepTurns, oppSleepTurns, myYawn, oppYawn, myPerish, oppPerish,
     myTaunt, oppTaunt, myEncore, oppEncore, myEncoreAct, oppEncoreAct,
     myUnburden, oppUnburden, myResistBerryUsed, oppResistBerryUsed, myFirstTurn, oppFirstTurn,
     myDisguise, oppDisguise, myRecharge, oppRecharge, myLocked, oppLocked, myChoiceMove, oppChoiceMove, mySubHp, oppSubHp,
@@ -3395,6 +3441,9 @@ function jointActions(
   counterSet?: boolean[],
   // Room (root only): a true entry → the mon can set a not-yet-active field room.
   roomSet?: boolean[],
+  // Trapped mask (root only): a true entry → a foe's trapping ability blocks
+  // this actor's SWITCH option. Pivot moves and Baton Pass bypass trapping.
+  trapped?: boolean[],
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -3483,7 +3532,7 @@ function jointActions(
       ...encoreCodes,
       ...fakeOutCodes,
       ...prioCodes,
-      ...switchCodes,
+      ...(trapped?.[actor] ? [] : switchCodes),
       ...batonCodes,
     ];
     // Choice lock (true per-move lock) narrows FIRST: only the locked move's
@@ -3594,7 +3643,7 @@ function ttKey(s: State, depth: number, maxDepth: number, pass: Pass): string {
   return [
     depth, maxDepth, pass.regime, bl(pass.survOpp), bl(pass.survMy),
     nb(s.myHp), nb(s.oppHp), nb(s.myActive), nb(s.oppActive), bl(s.oppSeen),
-    s.myStatus.join(''), s.oppStatus.join(''), nb(s.myToxicN), nb(s.oppToxicN), nb(s.mySleepTurns), nb(s.oppSleepTurns), nb(s.myYawn), nb(s.oppYawn),
+    s.myStatus.join(''), s.oppStatus.join(''), nb(s.myToxicN), nb(s.oppToxicN), nb(s.mySleepTurns), nb(s.oppSleepTurns), nb(s.myYawn), nb(s.oppYawn), nb(s.myPerish), nb(s.oppPerish),
     bs(s.myBoost), bs(s.oppBoost), nn(s.mySeeded), nn(s.oppSeeded),
     nb(s.myProtectStreak), nb(s.oppProtectStreak),
     `${s.trickRoom ? 1 : 0}${s.myTailwind ? 1 : 0}${s.theirTailwind ? 1 : 0}`,
@@ -3762,6 +3811,7 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
         ? lockedMoveSinceEntry(match, 'mine', idx) ?? undefined : undefined,
       // Disable root-carry (opp side rides the entry into predictions already).
       disabledMove: match.myDisabledMove?.[idx],
+      perishCount: match.myPerishCount?.[idx],
     });
     myTeamIdx.push(idx);
   }
@@ -3780,6 +3830,7 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
       // move suspicions stay display-only and never restrict the search.
       choiceLockedMove: oppActive.has(idx) && isChoiceItem(entry.item) && !entry.itemConsumed
         ? lockedMoveSinceEntry(match, 'theirs', idx) ?? undefined : undefined,
+      perishCount: entry.perishCount,
     });
     oppTeamIdx.push(idx);
   }
@@ -3864,7 +3915,8 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     t.myHazardClear.map(hc => !!hc && hasAnyHazard(s.myHazards)),
     t.myHasSubMove.map((kn, i) => kn && (s.myHp[i] ?? 0) > 25 && (s.mySubHp[i] ?? 0) <= 0),
     t.myCounter.map(c => !!c),
-    t.myRoomMove.map(rm => !!rm && !s[rm]));
+    t.myRoomMove.map(rm => !!rm && !s[rm]),
+    t.mySpecies.map((sp, i) => trappedBy(sp, t.myAbility[i], t.myItem[i], t.myGrounded[i]!, s.oppActive, s.oppHp, t.oppAbility)));
 }
 function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
   const leechFoes = s.myActive.filter(j => (s.myHp[j] ?? 0) > 0 && !t.myGrass[j] && s.mySeeded[j] == null);
@@ -3900,7 +3952,8 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     t.oppHazardClear.map(hc => !!hc && hasAnyHazard(s.oppHazards)),
     t.oppHasSubMove.map((kn, j) => kn && (s.oppHp[j] ?? 0) > 25 && (s.oppSubHp[j] ?? 0) <= 0),
     t.oppCounter.map(c => !!c),
-    t.oppRoomMove.map(rm => !!rm && !s[rm]));
+    t.oppRoomMove.map(rm => !!rm && !s[rm]),
+    t.oppSpecies.map((sp, j) => trappedBy(sp, t.oppAbility[j], t.oppItem[j], t.oppGrounded[j]!, s.myActive, s.myHp, t.myAbility)));
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
