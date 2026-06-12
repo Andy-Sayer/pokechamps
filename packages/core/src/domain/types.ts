@@ -327,8 +327,14 @@ export interface Match {
   // the 2 leads we saw at preview; grows up to 4 as opp switches or sends a
   // replacement after a faint. We never know all 4 brings up front.
   opponentBrought?: TeamSlot[];
-  // Current HP per myTeam index. Undefined slots = full HP. Lives on Match
-  // (not PokemonSet) because PokemonSet is static team data.
+  // Current HP per myTeam index, stored as PERCENT of max (0-100). Undefined
+  // slots = full HP. The USER types raw HP for their own mons (the unit the
+  // game displays for your side); every parse/apply path converts raw → % at
+  // the boundary via maxHpFor (my EVs are known exactly, so this is lossless).
+  // Opp HP arrives as percent already (OpponentEntry.currentHpPercent). All
+  // consumers read this as percent — do NOT divide by max HP again (that
+  // exact double-conversion silently skewed the live search until 2026-06-12).
+  // Lives on Match (not PokemonSet) because PokemonSet is static team data.
   myCurrentHp?: Record<number, number>;
   // myTeam indices that have fainted.
   myFainted?: number[];
