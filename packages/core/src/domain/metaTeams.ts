@@ -112,7 +112,10 @@ export function metaTeams(pika: PikaData, n: number, maxOverlap = 6): { anchor: 
     const tooSimilar = seen.some(prev => {
       let shared = 0;
       for (const sp of species) if (prev.has(sp)) shared++;
-      return shared > maxOverlap;
+      // Reject if over the overlap budget OR a full duplicate (every species
+      // already present) — the latter keeps the default (maxOverlap = full
+      // team) behaving as exact dedup, which the no-arg callers rely on.
+      return shared > maxOverlap || shared >= species.size;
     });
     if (tooSimilar) continue;
     seen.push(species);

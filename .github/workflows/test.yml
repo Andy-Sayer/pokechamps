@@ -1,8 +1,30 @@
 name: CI
 
+# Cost note: this repo is private, so Actions minutes draw on the 2,000/month
+# GitHub Free allowance. The default billing spending limit is $0 — if the
+# allowance is ever exhausted, runs PAUSE rather than charge. The settings
+# below keep usage minimal so that never happens:
+#   - push CI only on `main` (feature branches build via their PR, not twice)
+#   - skip docs-only commits (markdown / docs/ changes can't break tests)
+#   - concurrency cancels an in-flight run when a newer commit lands
+# `data/**` is deliberately NOT ignored — several tests read data/*.json
+# (Pikalytics usage, species), so a data-only change must still be verified.
 on:
   push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+# A rapid burst of commits only runs CI for the latest — earlier in-flight
+# runs are cancelled, so a 5-commit push costs one run's minutes, not five.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
