@@ -24,9 +24,11 @@ import { type Matchup } from '../domain/teamSim.js';
 import { MatchupPool } from '../domain/matchupPool.js';
 
 const SAVE = process.argv.includes('--save');
-const DEEP = 5;          // the decision depth — "at least 5 turns into the future"
+// Decision depth — "at least 5 turns into the future" by default; --deep N
+// overrides only for fast smoke tests of the parallel path.
+const DEEP = Number(process.argv[process.argv.indexOf('--deep') + 1]) || 5;
 const SCOUT = 2;         // shortlisting only
-const META_N = 12;
+const META_N = Number(process.argv[process.argv.indexOf('--meta') + 1]) || 12;
 const MAX_OVERLAP = 3;
 
 const pika = loadPikaData();
