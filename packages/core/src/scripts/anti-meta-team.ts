@@ -26,6 +26,7 @@ import { searchIterative, type SearchInput } from '../domain/endgameSearch.js';
 import { detectTactics, profileFromSet, tacticLabel } from '../domain/tactics.js';
 import type { PokemonSet, OpponentEntry } from '../domain/types.js';
 import { NEUTRAL_FIELD } from '../domain/types.js';
+import { damageRange, maxHpFor } from '../domain/damage.js';
 
 const SAVE = process.argv.includes('--save');
 const DEPTH = Number(process.argv[process.argv.indexOf('--depth') + 1]) || 3;
@@ -127,6 +128,90 @@ for (const anchor of pika.topPokemon.slice(0, 12)) addSeed(`${anchor} stack`, co
 }
 
 // Phase 1: fast depth-2 sweep over every seed (early floor-abort prunes).
+// ---------------------------------------------------------------------------
+// Niche seeds — data-derived, not vibes:
+//   (1) Underdogs: low-usage mons (rank > 20) ranked by direct damage-calc
+//       performance against every set in the meta gauntlet; best two anchor
+//       a team.
+//   (2) Niche tech: the meta's own mons with sub-20%-usage counter-tech
+//       moves (Wide Guard / Taunt / Haze / Icy Wind / …) swapped into their
+//       4th slot when their standard four carry none.
+//   (3) Off-meta combo: the highest-scoring catalog pair whose pieces are
+//       ALL outside the top-15 usage list.
+// ---------------------------------------------------------------------------
+{
+  // (1) Underdog promise score: avg (my best hit% on each meta set) minus
+  // (their best hit% back), over all 72 gauntlet sets.
+  const metaSets = meta.flatMap(m => m.sets);
+  const bestPct = (atk: PokemonSet, def: PokemonSet): number => {
+    let best = 0;
+    const max = maxHpFor(def);
+    for (const mv of atk.moves) {
+      try {
+        const r = damageRange({ attacker: atk, defender: def, move: mv, field: NEUTRAL_FIELD, attackerSide: 'mine' });
+        best = Math.max(best, max > 0 ? (r.max / max) * 100 : 0);
+      } catch { /* status moves / unknown ids */ }
+    }
+    return Math.min(150, best);
+  };
+  const underdogs = Object.keys(pika.pokemon)
+    .filter(n => (pika.pokemon[n]!.rank ?? 0) > 20)
+    .map(name => {
+      const set = buildSet(pika, name, new Set());
+      if (!set) return null;
+      let score = 0;
+      for (const oppSet of metaSets) score += bestPct(set, oppSet) - bestPct(oppSet, set);
+      return { name, score: score / metaSets.length };
+    })
+    .filter((x): x is { name: string; score: number } => !!x)
+    .sort((a, b) => b.score - a.score);
+  console.log('\nunderdog promise vs the gauntlet (top 6 of the sub-top-20):');
+  for (const u of underdogs.slice(0, 6)) console.log(`  ${u.name.padEnd(16)} ${u.score.toFixed(1)}`);
+  if (underdogs.length >= 2) {
+    addSeed(`Underdogs (${underdogs[0]!.name}+${underdogs[1]!.name})`,
+      composeTeam(pika, [underdogs[0]!.name, underdogs[1]!.name]));
+  }
+
+  // (2) Niche tech on the strongest meta stack: counter-tech moves that the
+  // 12-archetype gauntlet rewards, taken from each member's own usage list
+  // at < 20% (popular mon, unpopular move).
+  const COUNTER_TECH = new Set(['wideguard', 'taunt', 'haze', 'icywind', 'electroweb', 'clearsmog', 'coaching', 'quickguard', 'helpinghand']);
+  const baseStack = composeTeam(pika, [pika.topPokemon[0]!]);
+  if (baseStack) {
+    let touched = 0;
+    const teched = baseStack.map(s => {
+      const d = pika.pokemon[Object.keys(pika.pokemon).find(k => baseSpeciesFor(k) === s.species) ?? s.species];
+      if (!d) return s;
+      const hasTech = s.moves.some(m => COUNTER_TECH.has(toId(m)));
+      if (hasTech) return s;
+      const tech = d.moves.find(m => m.name !== 'Other' && m.pct < 20 && m.pct > 0.5 && COUNTER_TECH.has(toId(m.name)) && !s.moves.includes(m.name));
+      if (!tech) return s;
+      touched++;
+      return { ...s, moves: [...s.moves.slice(0, 3), tech.name] };
+    });
+    if (touched > 0) addSeed(`Niche tech ${pika.topPokemon[0]} stack (+${touched} tech swaps)`, teched);
+  }
+
+  // (3) Off-meta combo: best catalog pair with NO top-15 piece.
+  const catalog = JSON.parse(
+    readFileSync(join(dataDirPath(), 'tactics.champions.json'), 'utf8'),
+  ) as { patterns: Record<string, { instances: { pieces: { species: string }[]; name: string; score: number }[] }> };
+  const top15 = new Set(pika.topPokemon.slice(0, 15).map(baseSpeciesFor));
+  const offMeta = Object.values(catalog.patterns)
+    .flatMap(p => p.instances)
+    .filter(t => t.pieces.length === 2
+      && t.pieces.every(p => !top15.has(baseSpeciesFor(p.species)))
+      && t.pieces.every(p => Object.keys(pika.pokemon).some(k => baseSpeciesFor(k) === baseSpeciesFor(p.species))))
+    .sort((a, b) => b.score - a.score)[0];
+  if (offMeta) {
+    const anchors = offMeta.pieces.map(p =>
+      Object.keys(pika.pokemon).find(k => baseSpeciesFor(k) === baseSpeciesFor(p.species))!);
+    const team = composeTeam(pika, anchors);
+    const intact = team && anchors.every(a => team.some(s => baseSpeciesFor(s.species) === baseSpeciesFor(a)));
+    if (intact) addSeed(`Off-meta combo: ${offMeta.name} (${anchors.join('+')})`, team);
+  }
+}
+
 console.log(`\nphase 1: ${seeds.length} seed teams at depth 2 vs ${meta.length} meta teams…`);
 const sweep: { label: string; sets: PokemonSet[]; fit: Fitness }[] = [];
 let pruneFloor: number | undefined;
