@@ -235,13 +235,14 @@ for (const s of seeds) {
 sweep.sort((a, b) => (better(a.fit, b.fit) ? -1 : 1));
 if (!sweep.length) { console.error('no viable seed'); process.exit(1); }
 
-// Phase 2: verify the top 3 finalists at full depth.
+// Phase 2: verify the top 3 finalists at full depth (floor-abort vs the
+// incumbent keeps the expensive depth bounded).
 console.log(`\nphase 2: top ${Math.min(3, sweep.length)} finalists at depth ${DEPTH}…`);
 let best: { label: string; sets: PokemonSet[]; fit: Fitness } | null = null;
 for (const s of sweep.slice(0, 3)) {
   const t0 = Date.now();
-  const fit = evaluateTeam(s.sets, DEPTH);
-  if (!fit) continue;
+  const fit = evaluateTeam(s.sets, DEPTH, best?.fit.floor);
+  if (!fit) { console.log(`  ${s.label}: pruned at depth ${DEPTH} [${Date.now() - t0}ms]`); continue; }
   console.log(`  ${s.label}: floor ${Math.round(fit.floor)} avg ${Math.round(fit.avg)} flex ${fit.flex} [${Date.now() - t0}ms]`);
   if (!best || better(fit, best.fit)) best = { label: s.label, sets: s.sets, fit };
 }
