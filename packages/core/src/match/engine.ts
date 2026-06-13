@@ -21,7 +21,7 @@ import type {
   TurnSnapshot,
 } from '../domain/types.js';
 import { NEUTRAL_FIELD } from '../domain/types.js';
-import { scoreSpread, scoreOffensiveSpread, recoilDrainHpEvs, reconcileCandidates, refineCandidates, abilitiesRuledOutByHit } from '../domain/inference.js';
+import { scoreSpread, scoreOffensiveSpread, recoilDrainHpEvs, reconcileCandidates, abilitiesRuledOutByHit } from '../domain/inference.js';
 import { abilitiesRuledOutByStatus, ruleOutAbilities, confirmAbility, attackerIgnoresAbilities } from '../domain/abilityInference.js';
 import { applyItemClauseExclusion, claimedItemIdsExcept } from '../domain/itemClause.js';
 import { computeActionBoostContexts } from '../domain/turnBoosts.js';
@@ -1556,11 +1556,10 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     const opp = next.opponentTeam[oi];
     if (!opp?.candidates?.length || (opp.observations?.length ?? 0) < 2) continue;
     const level = opp.candidates[0]!.level;
-    const r = refineCandidates({
+    const r = reconcileCandidates({
       oppSpecies: opp.species, oppLevel: level, knownMoves: opp.knownMoves,
       candidates: opp.candidates.map(c => ({ evs: c.evs, nature: c.nature, item: c.item, ability: c.ability })),
       likelihoods: opp.candidateLikelihoods, history: opp.observations!,
-      ruledOutAbilities: opp.abilitiesRuledOut, hpEvCandidates: opp.hpEvLock,
     });
     if (r.candidates.length === opp.candidates.length) continue; // unchanged
     opp.candidates = r.candidates.map(c => ({

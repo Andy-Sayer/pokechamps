@@ -660,6 +660,11 @@ function offensiveStatOf(move: string): 'atk' | 'spa' | null {
 
 export interface JointSolveResult { candidates: SpreadCandidate[]; likelihoods: number[] }
 
+// Joint inference commits only when the observations collapse the candidate
+// natures to at most this many — its value is pinning the nature, and a result
+// spread across more natures means the swept stat wasn't discriminated.
+const NATURE_COLLAPSE_MAX = 3;
+
 // JOINT EV/nature/item inference. The sequential pipeline (scoreSpread →
 // scoreOffensiveSpread) commits to a NATURE defensively, then only overrides it
 // offensively as a last resort — so a single nature jointly consistent with a
@@ -796,17 +801,31 @@ export function jointSolve(p: {
       seen.add(k);
       return true;
     });
+  // DISCRIMINATION GATE: joint inference earns its place by pinning the NATURE
+  // (its whole point — a single nature consistent with both directions). When
+  // the observations don't discriminate the swept stat (e.g. Gyro Ball's power
+  // is speed-, not Atk-based, so every Atk fits), the result fans across most
+  // natures — pure noise that would also destabilise the chained pipeline.
+  // Only commit when it collapses the nature space; otherwise abstain (null)
+  // and the caller keeps the stable sequential belief.
+  const distinctNatures = new Set(deduped.map(d => d.c.nature)).size;
+  if (distinctNatures > NATURE_COLLAPSE_MAX) return null;
   return { candidates: deduped.map(k => k.c), likelihoods: deduped.map(k => k.like) };
 }
 
-// One entry point for the post-turn candidate refinement, shared by both
-// finalizeTurn mirrors so they can't drift. Tries the JOINT solver first (it
-// only fires for histories mixing offensive + defensive observations, where it
-// generates a nature×EV set jointly consistent across both directions that the
-// sequential pipeline can't); otherwise falls back to reconcile (filtering the
-// existing candidates). Joint is constrained to the items/abilities already
-// believed so it re-opens only the nature/EV space — it never re-widens item
-// or ability narrowing that earlier observations established.
+// Integration-ready (NOT yet wired into the live mirrors — see below) entry
+// point that augments reconcile with the JOINT solver: joint fires only for
+// histories mixing offensive + defensive observations AND only when it
+// collapses the nature space (the discrimination gate), then its correct-
+// nature spreads are unioned onto reconcile's trusted survivors.
+//
+// DEFERRED 2026-06-13: jointSolve itself is shipped + tested (jointSolve is the
+// proven unit), but feeding its candidates back into the CHAINED per-turn
+// pipeline (scoreOffensiveSpread sweeps them next turn) intermittently
+// destabilised the J.4 sim round-trip. The clean wiring needs feedback
+// isolation — surface joint's nature correction for display/use without
+// re-seeding the next turn's sequential sweep. Until then the mirrors call
+// reconcileCandidates directly (stable) and this helper is the staging ground.
 export function refineCandidates(p: {
   oppSpecies: string;
   oppLevel: number;

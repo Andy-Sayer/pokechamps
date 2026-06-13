@@ -21,12 +21,12 @@ import { writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDirPath, toId, getItem } from '../domain/data.js';
 import { loadPikaData, metaTeams, composeTeam, buildSet, baseSpeciesFor, type PikaData } from '../domain/metaTeams.js';
-import { scoreBrings } from '../domain/bring.js';
-import { searchIterative, type SearchInput } from '../domain/endgameSearch.js';
 import { detectTactics, profileFromSet, tacticLabel } from '../domain/tactics.js';
-import type { PokemonSet, OpponentEntry } from '../domain/types.js';
+import type { PokemonSet } from '../domain/types.js';
 import { NEUTRAL_FIELD } from '../domain/types.js';
 import { damageRange, maxHpFor } from '../domain/damage.js';
+import { type Matchup } from '../domain/teamSim.js';
+import { MatchupPool } from '../domain/matchupPool.js';
 
 const SAVE = process.argv.includes('--save');
 const DEPTH = Number(process.argv[process.argv.indexOf('--depth') + 1]) || 3;
@@ -41,50 +41,21 @@ const meta = metaTeams(pika, META_N, MAX_OVERLAP);
 console.log(`meta opponents (${meta.length}, ≤${MAX_OVERLAP} shared species between any two):`);
 for (const m of meta) console.log('  ', m.anchor, '—', m.sets.map(s => s.species).join(', '));
 
-/** Full-knowledge OpponentEntry for a known meta set: species + ability +
- *  item revealed, candidates pinned to the TRUE set so every damage calc in
- *  the search runs against the real spread. */
-function entryOf(set: PokemonSet): OpponentEntry {
-  return {
-    species: set.species,
-    ability: set.ability, item: set.item,
-    knownMoves: set.moves,
-    candidates: [set], candidateLikelihoods: [1],
-  };
-}
-
-interface Matchup { anchor: string; score: number; verdict: string; myBring: string[] }
-
-/** One simulated matchup: intelligent brings both sides, then maximin. */
-function evaluateMatchup(mine: PokemonSet[], opp: { anchor: string; sets: PokemonSet[] }, depth: number): Matchup {
-  const oppEntries = opp.sets.map(entryOf);
-  const myEntries = mine.map(entryOf);
-  // Each side picks its best bring KNOWING the other's six (open team sheets).
-  const myBring = scoreBrings(mine, oppEntries)[0]!;
-  const oppBring = scoreBrings(opp.sets, myEntries)[0]!;
-  const myIdx = myBring.myIndices;
-  const oppIdx = oppBring.myIndices;
-  const input: SearchInput = {
-    mine: myIdx.map((i, k) => ({ set: mine[i]!, hpPercent: 100, active: k < 2 })),
-    opp: oppIdx.map((j, k) => ({ entry: oppEntries[j]!, hpPercent: 100, active: k < 2 })),
-    field: { ...NEUTRAL_FIELD },
-    allOppRevealed: true,
-  };
-  const r = searchIterative(input, depth);
-  return { anchor: opp.anchor, score: r.score, verdict: r.verdict, myBring: myIdx.map(i => mine[i]!.species) };
-}
+// Worker pool: the 12 gauntlet matchups are independent, so they run in
+// parallel across cores. Results are identical to sequential (each worker runs
+// the same pure evaluateMatchup); falls back to synchronous transparently.
+const pool = new MatchupPool();
 
 interface Fitness { floor: number; avg: number; flex: number; matchups: Matchup[] }
 
-function evaluateTeam(mine: PokemonSet[], depth: number, abortBelow?: number): Fitness | null {
-  const matchups: Matchup[] = [];
-  for (const opp of meta) {
-    const m = evaluateMatchup(mine, opp, depth);
-    matchups.push(m);
-    // Early abort: this candidate's floor already lost to the incumbent.
-    if (abortBelow != null && m.score < abortBelow) return null;
-  }
+// All matchups run in parallel, so the early floor-abort the sequential path
+// used is gone — but wall-clock is ~one matchup instead of twelve, a far
+// bigger win. `abortBelow` is applied as a post-filter to preserve the
+// "pruned" semantics (null when the floor lost to the incumbent).
+async function evaluateTeam(mine: PokemonSet[], depth: number, abortBelow?: number): Promise<Fitness | null> {
+  const matchups = await pool.run(meta.map(opp => ({ mine, oppSets: opp.sets, oppAnchor: opp.anchor, depth })));
   const floor = Math.min(...matchups.map(m => m.score));
+  if (abortBelow != null && floor < abortBelow) return null;
   const avg = matchups.reduce((s, m) => s + m.score, 0) / matchups.length;
   const flex = new Set(matchups.flatMap(m => m.myBring)).size;
   return { floor, avg, flex, matchups };
@@ -224,7 +195,7 @@ const sweep: { label: string; sets: PokemonSet[]; fit: Fitness }[] = [];
 let pruneFloor: number | undefined;
 for (const s of seeds) {
   const t0 = Date.now();
-  const fit = evaluateTeam(s.sets, 2, pruneFloor);
+  const fit = await evaluateTeam(s.sets, 2, pruneFloor);
   if (!fit) { console.log(`  ${s.label}: pruned [${Date.now() - t0}ms]`); continue; }
   console.log(`  ${s.label}: floor ${Math.round(fit.floor)} avg ${Math.round(fit.avg)} flex ${fit.flex} [${Date.now() - t0}ms]`);
   sweep.push({ ...s, fit });
@@ -241,7 +212,7 @@ console.log(`\nphase 2: top ${Math.min(3, sweep.length)} finalists at depth ${DE
 let best: { label: string; sets: PokemonSet[]; fit: Fitness } | null = null;
 for (const s of sweep.slice(0, 3)) {
   const t0 = Date.now();
-  const fit = evaluateTeam(s.sets, DEPTH, best?.fit.floor);
+  const fit = await evaluateTeam(s.sets, DEPTH, best?.fit.floor);
   if (!fit) { console.log(`  ${s.label}: pruned at depth ${DEPTH} [${Date.now() - t0}ms]`); continue; }
   console.log(`  ${s.label}: floor ${Math.round(fit.floor)} avg ${Math.round(fit.avg)} flex ${fit.flex} [${Date.now() - t0}ms]`);
   if (!best || better(fit, best.fit)) best = { label: s.label, sets: s.sets, fit };
@@ -253,7 +224,7 @@ console.log(`\nbest seed: ${best.label} (floor ${Math.round(best.fit.floor)})`);
 // Hill-climb: replace single slots with high-usage alternatives while the
 // floor improves. Pool = top 20 usage mons not already on the team.
 // ---------------------------------------------------------------------------
-const pool = pika.topPokemon.slice(0, 20);
+const swapPool = pika.topPokemon.slice(0, 20);
 let improved = true;
 let rounds = 0;
 while (improved && rounds < 3) {
@@ -263,7 +234,7 @@ while (improved && rounds < 3) {
   const worst = best.fit.matchups.reduce((a, b) => (a.score < b.score ? a : b));
   console.log(`\nround ${rounds}: attacking worst matchup (${worst.anchor}, ${Math.round(worst.score)})`);
   for (let slot = 0; slot < 6 && !improved; slot++) {
-    for (const cand of pool) {
+    for (const cand of swapPool) {
       const base = baseSpeciesFor(cand);
       if (best.sets.some(s => baseSpeciesFor(s.species) === base)) continue;
       const others: PokemonSet[] = best.sets.filter((_, i) => i !== slot);
@@ -275,9 +246,9 @@ while (improved && rounds < 3) {
       if (megaCount > 1) continue;
       // Scout the swap at depth 2 (cheap, floor-aborted); a promising one is
       // re-verified at full depth before adoption.
-      const scout = evaluateTeam(trial, 2, best.fit.floor);
+      const scout = await evaluateTeam(trial, 2, best.fit.floor);
       if (!scout || !better(scout, best.fit)) continue;
-      const fit = evaluateTeam(trial, DEPTH);
+      const fit = await evaluateTeam(trial, DEPTH);
       if (fit && better(fit, best.fit)) {
         console.log(`  swap ${best.sets[slot]!.species} → ${candSet.species}: floor ${Math.round(fit.floor)} avg ${Math.round(fit.avg)}`);
         best = { label: `${best.label} +${candSet.species}`, sets: trial, fit };
@@ -307,3 +278,5 @@ if (SAVE) {
   writeFileSync(file, JSON.stringify(best.sets, null, 2));
   console.log(`\nsaved ${file}`);
 }
+
+pool.close();

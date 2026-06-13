@@ -19,10 +19,9 @@ import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDirPath, toId, getItem, getSpecies, isLegalItem, loadFormat } from '../domain/data.js';
 import { loadPikaData, metaTeams, composeTeam, baseSpeciesFor } from '../domain/metaTeams.js';
-import { scoreBrings } from '../domain/bring.js';
-import { searchIterative, type SearchInput } from '../domain/endgameSearch.js';
-import type { PokemonSet, OpponentEntry } from '../domain/types.js';
-import { NEUTRAL_FIELD } from '../domain/types.js';
+import type { PokemonSet } from '../domain/types.js';
+import { type Matchup } from '../domain/teamSim.js';
+import { MatchupPool } from '../domain/matchupPool.js';
 
 const SAVE = process.argv.includes('--save');
 const DEEP = 5;          // the decision depth — "at least 5 turns into the future"
@@ -34,38 +33,20 @@ const pika = loadPikaData();
 const meta = metaTeams(pika, META_N, MAX_OVERLAP);
 console.log(`gauntlet: ${meta.length} meta teams · decision depth ${DEEP} · scout depth ${SCOUT}`);
 
-function entryOf(set: PokemonSet): OpponentEntry {
-  return { species: set.species, ability: set.ability, item: set.item, knownMoves: set.moves, candidates: [set], candidateLikelihoods: [1] };
-}
-
-interface Matchup { anchor: string; score: number; verdict: string; myBring: string[] }
-function evaluateMatchup(mine: PokemonSet[], opp: { anchor: string; sets: PokemonSet[] }, depth: number): Matchup {
-  const oppEntries = opp.sets.map(entryOf);
-  const myEntries = mine.map(entryOf);
-  const myBring = scoreBrings(mine, oppEntries)[0]!;
-  const oppBring = scoreBrings(opp.sets, myEntries)[0]!;
-  const input: SearchInput = {
-    mine: myBring.myIndices.map((i, k) => ({ set: mine[i]!, hpPercent: 100, active: k < 2 })),
-    opp: oppBring.myIndices.map((j, k) => ({ entry: oppEntries[j]!, hpPercent: 100, active: k < 2 })),
-    field: { ...NEUTRAL_FIELD },
-    allOppRevealed: true,
-  };
-  const r = searchIterative(input, depth);
-  return { anchor: opp.anchor, score: r.score, verdict: r.verdict, myBring: myBring.myIndices.map(i => mine[i]!.species) };
-}
+// Worker pool: the 12 gauntlet matchups run in parallel across cores, with
+// results identical to sequential. At depth 5 (~16 min/matchup sequential)
+// this collapses a team's baseline to roughly one matchup's wall-clock.
+const pool = new MatchupPool();
 
 interface Fitness { floor: number; avg: number; matchups: Matchup[] }
-function evaluateTeam(mine: PokemonSet[], depth: number, abortBelow?: number, gauntlet = meta): Fitness | null {
-  const matchups: Matchup[] = [];
-  for (const opp of gauntlet) {
-    const t0 = Date.now();
-    const m = evaluateMatchup(mine, opp, depth);
-    if (depth >= DEEP) console.log(`    [d${depth}] vs ${m.anchor}: ${Math.round(m.score)} ${m.verdict} (${Math.round((Date.now() - t0) / 1000)}s)`);
-    matchups.push(m);
-    if (abortBelow != null && m.score < abortBelow) return null;
-  }
+async function evaluateTeam(mine: PokemonSet[], depth: number, abortBelow?: number, gauntlet = meta): Promise<Fitness | null> {
+  const t0 = Date.now();
+  const matchups = await pool.run(gauntlet.map(opp => ({ mine, oppSets: opp.sets, oppAnchor: opp.anchor, depth })));
+  const floor = Math.min(...matchups.map(m => m.score));
+  if (depth >= DEEP) console.log(`    [d${depth}] ${gauntlet.length} matchups, floor ${Math.round(floor)} (${Math.round((Date.now() - t0) / 1000)}s wall)`);
+  if (abortBelow != null && floor < abortBelow) return null;
   return {
-    floor: Math.min(...matchups.map(m => m.score)),
+    floor,
     avg: matchups.reduce((s, m) => s + m.score, 0) / matchups.length,
     matchups,
   };
@@ -143,7 +124,7 @@ for (const team of toTune) {
   console.log(`\n=== tuning: ${team.label} ===`);
   let cur = team.sets.map(s => ({ ...s, evs: { ...s.evs } }));
   console.log(`baseline at depth ${DEEP}…`);
-  let curFit = evaluateTeam(cur, DEEP)!;
+  let curFit = (await evaluateTeam(cur, DEEP))!;
   console.log(`  floor ${Math.round(curFit.floor)} avg ${Math.round(curFit.avg)}`);
   const changes: string[] = [];
   // The mons implicated in the worst matchups get tuned first.
@@ -156,15 +137,15 @@ for (const team of toTune) {
     const candidates: { desc: string; set: PokemonSet }[] = [];
     for (const item of itemVariants(mon, teamItems)) candidates.push({ desc: `${mon.species} item → ${item}`, set: { ...mon, item } });
     for (const v of spreadVariants(mon)) candidates.push({ desc: `${mon.species} spread → ${v.label} (${v.nature})`, set: { ...mon, nature: v.nature, evs: v.evs } });
-    const curScout = evaluateTeam(cur, SCOUT)!;     // once per mon, not per candidate
+    const curScout = (await evaluateTeam(cur, SCOUT))!;     // once per mon, not per candidate
     for (const cand of candidates) {
       const trial = cur.map((s, i) => (i === idx ? cand.set : s));
       // Scout shortlist (cheap), then the DEEP adoption gate.
-      const scout = evaluateTeam(trial, SCOUT, undefined);
+      const scout = await evaluateTeam(trial, SCOUT, undefined);
       if (!scout) continue;
       if (!better(scout, curScout)) continue;
       process.stdout.write(`  deep-checking ${cand.desc}… `);
-      const deep = evaluateTeam(trial, DEEP, curFit.floor);
+      const deep = await evaluateTeam(trial, DEEP, curFit.floor);
       if (deep && better(deep, curFit)) {
         console.log(`ADOPTED (floor ${Math.round(deep.floor)} avg ${Math.round(deep.avg)})`);
         cur = trial; curFit = deep; changes.push(cand.desc);
@@ -192,3 +173,5 @@ results.forEach((r, i) => {
     console.log(`  saved ${file}`);
   }
 });
+
+pool.close();

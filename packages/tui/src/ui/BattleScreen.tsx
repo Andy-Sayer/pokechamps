@@ -4,7 +4,7 @@ import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
 import type { Match, FieldState, DamageObservation, MoveAction, OpponentEntry, PokemonSet, Turn } from '@pokechamps/core/domain/types.js';
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
-import { scoreSpread, scoreOffensiveSpread, mostLikely, recoilDrainHpEvs, reconcileCandidates, refineCandidates, abilitiesRuledOutByHit } from '@pokechamps/core/domain/inference.js';
+import { scoreSpread, scoreOffensiveSpread, mostLikely, recoilDrainHpEvs, reconcileCandidates, abilitiesRuledOutByHit } from '@pokechamps/core/domain/inference.js';
 import { detectTactics, profileFromOpponentEntry, tacticLabel } from '@pokechamps/core/domain/tactics.js';
 import { PATTERN_COUNTERS } from '@pokechamps/core/domain/bring.js';
 import { abilitiesRuledOutByStatus, ruleOutAbilities, confirmAbility, attackerIgnoresAbilities } from '@pokechamps/core/domain/abilityInference.js';
@@ -1831,11 +1831,10 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       const opp = next.opponentTeam[oi];
       if (!opp?.candidates?.length || (opp.observations?.length ?? 0) < 2) continue;
       const level = opp.candidates[0]!.level;
-      const r = refineCandidates({
+      const r = reconcileCandidates({
         oppSpecies: opp.species, oppLevel: level, knownMoves: opp.knownMoves,
         candidates: opp.candidates.map(c => ({ evs: c.evs, nature: c.nature, item: c.item, ability: c.ability })),
         likelihoods: opp.candidateLikelihoods, history: opp.observations!,
-        ruledOutAbilities: opp.abilitiesRuledOut, hpEvCandidates: opp.hpEvLock,
       });
       if (r.candidates.length === opp.candidates.length) continue;
       opp.candidates = r.candidates.map(c => ({
