@@ -100,7 +100,10 @@ const seeds: { label: string; sets: PokemonSet[] }[] = [];
 const seen = new Set<string>();
 const addSeed = (label: string, sets: PokemonSet[] | null) => {
   if (!sets) return;
-  const key = sets.map(s => s.species).sort().join('|');
+  // Key includes MOVES — a niche-tech variant shares its species with the
+  // base stack but is a genuinely different team (species-only keying
+  // silently swallowed it).
+  const key = sets.map(s => `${s.species}:${[...s.moves].sort().join(',')}`).sort().join('|');
   if (seen.has(key)) return;
   seen.add(key);
   seeds.push({ label, sets });
