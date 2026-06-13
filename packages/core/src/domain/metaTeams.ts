@@ -46,20 +46,26 @@ export function buildSet(pika: PikaData, name: string, usedItems: Set<string>): 
   const format = loadFormat();
   const species = baseSpeciesFor(name);
   if (!isLegalSpecies(toId(species), format)) return null;
+  // Pikalytics marks an ITEMLESS set with a "Nothing"/"No Item"/"None" bucket
+  // (real for Acrobatics Talonflame etc.) — normalise those to a true empty
+  // item so the set doesn't carry a bogus item string that fails validation.
+  const ITEMLESS = new Set(['noitem', 'nothing', 'none', '']);
+  const normItem = (s: string | undefined) => (ITEMLESS.has(toId(s ?? '')) ? '' : s ?? '');
   const feat = d.featuredSets?.[0];
-  let item = feat?.item ?? d.items.find(i => i.name !== 'Other')?.name ?? '';
-  if (usedItems.has(toId(item))) {
-    const alt = d.items.find(i => i.name !== 'Other' && !usedItems.has(toId(i.name)))?.name;
+  let item = normItem(feat?.item ?? d.items.find(i => i.name !== 'Other')?.name);
+  // An itemless set never collides with the item clause; only real items do.
+  if (item && usedItems.has(toId(item))) {
+    const alt = d.items.find(i => i.name !== 'Other' && !ITEMLESS.has(toId(i.name)) && !usedItems.has(toId(i.name)))?.name;
     if (!alt) return null;
-    item = alt;
+    item = normItem(alt);
   }
   const ability = feat?.ability ?? d.abilities[0]?.name ?? '';
   const moves = (feat?.moves ?? d.moves.filter(m => m.name !== 'Other').slice(0, 4).map(m => m.name)).slice(0, 4);
   if (moves.length < 4) return null;
   const sp = d.topSpread?.sp ?? [0, 0, 0, 0, 0, 0];
   const evs = { hp: evFromSp(sp[0] ?? 0), atk: evFromSp(sp[1] ?? 0), def: evFromSp(sp[2] ?? 0), spa: evFromSp(sp[3] ?? 0), spd: evFromSp(sp[4] ?? 0), spe: evFromSp(sp[5] ?? 0) };
-  usedItems.add(toId(item));
-  return { species, level: format.level, nature: d.topSpread?.nature ?? 'Hardy', ability, item, evs, ivs: { ...MAX_IVS }, moves };
+  if (item) usedItems.add(toId(item));
+  return { species, level: format.level, nature: d.topSpread?.nature ?? 'Hardy', ability, item: item || undefined, evs, ivs: { ...MAX_IVS }, moves };
 }
 
 /** Greedy team from anchors + teammate correlations + global usage. Respects
