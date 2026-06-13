@@ -167,9 +167,13 @@ for (const anchor of pika.topPokemon.slice(0, 12)) addSeed(`${anchor} stack`, co
     .sort((a, b) => b.score - a.score);
   console.log('\nunderdog promise vs the gauntlet (top 6 of the sub-top-20):');
   for (const u of underdogs.slice(0, 6)) console.log(`  ${u.name.padEnd(16)} ${u.score.toFixed(1)}`);
-  if (underdogs.length >= 2) {
-    addSeed(`Underdogs (${underdogs[0]!.name}+${underdogs[1]!.name})`,
-      composeTeam(pika, [underdogs[0]!.name, underdogs[1]!.name]));
+  // Anchor the top underdog + the best one with a DIFFERENT base species
+  // (formes of the same mon would collapse under the species clause).
+  const first = underdogs[0];
+  const second = underdogs.find(u => baseSpeciesFor(u.name) !== baseSpeciesFor(first?.name ?? ''));
+  if (first && second) {
+    addSeed(`Underdogs (${first.name}+${second.name})`,
+      composeTeam(pika, [first.name, second.name]));
   }
 
   // (2) Niche tech on the strongest meta stack: counter-tech moves that the
