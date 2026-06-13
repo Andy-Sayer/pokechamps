@@ -614,6 +614,253 @@ export interface StoredObservation {
   observation: DamageObservation;
 }
 
+// Per-observation forward check: does this candidate's predicted damage contain
+// the observed value, and how well? Returns null when the obs is unscorable
+// (calc threw / not comparable) so the caller can skip it without penalty.
+// Shared by reconcileCandidates and jointSolve.
+function obsFit(
+  c: SpreadCandidate, h: StoredObservation,
+  oppSpecies: string, oppLevel: number, knownMoves: string[],
+): { within: boolean; like: number } | null {
+  const oppSpeciesForObs = h.oppIsAttacker ? h.observation.attackerSpecies : h.observation.defenderSpecies;
+  const oppSet = fullSet(oppSpeciesForObs || oppSpecies, c, oppLevel, knownMoves);
+  const attacker = h.oppIsAttacker ? oppSet : h.otherSet;
+  const defender = h.oppIsAttacker ? h.otherSet : oppSet;
+  let predicted;
+  try {
+    predicted = damageRange({
+      attacker, defender,
+      move: h.observation.move,
+      field: h.observation.field,
+      attackerSide: h.observation.attackerSide,
+      attackerOpts: { gimmickActive: h.observation.attackerGimmickActive, boosts: h.observation.attackerBoosts as any },
+      defenderOpts: { gimmickActive: h.observation.defenderGimmickActive, boosts: h.observation.defenderBoosts as any },
+      helpingHand: h.observation.helpingHand,
+      critical: h.observation.critical,
+    });
+  } catch { return null; }
+  const obs = observationToAbsoluteDamage(h.observation, defender);
+  return { within: predicted.max >= obs.lo && predicted.min <= obs.hi, like: candidateLikelihood(predicted.rolls, obs.lo, obs.hi) };
+}
+
+// The defensive / offensive stat a standard damaging move constrains on the
+// OPPONENT. Status, fixed-damage (Seismic Toss), Body Press (uses Def to
+// attack) and Foul Play (uses the target's Atk) don't constrain the opp's own
+// offensive stat, so they're null on the offensive side.
+function defensiveStatOf(move: string): 'def' | 'spd' | null {
+  const m = getMove(move) as { category?: string } | undefined;
+  return m?.category === 'Physical' ? 'def' : m?.category === 'Special' ? 'spd' : null;
+}
+function offensiveStatOf(move: string): 'atk' | 'spa' | null {
+  const m = getMove(move) as { category?: string; damage?: unknown; overrideOffensiveStat?: unknown; overrideOffensivePokemon?: unknown } | undefined;
+  if (!m || (m.category !== 'Physical' && m.category !== 'Special')) return null;
+  if (m.damage || m.overrideOffensiveStat || m.overrideOffensivePokemon === 'target') return null;
+  return m.category === 'Physical' ? 'atk' : 'spa';
+}
+
+export interface JointSolveResult { candidates: SpreadCandidate[]; likelihoods: number[] }
+
+// JOINT EV/nature/item inference. The sequential pipeline (scoreSpread →
+// scoreOffensiveSpread) commits to a NATURE defensively, then only overrides it
+// offensively as a last resort — so a single nature jointly consistent with a
+// hit the opp TOOK and a hit it DEALT is never generated (e.g. a special hit
+// constrains SpD while a physical hit it landed constrains Atk; only an
+// Adamant-family spread satisfying both should survive, but the defensive pass
+// might lock in Calm/-Atk first and the offensive pass can't recover the right
+// bulk).
+//
+// This solver enumerates nature × item × ability × HP ONCE and exploits that,
+// with those fixed, the opponent's defensive stat (from hits it took) and
+// offensive stat (from hits it dealt) are INDEPENDENT — so each is solved
+// marginally over the coarse EV grid, then the cartesian of the survivors is
+// re-checked against the FULL history (catching any cross-terms). Only worth
+// running when the history mixes both directions; returns null otherwise so the
+// caller keeps the cheaper sequential path. Bails to null past `calcBudget` so
+// live latency stays bounded.
+export function jointSolve(p: {
+  oppSpecies: string;
+  oppLevel: number;
+  knownMoves: string[];
+  history: StoredObservation[];
+  priorAbilities?: string[];
+  priorItems?: string[];
+  priorNatures?: string[];
+  excludeItems?: string[];
+  ruledOutAbilities?: string[];
+  itemKnownGone?: boolean;
+  hpEvCandidates?: number[];
+  calcBudget?: number;
+}): JointSolveResult | null {
+  const defensiveObs = p.history.filter(h => !h.oppIsAttacker);
+  const offensiveObs = p.history.filter(h => h.oppIsAttacker);
+  // Joint reasoning only adds something when BOTH directions are observed AND
+  // each actually constrains a stat (a status/fixed-damage move constrains
+  // neither). Otherwise the sequential solvers already cover it.
+  const constrainedDef = new Set(defensiveObs.map(h => defensiveStatOf(h.observation.move)).filter((s): s is 'def' | 'spd' => !!s));
+  const constrainedOff = new Set(offensiveObs.map(h => offensiveStatOf(h.observation.move)).filter((s): s is 'atk' | 'spa' => !!s));
+  if (!constrainedDef.size || !constrainedOff.size) return null;
+
+  const species = getSpecies(p.oppSpecies);
+  const speciesName = species?.name ?? p.oppSpecies;
+
+  // Axes (mirrors scoreSpread's filtering so the two solvers agree on the space).
+  const ruledOut = new Set((p.ruledOutAbilities ?? []).map(toId));
+  let abilities = p.priorAbilities ?? (species?.abilities ? Object.values(species.abilities) as string[] : ['']);
+  if (ruledOut.size) { const n = abilities.filter(a => !ruledOut.has(toId(a))); if (n.length) abilities = n; }
+  let items = p.itemKnownGone ? [''] : (p.priorItems ?? COMMON_DEFENSIVE_ITEMS.map(x => x ?? ''));
+  const excludeItems = new Set((p.excludeItems ?? []).map(toId));
+  items = items.filter(i => !i || (isLegalItem(i) && !excludeItems.has(toId(i))));
+  if (!items.length) items = [''];
+  const natures = p.priorNatures ?? NATURES_TO_TRY;
+  const hpAxis = p.hpEvCandidates?.length ? p.hpEvCandidates : COARSE_EVS;
+
+  // Pikalytics prior fills the UNCONSTRAINED stats so a candidate isn't
+  // implausibly zero where we have no signal.
+  const prior = priorsFromPikalytics(speciesName)[0]?.evs ?? { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
+
+  // Budget guard: project the calc count and bail if it would stall the UI.
+  const budget = p.calcBudget ?? 60_000;
+  const defAxisSize = hpAxis.length * (constrainedDef.has('def') ? COARSE_EVS.length : 1) * (constrainedDef.has('spd') ? COARSE_EVS.length : 1);
+  const offAxisSize = (constrainedOff.has('atk') ? COARSE_EVS.length : 1) * (constrainedOff.has('spa') ? COARSE_EVS.length : 1);
+  const projected = natures.length * items.length * abilities.length * (defAxisSize * defensiveObs.length + offAxisSize * offensiveObs.length);
+  if (projected > budget) return null;
+
+  const kept: { c: SpreadCandidate; like: number }[] = [];
+  const budgetStat = (stat: keyof Stats, ev: number, base: Stats) => ({ ...base, [stat]: ev });
+  for (const nature of natures) {
+    for (const itemRaw of items) {
+      const item = itemRaw || undefined;
+      for (const abilityRaw of abilities) {
+        const ability = abilityRaw || undefined;
+        const base: SpreadCandidate = { evs: { ...prior, atk: 0, spa: 0 }, nature, item, ability };
+        // --- Offensive marginals (independent of HP/defense) ---
+        const offCombos: Stats[] = [];
+        const sweepOff = (stat: 'atk' | 'spa', evs: Stats[]): Stats[] => {
+          if (!constrainedOff.has(stat)) return evs;
+          const out: Stats[] = [];
+          for (const e of evs) for (const ev of COARSE_EVS) out.push(budgetStat(stat, ev, e));
+          return out;
+        };
+        for (const combo of sweepOff('spa', sweepOff('atk', [{ ...base.evs }]))) {
+          const cand = { ...base, evs: combo };
+          if (offensiveObs.every(h => obsFit(cand, h, p.oppSpecies, p.oppLevel, p.knownMoves)?.within !== false)) offCombos.push(combo);
+        }
+        if (!offCombos.length) continue;
+        // --- Defensive marginals (depend on HP + the defensive stat) ---
+        const defCombos: Stats[] = [];
+        for (const hp of hpAxis) {
+          const sweepDef = (stat: 'def' | 'spd', evs: Stats[]): Stats[] => {
+            if (!constrainedDef.has(stat)) return evs;
+            const out: Stats[] = [];
+            for (const e of evs) for (const ev of COARSE_EVS) out.push(budgetStat(stat, ev, e));
+            return out;
+          };
+          for (const combo of sweepDef('spd', sweepDef('def', [budgetStat('hp', hp, base.evs)]))) {
+            const cand = { ...base, evs: combo };
+            if (defensiveObs.every(h => obsFit(cand, h, p.oppSpecies, p.oppLevel, p.knownMoves)?.within !== false)) defCombos.push(combo);
+          }
+        }
+        if (!defCombos.length) continue;
+        // --- Cartesian + full-history re-check (cross-terms) ---
+        for (const off of offCombos) {
+          for (const def of defCombos) {
+            const evs: Stats = {
+              hp: def.hp, def: def.def, spd: def.spd,
+              atk: constrainedOff.has('atk') ? off.atk : def.atk,
+              spa: constrainedOff.has('spa') ? off.spa : def.spa,
+              spe: prior.spe,
+            };
+            if (evs.hp + evs.atk + evs.def + evs.spa + evs.spd + evs.spe > 508) continue;
+            const cand: SpreadCandidate = { evs, nature, item, ability };
+            let ok = true, scoreSum = 0;
+            for (const h of p.history) {
+              const fit = obsFit(cand, h, p.oppSpecies, p.oppLevel, p.knownMoves);
+              if (fit == null) continue;
+              if (!fit.within) { ok = false; break; }
+              scoreSum += fit.like;
+            }
+            if (ok) kept.push({ c: cand, like: scoreSum });
+          }
+        }
+      }
+    }
+  }
+  if (!kept.length) return null;
+  // Dedupe identical spreads, keep the best-likelihood instance.
+  const seen = new Set<string>();
+  const deduped = kept
+    .sort((a, b) => b.like - a.like)
+    .filter(({ c }) => {
+      const k = `${c.evs.hp}|${c.evs.atk}|${c.evs.def}|${c.evs.spa}|${c.evs.spd}|${c.evs.spe}|${c.nature}|${c.item ?? ''}|${c.ability ?? ''}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  return { candidates: deduped.map(k => k.c), likelihoods: deduped.map(k => k.like) };
+}
+
+// One entry point for the post-turn candidate refinement, shared by both
+// finalizeTurn mirrors so they can't drift. Tries the JOINT solver first (it
+// only fires for histories mixing offensive + defensive observations, where it
+// generates a nature×EV set jointly consistent across both directions that the
+// sequential pipeline can't); otherwise falls back to reconcile (filtering the
+// existing candidates). Joint is constrained to the items/abilities already
+// believed so it re-opens only the nature/EV space — it never re-widens item
+// or ability narrowing that earlier observations established.
+export function refineCandidates(p: {
+  oppSpecies: string;
+  oppLevel: number;
+  knownMoves: string[];
+  candidates: SpreadCandidate[];
+  likelihoods?: number[];
+  history: StoredObservation[];
+  ruledOutAbilities?: string[];
+  hpEvCandidates?: number[];
+}): { candidates: SpreadCandidate[]; likelihoods: number[] } {
+  // Reconcile first: the subset of the PROVIDED candidates consistent with the
+  // whole history (this is what retains a correct seeded/chained spread).
+  const recon = reconcileCandidates(p);
+  const priorItems = [...new Set(p.candidates.map(c => c.item ?? ''))];
+  const priorAbilities = [...new Set(p.candidates.map(c => c.ability ?? '').filter(a => a))];
+  const joint = jointSolve({
+    oppSpecies: p.oppSpecies, oppLevel: p.oppLevel, knownMoves: p.knownMoves,
+    history: p.history,
+    priorItems: priorItems.length ? priorItems : undefined,
+    priorAbilities: priorAbilities.length ? priorAbilities : undefined,
+    ruledOutAbilities: p.ruledOutAbilities,
+    hpEvCandidates: p.hpEvCandidates,
+  });
+  if (!joint || !joint.candidates.length) return recon;
+  // Reconcile's survivors are kept IN FULL and unchanged — joint must never
+  // drop a trusted/seeded spread or alter the chained-observation feedback the
+  // sequential pipeline relies on. Joint then ADDS, into whatever room is left
+  // up to CAP, the correct-nature spreads the sequential pipeline couldn't
+  // reach (it commits to nature defensively first). New-nature joint
+  // candidates are added preferentially — that's joint's whole contribution.
+  const CAP = 40;
+  const key = (c: SpreadCandidate) =>
+    `${c.evs.hp}|${c.evs.atk}|${c.evs.def}|${c.evs.spa}|${c.evs.spd}|${c.evs.spe}|${c.nature}|${c.item ?? ''}|${c.ability ?? ''}`;
+  const out = [...recon.candidates];
+  const likes = [...recon.likelihoods];
+  const seen = new Set(out.map(key));
+  const reconNatures = new Set(recon.candidates.map(c => c.nature));
+  // New-nature joint candidates first (highest value), then the rest — both
+  // already likelihood-sorted within jointSolve.
+  const ordered = [
+    ...joint.candidates.map((c, i) => ({ c, l: joint.likelihoods[i] ?? 0 })).filter(x => !reconNatures.has(x.c.nature)),
+    ...joint.candidates.map((c, i) => ({ c, l: joint.likelihoods[i] ?? 0 })).filter(x => reconNatures.has(x.c.nature)),
+  ];
+  for (const { c, l } of ordered) {
+    if (out.length >= CAP) break;     // never truncates recon — recon was pushed whole
+    const k = key(c);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(c);
+    likes.push(l);
+  }
+  return { candidates: out, likelihoods: likes };
+}
+
 export function reconcileCandidates(p: {
   oppSpecies: string;
   oppLevel: number;
