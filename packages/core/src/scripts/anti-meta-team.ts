@@ -29,11 +29,15 @@ import { NEUTRAL_FIELD } from '../domain/types.js';
 
 const SAVE = process.argv.includes('--save');
 const DEPTH = Number(process.argv[process.argv.indexOf('--depth') + 1]) || 3;
-const META_N = 5;
+// Opponent pool: up to 12 top-anchor teams with a 3-species diversity gate,
+// so the pool spans real archetypes (goodstuff, sun, rain, TR, Tailwind) —
+// not five rotations of the same Sneasler-Garchomp core.
+const META_N = Number(process.argv[process.argv.indexOf('--meta') + 1]) || 12;
+const MAX_OVERLAP = 3;
 
 const pika = loadPikaData();
-const meta = metaTeams(pika, META_N);
-console.log(`meta opponents (${meta.length}):`);
+const meta = metaTeams(pika, META_N, MAX_OVERLAP);
+console.log(`meta opponents (${meta.length}, ≤${MAX_OVERLAP} shared species between any two):`);
 for (const m of meta) console.log('  ', m.anchor, '—', m.sets.map(s => s.species).join(', '));
 
 /** Full-knowledge OpponentEntry for a known meta set: species + ability +
@@ -100,7 +104,7 @@ const addSeed = (label: string, sets: PokemonSet[] | null) => {
   seen.add(key);
   seeds.push({ label, sets });
 };
-for (const anchor of pika.topPokemon.slice(0, 8)) addSeed(`${anchor} stack`, composeTeam(pika, [anchor]));
+for (const anchor of pika.topPokemon.slice(0, 12)) addSeed(`${anchor} stack`, composeTeam(pika, [anchor]));
 // Tactic-core seeds: strongest catalog pair combos whose pieces have usage
 // data — the off-meta lines (perish trap, TR, weather) compete on equal
 // footing with the meta stacks and win seed selection only if the simulated
@@ -122,16 +126,34 @@ for (const anchor of pika.topPokemon.slice(0, 8)) addSeed(`${anchor} stack`, com
   }
 }
 
-console.log(`\nevaluating ${seeds.length} seed teams at depth ${DEPTH} vs ${meta.length} meta teams…`);
-let best: { label: string; sets: PokemonSet[]; fit: Fitness } | null = null;
+// Phase 1: fast depth-2 sweep over every seed (early floor-abort prunes).
+console.log(`\nphase 1: ${seeds.length} seed teams at depth 2 vs ${meta.length} meta teams…`);
+const sweep: { label: string; sets: PokemonSet[]; fit: Fitness }[] = [];
+let pruneFloor: number | undefined;
 for (const s of seeds) {
   const t0 = Date.now();
-  const fit = evaluateTeam(s.sets, DEPTH, best ? best.fit.floor : undefined);
-  if (!fit) { console.log(`  ${s.label}: pruned (floor below incumbent) [${Date.now() - t0}ms]`); continue; }
+  const fit = evaluateTeam(s.sets, 2, pruneFloor);
+  if (!fit) { console.log(`  ${s.label}: pruned [${Date.now() - t0}ms]`); continue; }
   console.log(`  ${s.label}: floor ${Math.round(fit.floor)} avg ${Math.round(fit.avg)} flex ${fit.flex} [${Date.now() - t0}ms]`);
-  if (!best || better(fit, best.fit)) best = { ...s, fit };
+  sweep.push({ ...s, fit });
+  const floors = sweep.map(x => x.fit.floor).sort((a, b) => b - a);
+  // Prune anything that can't beat the 3rd-best floor (we keep 3 finalists).
+  pruneFloor = floors[2];
 }
-if (!best) { console.error('no viable seed'); process.exit(1); }
+sweep.sort((a, b) => (better(a.fit, b.fit) ? -1 : 1));
+if (!sweep.length) { console.error('no viable seed'); process.exit(1); }
+
+// Phase 2: verify the top 3 finalists at full depth.
+console.log(`\nphase 2: top ${Math.min(3, sweep.length)} finalists at depth ${DEPTH}…`);
+let best: { label: string; sets: PokemonSet[]; fit: Fitness } | null = null;
+for (const s of sweep.slice(0, 3)) {
+  const t0 = Date.now();
+  const fit = evaluateTeam(s.sets, DEPTH);
+  if (!fit) continue;
+  console.log(`  ${s.label}: floor ${Math.round(fit.floor)} avg ${Math.round(fit.avg)} flex ${fit.flex} [${Date.now() - t0}ms]`);
+  if (!best || better(fit, best.fit)) best = { label: s.label, sets: s.sets, fit };
+}
+if (!best) { console.error('no finalist survived'); process.exit(1); }
 console.log(`\nbest seed: ${best.label} (floor ${Math.round(best.fit.floor)})`);
 
 // ---------------------------------------------------------------------------
@@ -158,7 +180,11 @@ while (improved && rounds < 3) {
       const trial: PokemonSet[] = [...others, candSet];
       const megaCount = trial.filter((s: PokemonSet) => !!(getItem(s.item ?? '') as { megaStone?: unknown } | undefined)?.megaStone).length;
       if (megaCount > 1) continue;
-      const fit = evaluateTeam(trial, DEPTH, best.fit.floor);
+      // Scout the swap at depth 2 (cheap, floor-aborted); a promising one is
+      // re-verified at full depth before adoption.
+      const scout = evaluateTeam(trial, 2, best.fit.floor);
+      if (!scout || !better(scout, best.fit)) continue;
+      const fit = evaluateTeam(trial, DEPTH);
       if (fit && better(fit, best.fit)) {
         console.log(`  swap ${best.sets[slot]!.species} → ${candSet.species}: floor ${Math.round(fit.floor)} avg ${Math.round(fit.avg)}`);
         best = { label: `${best.label} +${candSet.species}`, sets: trial, fit };

@@ -97,17 +97,25 @@ export function composeTeam(pika: PikaData, anchors: string[]): PokemonSet[] | n
 }
 
 /** The top-N meta teams: each top-usage mon as anchor, filled by its real
- *  teammate correlations. These are "what you'll actually face". */
-export function metaTeams(pika: PikaData, n: number): { anchor: string; sets: PokemonSet[] }[] {
+ *  teammate correlations. `maxOverlap` is a DIVERSITY gate — a new team may
+ *  share at most that many species with any already-selected team, so the
+ *  pool spans archetypes (goodstuff / sun / rain / Trick Room / Tailwind)
+ *  instead of five rotations of the same Sneasler-Garchomp core. */
+export function metaTeams(pika: PikaData, n: number, maxOverlap = 6): { anchor: string; sets: PokemonSet[] }[] {
   const out: { anchor: string; sets: PokemonSet[] }[] = [];
-  const seen = new Set<string>();
+  const seen: Set<string>[] = [];
   for (const anchor of pika.topPokemon) {
     if (out.length >= n) break;
     const sets = composeTeam(pika, [anchor]);
     if (!sets) continue;
-    const key = sets.map(s => s.species).sort().join('|');
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const species = new Set(sets.map(s => s.species));
+    const tooSimilar = seen.some(prev => {
+      let shared = 0;
+      for (const sp of species) if (prev.has(sp)) shared++;
+      return shared > maxOverlap;
+    });
+    if (tooSimilar) continue;
+    seen.push(species);
     out.push({ anchor, sets });
   }
   return out;
