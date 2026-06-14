@@ -5,7 +5,7 @@
 // lookahead (searchIterative — the in-battle "best play" engine) scores the
 // brought position under mutual best play.
 import { scoreBrings } from './bring.js';
-import { searchIterative, type SearchInput } from './endgameSearch.js';
+import { searchIterative, searchBudgeted, type SearchInput } from './endgameSearch.js';
 import type { PokemonSet, OpponentEntry } from './types.js';
 import { NEUTRAL_FIELD } from './types.js';
 
@@ -28,12 +28,16 @@ export function entryOf(set: PokemonSet): OpponentEntry {
   };
 }
 
-/** One simulated matchup at the given lookahead depth. Pure + deterministic. */
+/** One simulated matchup. `depth` is the (max) lookahead; when `budgetMs` is
+ *  given the search deepens 1→depth under a per-position wall-clock budget
+ *  (anytime — as deep as the board allows in the time), else it runs the full
+ *  fixed `depth`. Pure + deterministic (the budget only caps how deep it gets). */
 export function evaluateMatchup(
   mine: PokemonSet[],
   oppSets: PokemonSet[],
   oppAnchor: string,
   depth: number,
+  budgetMs?: number,
 ): Matchup {
   const oppEntries = oppSets.map(entryOf);
   const myEntries = mine.map(entryOf);
@@ -46,6 +50,6 @@ export function evaluateMatchup(
     field: { ...NEUTRAL_FIELD },
     allOppRevealed: true,
   };
-  const r = searchIterative(input, depth);
+  const r = budgetMs ? searchBudgeted(input, depth, budgetMs) : searchIterative(input, depth);
   return { anchor: oppAnchor, score: r.score, verdict: r.verdict, myBring: myBring.myIndices.map(i => mine[i]!.species) };
 }

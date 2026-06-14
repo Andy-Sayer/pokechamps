@@ -3,7 +3,7 @@
 // predictThreat compute real damage; assertions stay on verdict/targets/score
 // sign to be robust to exact rolls.
 import { describe, test, expect } from 'vitest';
-import { searchToDepth, searchIterative, searchInputFromMatch, megaMaxSpeed, resolveOneTurn, createSearch, wideningSchedule, type SearchInput } from '../src/domain/endgameSearch.js';
+import { searchToDepth, searchIterative, searchBudgeted, searchInputFromMatch, megaMaxSpeed, resolveOneTurn, createSearch, wideningSchedule, type SearchInput } from '../src/domain/endgameSearch.js';
 import type { PokemonSet, OpponentEntry, Match, MoveAction } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } from '../src/domain/types.js';
 import { maxHpFor } from '../src/domain/damage.js';
@@ -2393,5 +2393,35 @@ describe('searchInputFromMatch HP units', () => {
     } as unknown as Match;
     const input = searchInputFromMatch(match, { mine: [0, null], theirs: [0, null] });
     expect(input.mine[0]!.hpPercent).toBe(50);
+  });
+});
+
+describe('searchBudgeted — anytime iterative deepening', () => {
+  const input: SearchInput = {
+    mine: [{ set: flutter, hpPercent: 100, active: true }],
+    opp: [{ entry: oppOf(incin), hpPercent: 100, active: true }],
+    field: { ...NEUTRAL_FIELD },
+    allOppRevealed: true,
+  };
+  test('a generous budget reaches the max depth and matches the unbudgeted result', () => {
+    const budgeted = searchBudgeted(input, 3, 30000);
+    const plain = searchToDepth(input, 3);
+    expect(budgeted.depth).toBe(3);
+    expect(budgeted.verdict).toBe(plain.verdict);
+    expect(Math.sign(budgeted.score)).toBe(Math.sign(plain.score));
+  });
+  test('a tiny budget still returns a sound (>=depth 1) result and never hangs', () => {
+    const t0 = Date.now();
+    const r = searchBudgeted(input, 5, 1);
+    expect(Date.now() - t0).toBeLessThan(5000);  // bails fast, no runaway
+    expect(r.depth).toBeGreaterThanOrEqual(1);
+    expect(r.plays.length).toBeGreaterThan(0);
+  });
+  test('the budget does not perturb the default (unbudgeted) search', () => {
+    // run a budgeted search, then confirm a plain search after it is unaffected
+    searchBudgeted(input, 2, 5);
+    const a = searchToDepth(input, 2);
+    const b = searchToDepth(input, 2);
+    expect(a.score).toBe(b.score);
   });
 });

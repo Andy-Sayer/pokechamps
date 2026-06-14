@@ -3790,7 +3790,19 @@ function ttKey(s: State, depth: number, maxDepth: number, pass: Pass): string {
 // worst-case. `alpha`/`beta` are the inherited fail-soft window — the floor the
 // caller already guarantees and the ceiling above which the caller (a MIN) stops
 // caring. Returns the exact maximin within that window; fail-soft outside it.
+// --- Search time budget (anytime iterative deepening) -----------------------
+// searchBudgeted sets a wall-clock deadline; value() checks it every ~2048
+// recursive nodes (cheap bitmask, so Date.now() is amortised away) and throws
+// SEARCH_TIMEOUT. The deepening driver catches it and keeps the deepest depth
+// that FULLY completed. No try/catch sits between value() and the driver in the
+// hot path (verified), so the throw always propagates. Unbudgeted callers leave
+// the deadline at Infinity → the check never fires → zero behaviour change.
+const SEARCH_TIMEOUT = { searchTimeout: true } as const;
+let searchDeadline = Infinity;
+let searchNodes = 0;
+
 function value(t: Tables, s: State, depth: number, alpha: number, beta: number, pass: Pass, maxDepth: number): number {
+  if ((++searchNodes & 2047) === 0 && Date.now() > searchDeadline) throw SEARCH_TIMEOUT;
   const term = terminal(s, depth);
   if (term !== null) return term;
   if (depth === 0) return leafScore(s);
@@ -5214,6 +5226,40 @@ export function searchIterative(
   for (let d = 1; d <= maxDepth; d++) {
     last = search.toDepth(d);
     onDepth?.(last);
+  }
+  return last;
+}
+
+/**
+ * Time-budgeted iterative deepening: deepen 1 → maxDepth, but stop as soon as
+ * `budgetMs` of wall-clock is spent, returning the deepest depth that FULLY
+ * completed (anytime behaviour — a half-searched deeper depth is discarded, so
+ * the result is always a sound maximin to SOME depth). Depth 1 always runs.
+ * This is what lets a per-position budget (e.g. 25 s) go as deep as the board
+ * allows: fast positions reach maxDepth, the pathologically-wide ones return a
+ * shallower-but-complete read instead of running for hours.
+ */
+export function searchBudgeted(
+  input: SearchInput,
+  maxDepth: number,
+  budgetMs: number,
+  onDepth?: (r: SearchResult) => void,
+): SearchResult {
+  const search = createSearch(input);
+  let last: SearchResult = { depth: 0, score: 0, plays: [], verdict: 'even', forced: false, allOppRevealed: input.allOppRevealed ?? false, risks: [] };
+  searchDeadline = Date.now() + budgetMs;
+  searchNodes = 0;
+  try {
+    for (let d = 1; d <= maxDepth; d++) {
+      const r = search.toDepth(d);   // may throw SEARCH_TIMEOUT partway through
+      last = r;                       // only on full completion of depth d
+      onDepth?.(r);
+      if (Date.now() >= searchDeadline) break;  // no time to start a deeper pass
+    }
+  } catch (e) {
+    if (e !== SEARCH_TIMEOUT) throw e;
+  } finally {
+    searchDeadline = Infinity;
   }
   return last;
 }

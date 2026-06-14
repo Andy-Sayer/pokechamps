@@ -1,33 +1,33 @@
-// Spread optimizer: for each team mon, generate attack/speed breakpoint
-// candidates that pour the freed SP into bulk, and let the PARALLEL maximin
-// gauntlet decide which actually wins more games. Tests the thesis directly —
-// if an attacker only 2HKOs a target, the candidate with bulk (that survives
-// the return hit) should out-score the full-offense one in simulated battle.
+// Spread optimizer (time-budgeted). For each team mon, generate attack/speed
+// breakpoint candidates that pour the freed SP into bulk, and let the PARALLEL
+// gauntlet decide which wins more games — directly testing "if I only 2HKO a
+// target, do I want bulk to survive the return hit?".
 //
 //   NODE_OPTIONS=--max-old-space-size=8192 npx tsx packages/core/src/scripts/optimize-spreads.ts --save
-//   flags: --scout N (shortlist depth, default 2) · --verify N (decision depth,
-//          default 4) · --hours H (wall-clock budget, default 12) · --meta N
+//   flags: --budget MS (per-matchup wall-clock, default 25000) · --maxdepth N
+//          (iterative-deepening cap, default 5) · --threads N (default 20) ·
+//          --hours H (total budget, default 12) · --meta N
 //
-// Coordinate descent: per mon, scout every candidate at --scout, verify the top
-// few at --verify, adopt the best that beats the incumbent, loop mons, repeat
-// rounds until no improvement or the deadline. Saves best-so-far on every
-// improvement so a long run is never lost.
+// Every matchup search deepens 1→maxdepth under the per-position budget — fast
+// boards reach depth 5, the pathologically wide ones return the deepest depth
+// that fit in the budget (anytime). Coordinate descent: per mon, evaluate ALL
+// candidate spreads in one big parallel batch, adopt the best that beats the
+// incumbent, loop until no improvement or the deadline. Saves on every gain.
 import { writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDirPath, toId } from '../domain/data.js';
 import { spFromEv } from '../domain/pikalytics.js';
 import { loadPikaData, metaTeams } from '../domain/metaTeams.js';
-import { MatchupPool } from '../domain/matchupPool.js';
+import { MatchupPool, type MatchupTask } from '../domain/matchupPool.js';
 import { candidateSpreads } from '../domain/breakpoints.js';
+import type { Matchup } from '../domain/teamSim.js';
 import type { PokemonSet } from '../domain/types.js';
 
 const arg = (f: string, d: number) => { const i = process.argv.indexOf(f); return i >= 0 ? Number(process.argv[i + 1]) : d; };
 const SAVE = process.argv.includes('--save');
-const SCOUT = arg('--scout', 2);
-// Decision depth defaults to 3: the depth that validated the floor-0 team and
-// the practical ceiling for a 12h multi-gauntlet run (the bulky Aegislash board
-// explodes past it). --verify 4 is available if you accept far fewer rounds.
-const VERIFY = arg('--verify', 3);
+const BUDGET = arg('--budget', 25000);
+const MAXDEPTH = arg('--maxdepth', 5);
+const THREADS = arg('--threads', 20);
 const HOURS = arg('--hours', 12);
 const META_N = arg('--meta', 12);
 const MAX_OVERLAP = 3;
@@ -38,21 +38,16 @@ const hhmm = (ms: number) => `${Math.floor(ms / 3600000)}h${String(Math.floor((m
 const pika = loadPikaData();
 const meta = metaTeams(pika, META_N, MAX_OVERLAP);
 const defenders = meta.flatMap(m => m.sets).filter((s, i, a) => a.findIndex(x => x.species === s.species) === i);
-const pool = new MatchupPool();
-console.log(`spread optimizer · ${meta.length} meta teams · scout d${SCOUT} / verify d${VERIFY} · budget ${HOURS}h`);
+const pool = new MatchupPool(THREADS);
+console.log(`spread optimizer · ${meta.length} meta teams · ${BUDGET / 1000}s/matchup, deepen 1→${MAXDEPTH} · ${THREADS} threads · budget ${HOURS}h`);
 
 const teamPath = join(dataDirPath(), 'my-teams', 'anti-meta.json');
 let team: PokemonSet[] = JSON.parse(readFileSync(teamPath, 'utf8'));
 
 interface Fit { floor: number; avg: number }
 const better = (a: Fit, b: Fit) => (a.floor !== b.floor ? a.floor > b.floor : a.avg > b.avg);
-
-async function fitness(t: PokemonSet[], depth: number, abortBelow?: number): Promise<Fit | null> {
-  const ms = await pool.run(meta.map(opp => ({ mine: t, oppSets: opp.sets, oppAnchor: opp.anchor, depth })));
-  const floor = Math.min(...ms.map(m => m.score));
-  if (abortBelow != null && floor < abortBelow) return null;
-  return { floor, avg: ms.reduce((s, m) => s + m.score, 0) / ms.length };
-}
+const fitOf = (ms: Matchup[]): Fit => ({ floor: Math.min(...ms.map(m => m.score)), avg: ms.reduce((s, m) => s + m.score, 0) / ms.length });
+const tasksFor = (t: PokemonSet[]): MatchupTask[] => meta.map(opp => ({ mine: t, oppSets: opp.sets, oppAnchor: opp.anchor, depth: MAXDEPTH, budgetMs: BUDGET }));
 
 function spStr(s: PokemonSet): string {
   const k: [keyof typeof s.evs, string][] = [['hp', 'HP'], ['atk', 'Atk'], ['def', 'Def'], ['spa', 'SpA'], ['spd', 'SpD'], ['spe', 'Spe']];
@@ -60,52 +55,41 @@ function spStr(s: PokemonSet): string {
 }
 const rainMon = (s: PokemonSet) => s.moves.some(m => /hurricane|weather ball/i.test(m)) || toId(s.ability ?? '') === 'drizzle';
 
-console.log('\nbaseline at verify depth…');
-let baseFit = (await fitness(team, VERIFY))!;
+console.log('\nbaseline…');
+let baseFit = fitOf(await pool.run(tasksFor(team)));
 console.log(`  floor ${Math.round(baseFit.floor)} avg ${Math.round(baseFit.avg)}`);
-const original = team.map(s => ({ species: s.species, spread: spStr(s) }));
+const original = team.map(s => spStr(s));
 
-let round = 0;
+let roundN = 0;
 while (timeLeft() > 0) {
-  round++;
+  roundN++;
   let improved = false;
-  console.log(`\n=== round ${round} (${hhmm(timeLeft())} left) ===`);
+  console.log(`\n=== round ${roundN} (${hhmm(timeLeft())} left) ===`);
   for (let i = 0; i < team.length; i++) {
     if (timeLeft() <= 0) break;
-    const mon = team[i]!;
-    const cands = candidateSpreads(mon, defenders, defenders, rainMon(mon));
-    console.log(`\n${mon.species}: ${cands.length} candidate spreads`);
-    // Scout every candidate cheaply.
-    const scored: { label: string; set: PokemonSet; f: Fit }[] = [];
-    for (const c of cands) {
-      if (timeLeft() <= 0) break;
-      const trial = team.map((s, k) => (k === i ? c.set : s));
-      const f = await fitness(trial, SCOUT);
-      if (f) scored.push({ ...c, f });
+    const cands = candidateSpreads(team[i]!, defenders, defenders, rainMon(team[i]!));
+    // One big parallel batch: every candidate × every meta opponent.
+    const t0 = Date.now();
+    const flat: MatchupTask[] = cands.flatMap(c => meta.map(opp => ({ mine: team.map((s, k) => (k === i ? c.set : s)), oppSets: opp.sets, oppAnchor: opp.anchor, depth: MAXDEPTH, budgetMs: BUDGET })));
+    const results = await pool.run(flat);
+    // Aggregate back per candidate (results are in input order).
+    type Best = { label: string; set: PokemonSet; fit: Fit };
+    const scored: Best[] = cands.map((c, ci) => ({ label: c.label, set: c.set, fit: fitOf(results.slice(ci * meta.length, (ci + 1) * meta.length)) }));
+    const best: Best | undefined = scored.reduce<Best | undefined>((b, c) => (!b || better(c.fit, b.fit) ? c : b), undefined);
+    const wall = Math.round((Date.now() - t0) / 1000);
+    if (best && better(best.fit, baseFit)) {
+      console.log(`  ${team[i]!.species}: ADOPT ${best.label} -> floor ${Math.round(best.fit.floor)} avg ${Math.round(best.fit.avg)}  [${spStr(best.set)}]  (${cands.length} cands, ${wall}s)`);
+      team[i] = best.set; baseFit = best.fit; improved = true;
+      if (SAVE) writeFileSync(teamPath, JSON.stringify(team, null, 2));
+    } else {
+      console.log(`  ${team[i]!.species}: kept ${spStr(team[i]!)} (best cand floor ${best ? Math.round(best.fit.floor) : '—'}, ${cands.length} cands, ${wall}s)`);
     }
-    scored.sort((a, b) => (better(a.f, b.f) ? -1 : 1));
-    // Verify the top few deep; adopt the first that beats the incumbent.
-    for (const c of scored.slice(0, 3)) {
-      if (timeLeft() <= 0) break;
-      const trial = team.map((s, k) => (k === i ? c.set : s));
-      const f = await fitness(trial, VERIFY, baseFit.floor);
-      if (f && better(f, baseFit)) {
-        console.log(`  ADOPT ${c.label}: floor ${Math.round(f.floor)} avg ${Math.round(f.avg)}  [${spStr(c.set)}]`);
-        team = trial; baseFit = f; improved = true;
-        if (SAVE) writeFileSync(teamPath, JSON.stringify(team, null, 2));
-        break;
-      }
-    }
-    if (!improved || scored.length === 0) console.log(`  (kept ${spStr(mon)})`);
   }
   if (!improved) { console.log('\nno improvement this round — converged.'); break; }
 }
 
 console.log('\n=== OPTIMIZED SPREADS ===');
-team.forEach((s, i) => {
-  const ch = original[i]!.spread !== spStr(s) ? '  <- changed' : '';
-  console.log(`  ${s.species.padEnd(11)} ${s.nature.padEnd(8)} ${spStr(s)}${ch}`);
-});
-console.log(`\nfinal floor ${Math.round(baseFit.floor)} avg ${Math.round(baseFit.avg)} (was floor ${Math.round((await fitness(team, VERIFY))!.floor)})`);
+team.forEach((s, i) => console.log(`  ${s.species.padEnd(11)} ${s.nature.padEnd(8)} ${spStr(s)}${original[i] !== spStr(s) ? '  <- changed' : ''}`));
+console.log(`\nfinal floor ${Math.round(baseFit.floor)} avg ${Math.round(baseFit.avg)}`);
 if (SAVE) { writeFileSync(teamPath, JSON.stringify(team, null, 2)); console.log(`saved ${teamPath}`); }
 pool.close();
