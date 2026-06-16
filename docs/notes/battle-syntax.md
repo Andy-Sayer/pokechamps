@@ -119,6 +119,38 @@ Encore/Taunt/Disable are move-restricting volatiles (Bulbapedia: Taunt 3t / Enco
 /quit  /q        end match
 ```
 
+## Reference by species name + live resolution
+
+You don't have to look up which slot a mon is in. Anywhere a `m1`/`o1` ref goes
+(actor, target, **and** state lines), you can name the mon instead:
+
+```
+mSableye > Will-O-Wisp > oPelipper > 40    ← name-based actor + target
+mSnea > Close Combat > o1 > 33             ← prefix abbreviation (Sneasler)
+oPelliper brn                              ← typo-tolerant (→ Pelipper)
+```
+
+A ref of the form `m`/`o` + a **letter** (not a digit) is a species token,
+resolved against that side's roster — exact → unique prefix → unique substring →
+unique subsequence → nearest edit-distance (only a handful of candidates, so a
+typo like `Pelliper` still lands). `canonicalizeRefs()` (`turnparser.ts`) rewrites
+it to the canonical numeric ref **up front**, before the rest of the parser runs:
+`m2` for an active mon, `my4`/`op4` for a benched one. So the whole grammar stays
+slot-based — species refs are pure sugar resolved in one pass.
+
+**Live materialisation (the point is: no doubt about what got computed).**
+- Typing `>` (or Tab) rewrites the buffer so resolution is **visible**: a species
+  ref becomes `m2`, and a unique partial move expands to its full name
+  (`m2 > tail >` → `m2 > Tailwind > `). Ambiguous moves are left for the
+  suggestion list — never guessed.
+- A live **⮑ parsed-as line** under the input echoes the fully-glossed
+  interpretation (`m2 (Sableye) · Tailwind → o1 (Pelipper) · 33% left`) so you
+  verify refs + move without looking up to the board.
+- The draft list + turn history gloss every ref the same way (`m2 (Sableye) > …`).
+  The `(species)` gloss is decorative — `canonicalizeRefs()` strips it, so an
+  `/edit`'d log line round-trips. Gloss-stripping is **position-scoped** to ref
+  tokens, so a damage-slot `(berry)` / `(crit)` is never eaten.
+
 ## Reference resolution rules
 
 - `o1` / `o2` / `m1` / `m2` are **active-slot refs** (look up via `activeIdx`).

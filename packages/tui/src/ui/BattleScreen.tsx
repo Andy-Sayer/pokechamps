@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
-import type { Match, FieldState, DamageObservation, MoveAction, OpponentEntry, PokemonSet, Turn } from '@pokechamps/core/domain/types.js';
+import type { Match, FieldState, DamageObservation, MoveAction, OpponentEntry, PokemonSet, Turn, FieldSide } from '@pokechamps/core/domain/types.js';
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
 import { scoreSpread, scoreOffensiveSpread, mostLikely, recoilDrainHpEvs, reconcileCandidates, abilitiesRuledOutByHit } from '@pokechamps/core/domain/inference.js';
 import { detectTactics, profileFromOpponentEntry, tacticLabel } from '@pokechamps/core/domain/tactics.js';
@@ -18,7 +18,7 @@ import { isAvailable as aiAvailable } from '@pokechamps/core/ai/client.js';
 import type { Stores } from '@pokechamps/core/storage/index.js';
 import { getSpecies, getMove, getAbility, getItem, toId, isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, isSpreadMove, isTrappingMove, moveFlinchChance } from '@pokechamps/core/domain/data.js';
 import { defaultOpponentSet } from '@pokechamps/core/domain/bring.js';
-import { parseTurnLine, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
+import { parseTurnLine, canonicalizeRefs, previewTurnLine, resolveMoveToken, parseActor, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs, hazardClearEffect, applyHazardClear } from '@pokechamps/core/domain/hazards.js';
 import { fieldMoveEffect, applyFieldMove } from '@pokechamps/core/domain/fieldMoves.js';
 import { EFFECT_DURATIONS } from '@pokechamps/core/domain/durations.js';
@@ -2406,6 +2406,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // ---------------- suggestion derivation ----------------
 
   const sctx = useMemo(() => deriveSuggestionContext(input, ctxWithDraft), [input, ctxWithDraft]);
+  // Glossed "parsed-as" echo of the in-progress line — the verification surface
+  // so you confirm refs + the resolved move without looking up to the board.
+  const inputPreview = useMemo(() => previewTurnLine(input, ctxWithDraft), [input, ctxWithDraft]);
   const suggestions = useMemo(
     () => getSuggestions(sctx, { myTeam: match.myTeam, opponentTeam: match.opponentTeam, myFainted: match.myFainted, bring: match.bring }, 8),
     [sctx, match.myTeam, match.opponentTeam, match.myFainted],
@@ -3457,7 +3460,20 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
           <TextInput
             key={inputKey}
             value={input}
-            onChange={setInput}
+            onChange={next => {
+              // The instant a `>` is typed, materialise the just-finished field
+              // in the buffer: species refs → `m2`, a unique partial move → its
+              // full name. So the line you see is the line that gets computed.
+              if (next.length === input.length + 1 && next.endsWith('>')) {
+                const expanded = expandOnSep(next, ctxWithDraft);
+                if (expanded !== next) {
+                  setInput(expanded);
+                  setInputKey(k => k + 1); // remount → cursor jumps to the end
+                  return;
+                }
+              }
+              setInput(next);
+            }}
             focus={!pendingReplacement && !match.outcome && !overrideOpen}
             onSubmit={value => {
               const trimmed = value.trim();
@@ -3517,6 +3533,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             }}
           />
         </Box>
+        {input.length > 0 && inputPreview && !input.trim().startsWith('/') && (
+          <Box marginTop={1}>
+            <Text dimColor>⮑ </Text><Text color="cyan">{inputPreview}</Text>
+          </Box>
+        )}
         {input.length > 0 && (
           <Box flexDirection="column" marginTop={1} borderStyle="round" paddingX={1}>
             {sctx.kind === 'none' && damageHintTargetSide ? (
@@ -3527,7 +3548,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
               </Text>
             ) : sctx.kind === 'none' ? (
               <Text dimColor>
-                Autocomplete: type <Text color="white">{'m1 > '}</Text> (or m2/o1/o2) to start a move; <Text color="white">m1 &gt; switch &gt; </Text> for switches.
+                Autocomplete: type <Text color="white">{'m1 > '}</Text> (or m2/o1/o2, or a name like <Text color="white">mSableye</Text>) to start a move; <Text color="white">m1 &gt; switch &gt; </Text> for switches.
               </Text>
             ) : suggestions.length === 0 ? (
               <Text dimColor>
@@ -3595,15 +3616,49 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   );
 }
 
-// Pretty-print a MoveAction back to roughly the syntax that produced it,
-// for display in the in-progress turn list and the history panel.
+// When the user types a freshly-closed `>`, rewrite the line so the resolution
+// is VISIBLE in the buffer: species refs canonicalise (`mSableye` → `m2`) and the
+// just-finished move expands to its full name when it resolves uniquely
+// (`tail` → `Tailwind`). Ambiguous moves are left untouched for the suggestion
+// list to disambiguate. Mirrors `canonicalizeRefs` so what you see is what the
+// engine computes on submit.
+function expandOnSep(value: string, ctx: ParseContext): string {
+  let v = canonicalizeRefs(value, ctx);
+  const parts = v.split('>');
+  const justClosed = parts.length - 2; // segment before the trailing empty chunk
+  if (justClosed === 1 && parts[1] && parts[1].trim().toLowerCase() !== 'switch') {
+    const actor = parseActor(parts[0]!.trim());
+    if (actor) {
+      const ti = actor.side === 'mine' ? ctx.myActiveTeamIndex[actor.slot] : ctx.theirActiveTeamIndex[actor.slot];
+      if (ti != null) parts[1] = ` ${resolveMoveToken(parts[1]!.trim(), actor.side, ti, ctx)} `;
+    }
+  }
+  v = parts.join('>');
+  if (v.endsWith('>')) v += ' ';
+  return v;
+}
+
+// Short species gloss for a ref, for the self-documenting turn log: `m2 (Sableye)`.
+// The `(species)` is decorative — `canonicalizeRefs` strips it on /edit re-parse.
+function glossRef(side: FieldSide, slot: number, teamIndex: number | undefined, match: Match, mods = ''): string {
+  const ref = `${side === 'mine' ? 'm' : 'o'}${slot + 1}${mods}`;
+  const team = side === 'mine' ? match.myTeam : match.opponentTeam;
+  const species = teamIndex != null
+    ? (team[teamIndex] as PokemonSet | OpponentEntry | undefined)?.species
+    : undefined;
+  return species ? `${ref} (${species})` : ref;
+}
+
+// Pretty-print a MoveAction back to roughly the syntax that produced it, now with
+// a `(species)` gloss on each ref so the log is verifiable without looking up to
+// the board. The glosses round-trip: `canonicalizeRefs` drops them on /edit.
 function actionToLine(a: MoveAction, match: Match): string {
   const mods = [
     a.mega ? '+mega' : '',
     a.critical ? '+crit' : '',
     a.quickClaw ? '+quick' : '',
   ].join('');
-  const actor = `${a.side === 'mine' ? 'm' : 'o'}${a.attackerSlot + 1}${mods}`;
+  const actor = glossRef(a.side, a.attackerSlot, a.attackerTeamIndex, match, mods);
   if (a.kind === 'switch') {
     const team = a.side === 'mine' ? match.myTeam : match.opponentTeam;
     const incoming = a.targetTeamIndex != null
@@ -3618,7 +3673,7 @@ function actionToLine(a: MoveAction, match: Match): string {
     return `${actor} ${a.move}`;
   }
   const target = typeof a.target === 'object'
-    ? `${a.target.side === 'mine' ? 'm' : 'o'}${a.target.slot + 1}`
+    ? glossRef(a.target.side, a.target.slot, a.targetTeamIndex, match)
     : a.target;
   // Damage / remaining-HP token: prefer the dealt-damage fields (set post-finalize),
   // else the remaining-HP a fresh draft still carries (side-aware unit).
@@ -3711,6 +3766,9 @@ function HelpPanel() {
       <Text>  <Text color="white">m1 &gt; Close Combat &gt; o1 &gt; 1 sash</Text>  <Text dimColor>— Sash fired (consumed); 1-sliver = survived at 1 HP</Text></Text>
       <Text>  <Text color="white">m1+mega &gt; Flamethrower &gt; o2 &gt; 45</Text> <Text dimColor>— +mega / +crit / +tera&lt;type&gt; / +quick (Quick Claw)</Text></Text>
       <Text>  <Text color="white">m1 &gt; switch &gt; Kingambit</Text>           <Text dimColor>— switch by species (must be in brought 4)</Text></Text>
+      <Box marginTop={1}><Text bold>Refs &amp; resolution</Text></Box>
+      <Text>  <Text color="white">mSableye</Text> / <Text color="white">oPelipper</Text>     <Text dimColor>— name a mon instead of m1/o2 (typo-tolerant); auto-canonicalises to m2/o1 on `&gt;`</Text></Text>
+      <Text>  <Text color="white">m2 &gt; tail &gt;</Text>            <Text dimColor>— a unique partial move fills in on `&gt;` or Tab (→ Tailwind); the ⮑ line echoes the parsed result</Text></Text>
       <Box marginTop={1}><Text bold>State updates</Text></Box>
       <Text>  <Text color="white">o3 = 45</Text>          <Text dimColor>— opp HP set to 45%</Text></Text>
       <Text>  <Text color="white">m2 = 145</Text>         <Text dimColor>— my mon HP set to 145 raw</Text></Text>

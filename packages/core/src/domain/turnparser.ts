@@ -7,7 +7,7 @@ import { pikalyticsMoves } from './predictions.js';
 // that typing "Tail" on a Tailwind user records "Tailwind" — not the literal "Tail".
 // Exact (normalised) match wins; else a UNIQUE prefix; else a UNIQUE substring;
 // else the raw token (the user may be logging an unexpected move — never block).
-function resolveMoveToken(token: string, side: FieldSide, teamIndex: number, ctx: ParseContext): string {
+export function resolveMoveToken(token: string, side: FieldSide, teamIndex: number, ctx: ParseContext): string {
   const pool = side === 'mine'
     ? (ctx.myTeam[teamIndex]?.moves ?? [])
     : Array.from(new Set([
@@ -25,6 +25,218 @@ function resolveMoveToken(token: string, side: FieldSide, teamIndex: number, ctx
   const sub = pool.filter(m => norm(m).includes(nt));
   if (sub.length === 1) return sub[0]!;
   return token;
+}
+
+// ---------------------------------------------------------------------------
+// Species references — `mSableye` / `oPelipper` instead of `m2` / `o1`.
+//
+// You shouldn't have to look up which slot a mon is in. A ref of the form
+// `m<species>` / `o<species>` (a side letter followed by a NON-digit) resolves
+// the species against that side's roster — typo-tolerant, since each team only
+// has a handful of mons — and `canonicalizeRefs()` rewrites it to the canonical
+// numeric ref (`m2` for an active mon, `my4`/`op4` for a benched one) BEFORE the
+// rest of the parser runs. So the whole grammar stays slot-based; species refs
+// are pure sugar resolved up front. The same pass also strips a trailing
+// `(gloss)` after a ref so the glossed log lines (`m2 (Sableye) > …`) round-trip
+// back through `/edit` unchanged.
+// ---------------------------------------------------------------------------
+
+const norm = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// Plain Levenshtein, used only across a roster of ≤6 candidates so the O(n·m)
+// cost is irrelevant. Powers the typo-tolerant fallback (`oPelliper` → Pelipper).
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    const cur = new Array<number>(n + 1);
+    cur[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + cost);
+    }
+    prev = cur;
+  }
+  return prev[n]!;
+}
+
+// Is `q` a subsequence of `s` (chars in order, gaps allowed)? Lets `mtflame`
+// match `talonflame` and `clcombat` match `closecombat` — aggressive but only
+// accepted when it's UNIQUE across the small roster.
+function isSubsequence(q: string, s: string): boolean {
+  let i = 0;
+  for (let j = 0; j < s.length && i < q.length; j++) if (s[j] === q[i]) i++;
+  return i === q.length;
+}
+
+// Resolve a species token to a team index on `side`, typo-tolerant. Order:
+// exact → unique prefix → unique substring → unique subsequence → nearest edit
+// distance (within a small threshold and strictly closer than the runner-up).
+// Returns null when nothing resolves unambiguously — the caller then leaves the
+// token as typed so the downstream parser surfaces a clear error.
+export function resolveSpeciesRef(token: string, side: FieldSide, ctx: ParseContext): number | null {
+  const nt = norm(token);
+  if (!nt) return null;
+  const team: Array<{ species: string }> = side === 'mine' ? ctx.myTeam : ctx.opponentTeam;
+  const cands = team.map((e, i) => ({ i, n: norm(e.species ?? '') })).filter(c => c.n);
+  if (!cands.length) return null;
+  const exact = cands.filter(c => c.n === nt);
+  if (exact.length) return exact[0]!.i;
+  const pre = cands.filter(c => c.n.startsWith(nt));
+  if (pre.length === 1) return pre[0]!.i;
+  const sub = cands.filter(c => c.n.includes(nt));
+  if (sub.length === 1) return sub[0]!.i;
+  const seq = cands.filter(c => isSubsequence(nt, c.n));
+  if (seq.length === 1) return seq[0]!.i;
+  const scored = cands.map(c => ({ i: c.i, d: levenshtein(nt, c.n) })).sort((a, b) => a.d - b.d);
+  const best = scored[0]!;
+  const second = scored[1];
+  const thresh = Math.max(1, Math.floor(nt.length / 3));
+  if (best.d <= thresh && (!second || second.d > best.d)) return best.i;
+  return null;
+}
+
+function activeSlotOf(ctx: ParseContext, side: FieldSide, teamIndex: number): 0 | 1 | null {
+  const arr = side === 'mine' ? ctx.myActiveTeamIndex : ctx.theirActiveTeamIndex;
+  if (arr[0] === teamIndex) return 0;
+  if (arr[1] === teamIndex) return 1;
+  return null;
+}
+
+// Canonicalise ONE ref token sitting in actor / target / state-ref position.
+// Strips a trailing `(gloss)`, splits off any `+mods` (mega/crit/quick), and —
+// when the head is a species ref (`m`/`o` + a letter) — rewrites it to the
+// numeric ref. Numeric refs (`m2`, `my4`) pass through with mods preserved and
+// gloss removed. Unresolved species are returned as-is so the parser can error.
+function canonOneRef(tok: string, ctx: ParseContext): string {
+  const g = tok.match(/^(.*?)\s*\([^)]*\)\s*$/);
+  const core = (g ? g[1]! : tok).trim();
+  if (!core) return core;
+  const plus = core.split('+');
+  const head = plus[0]!.trim();
+  const mods = plus.slice(1).map(x => x.trim()).filter(Boolean).map(x => '+' + x).join('');
+  const sm = head.match(/^([mo])([a-zA-Z].*)$/);
+  if (!sm) return head + mods;  // numeric m2 / my4 / o1 — keep mods, gloss already dropped
+  const side: FieldSide = sm[1]!.toLowerCase() === 'm' ? 'mine' : 'theirs';
+  const idx = resolveSpeciesRef(sm[2]!, side, ctx);
+  if (idx == null) return core;  // unresolved → leave for the parser to reject helpfully
+  const slot = activeSlotOf(ctx, side, idx);
+  const base = slot != null
+    ? `${sm[1]!.toLowerCase()}${slot + 1}`
+    : `${side === 'mine' ? 'my' : 'op'}${idx + 1}`;
+  return base + mods;
+}
+
+// Replace the lone ref token inside `seg` (which may have leading/trailing
+// whitespace) via `fn`, preserving the surrounding spacing so the rebuilt line
+// reads naturally.
+function mapSegToken(seg: string, fn: (tok: string) => string): string {
+  const m = seg.match(/^(\s*)([\s\S]*?)(\s*)$/);
+  if (!m) return seg;
+  return m[1]! + fn(m[2]!) + m[3]!;
+}
+
+// Rewrite species refs → numeric refs and strip ref-glosses, in the ONLY
+// positions a ref can appear: the actor (first `>`-segment, or the leading token
+// of a state/mega line) and the move's target (third `>`-segment, unless the
+// verb is `switch`, which resolves its own species elsewhere). The damage slot
+// is never touched, so `(berry)` / `(crit)` / `99,98(crit)` survive intact.
+// Idempotent on already-canonical lines.
+export function canonicalizeRefs(line: string, ctx: ParseContext): string {
+  if (!line.includes('>')) {
+    // State line or standalone mega — the leading whitespace token is the ref,
+    // optionally followed by a `(gloss)` token (when re-parsing an /edit'd log
+    // line like `m1 (Sneasler) mega` or `o2 (Pelipper) brn`). Drop the gloss.
+    const lead = line.match(/^(\s*)(\S+)(\s*\([^)]*\))?([\s\S]*)$/);
+    if (!lead) return line;
+    const tok = lead[2]!;
+    // Only a side-letter-led token is a ref; leave `hp …`, `/cmd`, etc. alone.
+    if (/^[mo][a-zA-Z(]/.test(tok) || /^(my|op|m|o)[0-9]/i.test(tok)) {
+      return lead[1]! + canonOneRef(tok, ctx) + lead[4]!;
+    }
+    return line;
+  }
+  const segs = line.split('>');
+  segs[0] = mapSegToken(segs[0]!, t => canonOneRef(t, ctx));
+  if (segs.length >= 3 && segs[1]!.trim().toLowerCase() !== 'switch') {
+    segs[2] = mapSegToken(segs[2]!, t => {
+      const low = t.trim().toLowerCase();
+      if (low === 'self' || low === 'spread' || low === 'foes' || low === 'allies') return t.trim();
+      return canonOneRef(t, ctx);
+    });
+  }
+  return segs.join('>');
+}
+
+// Resolve a canonical ref token (`m2` / `o1` / `my4` / `op3`) to its species +
+// a short, glossed label like `m2 (Sableye)`. Returns null when the token isn't
+// a resolvable ref. Used by the live "parsed-as" preview and could back any
+// other glossed display.
+function refToSpecies(tok: string, ctx: ParseContext): { side: FieldSide; teamIndex: number; species: string; label: string } | null {
+  const m = tok.trim().split('+')[0]!.match(/^(my|op|m|o)([1-6])$/i);
+  if (!m) return null;
+  const ref = resolveRef(m[1]!, parseInt(m[2]!, 10), ctx);
+  if (!ref) return null;
+  const team: Array<{ species: string }> = ref.side === 'mine' ? ctx.myTeam : ctx.opponentTeam;
+  const species = team[ref.teamIndex]?.species ?? `#${ref.teamIndex + 1}`;
+  const slot = activeSlotOf(ctx, ref.side, ref.teamIndex);
+  const shortRef = slot != null ? `${ref.side === 'mine' ? 'm' : 'o'}${slot + 1}` : tok.trim().split('+')[0]!;
+  return { side: ref.side, teamIndex: ref.teamIndex, species, label: `${shortRef} (${species})` };
+}
+
+// One-line glossed echo of the (possibly partial) line the user is typing — the
+// verification surface so they never look back up to the board to confirm a ref
+// or a half-typed move resolved correctly. Best-effort: glosses whatever has
+// resolved so far. Returns null when there's nothing useful to show.
+export function previewTurnLine(raw: string, ctx: ParseContext): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.startsWith('/')) return null;
+  try {
+    const line = canonicalizeRefs(trimmed, ctx);
+    if (!line.includes('>')) {
+      // State / standalone-mega: gloss the leading ref + echo the rest.
+      const lead = line.match(/^\s*(\S+)\s*([\s\S]*)$/);
+      if (!lead) return null;
+      const g = refToSpecies(lead[1]!, ctx);
+      if (!g) return null;
+      const rest = lead[2]!.trim();
+      return rest ? `${g.label} · ${rest}` : g.label;
+    }
+    const segs = line.split('>').map(s => s.trim());
+    const actorTok = segs[0]!;
+    const actorMods = actorTok.includes('+') ? ' ' + actorTok.split('+').slice(1).map(x => '+' + x).join('') : '';
+    const actor = refToSpecies(actorTok, ctx);
+    if (!actor) return null;
+    let out = actor.label + actorMods;
+    const verb = segs[1] ?? '';
+    if (!verb) return out + ' · …';
+    if (verb.toLowerCase() === 'switch') {
+      const t = segs[2];
+      if (!t) return `${out} · switch → …`;
+      const idx = resolveTeamRef(t, ctx, actor.side);
+      const team: Array<{ species: string }> = actor.side === 'mine' ? ctx.myTeam : ctx.opponentTeam;
+      const sp = idx != null ? (team[idx]?.species ?? t) : t;
+      return `${out} · switch → ${sp}`;
+    }
+    const move = resolveMoveToken(verb, actor.side, actor.teamIndex, ctx);
+    out += ` · ${move}`;
+    const tgtTok = segs[2];
+    if (tgtTok) {
+      const low = tgtTok.toLowerCase();
+      const tgt = (low === 'self') ? 'self'
+        : (low === 'spread' || low === 'foes') ? 'spread'
+        : (low === 'allies') ? 'ally'
+        : (refToSpecies(tgtTok, ctx)?.label ?? tgtTok);
+      out += ` → ${tgt}`;
+    }
+    const dmg = segs[3];
+    if (dmg) out += ` · ${dmg}`;
+    return out;
+  } catch {
+    return null;
+  }
 }
 
 // Single-line turn syntax (case-insensitive on the actor tokens):
@@ -531,7 +743,11 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
   return null;
 }
 
-export function parseTurnLine(line: string, ctx: ParseContext, order: number): ParseResult {
+export function parseTurnLine(rawLine: string, ctx: ParseContext, order: number): ParseResult {
+  // Resolve species refs (`mSableye` → `m2`) and strip ref-glosses (`m2 (Sableye)`
+  // → `m2`) up front so the rest of the parser only ever sees canonical numeric
+  // refs. No-op on lines that already use numeric refs.
+  const line = canonicalizeRefs(rawLine, ctx);
   // State updates take precedence: they're disambiguated by `=`, `ko`/`fainted`,
   // or `in`, none of which appear in action syntax.
   const state = tryParseState(line, ctx);

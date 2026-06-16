@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { parseTurnLine, type ParseContext } from '../src/domain/turnparser.js';
+import { parseTurnLine, canonicalizeRefs, previewTurnLine, type ParseContext } from '../src/domain/turnparser.js';
 import type { PokemonSet, OpponentEntry } from '../src/domain/types.js';
 import { ZERO_EVS, MAX_IVS } from '../src/domain/types.js';
 
@@ -763,5 +763,91 @@ describe('parseTurnLine: inline target stat drop (chance secondaries)', () => {
   test('a plain damage number is NOT parsed as a drop', () => {
     const r = parseTurnLine('m1 > Close Combat > o1 > 67', ctx, 1);
     if (r.ok && r.kind === 'action') expect(r.actions[0]!.targetDrop).toBeUndefined();
+  });
+});
+
+describe('species refs (mSableye / oPelipper) + glosses', () => {
+  // myActiveTeamIndex=[0,1] → Sneasler(slot0), Garchomp(slot1).
+  // theirActiveTeamIndex=[0,1] → Incineroar(slot0), Pelipper(slot1); Sinistcha benched (idx2).
+  test('species actor resolves to its active slot', () => {
+    const r = parseTurnLine('mGarchomp > Earthquake > o1 > 50', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    expect(r.actions[0]!.attackerSlot).toBe(1);
+    expect(r.actions[0]!.attackerTeamIndex).toBe(1);
+  });
+
+  test('species target resolves to its active slot', () => {
+    const r = parseTurnLine('m1 > Ice Beam > oPelipper > 40', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    expect(typeof r.actions[0]!.target === 'object' && r.actions[0]!.target.slot).toBe(1);
+    expect(r.actions[0]!.targetTeamIndex).toBe(1);
+  });
+
+  test('typo-tolerant: oPelliper still resolves to Pelipper', () => {
+    const r = parseTurnLine('m1 > Ice Beam > oPelliper > 40', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.kind === 'action') expect(r.actions[0]!.targetTeamIndex).toBe(1);
+  });
+
+  test('prefix abbreviation: mSnea → Sneasler', () => {
+    const r = parseTurnLine('mSnea > Close Combat > o1 > 33', ctx, 1);
+    if (r.ok && r.kind === 'action') expect(r.actions[0]!.attackerTeamIndex).toBe(0);
+  });
+
+  test('species state ref reaches a benched mon', () => {
+    const r = parseTurnLine('oSinistcha brn', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'state') return;
+    expect(r.update.side).toBe('theirs');
+    expect(r.update.teamIndex).toBe(2);
+    expect(r.update.status).toBe('brn');
+  });
+
+  test('ref gloss round-trips: `m1 (Sneasler) > … > o1 (Incineroar) > 33` parses', () => {
+    const r = parseTurnLine('m1 (Sneasler) > Close Combat > o1 (Incineroar) > 33', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.kind !== 'action') return;
+    expect(r.actions[0]!.attackerSlot).toBe(0);
+    expect(typeof r.actions[0]!.target === 'object' && r.actions[0]!.target.slot).toBe(0);
+    expect(r.actions[0]!.targetRemainingHpPercent).toBe(33);
+  });
+
+  test('gloss-strip does NOT eat a damage-slot `(berry)`', () => {
+    const r = parseTurnLine('m1 (Sneasler) > Ice Beam > o1 (Incineroar) > 80 (berry)', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.kind === 'action') expect(r.actions[0]!.berry).toBe(true);
+  });
+
+  test('mega line gloss round-trips', () => {
+    const r = parseTurnLine('m1 (Sneasler) mega', ctx, 1);
+    expect(r.ok).toBe(true);
+    if (r.ok && r.kind === 'action') expect(r.actions[0]!.kind).toBe('mega');
+  });
+
+  test('canonicalizeRefs is idempotent on numeric refs', () => {
+    const a = canonicalizeRefs('m1 > Close Combat > o1 > 33', ctx);
+    const b = canonicalizeRefs(a, ctx);
+    expect(b).toBe(a);
+  });
+
+  test('previewTurnLine glosses actor + target', () => {
+    const p = previewTurnLine('mGarc > earth > oPel > 50', ctx);
+    expect(p).toContain('Garchomp');
+    expect(p).toContain('Pelipper');
+  });
+
+  test('previewTurnLine expands a partial move against the mon moveset', () => {
+    const ctxMoves: ParseContext = {
+      ...ctx,
+      myTeam: [
+        { ...my[0]! },
+        { ...my[1]!, moves: ['Earthquake', 'Rock Slide', 'Dragon Claw'] },
+        { ...my[2]! },
+      ],
+    };
+    const p = previewTurnLine('mGarc > earth > oPel > 50', ctxMoves);
+    expect(p).toContain('Earthquake');
   });
 });
