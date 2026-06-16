@@ -14,8 +14,8 @@
 import type { SearchInput, SearchPlay } from './endgameSearch.js';
 import { searchInputToSimPosition } from './simDiff.js';
 import {
-  ensureSimLoaded, buildBattle, stepTurn, readOutcome, orderTeam,
-  type SimMon, type SimSlot,
+  ensureSimLoaded, buildBattle, stepTurn, readOutcome, readRoster, orderTeam,
+  type SimMon, type SimSlot, type RosterMon,
 } from './simBridge.js';
 import { getMove, toId } from './data.js';
 
@@ -188,26 +188,42 @@ export async function runExactOracle(
     const battle = buildBattle({ ...pos, seed: [k + 1, 2 * k + 3, 5 * k + 7, 11 * k + 13] });
     const before = readOutcome(battle);
     const turnBefore = before.turn;
-    const after = stepTurn(battle, myChoice, oppChoice);
+    let after = stepTurn(battle, myChoice, oppChoice);
+    // A mid-turn faint puts the battle in an end-of-turn REPLACEMENT request, so
+    // the turn hasn't advanced yet — the choices were valid (the probe accepted
+    // them), the sim is just waiting for the send-in. Flush it with 'default':
+    // the replacement is next-turn state and doesn't change THIS turn's resolved
+    // HP/faints (read from the full roster below). Only AFTER flushing is a still-
+    // stuck turn a genuine rejection.
+    let guard = 0;
+    while (after.turn === turnBefore && !battle.ended && (battle as { requestState?: string }).requestState === 'switch' && guard++ < 8) {
+      battle.makeChoices('default', 'default');
+      after = readOutcome(battle);
+    }
     if (after.turn === turnBefore && !battle.ended) {
       return { ok: false, error: `sim rejected the choices ("${myChoice}" vs "${oppChoice}")` };
     }
-    const collect = (side: 'mine' | 'opp', beforeSlots: (SimSlot | null)[], afterSlots: (SimSlot | null)[]) => {
+    // Match each pre-turn active to its POST-TURN state via the full roster keyed
+    // by base species — so a mega (species renamed Dragonite→Dragonite-Mega) or a
+    // switch-out (left the active slots, alive on the bench) is tracked correctly,
+    // not mistaken for a faint as a species-name active-slot match would.
+    const roster = readRoster(battle);
+    const collect = (side: 'mine' | 'opp', beforeSlots: (SimSlot | null)[], rosterSide: RosterMon[]) => {
       for (const b of beforeSlots) {
         if (!b) continue;
-        const a = afterSlots.find(s => s && s.species === b.species);
-        const key = `${side}|${b.species}`;
+        const a = rosterSide.find(r => r.baseSpecies === b.baseSpecies);
+        const key = `${side}|${b.baseSpecies}`;
         let e = acc.get(key);
         if (!e) { e = { hp: [], faints: 0, status: new Map(), before: b.hpPct }; acc.set(key, e); }
-        const hpAfter = a ? (a.fainted ? 0 : a.hpPct) : 0; // gone from actives + not found ⇒ treat as fainted-out
+        const hpAfter = a ? (a.fainted ? 0 : a.hpPct) : 0; // not on the roster at all ⇒ treat as gone
         e.hp.push(hpAfter);
         if ((a ? a.fainted : true) && !b.fainted) e.faints += 1;
         const gained = a && !b.status && a.status ? a.status : '';
         if (gained) e.status.set(gained, (e.status.get(gained) ?? 0) + 1);
       }
     };
-    collect('mine', before.p1, after.p1);
-    collect('opp', before.p2, after.p2);
+    collect('mine', before.p1, roster.p1);
+    collect('opp', before.p2, roster.p2);
     const wB = before.weather || '', wA = after.weather || '';
     if (wA !== wB) fieldChange.set(`weather → ${wA || 'clear'}`, (fieldChange.get(`weather → ${wA || 'clear'}`) ?? 0) + 1);
     const tB = before.terrain || '', tA = after.terrain || '';

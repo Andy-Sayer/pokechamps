@@ -28,6 +28,24 @@ export function entryOf(set: PokemonSet): OpponentEntry {
   };
 }
 
+/** Build the opening SearchInput for `mine` vs `oppSets`: each side picks its
+ *  best bring knowing the other's six (open team sheets), leads in the first two
+ *  brought, all at full HP, neutral field. Shared by `evaluateMatchup` and the
+ *  policy audit so both reason about the exact same opening position. */
+export function buildMatchupInput(mine: PokemonSet[], oppSets: PokemonSet[]): { input: SearchInput; myBring: number[] } {
+  const oppEntries = oppSets.map(entryOf);
+  const myEntries = mine.map(entryOf);
+  const myBring = scoreBrings(mine, oppEntries)[0]!;
+  const oppBring = scoreBrings(oppSets, myEntries)[0]!;
+  const input: SearchInput = {
+    mine: myBring.myIndices.map((i, k) => ({ set: mine[i]!, hpPercent: 100, active: k < 2 })),
+    opp: oppBring.myIndices.map((j, k) => ({ entry: oppEntries[j]!, hpPercent: 100, active: k < 2 })),
+    field: { ...NEUTRAL_FIELD },
+    allOppRevealed: true,
+  };
+  return { input, myBring: myBring.myIndices };
+}
+
 /** One simulated matchup. `depth` is the (max) lookahead; when `budgetMs` is
  *  given the search deepens 1→depth under a per-position wall-clock budget
  *  (anytime — as deep as the board allows in the time), else it runs the full
@@ -39,17 +57,7 @@ export function evaluateMatchup(
   depth: number,
   budgetMs?: number,
 ): Matchup {
-  const oppEntries = oppSets.map(entryOf);
-  const myEntries = mine.map(entryOf);
-  // Each side picks its best bring KNOWING the other's six (open team sheets).
-  const myBring = scoreBrings(mine, oppEntries)[0]!;
-  const oppBring = scoreBrings(oppSets, myEntries)[0]!;
-  const input: SearchInput = {
-    mine: myBring.myIndices.map((i, k) => ({ set: mine[i]!, hpPercent: 100, active: k < 2 })),
-    opp: oppBring.myIndices.map((j, k) => ({ entry: oppEntries[j]!, hpPercent: 100, active: k < 2 })),
-    field: { ...NEUTRAL_FIELD },
-    allOppRevealed: true,
-  };
+  const { input, myBring } = buildMatchupInput(mine, oppSets);
   const r = budgetMs ? searchBudgeted(input, depth, budgetMs) : searchIterative(input, depth);
-  return { anchor: oppAnchor, score: r.score, verdict: r.verdict, myBring: myBring.myIndices.map(i => mine[i]!.species) };
+  return { anchor: oppAnchor, score: r.score, verdict: r.verdict, myBring: myBring.map(i => mine[i]!.species) };
 }

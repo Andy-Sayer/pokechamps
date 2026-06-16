@@ -21,15 +21,18 @@
 import type { Battle } from '@pkmn/sim';
 import { toId } from './data.js';
 
-// Lazily-loaded Battle constructor. Null until ensureSimLoaded() succeeds.
+// Lazily-loaded Battle constructor + Dex. Null until ensureSimLoaded() succeeds.
 let BattleCtor: typeof Battle | null = null;
+let SimDex: { species: { get(name: string): { exists?: boolean } | undefined } } | null = null;
 
 /** Load `@pkmn/sim` if present. Returns false (without throwing) when the
  *  package isn't installed — the caller surfaces "exact engine unavailable". */
 export async function ensureSimLoaded(): Promise<boolean> {
   if (BattleCtor) return true;
   try {
-    BattleCtor = (await import('@pkmn/sim')).Battle;
+    const mod = await import('@pkmn/sim');
+    BattleCtor = mod.Battle;
+    SimDex = mod.Dex as unknown as typeof SimDex;
     return true;
   } catch {
     return false;
@@ -39,6 +42,17 @@ export async function ensureSimLoaded(): Promise<boolean> {
 /** True once ensureSimLoaded() has succeeded in this process. */
 export function simAvailable(): boolean {
   return BattleCtor != null;
+}
+
+/** Does the loaded sim's dex know this species/forme? Champions CUSTOM megas
+ *  (e.g. Dragonite-Mega) don't exist in `@pkmn/sim`, so a line that mega-evolves
+ *  one can't be resolved — callers use this to skip such positions cleanly
+ *  rather than feed the sim a `mega` flag it silently mishandles. Returns false
+ *  when the sim isn't loaded. */
+export function simHasSpecies(name: string): boolean {
+  if (!SimDex || !name) return false;
+  const s = SimDex.species.get(name);
+  return !!s && s.exists !== false;
 }
 
 /** One Pokémon for the sim. Mirrors Showdown's PokemonSet shape (the fields we use). */
@@ -84,6 +98,10 @@ export interface SimPosition {
 /** Read-out of one active slot after a turn. */
 export interface SimSlot {
   species: string;
+  /** Forme-stable identity: a mega-evolved mon's `species` changes
+   *  (Dragonite → Dragonite-Mega) but its `baseSpecies` does not — match on this
+   *  to track a mon across a mega or a forme change within a turn. */
+  baseSpecies: string;
   hpPct: number;
   fainted: boolean;
   status: string;
@@ -163,7 +181,8 @@ export function stepTurn(battle: Battle, p1choice: string, p2choice: string): Si
 
 export function readOutcome(battle: Battle): SimOutcome {
   const slot = (p: any): SimSlot | null => p == null ? null : ({
-    species: p.species.name, hpPct: p.hp / p.maxhp * 100, fainted: p.fainted, status: p.status || '',
+    species: p.species.name, baseSpecies: p.species.baseSpecies || p.species.name,
+    hpPct: p.hp / p.maxhp * 100, fainted: p.fainted, status: p.status || '',
     boosts: { atk: p.boosts.atk, def: p.boosts.def, spa: p.boosts.spa, spd: p.boosts.spd, spe: p.boosts.spe },
   });
   return {
@@ -173,4 +192,19 @@ export function readOutcome(battle: Battle): SimOutcome {
     weather: battle.field.weather || '',
     terrain: battle.field.terrain || '',
   };
+}
+
+/** Post-turn state of EVERY Pokémon on a side (active + bench + fainted), keyed
+ *  by forme-stable base species. Lets a caller find where a mon ended up even if
+ *  it mega-evolved (species renamed) or switched out (left the active slots) —
+ *  the active-slot read-out alone can't distinguish "switched out, alive" from
+ *  "fainted". */
+export interface RosterMon { baseSpecies: string; species: string; hpPct: number; fainted: boolean; status: string; active: boolean }
+export function readRoster(battle: Battle): { p1: RosterMon[]; p2: RosterMon[] } {
+  const side = (s: any): RosterMon[] => (s.pokemon as any[]).map(p => ({
+    baseSpecies: p.species.baseSpecies || p.species.name, species: p.species.name,
+    hpPct: p.maxhp ? p.hp / p.maxhp * 100 : 0, fainted: !!p.fainted, status: p.status || '',
+    active: !!p.isActive,
+  }));
+  return { p1: side(battle.sides[0]!), p2: side(battle.sides[1]!) };
 }
