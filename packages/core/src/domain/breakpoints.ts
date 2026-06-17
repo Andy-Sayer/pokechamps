@@ -81,6 +81,26 @@ export function speedBreakpoints(set: PokemonSet, opponents: PokemonSet[]): numb
   return [...bps].sort((a, b) => a - b);
 }
 
+/** The Speed SP a mon must KEEP to preserve every outspeed its max-Speed build
+ *  achieves vs `opponents` — computed WITHOUT Tailwind, so the floor still holds
+ *  when Tailwind is down. This is the guard against the optimizer's Tailwind
+ *  blind spot: under a team's own (doubled) Tailwind the search sees base Speed
+ *  as near-worthless — everything doubles, order preserved — and would pour it
+ *  all into bulk, even zeroing a fast cleaner or a Choice Scarf, whose entire
+ *  purpose is Speed. The optimizer may free Speed ABOVE this floor (genuine
+ *  overkill → bulk is fine) but never below it.
+ *    - Choice Scarf → SP_MAX: a Scarf is a Speed item; cutting its Speed is
+ *      incoherent regardless of breakpoints (and `monSpeed` ignores the ×1.5,
+ *      so its breakpoints would be wrong anyway).
+ *    - otherwise the highest required-outspeed breakpoint, or 0 when the mon
+ *      outspeeds nothing relevant even at max (a genuinely slow / Trick Room mon
+ *      that legitimately wants its Speed in bulk). */
+export function requiredSpeedSP(set: PokemonSet, opponents: PokemonSet[]): number {
+  if (toId(set.item ?? '') === 'choicescarf') return SP_MAX;
+  const bps = speedBreakpoints(set, opponents);
+  return bps.length ? Math.max(...bps) : 0;
+}
+
 // --- Candidate spreads -----------------------------------------------------
 // Representative levels from a breakpoint list, capped to keep the per-mon
 // candidate count tractable for the gauntlet.
@@ -99,6 +119,16 @@ function levels(bps: number[], allowZero: boolean): number[] {
   return all.length <= 3 ? all : [all[0]!, all[Math.floor(all.length / 2)]!, all[all.length - 1]!];
 }
 
+/** Speed candidate levels for the gauntlet, floored at `floor` (requiredSpeedSP):
+ *  never offers a Speed that would cost a real no-Tailwind outspeed, so 0 appears
+ *  only when the mon outspeeds nothing relevant. Always keeps the floor itself
+ *  (so freed SP can be realised) and the full send. Capped to 3 (floor/mid/full). */
+function speedLevels(bps: number[], floor: number): number[] {
+  const raw = levels(bps, floor === 0).filter(v => v >= floor);
+  const all = [...new Set([floor, ...raw, SP_MAX])].sort((a, b) => a - b);
+  return all.length <= 3 ? all : [all[0]!, all[Math.floor(all.length / 2)]!, all[all.length - 1]!];
+}
+
 function spread(set: PokemonSet, stat: 'atk' | 'spa' | null, atkSP: number, speSP: number, hpSP: number, defSP: number, spdSP: number): PokemonSet {
   const evs: Stats = { hp: evFromSp(hpSP), atk: 0, def: evFromSp(defSP), spa: 0, spd: evFromSp(spdSP), spe: evFromSp(speSP) };
   if (stat) evs[stat] = evFromSp(atkSP);
@@ -112,7 +142,10 @@ function spread(set: PokemonSet, stat: 'atk' | 'spa' | null, atkSP: number, speS
 export function candidateSpreads(set: PokemonSet, defenders: PokemonSet[], opponents: PokemonSet[], rain: boolean): { label: string; set: PokemonSet }[] {
   const stat = attackingStat(set);
   const atkLevels = stat ? levels(attackBreakpoints(set, stat, defenders, rain), false) : [0];
-  const speLevels = levels(speedBreakpoints(set, opponents), true);
+  // Speed is floored at the no-Tailwind required-outspeed level so the optimizer
+  // can't strip a cleaner's (or a Scarf's) Speed just because the team's own
+  // Tailwind makes base Speed look worthless inside the shallow gauntlet horizon.
+  const speLevels = speedLevels(speedBreakpoints(set, opponents), requiredSpeedSP(set, opponents));
   const out: { label: string; set: PokemonSet }[] = [];
   const seen = new Set<string>();
   const add = (label: string, s: PokemonSet) => {
