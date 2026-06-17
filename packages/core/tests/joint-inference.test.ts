@@ -65,6 +65,13 @@ describe('jointSolve', () => {
       oppSpecies: 'Tyranitar', oppLevel: 50,
       knownMoves: ['Rock Slide', 'Crunch', 'Moonblast'],
       history,
+      // Exclude Life Orb so this stays a clean test of NATURE recovery. Once
+      // Life Orb is legal (Reg M-B), the Rock Slide damage is genuinely
+      // ambiguous — high-Atk no-item vs lower-Atk ×1.3 Life Orb — which fans the
+      // nature space and (correctly) trips jointSolve's discrimination gate to
+      // null. That meta ambiguity is real but orthogonal to the nature-collapse
+      // logic under test; pinning the item axis keeps the unit deterministic.
+      excludeItems: ['Life Orb'],
     });
     expect(res).toBeTruthy();
     expect(res!.candidates.length).toBeGreaterThan(0);

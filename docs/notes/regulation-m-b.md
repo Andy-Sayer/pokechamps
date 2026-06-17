@@ -5,6 +5,19 @@ Researched 2026-06-12. Reg M-A ends **June 17, 2026**; Regulation Set M-B runs
 published yet — it drops with the update on the 17th. This note holds the
 confirmed facts and the exact steps to flip the app over on day one.
 
+## STATUS 2026-06-16: format STAGED
+
+The Serebii M-B additions list is live, so the format is pre-staged off it:
+legality.allow **208** (+22 base species), items.allow **148** (+15 standard
+items, +14 mega stones; Raichunite X/Y were staged earlier). `validate-format`
+clean. Assumes M-A carries forward with NO removals — re-verify on the official
+in-game list. The one open task is the **custom mega abilities** — see
+[`champions-custom-data.md`](champions-custom-data.md) (2 names confirmed +
+patched, 7 unpublished, effect emulation pending). New base species (22):
+Vileplume, Qwilfish, Sceptile, Blaziken, Swampert, Mawile, Metagross, Staraptor,
+Musharna, Scolipede, Scrafty, Eelektross, Pyroar, Malamar, Barbaracle, Dragalge,
+Grimmsnarl, Falinks, Overqwil, Houndstone, Annihilape, Gholdengo.
+
 ## Confirmed (official announcements)
 
 - **Gimmick stays Mega Evolution** — no Terastallization. Our `gimmick: "mega"`

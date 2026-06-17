@@ -25,6 +25,34 @@ Also re-verified this pass: Mega Raichu X/Y (Reg M-B) abilities are **standard**
 (Electric Surge / No Guard) — no new custom hooks needed, only the
 `refresh-data.ts` `SPECIES_PATCHES` data correction.
 
+## Reg M-B custom-mega audit (2026-06-16, pre-launch)
+
+M-B (June 17) adds 22 base species + 16 mega formes. All species/formes/stones
+are already in the `@pkmn/dex` dump and format-staged (legality.allow 208,
+items.allow 148). The custom surface is the **mega abilities**, split three ways:
+
+| Group | Megas | Ability | Status |
+|---|---|---|---|
+| Canonical (calc-native) | Sceptile, Blaziken, Swampert, Mawile, Metagross | Lightning Rod / Speed Boost / Swift Swim / Huge Power / Tough Claws | ✅ correct in dump, calc handles |
+| Standard (already patched + tested) | Raichu X, Raichu Y | Electric Surge / No Guard | ✅ `SPECIES_PATCHES`; `tests/regulation-m-b.test.ts` |
+| Custom — name confirmed | Eelektross, Pyroar | **Eelevate**, **Fire Mane** | ⚠️ name pinned via `SPECIES_PATCHES`; **effect unpublished → no emulation yet** |
+| Custom — name unpublished | Staraptor, Scolipede, Scrafty, Malamar, Barbaracle, Dragalge, Falinks | ? | ❌ dump carries PLACEHOLDER base abilities; Serebii ability pages still blank |
+
+**Why this matters:** like M-A's Dragonize/Mega Sol, any custom ability that
+changes type/damage/weather must be emulated in `damage.ts` (+ mirrored in the
+search) — the calc won't know it. Until the effects publish, these megas
+calc on correct stats/types but with a possibly-wrong ability, so treat them as
+**playable-but-not-damage-exact**. Don't anchor a team on their special ability.
+
+**Launch fill-in (≈10 min once Serebii populates the ability pages):**
+1. add the 7 unpublished names to `SPECIES_PATCHES` (refresh-data.ts), run
+   `npm run refresh-data`, confirm the `patched species.json/...` log lines;
+2. for each ability whose effect touches damage/type/weather/protection, add the
+   emulation to `damage.ts` (mirror the Mega Sol / Dragonize / Piercing Drill
+   patterns above) + the search;
+3. extend `tests/regulation-m-b.test.ts` with a forward-damage assertion per
+   emulated ability.
+
 ## Caveats / accepted simplifications
 
 - Piercing Drill is modeled in the **search** only. The forward damage calc

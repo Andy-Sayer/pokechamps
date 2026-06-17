@@ -21,6 +21,16 @@ const gen = Dex.forGen(9).includeData();
 const SPECIES_PATCHES: Record<string, { abilities?: Record<string, string> }> = {
   raichumegax: { abilities: { 0: 'Electric Surge' } },
   raichumegay: { abilities: { 0: 'No Guard' } },
+  // Reg M-B custom megas: the @pkmn/dex dump ships these with PLACEHOLDER
+  // base-forme abilities, so pin the real Champions ability (a single-slot
+  // object collapses the forme to one ability, like raichumegay above). Only
+  // two are publicly named pre-launch; effect emulation is tracked separately
+  // in docs/notes/champions-custom-data.md.
+  eelektrossmega: { abilities: { 0: 'Eelevate' } },   // confirmed name (Serebii); effect TBD
+  pyroarmega: { abilities: { 0: 'Fire Mane' } },       // confirmed name (Serebii); effect TBD
+  // TODO(launch, fill from serebii.net/pokemonchampions/megaabilities.shtml):
+  //   staraptormega, scolipedemega, scraftymega, malamarmega,
+  //   barbaraclemega, dragalgemega, falinksmega — ability pages still blank.
 };
 
 function dump<T>(filename: string, entries: Iterable<T>, getId: (e: T) => string, patches?: Record<string, Partial<T>>) {
