@@ -49,6 +49,17 @@ confirmed facts and the exact steps to flip the app over on day one.
 2. Update `data/format.champions.json`:
    - `__notes`: new dates + source link.
    - `legality.allow`: add the new species ids (MetaVGC / Serebii M-B list).
+     **Use the staging helper** — paste the official roster (names or ids, any
+     separators) and it emits a validated, sorted, paste-ready block + a diff,
+     flagging typos / ids not in the dex and any mega formes that belong in
+     `items.allow` instead:
+       `npx tsx packages/core/src/scripts/stage-roster.ts --mode replace`
+     (`--mode replace` = the paste is the full new list, so it also reports
+     removals; `--mode add` = the paste is only additions. `--in roster.txt` to
+     read a file instead of stdin.) Then paste the printed block between the
+     `[ ]` of `"legality": { "allow": [ … ] }`. The watch-list candidates
+     (Indeedee/Indeedee-F/Rillaboom/Pincurchin/Weezing-Galar) already resolve in
+     the dump — but confirm against the OFFICIAL list before committing.
    - `items.allow`: add new items. **`raichunitex` / `raichunitey` were
      PRE-STAGED 2026-06-16** (commit "pre-stage Raichunite X/Y") and verified by
      `tests/regulation-m-b.test.ts` — just add anything else the official list
