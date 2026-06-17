@@ -675,4 +675,8 @@ Also completed 2026-06-12:
 Next:
 - Richer tactic-aware oppLine prose ("deny with Y" counter suggestions inline
   in the battle screen — combo watch already lists counters statically).
-- Reg M-B switch on 2026-06-17 — runbook in regulation-m-b.md.
+- Reg M-B switch on 2026-06-17 — runbook in regulation-m-b.md. Raichunite X/Y
+  pre-staged into items.allow 2026-06-16; both Mega Raichu cores (Y No Guard
+  nukes, X Electric Surge terrain) verified through the existing detectors by
+  tests/regulation-m-b.test.ts. Remaining switch-day work is the species roster
+  + Pikalytics format id once the official list drops.

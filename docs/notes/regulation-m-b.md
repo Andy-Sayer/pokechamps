@@ -35,8 +35,11 @@ confirmed facts and the exact steps to flip the app over on day one.
   Flip side: everything aimed at it also never misses — Hail-Mary miss outs
   vanish against it (the search's miss-out logic keys off accuracy, which No
   Guard pins to 100).
-- Add a `no-guard-inaccurate` tactic detector once M-B lands (No Guard holder +
-  ≤80%-accuracy high-BP moves) — cheap pattern, surprise value.
+- A No Guard + inaccurate-nuke detector ALREADY EXISTS (`detectNoGuard` in
+  `tactics.ts`, pattern `no-guard`: No Guard holder + ≥90 BP / ≤90% accuracy
+  moves, recharge/charge filtered). It fires on Mega Raichu Y automatically once
+  the stone is profiled — Zap Cannon / Focus Blast / Thunder are all in Raichu's
+  learnset. Covered by `tests/regulation-m-b.test.ts`.
 
 ## Switch-day runbook (June 17)
 
@@ -46,7 +49,10 @@ confirmed facts and the exact steps to flip the app over on day one.
 2. Update `data/format.champions.json`:
    - `__notes`: new dates + source link.
    - `legality.allow`: add the new species ids (MetaVGC / Serebii M-B list).
-   - `items.allow`: add new items — at minimum `raichunitex`, `raichunitey`.
+   - `items.allow`: add new items. **`raichunitex` / `raichunitey` were
+     PRE-STAGED 2026-06-16** (commit "pre-stage Raichunite X/Y") and verified by
+     `tests/regulation-m-b.test.ts` — just add anything else the official list
+     introduces.
    - Check for removals — rotations can drop species/items too.
 3. `npm run validate-format` — every id must resolve.
 4. Pikalytics: the format id moves from `gen9championsvgc2026regma` to (likely)
