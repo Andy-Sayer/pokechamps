@@ -20,6 +20,14 @@ const MEGA_ABILITY_OVERRIDES: Record<string, string> = {
   'Eelektross-Mega': 'Eelevate',
 };
 
+// The ability a mega forme fights with — our override (for the customs @pkmn/dex
+// still ships as placeholders) else the dex's slot-0. Shared by enrichCalcPokemon
+// (calc) and the search (Beast Boost / Eelevate snowball off the resolved ability).
+export function megaFormeAbility(forme: string): string | undefined {
+  return MEGA_ABILITY_OVERRIDES[forme]
+    ?? ((dex.species.get(forme) as any)?.abilities as Record<string, string> | undefined)?.['0'];
+}
+
 // Map: speciesId -> list of mega stone item names that turn it into a mega.
 // Built once on module load by walking every item in the dex.
 const stonesBySpecies = (() => {
@@ -152,8 +160,7 @@ export const megaGimmick: Gimmick = {
     if (!active || !set.item) return;
     const forme = megaFormeByItem.get(toId(set.item))?.get(toId(set.species));
     if (!forme) return;
-    const ability = MEGA_ABILITY_OVERRIDES[forme]
-      ?? ((dex.species.get(forme) as any)?.abilities as Record<string, string> | undefined)?.['0'];
+    const ability = megaFormeAbility(forme);
     if (ability) opts.ability = ability;
   },
 

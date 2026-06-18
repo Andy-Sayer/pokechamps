@@ -28,7 +28,7 @@ import { predictOffense, predictThreat, predictOffenseCells, predictThreatCells,
 import { representativeSpreadIndices } from './inference.js';
 import { actualSpeed, actualStat, effectiveSpeedRange } from './speed.js';
 import { getMove, getSpecies, getNature, toId, isSpreadMove, moveFlinchChance, isTrappingMove } from './data.js';
-import { getMegaOptions } from './gimmicks/mega.js';
+import { getMegaOptions, megaFormeAbility } from './gimmicks/mega.js';
 import { defaultOpponentSet } from './bring.js';
 import { maxHpFor } from './damage.js';
 import { getPikalytics } from './pikalytics.js';
@@ -464,7 +464,9 @@ function onKoBoost(set: PokemonSet, ability: string | null | undefined): BoostMa
   switch (toId(ability ?? '')) {
     case 'moxie': case 'chillingneigh': case 'asoneglastrier': return { atk: 1 };
     case 'grimneigh': case 'asonespectrier': return { spa: 1 };
-    case 'beastboost': return { [highestStat(set)]: 1 };
+    // Beast Boost, and Eelevate (Eelektross-Mega = Levitate + Beast Boost) →
+    // the mon's highest stat. The Levitate half is handled in damage.ts.
+    case 'beastboost': case 'eelevate': return { [highestStat(set)]: 1 };
     default: return null;
   }
 }
@@ -1622,6 +1624,19 @@ function myMegaForme(set: PokemonSet): string | null {
   return match?.forme ?? null;
 }
 
+// On-KO boost (Moxie / Beast Boost / Eelevate / …) for a set, resolving the MEGA
+// forme's ability AND stats when a stone is held — the team set carries the base
+// ability, but Beast Boost / Eelevate key off the mega forme (e.g. a stone-holding
+// Eelektross fights as Eelektross-Mega/Eelevate and snowballs its highest mega
+// stat). `abilityHint` overrides the base ability for non-mega opp sets (inference).
+// Exported for tests.
+export function koBoostForSet(set: PokemonSet, abilityHint?: string | null): BoostMap | null {
+  const forme = myMegaForme(set);
+  const ability = forme ? (megaFormeAbility(forme) ?? set.ability) : (abilityHint ?? set.ability);
+  const statSet = forme ? { ...set, species: forme } : set;   // Beast Boost reads the MEGA forme's stats
+  return onKoBoost(statSet, ability);
+}
+
 // The opponent's (assumed worst-case) mega forme + its stone, or null if the
 // species has no mega. We don't know the opp's real item, so for the
 // adversarial "could they mega" branch we assume they hold the stone.
@@ -1860,8 +1875,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppDefiantStat: opp.map(o => defiantStat(o.entry.ability)),
     myUnaware: mine.map(m => toId(m.set.ability ?? '') === 'unaware'),
     oppUnaware: opp.map(o => toId(o.entry.ability ?? '') === 'unaware'),
-    myOnKo: mine.map(m => onKoBoost(m.set, m.set.ability)),
-    oppOnKo: opp.map(o => onKoBoost(o.entry.candidates?.[0] ?? defaultOpponentSet(o.entry, 50), o.entry.ability)),
+    myOnKo: mine.map(m => koBoostForSet(m.set)),
+    oppOnKo: opp.map(o => koBoostForSet(o.entry.candidates?.[0] ?? defaultOpponentSet(o.entry, 50), o.entry.ability)),
     myLifeOrb: mine.map(m => takesLifeOrbRecoil(m.set.item, m.set.ability)),
     oppLifeOrb: opp.map(o => takesLifeOrbRecoil(o.entry.item, o.entry.ability)),
     myRedirectMove: mine.map(m => findRedirectMove(m.set.moves ?? [])),
