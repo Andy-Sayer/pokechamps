@@ -478,6 +478,46 @@ describe('mega forme abilities are applied in the calc', () => {
   });
 });
 
+describe('Reg M-B custom mega abilities (Fire Mane, Eelevate)', () => {
+  const pyroar: PokemonSet = {
+    species: 'Pyroar', level: 50, item: 'Pyroarite', ability: 'Unnerve', nature: 'Modest',
+    evs: { ...ZERO_EVS, spa: 252 }, ivs: MAX_IVS, moves: ['Flamethrower'],
+  };
+  // Snorlax (Normal) is neutral to BOTH Fire and Psychic, so the only difference
+  // between the two 90-BP special moves is Pyroar's Fire STAB (×1.5) plus Fire Mane
+  // (×1.5). Without Fire Mane the ratio is ~1.5 (STAB only); with it, ~2.25.
+  const snorlax: PokemonSet = {
+    species: 'Snorlax', level: 50, nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, ivs: MAX_IVS, moves: [],
+  };
+
+  test('Fire Mane: Mega Pyroar Fire move gets ×1.5 on top of STAB', () => {
+    const fire = damageRange({ attacker: pyroar, defender: snorlax, move: 'Flamethrower', field: NEUTRAL_FIELD, attackerSide: 'mine', attackerOpts: { gimmickActive: true } });
+    const ctrl = damageRange({ attacker: pyroar, defender: snorlax, move: 'Psychic', field: NEUTRAL_FIELD, attackerSide: 'mine', attackerOpts: { gimmickActive: true } });
+    const ratio = (fire.min + fire.max) / (ctrl.min + ctrl.max);
+    expect(ratio).toBeGreaterThan(2.0);   // STAB 1.5 × Fire Mane 1.5 = 2.25; >2 proves Fire Mane fired
+    expect(ratio).toBeLessThan(2.5);
+  });
+
+  test('Fire Mane is OFF before mega activation', () => {
+    const pre = damageRange({ attacker: pyroar, defender: snorlax, move: 'Flamethrower', field: NEUTRAL_FIELD, attackerSide: 'mine', attackerOpts: { gimmickActive: false } });
+    const post = damageRange({ attacker: pyroar, defender: snorlax, move: 'Flamethrower', field: NEUTRAL_FIELD, attackerSide: 'mine', attackerOpts: { gimmickActive: true } });
+    expect(post.maxPercent).toBeGreaterThan(pre.maxPercent);   // mega SpA + Fire Mane ×1.5
+  });
+
+  // Eelevate = Levitate + Beast Boost. The calc-relevant half is the Ground immunity,
+  // which the Levitate→Eelevate rename would otherwise drop (calc doesn't know the name).
+  test('Eelevate: Mega Eelektross is immune to Ground (Earthquake)', () => {
+    const chomp: PokemonSet = { species: 'Garchomp', level: 50, ability: 'Rough Skin', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, ivs: MAX_IVS, moves: ['Earthquake', 'Ice Fang'] };
+    const eel: PokemonSet = { species: 'Eelektross', level: 50, item: 'Eelektrossite', ability: 'Levitate', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, ivs: MAX_IVS, moves: [] };
+    // A pure-Electric Eelektross takes Earthquake neutrally; full immunity makes
+    // the calc emit 0 damage, which it surfaces by THROWING (callers try/catch it
+    // as "immune"). The throw is the immunity signal.
+    expect(() => damageRange({ attacker: chomp, defender: eel, move: 'Earthquake', field: NEUTRAL_FIELD, attackerSide: 'mine', defenderOpts: { gimmickActive: true } })).toThrow();
+    const ice = damageRange({ attacker: chomp, defender: eel, move: 'Ice Fang', field: NEUTRAL_FIELD, attackerSide: 'mine', defenderOpts: { gimmickActive: true } });
+    expect(ice.max).toBeGreaterThan(0);   // non-Ground still connects — Eelevate isn't blanket immunity
+  });
+});
+
 describe('Dragonize (custom Champions mega ability — Feraligatr-Mega)', () => {
   // Feraligatr-Mega is Water/Dragon with Dragonize: its Normal moves become Dragon
   // (1.2x). @smogon/calc doesn't know the ability, so damage.ts emulates the type/BP

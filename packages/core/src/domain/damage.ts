@@ -76,6 +76,14 @@ function toCalcPokemon(set: PokemonSet, opts: {
   const gimmick = activeGimmick();
   const resolvedSpecies = gimmick.resolveSpecies?.({ set, active: !!opts.gimmickActive }) ?? set.species;
   gimmick.enrichCalcPokemon?.({ set, active: !!opts.gimmickActive, opts: calcOpts });
+  // Eelevate (custom Champions ability, Eelektross-Mega) = Levitate + Beast Boost.
+  // @smogon/calc has no logic for the NAME, so it would drop the Ground/hazard
+  // immunity (and our SPECIES_PATCH rename Levitate→Eelevate is what removed it).
+  // Alias it to Levitate for the calc — exactly Eelevate's calc-relevant half, with
+  // all of Levitate's interactions (Mold Breaker / Iron Ball / Gravity / Smack Down
+  // bypass) for free. The Beast Boost half (KO → highest stat +1) is a post-KO
+  // engine effect, not damage, so it lives outside the calc.
+  if (calcOpts.ability === 'Eelevate') calcOpts.ability = 'Levitate';
   const p = new CalcPokemon(GEN, calcSpeciesName(resolvedSpecies), calcOpts as any);
   // Current HP is given as a PERCENT; scale it by the species' REAL max HP
   // after construction (HP-fraction BP moves: Eruption/Water Spout). Passing a
@@ -179,6 +187,16 @@ export function damageRange(args: {
     && moveData?.type === 'Normal' && moveData?.category !== 'Status') {
     const boostedBp = Math.round((((move as unknown as { bp?: number }).bp) ?? 0) * 1.2);
     move = new CalcMove(GEN, args.move, { ...moveOpts, overrides: { type: 'Dragon', basePower: boostedBp } } as any);
+  }
+  // Fire Mane (custom Champions ability, Pyroar-Mega): a PERMANENT Blaze — the
+  // holder's Fire-type moves get ×1.5 power unconditionally (Blaze is the same ×1.5
+  // but only below 1/3 HP). The calc doesn't know the name, so emulate with a ×1.5
+  // base-power override (mirror of Dragonize; no type change — the move stays Fire,
+  // so STAB + effectiveness are already correct). Damaging moves only.
+  if ((atk as unknown as { ability?: string }).ability === 'Fire Mane'
+    && moveData?.type === 'Fire' && moveData?.category !== 'Status') {
+    const boostedBp = Math.round((((move as unknown as { bp?: number }).bp) ?? 0) * 1.5);
+    move = new CalcMove(GEN, args.move, { ...moveOpts, overrides: { basePower: boostedBp } } as any);
   }
   const field = toCalcField(effField, args.attackerSide, args.helpingHand);
   const result = calculate(GEN, atk, def, move, field);

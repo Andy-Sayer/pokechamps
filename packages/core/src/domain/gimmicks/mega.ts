@@ -9,6 +9,17 @@ const dex = Dex.forGen(9).includeData();
 const toId = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 const getItem = (name: string) => dex.items.get(name);
 
+// Champions custom mega abilities that @pkmn/dex still ships as PLACEHOLDERS
+// (the base-forme ability), so the calc would miss their DAMAGE-affecting effect.
+// Keyed by mega forme name. Keep in sync with refresh-data's SPECIES_PATCHES (our
+// data layer) and the emulation in damage.ts. Fire Mane → ×1.5 Fire override;
+// Eelevate → aliased to Levitate by the calc for the Ground immunity. (The Raichu
+// X/Y customs are NOT here — Electric Surge / No Guard don't affect damage.)
+const MEGA_ABILITY_OVERRIDES: Record<string, string> = {
+  'Pyroar-Mega': 'Fire Mane',
+  'Eelektross-Mega': 'Eelevate',
+};
+
 // Map: speciesId -> list of mega stone item names that turn it into a mega.
 // Built once on module load by walking every item in the dex.
 const stonesBySpecies = (() => {
@@ -141,7 +152,8 @@ export const megaGimmick: Gimmick = {
     if (!active || !set.item) return;
     const forme = megaFormeByItem.get(toId(set.item))?.get(toId(set.species));
     if (!forme) return;
-    const ability = ((dex.species.get(forme) as any)?.abilities as Record<string, string> | undefined)?.['0'];
+    const ability = MEGA_ABILITY_OVERRIDES[forme]
+      ?? ((dex.species.get(forme) as any)?.abilities as Record<string, string> | undefined)?.['0'];
     if (ability) opts.ability = ability;
   },
 

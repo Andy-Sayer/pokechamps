@@ -35,14 +35,17 @@ items.allow 148). The custom surface is the **mega abilities**, split three ways
 |---|---|---|---|
 | Canonical (calc-native) | Sceptile, Blaziken, Swampert, Mawile, Metagross | Lightning Rod / Speed Boost / Swift Swim / Huge Power / Tough Claws | ✅ correct in dump, calc handles |
 | Standard (already patched + tested) | Raichu X, Raichu Y | Electric Surge / No Guard | ✅ `SPECIES_PATCHES`; `tests/regulation-m-b.test.ts` |
-| Custom — name confirmed | Eelektross, Pyroar | **Eelevate**, **Fire Mane** | ⚠️ name pinned via `SPECIES_PATCHES`; **effect unpublished → no emulation yet** |
+| Custom — EMULATED (2026-06-17) | Eelektross, Pyroar | **Eelevate** = Levitate + Beast Boost · **Fire Mane** = permanent Blaze (Fire ×1.5) | ✅ calc-correct. Fire Mane ×1.5 Fire override + Eelevate→Levitate immunity in `damage.ts`; the calc reads the mega ability from `@pkmn/dex` (placeholder), so the real name is forced via `MEGA_ABILITY_OVERRIDES` in `gimmicks/mega.ts`. Tests in `damage.test.ts`. **GAP:** Eelevate's Beast Boost (KO → +1 highest stat) is a post-KO ENGINE effect, not emulated in the search yet |
 | Custom — name unpublished | Staraptor, Scolipede, Scrafty, Malamar, Barbaracle, Dragalge, Falinks | ? | ❌ dump carries PLACEHOLDER base abilities; Serebii ability pages still blank |
 
 **Why this matters:** like M-A's Dragonize/Mega Sol, any custom ability that
-changes type/damage/weather must be emulated in `damage.ts` (+ mirrored in the
-search) — the calc won't know it. Until the effects publish, these megas
-calc on correct stats/types but with a possibly-wrong ability, so treat them as
-**playable-but-not-damage-exact**. Don't anchor a team on their special ability.
+changes type/damage/weather must be emulated in `damage.ts` (+ the
+`MEGA_ABILITY_OVERRIDES` map in `gimmicks/mega.ts`, since the calc resolves the
+mega ability from `@pkmn/dex`, not our patched `species.json`) — the calc won't
+know it otherwise. **Eelevate + Fire Mane are now emulated** (2026-06-17). The
+remaining 7 invented megas still calc on correct stats/types but a placeholder
+ability, so treat THOSE as **playable-but-not-damage-exact** until their effects
+publish; don't anchor a team on their special ability.
 
 **Launch fill-in (≈10 min once Serebii populates the ability pages):**
 1. add the 7 unpublished names to `SPECIES_PATCHES` (refresh-data.ts), run
