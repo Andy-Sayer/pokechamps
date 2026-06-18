@@ -1,0 +1,19 @@
+{
+  "name": "@pokechamps/vision",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Vision input adapter: read the Switch 2 game screen (HDMI capture over USB-C) and emit canonical PokeChamps turn-log lines. Deterministic CV (HP-bar pixels + region OCR), confirm-before-commit. The CV layer produces the exact lines you'd type by hand, so the parser/engine stay untouched.",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@pokechamps/core": "*"
+  }
+}

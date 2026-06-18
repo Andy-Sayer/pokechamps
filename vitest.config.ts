@@ -12,6 +12,7 @@ export default defineConfig({
       'packages/server',
       'packages/tui',
       'packages/web',
+      'packages/vision',
     ],
   },
 });
