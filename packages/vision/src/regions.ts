@@ -1,4 +1,28 @@
-import type { RegionMap, Rect } from './types.js';
+import type { RegionMap, Rect, TeamPreviewRegions } from './types.js';
+
+const rect = (x: number, w: number, y: number, h: number): Rect => ({ x, y, w, h });
+
+// CALIBRATED from YouTube clips of a real Reg M-B match (two 16:9 captures — the
+// game area at 1175×662 for the left panel, the user's 1422×800 grab for the
+// opponent panel; both 16:9, so normalized coords are comparable).
+//   VALIDATED: left name column + the top 3 rows read correctly via OCR; the
+//     opponent panel was located on the right edge and its 6 sprites identified
+//     (Azumarill / Staraptor / Arcanine / Florges / Sylveon / Gholdengo).
+//   ESTIMATED: exact per-row y for the lower rows + item offsets — the LAYOUT is
+//     right; the pixels get nudged against real dongle footage (game fills the
+//     frame cleanly, no browser chrome). The earlier bug was cropping the game at
+//     width 1175 and clipping the opponent panel, which lives at x≈0.83–1.0.
+export const CHAMPIONS_TEAM_PREVIEW: TeamPreviewRegions = {
+  label: 'champions-team-preview (youtube-calibrated — refine on dongle)',
+  myTeam: Array.from({ length: 6 }, (_, i) => {
+    const y = 0.322 + i * 0.131;                                   // name top, ~0.131 row spacing
+    return { name: rect(0.070, 0.163, y, 0.045), item: rect(0.085, 0.150, y + 0.066, 0.038) };
+  }),
+  oppTeam: Array.from({ length: 6 }, (_, i) => ({
+    sprite: rect(0.833, 0.060, 0.137 + i * 0.1375, 0.105),         // right-edge sprite, ~0.1375 spacing
+  })),
+  oppName: rect(0.830, 0.150, 0.100, 0.050),
+};
 
 /** Resolve a normalized Rect to integer pixel bounds for a given frame size. */
 export function toPixels(r: Rect, width: number, height: number): { x: number; y: number; w: number; h: number } {

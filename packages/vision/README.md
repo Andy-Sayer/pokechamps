@@ -24,25 +24,36 @@ default-off fallback.
 ## Status (scaffold)
 
 **Built + tested (hardware-independent):**
-- `hpBar.ts` — `readHpFraction`: HP bar crop → fill fraction (the only unknown is
-  *where* the bar is, not how to read it).
-- `fuzzyMatch.ts` — `matchSpecies` / `matchMove`: noisy OCR → legal species/move
-  (the tiny candidate set is the accuracy win).
-- `turnLog.ts` — `emitTurnLog`: TurnObservation → canonical lines. **This is the
-  contract boundary**; it encodes the grammar exactly.
-- `types.ts`, `regions.ts` (`toPixels`), `visionSource.ts` (`cropRegion`, `readFrame`).
+- `hpBar.ts` — `readHpFraction`: HP bar crop → fill fraction.
+- `fuzzyMatch.ts` — `matchSpecies` / `matchMove`: noisy OCR → legal species/move.
+- `turnLog.ts` — `emitTurnLog`: TurnObservation → canonical lines (**the contract
+  boundary** — encodes the grammar exactly).
+- `decode.ts` — `loadFrame` / `FileFrameGrabber`: decode PNG/JPG → RGBA Frame (jimp).
+- `sprite.ts` — `dHash` / `SpriteHashMatcher`: perceptual-hash sprite matching for
+  the OPPONENT's team (icons, no text → OCR can't help).
+- `regions.ts` `CHAMPIONS_TEAM_PREVIEW` — the "Select 4" layout, **calibrated from
+  real YouTube footage** (your six = name/item OCR on the left; opponent six =
+  sprite match on the right edge x≈0.83–1.0; opponent name OCR).
 
-**Stubbed — needs a capture dongle + real screenshots to finish:**
+**Validated on real footage:** screen-grab → decode → crop → tesseract OCR read
+your team ("Staraptor" @1.00, "Grimmsnarl", "Sinistcha") + items; the opponent's
+six were located + identified by sight (Azumarill/Staraptor/Arcanine/Florges/
+Sylveon/Gholdengo), confirming the sprite-match requirement.
+
+**Stubbed — needs the capture dongle + continuous footage to finish:**
 - `frameGrabber.ts` `UvcFrameGrabber` — real HDMI capture. **Pre-flight: confirm
   Switch 2 gameplay isn't HDCP-protected** (almost certainly fine).
-- `ocr.ts` `TesseractOcrReader` — `tesseract.js` wiring + per-region tuning.
-- `regions.ts` `CHAMPIONS_DOUBLES_PLACEHOLDER` — coordinates are GUESSES;
-  **calibrate from a real 1080p screenshot** (the switch-day work).
-- `stateMachine.ts` — turn-assembly transitions need live frame timing to tune.
+- `ocr.ts` `TesseractOcrReader` — consolidate the proven OCR (jimp crop+greyscale+
+  upscale → tesseract); per-region whitelists.
+- `sprite.ts` `loadSpriteRefs` — generate `data/sprite-hashes.json` (dHash each
+  legal species' icon from `@pkmn/img` / the dex sprite sheet).
+- `regions.ts` CHAMPIONS_TEAM_PREVIEW px + a battle-`RegionMap` (HP bars/names/log)
+  — refine against dongle frames (game fills the frame; no browser chrome).
+- `stateMachine.ts` — turn-assembly transitions need live (uncut) frame timing.
 
 ## Next (when hardware lands)
-1. Drop a 1080p Champions doubles screenshot in `fixtures/`, calibrate `regions.ts`.
-2. Wire `tesseract.js` in `ocr.ts`; tune page-seg + whitelists on real frames.
-3. Implement `UvcFrameGrabber` against the dongle; verify ~2-5 fps RGBA frames.
+1. Generate `data/sprite-hashes.json` → wire `loadSpriteRefs`; opponent team reads.
+2. Consolidate `TesseractOcrReader`; lock the team-preview px against a clean frame.
+3. Implement `UvcFrameGrabber` (~2-5 fps RGBA); add a battle `RegionMap`.
 4. Flesh out `BattleStateMachine.feed` (text→actions, HP-diff→damage, debounce).
-5. Add the TUI confirm/edit surface that consumes `TurnProposal`.
+5. TUI confirm/edit surface consuming `TurnProposal`.

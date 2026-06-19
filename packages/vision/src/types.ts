@@ -83,3 +83,14 @@ export interface TurnProposal {
   notes: string[];
   frameTs: number;
 }
+
+/** The team-preview ("Select 4") screen: YOUR six on the left as TEXT (name +
+ *  item → OCR), the OPPONENT's six on the right as SPRITES only (→ sprite match),
+ *  with the trainer name as the only opponent text. A different layout from the
+ *  in-battle RegionMap. Coordinates NORMALIZED to the 16:9 game frame. */
+export interface TeamPreviewRegions {
+  label: string;
+  myTeam: { name: Rect; item: Rect }[];   // left panel, 6 rows — OCR
+  oppTeam: { sprite: Rect }[];             // right panel, 6 rows — sprite match
+  oppName: Rect;                           // opponent trainer name — OCR
+}
