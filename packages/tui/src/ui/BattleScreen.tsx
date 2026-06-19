@@ -43,6 +43,7 @@ import { MatchSummary } from './MatchSummary.js';
 import { formatShowdownTeamSP } from '@pokechamps/core/domain/showdown.js';
 import { loadPrefs, savePrefs } from '@pokechamps/core/storage/prefs.js';
 import { BATTLE_COMMANDS, parseCommand, type BattleCommandId } from './slashCommands.js';
+import { VisionProposalPanel, type ProposalLike } from './VisionProposalPanel.js';
 import { deriveActiveIdx, snapshotTurn } from '@pokechamps/core/match/engine.js';
 import { applyMegaAction } from '@pokechamps/core/domain/megaResolve.js';
 import { getMegaOptions } from '@pokechamps/core/domain/gimmicks/mega.js';
@@ -607,6 +608,10 @@ function synthOppEntry(set: PokemonSet): OpponentEntry {
 export function BattleScreen({ stores, match: initial, onEnd, spectator = false, spectatorLabel }: BattleScreenProps) {
   const [match, setMatch] = useState<Match>(initial);
   const [input, setInput] = useState('');
+  // A vision-built turn awaiting ratification (the VisionProposalPanel). Set by
+  // /vision (and, once HDMI capture is wired, by the runVision loop); cleared on
+  // accept/reject. While set, it owns input focus.
+  const [visionProposal, setVisionProposal] = useState<ProposalLike | null>(null);
   const [draftActions, setDraftActions] = useState<MoveAction[]>([]);
   // Boost lines logged DURING a turn join the turn's ordered timeline (instead of
   // applying immediately), so they take effect at their input position — a defense
@@ -2504,6 +2509,36 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // Dispatch a parsed slash command. Returns true when handled (the caller
   // should clear the input box); false when the command was unknown or its
   // preconditions weren't met (e.g. /review with no turns yet).
+  // Apply ONE turn-log line into the turn draft (parse → action / hazard / state),
+  // mirroring the TextInput onSubmit dispatch below — KEEP THE TWO IN SYNC. Returns a
+  // human error string on a parse failure, else null. (Used by the vision ratify path;
+  // multi-line callers see a stale `draftActions` in the boost-queue branch — fine, as
+  // vision proposals essentially never carry mid-turn boost lines.)
+  const applyTurnLine = (line: string): string | null => {
+    const trimmed = line.trim();
+    if (!trimmed) return null;
+    const r = parseTurnLine(trimmed, ctxWithDraft, nextTurnOrder());
+    if (!r.ok) return `"${trimmed}" — ${r.error}`;
+    if (r.kind === 'action') { setDraftActions(prev => [...prev, ...r.actions]); return null; }
+    if (r.kind === 'hazard') { applyHazardUpdate(r.update); return null; }
+    if (r.kind === 'states') { for (const u of r.updates) applyStateUpdate(u); noteBoostLogged(r.updates); return null; }
+    if (r.update.boosts && draftActions.length > 0) {
+      setDraftBoostEvents(prev => [...prev, { order: nextTurnOrder(), update: r.update, raw: trimmed }]);
+      noteBoostLogged([r.update]);
+    } else { applyStateUpdate(r.update); noteBoostLogged([r.update]); }
+    return null;
+  };
+
+  // Ratify a vision proposal: apply each line into the turn draft (you then /next to
+  // finalize, exactly as with typed input), and close the panel.
+  const acceptVisionProposal = (lines: string[]) => {
+    const errors = lines.map(applyTurnLine).filter((e): e is string => e != null);
+    setVisionProposal(null);
+    setMessage(errors.length
+      ? `Vision: applied with ${errors.length} issue(s) — first: ${errors[0]}`
+      : `Vision: applied ${lines.length} line(s). Review the draft, then /next to finalize.`);
+  };
+
   const runBattleCommand = (id: BattleCommandId, args = ''): boolean => {
     switch (id) {
       case 'ask': {
@@ -2512,6 +2547,16 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         return true;
       }
       case 'quit': onEnd(); return true;
+      case 'vision': {
+        // Surface vision-built turn-log lines (semicolon- or newline-separated) in the
+        // ratify panel. Once HDMI capture is wired, the runVision loop calls
+        // setVisionProposal directly with the same shape.
+        const lines = args.split(/\s*;\s*|\n/).map(s => s.trim()).filter(Boolean);
+        if (!lines.length) { setMessage('Usage: /vision m1 > Close Combat > o1 > 33; o1 ko  (semicolon-separated turn-log lines).'); return true; }
+        setVisionProposal({ lines, confidence: 0.9, notes: [] });
+        setMessage('');
+        return true;
+      }
       case 'share': {
         // Remote-mode only — sharing needs the match to live on the server.
         if (!stores.matches.share || !stores.matches.unshare) {
@@ -2776,7 +2821,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         setInputKey(k => k + 1);
       }
     }
-  }, { isActive: !overrideOpen });
+  }, { isActive: !overrideOpen && !visionProposal });
 
   // ---------------- per-active matchup grid ----------------
   // For each of my 2 active slots, compute matchup rows against ALL 6 opps
@@ -3361,6 +3406,20 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         </Box>
       )}
 
+      {/* Vision proposal — ratify a vision-built turn before it commits. Owns its
+          own input while open (main useInput + TextInput gated off via visionProposal). */}
+      {visionProposal && (
+        <Box marginTop={1}>
+          <VisionProposalPanel
+            proposal={visionProposal}
+            turnNumber={match.turns.length + 1}
+            gloss={line => previewTurnLine(line, ctxWithDraft)}
+            onAccept={acceptVisionProposal}
+            onReject={() => { setVisionProposal(null); setMessage('Vision proposal dismissed.'); }}
+          />
+        </Box>
+      )}
+
       {/* /override — manual state editor. Owns its own input while open;
           the main useInput + TextInput are gated off via overrideOpen. */}
       {overrideOpen && (
@@ -3474,7 +3533,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
               }
               setInput(next);
             }}
-            focus={!pendingReplacement && !match.outcome && !overrideOpen}
+            focus={!pendingReplacement && !match.outcome && !overrideOpen && !visionProposal}
             onSubmit={value => {
               const trimmed = value.trim();
               if (!trimmed) return;

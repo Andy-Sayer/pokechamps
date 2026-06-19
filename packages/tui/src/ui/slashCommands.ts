@@ -32,6 +32,7 @@ export type BattleCommandId =
   | 'override'
   | 'share'
   | 'summary'
+  | 'vision'
   | 'help'
   | 'quit';
 
@@ -59,6 +60,7 @@ export const BATTLE_COMMANDS: readonly BattleCommand[] = [
   { id: 'override', aliases: ['override', 'ov'],      description: 'Open the manual state editor (field / HP / status / boosts / positions)' },
   { id: 'share',    aliases: ['share', 'sh'],         description: 'Live-share this match (remote mode): /share for a spectator link, /share off to revoke' },
   { id: 'summary',  aliases: ['summary', 'sum'],      description: 'Match summary: per-mon damage dealt / taken, KOs, turn count' },
+  { id: 'vision',   aliases: ['vision', 'vis'],       description: 'Ratify vision-built turn-log lines (semicolon-separated): /vision m1 > Close Combat > o1 > 33; o1 ko — opens the proposal panel. HDMI capture feeds these automatically once wired.' },
   { id: 'help',     aliases: ['help', 'h', '?'],      description: 'Show available commands' },
   { id: 'quit',     aliases: ['quit', 'q', 'end'],    description: 'End the match and return to the menu' },
 ];
