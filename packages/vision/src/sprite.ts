@@ -5,11 +5,24 @@
 // cheap 64-bit Hamming compare against ~208 references (the small candidate set is
 // again the accuracy win). Deterministic — no LLM/visual guessing in the loop.
 //
-// STATUS: the matcher (dHash + nearest-reference) is implemented + tested. What's
-// stubbed is the REFERENCE TABLE — see buildSpriteRefs()'s TODO: a one-off script
-// dHashes each legal species' icon (from @pkmn/img or the dex sprite sheet) into
-// data/sprite-hashes.json, which loadSpriteRefs() then reads. Tune the hash size
-// + add a colour-histogram tiebreak against real captured icons.
+// STATUS: the matcher (dHash + nearest-reference) is implemented + tested on
+// identical-art inputs (same image → distance 0). But matching ACROSS ART STYLES
+// does NOT work, and this was measured, not assumed: dHashing the game's official-
+// render sprites against public sources (@pkmn/img Showdown icons; PokeAPI HOME
+// renders) gives noise-level distances — captured sprite vs its OWN correct icon
+// landed 27–35/64 (farther than random other icons), and even two clean sources of
+// the SAME species (Showdown icon vs HOME render) sit 18–44/64 apart (2026-06).
+// Global-luminance dHash cannot bridge pixel-art vs 3D-render. Public icons are a
+// proven dead end as a reference source.
+//
+// FURTHER: even GAME-ART-vs-GAME-ART, dHash is too alignment-fragile for species ID
+// — a ±6px shift on a 126px preview sprite flipped up to 22/64 bits, as large as the
+// gap between different species (5/54 jittered crops misidentified). The VALIDATED
+// matcher is a background-masked COLOUR HISTOGRAM — see colorHist.ts (54/54 correct
+// under ±8px jitter, 6/6 cross-frame; species separation 0.76 vs self-dist 0.49).
+// dHash below is retained for true near-duplicate checks (same render, recompressed),
+// NOT species identification; loadSpriteRefs() stays stubbed in favour of
+// loadColorHistRefs() / data/sprite-refs.json.
 
 /** Average luminance downscale of an RGBA buffer to outW×outH (box filter). */
 function downscaleGrey(pixels: Uint8ClampedArray | number[], width: number, height: number, outW: number, outH: number): number[] {
@@ -68,11 +81,11 @@ export class SpriteHashMatcher {
   }
 }
 
-// TODO(reference table): generate data/sprite-hashes.json with a one-off script —
-// for each id in format.champions.json legality.allow, fetch its icon (e.g.
-// @pkmn/img's Icons.getPokemon(id).url, or a dex sprite sheet), decode with jimp,
-// dHash it, and write { id, name, hash: hashHex }. Then loadSpriteRefs() parses
-// that file. Stubbed until we wire the sprite source.
+// TODO(reference table): build data/sprite-hashes.json from the GAME'S OWN sprites,
+// NOT public icons (proven not to match cross-art — see STATUS above). Capture each
+// legal species' Champions sprite once (team-builder screen, or harvested live),
+// crop, dHash, write { id, name, hash: hashHex }. Then loadSpriteRefs() parses that
+// file. Stubbed until we have game-art reference crops.
 export function loadSpriteRefs(): SpriteRef[] {
   return [];   // TODO: read data/sprite-hashes.json (hash hex → bigint)
 }

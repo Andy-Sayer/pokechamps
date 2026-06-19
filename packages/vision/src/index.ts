@@ -2,6 +2,7 @@ export * from './types.js';
 export * from './hpBar.js';
 export * from './fuzzyMatch.js';
 export * from './sprite.js';
+export * from './colorHist.js';
 export * from './turnLog.js';
 export * from './frameGrabber.js';
 export * from './decode.js';

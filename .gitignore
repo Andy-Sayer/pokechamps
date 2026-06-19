@@ -22,6 +22,11 @@ packages/server/.data-test/
 # …but the replay-validation corpus fixtures ARE tracked (offline CI tests).
 !packages/core/tests/replays/*.log
 
+# Vision capture/experiment scratch — screenshots, sprite crops, OCR model.
+# (data/sprite-refs.json, the bootstrapped reference TABLE, lives under data/ and IS tracked.)
+packages/vision/fixtures/
+eng.traineddata
+
 # editor / OS cruft
 .DS_Store
 Thumbs.db

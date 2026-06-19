@@ -2,27 +2,35 @@ import type { RegionMap, Rect, TeamPreviewRegions } from './types.js';
 
 const rect = (x: number, w: number, y: number, h: number): Rect => ({ x, y, w, h });
 
-// CALIBRATED from YouTube clips of a real Reg M-B match (two 16:9 captures — the
-// game area at 1175×662 for the left panel, the user's 1422×800 grab for the
-// opponent panel; both 16:9, so normalized coords are comparable).
-//   VALIDATED: left name column + the top 3 rows read correctly via OCR; the
-//     opponent panel was located on the right edge and its 6 sprites identified
-//     (Azumarill / Staraptor / Arcanine / Florges / Sylveon / Gholdengo).
-//   ESTIMATED: exact per-row y for the lower rows + item offsets — the LAYOUT is
-//     right; the pixels get nudged against real dongle footage (game fills the
-//     frame cleanly, no browser chrome). The earlier bug was cropping the game at
-//     width 1175 and clipping the opponent panel, which lives at x≈0.83–1.0.
+// CALIBRATED on a real Reg M-B match captured FULLSCREEN at 1920×1080 (game fills
+// the frame, no browser chrome — same shape the HDMI dongle will hand us, so these
+// normalized coords transfer directly).
+//   VERIFIED (oppTeam): the six opponent sprites sit at frame x≈1593..1719, card
+//     centres y≈211,337,464,590,716,842 (spacing 126px). Colour-histogram matching
+//     the six (Azumarill/Staraptor/Arcanine/Florges/Sylveon/Gholdengo — see
+//     colorHist.ts) scored 54/54 under ±8px jitter and 6/6 cross-frame.
+//   ESTIMATED (myTeam): card-1 name/item measured directly; lower rows extrapolated
+//     at the same 0.1167 spacing — refine the OCR boxes against a clean dongle frame.
 export const CHAMPIONS_TEAM_PREVIEW: TeamPreviewRegions = {
-  label: 'champions-team-preview (youtube-calibrated — refine on dongle)',
+  label: 'champions-team-preview (fullscreen 1080p — oppTeam verified)',
   myTeam: Array.from({ length: 6 }, (_, i) => {
-    const y = 0.322 + i * 0.131;                                   // name top, ~0.131 row spacing
-    return { name: rect(0.070, 0.163, y, 0.045), item: rect(0.085, 0.150, y + 0.066, 0.038) };
+    const y = 0.171 + i * 0.1167;                                  // name top; fullscreen card spacing
+    return { name: rect(0.065, 0.185, y, 0.037), item: rect(0.082, 0.150, y + 0.045, 0.033) };
   }),
   oppTeam: Array.from({ length: 6 }, (_, i) => ({
-    sprite: rect(0.833, 0.060, 0.137 + i * 0.1375, 0.105),         // right-edge sprite, ~0.1375 spacing
+    sprite: rect(0.8297, 0.0656, 0.1417 + i * 0.1167, 0.1074),     // verified sprite box
   })),
-  oppName: rect(0.830, 0.150, 0.100, 0.050),
+  oppName: rect(0.800, 0.170, 0.105, 0.040),
 };
+
+/** Champions opponent-panel background (dark magenta). Mask this out before
+ *  colour-histogram matching the opponent sprites (the sprite sits on this panel). */
+export const CHAMPIONS_OPP_PANEL_BG: readonly [number, number, number] = [131, 6, 55];
+
+/** Opponent sprite crop boxes (integer px) for a frame of the given size. */
+export function opponentSpriteBoxes(width: number, height: number) {
+  return CHAMPIONS_TEAM_PREVIEW.oppTeam.map((s) => toPixels(s.sprite, width, height));
+}
 
 /** Resolve a normalized Rect to integer pixel bounds for a given frame size. */
 export function toPixels(r: Rect, width: number, height: number): { x: number; y: number; w: number; h: number } {
