@@ -23,6 +23,22 @@ describe('BattleAssembler — opening turn (real Oni capture)', () => {
       'o1 ko',
     ]);
   });
+
+  test('post-turn HP read fills the damage % on each targeted move', () => {
+    const a = new BattleAssembler({ m1: 'Staraptor', m2: 'Grimmsnarl', o1: 'Raichu', o2: 'Sylveon' });
+    feed(a, [
+      'The opposing Raichu used Fake Out!',
+      "Staraptor flinched and couldn't move!",       // Fake Out → m1
+      'Staraptor used Close Combat!',
+      'The opposing Raichu fainted!',                // Close Combat → o1 (KO)
+    ]);
+    // post-turn remaining HP%: Staraptor at 82, Raichu at 0 (fainted)
+    expect(a.endTurnLines({ m1: 82, o1: 0 })).toEqual([
+      'o1 > Fake Out > m1 > 82',
+      'm1 > Close Combat > o1 > 0',
+      'o1 ko',
+    ]);
+  });
 });
 
 describe('BattleAssembler — slot resolution & roster', () => {

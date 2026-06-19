@@ -32,6 +32,9 @@ export interface RegionMap {
   battleText: Rect;         // bottom log box ("X used Y!", "…fainted!")
   moveMenu: [Rect, Rect, Rect, Rect];  // 4 move slots (when choosing)
   slots: SlotRegion[];      // 4 in doubles
+  /** The two opponent HP-percent readouts (white digits on the nameplate bar), left
+   *  plate → o1, right → o2. OCR'd for the exact remaining HP% (the inference signal). */
+  oppHpText?: [Rect, Rect];
 }
 
 /** Active-slot refs as the turn-log grammar uses them. */

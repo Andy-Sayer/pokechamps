@@ -112,13 +112,20 @@ export class BattleAssembler {
     }
   }
 
-  /** Close the current turn → its TurnObservation, and reset for the next. */
-  endTurn(): TurnObservation {
+  /** Close the current turn → its TurnObservation, and reset for the next. Pass the
+   *  post-turn remaining HP% per slot (from the HP read, opp nameplate %, mine
+   *  abs/max) to fill each damaging move's `hpRemainingPercent` — that's the damage
+   *  signal the inference solver back-solves spreads from. One read/slot per turn
+   *  assumes one hit/target/turn (the common case); refine with mid-turn reads. */
+  endTurn(hpBySlot: Partial<Record<SlotRef, number>> = {}): TurnObservation {
+    for (const a of this.actions) {
+      if (a.kind === 'move' && a.target != null && hpBySlot[a.target] != null) a.hpRemainingPercent = hpBySlot[a.target];
+    }
     const obs: TurnObservation = { actions: this.actions, faints: this.faints, confidence: 1, notes: this.notes };
     this.actions = []; this.faints = []; this.notes = []; this.megaPending.clear();
     return obs;
   }
 
   /** Convenience: close the turn and emit its canonical turn-log lines. */
-  endTurnLines(): string[] { return emitTurnLog(this.endTurn()); }
+  endTurnLines(hpBySlot: Partial<Record<SlotRef, number>> = {}): string[] { return emitTurnLog(this.endTurn(hpBySlot)); }
 }

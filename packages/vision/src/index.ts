@@ -1,5 +1,6 @@
 export * from './types.js';
 export * from './hpBar.js';
+export * from './hpRead.js';
 export * from './fuzzyMatch.js';
 export * from './sprite.js';
 export * from './colorHist.js';

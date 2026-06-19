@@ -60,4 +60,11 @@ export const CHAMPIONS_DOUBLES_PLACEHOLDER: RegionMap = {
     { side: 'mine', index: 0, name: { x: 0.10, y: 0.58, w: 0.30, h: 0.05 }, hpBar: { x: 0.10, y: 0.64, w: 0.30, h: 0.02 }, statusIcon: TODO },
     { side: 'mine', index: 1, name: { x: 0.55, y: 0.66, w: 0.30, h: 0.05 }, hpBar: { x: 0.55, y: 0.72, w: 0.30, h: 0.02 }, statusIcon: TODO },
   ],
+  // Opponent HP-% readouts (white digits on the bar). slot A (left) VERIFIED — reads
+  // "100" via white-isolation + digit whitelist; slot B (right) needs an x nudge (its
+  // leading "1" clipped at x≈1845 → shift left). 1080p-derived normalized boxes.
+  oppHpText: [
+    { x: 0.740, y: 0.1185, w: 0.0911, h: 0.0370 },   // o1 — frame x1420 y128 w175 h40
+    { x: 0.9365, y: 0.1185, w: 0.0625, h: 0.0370 },  // o2 — ~x1798 (left of the clip)
+  ],
 };
