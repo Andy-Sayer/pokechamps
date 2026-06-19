@@ -36,25 +36,22 @@ items.allow 148). The custom surface is the **mega abilities**, split three ways
 | Canonical (calc-native) | Sceptile, Blaziken, Swampert, Mawile, Metagross | Lightning Rod / Speed Boost / Swift Swim / Huge Power / Tough Claws | ✅ correct in dump, calc handles |
 | Standard (already patched + tested) | Raichu X, Raichu Y | Electric Surge / No Guard | ✅ `SPECIES_PATCHES`; `tests/regulation-m-b.test.ts` |
 | Custom — EMULATED (2026-06-17) | Eelektross, Pyroar | **Eelevate** = Levitate + Beast Boost · **Fire Mane** = permanent Blaze (Fire ×1.5) | ✅ calc-correct. Fire Mane ×1.5 Fire override + Eelevate→Levitate immunity in `damage.ts`; the calc reads the mega ability from `@pkmn/dex` (placeholder), so the real name is forced via `MEGA_ABILITY_OVERRIDES` in `gimmicks/mega.ts`. Tests in `damage.test.ts`. Eelevate's Beast Boost half (KO → +1 highest stat) is modeled in the search (`koBoostForSet`, 2026-06-18) — it resolves the MEGA forme's ability + highest stat from the held stone |
-| Custom — name unpublished | Staraptor, Scolipede, Scrafty, Malamar, Barbaracle, Dragalge, Falinks | ? | ❌ dump carries PLACEHOLDER base abilities; Serebii ability pages still blank |
+| Standard — CONFIRMED 2026-06-18 | Staraptor (Contrary), Scolipede (Shell Armor), Scrafty (Intimidate), Malamar (Contrary), Barbaracle (Tough Claws), Dragalge (Regenerator), Falinks (Defiant) | standard | ✅ pinned in `SPECIES_PATCHES` + `MEGA_ABILITY_OVERRIDES` + species.json. All STANDARD abilities — calc/search handle natively, no emulation. Sources: The Game Haus / Pokéos / PLDH; Staraptor independently seen in live battle footage |
 
 **Why this matters:** like M-A's Dragonize/Mega Sol, any custom ability that
 changes type/damage/weather must be emulated in `damage.ts` (+ the
 `MEGA_ABILITY_OVERRIDES` map in `gimmicks/mega.ts`, since the calc resolves the
 mega ability from `@pkmn/dex`, not our patched `species.json`) — the calc won't
-know it otherwise. **Eelevate + Fire Mane are now emulated** (2026-06-17). The
-remaining 7 invented megas still calc on correct stats/types but a placeholder
-ability, so treat THOSE as **playable-but-not-damage-exact** until their effects
-publish; don't anchor a team on their special ability.
+know it otherwise. **Eelevate + Fire Mane are emulated** (2026-06-17).
 
-**Launch fill-in (≈10 min once Serebii populates the ability pages):**
-1. add the 7 unpublished names to `SPECIES_PATCHES` (refresh-data.ts), run
-   `npm run refresh-data`, confirm the `patched species.json/...` log lines;
-2. for each ability whose effect touches damage/type/weather/protection, add the
-   emulation to `damage.ts` (mirror the Mega Sol / Dragonize / Piercing Drill
-   patterns above) + the search;
-3. extend `tests/regulation-m-b.test.ts` with a forward-damage assertion per
-   emulated ability.
+**ALL M-B mega abilities are now pinned (2026-06-18) — no blanks remain.** The
+other 7 invented megas turned out to use STANDARD abilities (Contrary / Shell
+Armor / Intimidate / Tough Claws / Regenerator / Defiant), which the calc and
+search already handle, so resolving the forme to the correct ability is the whole
+fix — no emulation. Only Eelevate + Fire Mane have custom effects. NOTE these were
+filled directly into `SPECIES_PATCHES` + `MEGA_ABILITY_OVERRIDES` + `species.json`
+WITHOUT a full `npm run refresh-data` (avoids a wide dex re-dump mid-cycle); the
+patches are in `SPECIES_PATCHES` so the next refresh reproduces them.
 
 ## Caveats / accepted simplifications
 

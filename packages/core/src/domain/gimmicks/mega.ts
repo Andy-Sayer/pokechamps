@@ -18,9 +18,18 @@ const getItem = (name: string) => dex.items.get(name);
 // inverts self-stat-drops via hasContrary (so Close Combat boosts its Def/SpD). (The
 // Raichu X/Y customs are NOT here — Electric Surge / No Guard don't affect damage.)
 const MEGA_ABILITY_OVERRIDES: Record<string, string> = {
-  'Pyroar-Mega': 'Fire Mane',
-  'Eelektross-Mega': 'Eelevate',
-  'Staraptor-Mega': 'Contrary',   // confirmed via live footage (Close Combat → Def/SpD rose)
+  'Pyroar-Mega': 'Fire Mane',          // custom effect — emulated in damage.ts (×1.5 Fire)
+  'Eelektross-Mega': 'Eelevate',       // custom effect — Levitate immunity + Beast Boost snowball
+  // The rest are STANDARD abilities (effects handled natively by calc/search); pinned
+  // here only to override @pkmn/dex's placeholders. Confirmed 2026-06-18 (The Game
+  // Haus / Pokéos / PLDH); Staraptor=Contrary independently seen in live footage.
+  'Staraptor-Mega': 'Contrary',
+  'Scolipede-Mega': 'Shell Armor',
+  'Scrafty-Mega': 'Intimidate',
+  'Malamar-Mega': 'Contrary',
+  'Barbaracle-Mega': 'Tough Claws',
+  'Dragalge-Mega': 'Regenerator',
+  'Falinks-Mega': 'Defiant',
 };
 
 // The ability a mega forme fights with — our override (for the customs @pkmn/dex

@@ -43012,9 +43012,7 @@
       "spe": 62
     },
     "abilities": {
-      "0": "Poison Point",
-      "1": "Swarm",
-      "H": "Speed Boost"
+      "0": "Shell Armor"
     },
     "weightkg": 230.5,
     "eggGroups": [
@@ -44378,9 +44376,7 @@
       "spe": 68
     },
     "abilities": {
-      "0": "Shed Skin",
-      "1": "Moxie",
-      "H": "Intimidate"
+      "0": "Intimidate"
     },
     "weightkg": 31,
     "eggGroups": [
@@ -55552,9 +55548,7 @@
       "spe": 88
     },
     "abilities": {
-      "0": "Contrary",
-      "1": "Suction Cups",
-      "H": "Infiltrator"
+      "0": "Contrary"
     },
     "weightkg": 69.8,
     "eggGroups": [
@@ -55738,9 +55732,7 @@
       "spe": 88
     },
     "abilities": {
-      "0": "Tough Claws",
-      "1": "Sniper",
-      "H": "Pickpocket"
+      "0": "Tough Claws"
     },
     "weightkg": 100,
     "eggGroups": [
@@ -55925,9 +55917,7 @@
       "spe": 44
     },
     "abilities": {
-      "0": "Poison Point",
-      "1": "Poison Touch",
-      "H": "Adaptability"
+      "0": "Regenerator"
     },
     "weightkg": 100.3,
     "eggGroups": [
@@ -72505,8 +72495,7 @@
       "spe": 100
     },
     "abilities": {
-      "0": "Battle Armor",
-      "H": "Defiant"
+      "0": "Defiant"
     },
     "weightkg": 99,
     "eggGroups": [

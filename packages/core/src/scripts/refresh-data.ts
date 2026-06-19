@@ -26,12 +26,18 @@ const SPECIES_PATCHES: Record<string, { abilities?: Record<string, string> }> = 
   // object collapses the forme to one ability, like raichumegay above). Only
   // two are publicly named pre-launch; effect emulation is tracked separately
   // in docs/notes/champions-custom-data.md.
-  eelektrossmega: { abilities: { 0: 'Eelevate' } },   // confirmed name (Serebii); effect TBD
-  pyroarmega: { abilities: { 0: 'Fire Mane' } },       // confirmed name (Serebii); effect TBD
-  staraptormega: { abilities: { 0: 'Contrary' } },     // confirmed via live footage — standard ability, search handles it
-  // TODO(launch, fill from serebii.net/pokemonchampions/megaabilities.shtml):
-  //   scolipedemega, scraftymega, malamarmega,
-  //   barbaraclemega, dragalgemega, falinksmega — ability pages still blank.
+  eelektrossmega: { abilities: { 0: 'Eelevate' } },    // CUSTOM effect (Levitate + Beast Boost) — emulated in damage.ts/search
+  pyroarmega: { abilities: { 0: 'Fire Mane' } },       // CUSTOM effect (×1.5 Fire) — emulated in damage.ts
+  // The remaining M-B megas use STANDARD abilities (no emulation needed). All
+  // confirmed 2026-06-18 (The Game Haus / Pokéos / PLDH); Staraptor independently
+  // seen in live footage. Full set now pinned — no blanks remain.
+  staraptormega: { abilities: { 0: 'Contrary' } },
+  scolipedemega: { abilities: { 0: 'Shell Armor' } },
+  scraftymega: { abilities: { 0: 'Intimidate' } },
+  malamarmega: { abilities: { 0: 'Contrary' } },
+  barbaraclemega: { abilities: { 0: 'Tough Claws' } },
+  dragalgemega: { abilities: { 0: 'Regenerator' } },
+  falinksmega: { abilities: { 0: 'Defiant' } },
 };
 
 function dump<T>(filename: string, entries: Iterable<T>, getId: (e: T) => string, patches?: Record<string, Partial<T>>) {
