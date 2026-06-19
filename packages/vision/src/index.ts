@@ -3,6 +3,7 @@ export * from './hpBar.js';
 export * from './fuzzyMatch.js';
 export * from './turnLog.js';
 export * from './frameGrabber.js';
+export * from './decode.js';
 export * from './ocr.js';
 export * from './regions.js';
 export * from './stateMachine.js';
