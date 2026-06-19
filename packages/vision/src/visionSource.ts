@@ -9,7 +9,7 @@ import { readHpFraction } from './hpBar.js';
 import { matchSpecies } from './fuzzyMatch.js';
 import { toPixels } from './regions.js';
 import { BattleStateMachine } from './stateMachine.js';
-import { emitTurnLog } from './turnLog.js';
+import type { Roster } from './assemble.js';
 
 export interface VisionDeps {
   grabber: FrameGrabber;
@@ -28,7 +28,10 @@ export function cropRegion(frame: Frame, r: { x: number; y: number; w: number; h
   return { data: out, width: w, height: h };
 }
 
-/** Read one frame into a FrameRead: HP fractions from the bars + name/text OCR. */
+/** Read one frame into a FrameRead: HP fractions from the bars + name/text OCR.
+ *  NOTE: opp HP is more reliable via the nameplate NUMBER (white-isolation + digit
+ *  OCR — see hpRead.readOpponentHpPercents) than the bar, which carries an overlaid
+ *  number; wire that in here once deps.ocr can OCR a preprocessed pixel buffer. */
 export async function readFrame(frame: Frame, deps: VisionDeps): Promise<FrameRead> {
   const slots = await Promise.all(deps.regions.slots.map(async sr => {
     const bar = cropRegion(frame, sr.hpBar);
@@ -47,22 +50,23 @@ export async function readFrame(frame: Frame, deps: VisionDeps): Promise<FrameRe
 }
 
 /** Live loop: grab → read → feed → propose. Stops when the grabber drains or
- *  `opts.stop()` returns true. Each settled turn calls `onProposal` with the
- *  canonical turn-log lines for the TUI to confirm/edit before committing. */
+ *  `opts.stop()` returns true. Each completed turn calls `onProposal` with the
+ *  canonical turn-log lines for the TUI to confirm/edit before committing. Seed
+ *  `opts.leads` (the two active mons per side from team preview) so slots resolve
+ *  from turn 1. */
 export async function runVision(
   deps: VisionDeps,
   onProposal: (p: TurnProposal) => void,
-  opts: { stop?: () => boolean } = {},
+  opts: { stop?: () => boolean; leads?: Partial<Roster> } = {},
 ): Promise<void> {
-  const sm = new BattleStateMachine();
+  const sm = new BattleStateMachine(opts.leads ?? {});
   for (;;) {
     if (opts.stop?.()) break;
     const frame = await deps.grabber.next();
     if (!frame) break;
-    const obs = sm.feed(await readFrame(frame, deps));
-    if (obs) {
-      onProposal({ lines: emitTurnLog(obs), confidence: obs.confidence, notes: obs.notes, frameTs: frame.ts });
-      sm.reset();
-    }
+    const proposal = sm.feed(await readFrame(frame, deps));
+    if (proposal) onProposal(proposal);
   }
+  const last = sm.finish();            // flush the final in-progress turn
+  if (last) onProposal(last);
 }

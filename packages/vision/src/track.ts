@@ -14,6 +14,9 @@
 
 import type { BattleMessage } from './bannerParse.js';
 import { BattleAssembler, type Roster } from './assemble.js';
+import type { SlotRef } from './types.js';
+
+type HpBySlot = Partial<Record<SlotRef, number>>;
 
 const isEotResidual = (e: BattleMessage): boolean => e.kind === 'weather';
 const isActionStart = (e: BattleMessage): boolean =>
@@ -51,11 +54,12 @@ export class BattleTracker {
   /** Current active roster snapshot. */
   getRoster(): Roster { return this.asm.getRoster(); }
 
-  /** Feed one event; returns the PREVIOUS turn's lines if this event opened a new turn. */
-  feed(e: BattleMessage): string[] | null {
+  /** Feed one event; returns the PREVIOUS turn's lines if this event opened a new turn.
+   *  `hp` (post-turn remaining HP% per slot) is attached to that closed turn's moves. */
+  feed(e: BattleMessage, hp: HpBySlot = {}): string[] | null {
     let done: string[] | null = null;
     if (isActionStart(e) && this.sawAction && this.sawEot) {
-      done = this.asm.endTurnLines();
+      done = this.asm.endTurnLines(hp);
       this.sawAction = false; this.sawEot = false;
     }
     this.asm.feed(e);
@@ -64,8 +68,17 @@ export class BattleTracker {
     return done;
   }
 
+  /** Close the current turn ONLY if it has an action yet (for the frame-gap boundary —
+   *  a no-residual turn ends at the move-select gap, not on an event). Else null. */
+  flushPending(hp: HpBySlot = {}): string[] | null {
+    if (!this.sawAction) return null;
+    const lines = this.asm.endTurnLines(hp);
+    this.sawAction = false; this.sawEot = false;
+    return lines;
+  }
+
   /** Close the final (in-progress) turn. */
-  end(): string[] { return this.asm.endTurnLines(); }
+  end(hp: HpBySlot = {}): string[] { return this.asm.endTurnLines(hp); }
 }
 
 /** Convenience: segment + assemble a whole event stream into per-turn line groups.
