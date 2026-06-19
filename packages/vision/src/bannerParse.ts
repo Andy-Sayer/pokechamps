@@ -10,10 +10,11 @@
 //   "It's super effective on X!"  · "The battle has ended due to a forfeit."  ...
 // Two hard facts from the wild:
 //   1. SIDE is in the prefix — "The opposing X …" = opponent; bare "X …" = mine.
-//   2. NICKNAMES appear ("Go! Sinistcha the Rank Master!") — so the banner's mon
-//      label is unreliable for species; we fuzzy-match it to a legal species when we
-//      can (clean labels) and otherwise return species=null (caller resolves via the
-//      nameplate-icon appearance match — see colorHist.ts).
+//   2. The mon label can carry a RIBBON TITLE ("Sylveon of the Distant Past",
+//      "Sinistcha the Rank Master") — these SUFFIX the real species, so
+//      resolveSpecies() recovers it by token. A true CUSTOM NICKNAME instead
+//      REPLACES the species with the player's free text; then species=null and the
+//      caller resolves it via the nameplate-icon appearance match (see colorHist.ts).
 // OCR's only systematic error here is the f-ligature (ff/fl/ft → tt/tl): fainted→
 // tainted, flinched→tlinched, effective→ettective, buffeted→butteted, forfeit→
 // torteit. repairOcr() snaps those back before matching.
