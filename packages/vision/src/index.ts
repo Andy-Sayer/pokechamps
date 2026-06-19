@@ -4,6 +4,7 @@ export * from './fuzzyMatch.js';
 export * from './sprite.js';
 export * from './colorHist.js';
 export * from './bannerParse.js';
+export * from './assemble.js';
 export * from './turnLog.js';
 export * from './frameGrabber.js';
 export * from './decode.js';
