@@ -28,8 +28,9 @@ const SPECIES_PATCHES: Record<string, { abilities?: Record<string, string> }> = 
   // in docs/notes/champions-custom-data.md.
   eelektrossmega: { abilities: { 0: 'Eelevate' } },   // confirmed name (Serebii); effect TBD
   pyroarmega: { abilities: { 0: 'Fire Mane' } },       // confirmed name (Serebii); effect TBD
+  staraptormega: { abilities: { 0: 'Contrary' } },     // confirmed via live footage — standard ability, search handles it
   // TODO(launch, fill from serebii.net/pokemonchampions/megaabilities.shtml):
-  //   staraptormega, scolipedemega, scraftymega, malamarmega,
+  //   scolipedemega, scraftymega, malamarmega,
   //   barbaraclemega, dragalgemega, falinksmega — ability pages still blank.
 };
 

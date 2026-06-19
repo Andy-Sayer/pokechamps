@@ -13,11 +13,14 @@ const getItem = (name: string) => dex.items.get(name);
 // (the base-forme ability), so the calc would miss their DAMAGE-affecting effect.
 // Keyed by mega forme name. Keep in sync with refresh-data's SPECIES_PATCHES (our
 // data layer) and the emulation in damage.ts. Fire Mane → ×1.5 Fire override;
-// Eelevate → aliased to Levitate by the calc for the Ground immunity. (The Raichu
-// X/Y customs are NOT here — Electric Surge / No Guard don't affect damage.)
+// Eelevate → aliased to Levitate by the calc for the Ground immunity; Contrary
+// (Mega Staraptor) is a STANDARD ability needing no emulation — the search already
+// inverts self-stat-drops via hasContrary (so Close Combat boosts its Def/SpD). (The
+// Raichu X/Y customs are NOT here — Electric Surge / No Guard don't affect damage.)
 const MEGA_ABILITY_OVERRIDES: Record<string, string> = {
   'Pyroar-Mega': 'Fire Mane',
   'Eelektross-Mega': 'Eelevate',
+  'Staraptor-Mega': 'Contrary',   // confirmed via live footage (Close Combat → Def/SpD rose)
 };
 
 // The ability a mega forme fights with — our override (for the customs @pkmn/dex
