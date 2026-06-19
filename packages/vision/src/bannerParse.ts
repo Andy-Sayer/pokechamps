@@ -58,10 +58,20 @@ export function repairOcr(s: string): string {
 const clean = (s: string) => s.trim().replace(/\s+/g, ' ').replace(/[’`´]/g, "'").replace(/[!.]+$/, '').trim();
 
 /** Fuzzy-resolve a banner mon-label to a legal species (null if not confident — a
- *  nickname, or too garbled; caller falls back to the nameplate appearance match). */
+ *  nickname, or too garbled; caller falls back to the nameplate appearance match).
+ *  Nicknames often EMBED the species ("Sylveon of the Distant Past"), so we also try
+ *  each word, accepting a high-confidence token match over a weak whole-string one. */
 function resolveSpecies(label: string): string | null {
-  const m = matchSpecies(label);
-  return m && m.score >= 0.7 ? m.value : null;
+  const full = matchSpecies(label);
+  let best = full && full.score >= 0.7 ? full : null;   // clean-label / garbled fallback
+  if (!best || best.score < 0.85) {
+    for (const w of label.split(/\s+/)) {
+      if (w.length < 4) continue;                        // skip "of", "the", …
+      const m = matchSpecies(w);
+      if (m && m.score >= 0.85 && (!best || m.score > best.score)) best = m;
+    }
+  }
+  return best ? best.value : null;
 }
 
 const STAT_ALIASES: Record<string, string> = {

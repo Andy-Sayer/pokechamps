@@ -45,6 +45,10 @@ describe('parseBanner — switches (nicknames in the wild)', () => {
   test('"<Trainer> sent out X!" → opp switchIn', () => {
     expect(parseBanner('Oni sent out Garchomp!')).toMatchObject({ kind: 'switchIn', side: 'opp', species: 'Garchomp', trainer: 'Oni' });
   });
+  test('recovers species embedded in an opp send-out nickname (real capture)', () => {
+    // "Stephan sent out Sylveon of the Distant Past!" — nickname embeds the species.
+    expect(parseBanner('Stephan sent out Sylveon of the Distant Past!')).toMatchObject({ kind: 'switchIn', side: 'opp', species: 'Sylveon', trainer: 'Stephan' });
+  });
 });
 
 describe('parseBanner — status / field / effectiveness', () => {
