@@ -37,15 +37,21 @@ export function toPixels(r: Rect, width: number, height: number): { x: number; y
   return { x: Math.round(r.x * width), y: Math.round(r.y * height), w: Math.round(r.w * width), h: Math.round(r.h * height) };
 }
 
-// PLACEHOLDER layout for a Champions doubles battle. Coordinates are normalized
-// [0,1] and are GUESSES for shape only — CALIBRATE against a real screenshot:
-// drop a 1080p capture in fixtures/, measure each box, and replace these numbers.
-// The structure (which regions exist) is final; the values are the switch-day work.
+// Champions doubles battle layout. Normalized [0,1]. PARTIALLY CALIBRATED on a
+// real 1080p match:
+//   VERIFIED: battleText — the bottom message banner ("X used Y!", "X has Mega
+//     Evolved into Mega X!", etc.); OCR'd at conf 94 (white text, left-aligned).
+//   TODO: per-slot name/hpBar boxes still measured roughly — opp nameplates are
+//     top-right, mine bottom-left. HP CONVENTION: the opponent's HP shows as a
+//     PERCENT number on the nameplate ("100%"); mine shows as an ABSOLUTE number
+//     ("162"). So damage is read by OCR'ing the per-slot HP delta (pixel hpBar is a
+//     cross-check). Opp species ICON for appearance-match lives in the nameplate
+//     (~slot0 x0.62 w0.043 / slot1 x0.85 w0.037, y0.035 h0.069) — see colorHist.
 const TODO: Rect = { x: 0, y: 0, w: 0, h: 0 };
 
 export const CHAMPIONS_DOUBLES_PLACEHOLDER: RegionMap = {
-  label: 'champions-doubles-PLACEHOLDER',
-  battleText: { x: 0.08, y: 0.80, w: 0.84, h: 0.16 },     // bottom log box (rough)
+  label: 'champions-doubles (battleText verified; slots rough)',
+  battleText: { x: 0.140, y: 0.737, w: 0.600, h: 0.055 },  // VERIFIED bottom banner
   moveMenu: [TODO, TODO, TODO, TODO],                     // 4 move slots when choosing
   slots: [
     // Opponent mons usually top, mine bottom — rough guesses, calibrate.

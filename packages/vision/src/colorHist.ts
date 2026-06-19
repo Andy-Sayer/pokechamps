@@ -21,6 +21,17 @@ import { dataDirPath } from '@pokechamps/core/domain/data.js';
 // so for the full table this is the primary score with the per-match candidate set
 // (and optionally a spatial/quadrant histogram) as the tie-break — but as a
 // discriminator on real game art it is strong where dHash was not.
+//
+// SHINY CAVEAT: a colour histogram keys on the palette, so a SHINY variant (different
+// colours, sometimes drastically) will NOT match a reference built from the normal
+// variant — and may mis-rank to a similar-coloured species. Two saving graces: (1) a
+// shiny appears shiny in BOTH the team preview AND the in-battle nameplate, so a
+// reference bootstrapped from THIS match's preview still matches that match's battle
+// icon; the failure is only the cross-match GENERIC table (normal ref vs a shiny). (2)
+// the per-match candidate set narrows it. Proper fix when it bites: store a shiny ref
+// alongside the normal one (id + isShiny), or fall back to a shape feature + flag the
+// read low-confidence for manual confirm. Not handled yet — recorded so it isn't a
+// silent mismatch.
 
 export type RGB = readonly [number, number, number];
 
