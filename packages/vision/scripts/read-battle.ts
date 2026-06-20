@@ -11,7 +11,7 @@
 
 import { Jimp } from 'jimp';
 import { createWorker } from 'tesseract.js';
-import { readdirSync } from 'node:fs';
+import { readdirSync, existsSync } from 'node:fs';
 import { CHAMPIONS_DOUBLES_PLACEHOLDER, toPixels } from '../src/regions.js';
 import { parseBanner, type BattleMessage } from '../src/bannerParse.js';
 
@@ -43,7 +43,12 @@ const detail = (e: BattleMessage): string => {
   }
 };
 
-const worker = await createWorker('eng', 1, { langPath: process.cwd(), cachePath: process.cwd(), gzip: false });
+// Use the committed-locally uncompressed model when present (offline, fast); on a
+// fresh clone (the model is gitignored) fall back to tesseract.js's CDN download,
+// cached to cwd so it's a one-time cost. Keeps the OCR loop portable to a laptop.
+const worker = existsSync(`${process.cwd()}/eng.traineddata`)
+  ? await createWorker('eng', 1, { langPath: process.cwd(), cachePath: process.cwd(), gzip: false })
+  : await createWorker('eng', 1, { cachePath: process.cwd() });
 const tmp = `${dir}/_band.png`;
 let last = '', scanned = 0, banners = 0, unknown = 0;
 const events: { i: number; e: BattleMessage }[] = [];
