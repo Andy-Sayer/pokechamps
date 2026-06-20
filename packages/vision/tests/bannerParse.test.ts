@@ -34,6 +34,11 @@ describe('parseBanner — switches (nicknames in the wild)', () => {
   test('"X went back to <Trainer>!" → switchOut', () => {
     expect(parseBanner('Grimmsnarl went back to Kaglish!')).toMatchObject({ kind: 'switchOut', side: 'mine', species: 'Grimmsnarl', trainer: 'Kaglish' });
   });
+  test('"X, come back!" (player recall, no trainer) → switchOut mine', () => {
+    const r = parseBanner('Kingambit, come back!');
+    expect(r).toMatchObject({ kind: 'switchOut', side: 'mine', species: 'Kingambit' });
+    if (r.kind === 'switchOut') expect(r.trainer).toBeUndefined();
+  });
   test('"Go! <species> the <nickname>!" → switchIn with nickname', () => {
     expect(parseBanner('Go! Sinistcha the Rank Master!')).toMatchObject({ kind: 'switchIn', side: 'mine', species: 'Sinistcha', nickname: 'Rank Master' });
   });

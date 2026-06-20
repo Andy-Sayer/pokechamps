@@ -28,7 +28,7 @@ export type BattleMessage =
   | { kind: 'mega'; side: Side; label: string; species: string | null }
   | { kind: 'megaReact'; side: Side; label: string; species: string | null; item: string }
   | { kind: 'faint'; side: Side; label: string; species: string | null }
-  | { kind: 'switchOut'; side: Side; label: string; species: string | null; trainer: string }
+  | { kind: 'switchOut'; side: Side; label: string; species: string | null; trainer?: string }
   | { kind: 'switchIn'; side: Side; label: string; species: string | null; nickname: string | null; trainer?: string }
   | { kind: 'flinch'; side: Side; label: string; species: string | null }
   | { kind: 'weather'; side: Side; label: string; species: string | null; weather: string }
@@ -144,6 +144,12 @@ export function parseBanner(raw: string): BattleMessage {
 
   if ((m = /^(.+?) went back to (.+)$/i.exec(rest)))
     return { kind: 'switchOut', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()), trainer: m[2]!.trim() };
+  // player recalling their own mon on a manual switch ("Kingambit, come back!") — no
+  // trainer named; comma optional for OCR slop. Always mine (the opp form is "went back to").
+  if ((m = /^(.+?),?\s*come back$/i.exec(rest))) {
+    const label = m[1]!.trim().replace(/,\s*$/, '');
+    return { kind: 'switchOut', side, label, species: resolveSpecies(label) };
+  }
   if ((m = /^(.+?)'s (.+?) is reacting to .+omni ring/i.exec(rest)))
     return { kind: 'megaReact', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()), item: m[2]!.trim() };
   if ((m = /^(.+?) has mega evolved into mega (.+)$/i.exec(rest)))

@@ -26,7 +26,7 @@ const detail = (e: BattleMessage): string => {
     case 'mega': case 'faint': case 'flinch': case 'weather': return `${e.species ?? e.label}${e.kind === 'weather' ? ` (${e.weather})` : ''}`;
     case 'megaReact': return `${e.species ?? e.label} (${e.item})`;
     case 'switchIn': return `${e.species ?? '?'}${e.nickname ? ` "${e.nickname}"` : ''}${e.trainer ? ` ← ${e.trainer}` : ''}`;
-    case 'switchOut': return `${e.species ?? e.label} → ${e.trainer}`;
+    case 'switchOut': return `${e.species ?? e.label}${e.trainer ? ` → ${e.trainer}` : ' (recalled)'}`;
     case 'statChange': return `${e.species ?? e.label}: ${e.stats.join('/')} ${e.dir}`;
     case 'effectiveness': return `${e.level} on ${e.species ?? e.label}`;
     case 'heal': return `${e.species ?? e.label} (from ${e.source})`;
