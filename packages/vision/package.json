@@ -14,7 +14,8 @@
     "test": "vitest run",
     "watch": "tsx scripts/watch.ts",
     "serve": "tsx scripts/serve.ts",
-    "record": "tsx scripts/record.ts"
+    "record": "tsx scripts/record.ts",
+    "youtube": "tsx scripts/youtube.ts"
   },
   "dependencies": {
     "@pokechamps/core": "*",
