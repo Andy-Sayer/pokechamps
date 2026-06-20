@@ -40,6 +40,8 @@ export type BattleMessage =
   | { kind: 'status'; side: Side; label: string; species: string | null; status: string }
   | { kind: 'protect'; side: Side; label: string; species: string | null }
   | { kind: 'miss'; side: Side; label: string; species: string | null }
+  | { kind: 'hpLoss'; side: Side; label: string; species: string | null }
+  | { kind: 'confusionHit' }
   | { kind: 'weatherStart'; weather: string }
   | { kind: 'weatherEnd' }
   | { kind: 'screen'; screen: string }
@@ -122,6 +124,9 @@ export function parseBanner(raw: string): BattleMessage {
     const { side, label } = splitSide(m[1]!);
     return { kind: 'effectiveness', level: 'immune', side, label, species: resolveSpecies(label) };
   }
+  // confusion self-hit — banner names no mon ("It hurt itself in its confusion!"); the
+  // assembler attributes the HP loss to whichever active mon is confused and acting.
+  if (/it hurt itself in its confusion/i.test(lc)) return { kind: 'confusionHit' };
 
   // --- switch-in: "Go! X the NICK!" (mine) / "<Trainer> sent out X!" (opp) ---
   if ((m = /^go!?\s+(.+?)(?:\s+the\s+(.+))?$/i.exec(text))) {
@@ -155,6 +160,10 @@ export function parseBanner(raw: string): BattleMessage {
     return { kind: 'ability', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()), ability: cap(m[2]!) };
   if ((m = /^(.+?) was damaged by (?:the )?(.+)$/i.exec(rest)) || (m = /^(.+?) is hurt by (?:its )?(.+)$/i.exec(rest)))
     return { kind: 'residual', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()), source: m[2]!.trim().toLowerCase() };
+  // self-inflicted HP loss with no named source ("X lost some of its HP!") — Life Orb,
+  // Substitute, Curse, Belly Drum, etc. Self-damage: never an opponent-dealt-damage signal.
+  if ((m = /^(.+?) lost some of its hp$/i.exec(rest)))
+    return { kind: 'hpLoss', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()) };
   if ((m = /^(.+?) avoided the attack$/i.exec(rest)) || (m = /^(.+?)'?s attack missed$/i.exec(rest)))
     return { kind: 'miss', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()) };
   if ((m = /^(.+?) protected itself$/i.exec(rest)))

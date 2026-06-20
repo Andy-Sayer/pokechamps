@@ -33,7 +33,8 @@ const detail = (e: BattleMessage): string => {
     case 'ability': return `${e.species ?? e.label} (${e.ability})`;
     case 'residual': return `${e.species ?? e.label} (${e.source})`;
     case 'status': return `${e.species ?? e.label} (${e.status})`;
-    case 'protect': case 'miss': return `${e.species ?? e.label}`;
+    case 'protect': case 'miss': case 'hpLoss': return `${e.species ?? e.label}`;
+    case 'confusionHit': return 'self-hit';
     case 'weatherStart': return `(${e.weather})`;
     case 'weatherEnd': return 'cleared';
     case 'screen': return e.screen;

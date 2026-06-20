@@ -91,6 +91,18 @@ describe('parseBanner — protect & status (real captures + standard wording)', 
   });
 });
 
+describe('parseBanner — self-inflicted HP loss (real captures)', () => {
+  test('confusion self-hit names no mon → sideless confusionHit', () => {
+    expect(parseBanner('It hurt itself in its confusion!')).toMatchObject({ kind: 'confusionHit' });
+  });
+  test('"X lost some of its HP!" → hpLoss (opp)', () => {
+    expect(parseBanner('The opposing Garchomp lost some of its HP!')).toMatchObject({ kind: 'hpLoss', side: 'opp', species: 'Garchomp' });
+  });
+  test('"X lost some of its HP!" → hpLoss (mine)', () => {
+    expect(parseBanner('Dragonite lost some of its HP!')).toMatchObject({ kind: 'hpLoss', side: 'mine', species: 'Dragonite' });
+  });
+});
+
 describe('parseBanner — terminal states', () => {
   test('forfeit (ligature-repaired)', () => {
     expect(parseBanner('The battle has ended due to a torteit.')).toMatchObject({ kind: 'end', reason: 'forfeit' });
