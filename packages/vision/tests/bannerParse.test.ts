@@ -72,6 +72,25 @@ describe('parseBanner — status / field / effectiveness', () => {
   });
 });
 
+describe('parseBanner — protect & status (real captures + standard wording)', () => {
+  test('"X protected itself!" → protect (mine)', () => {
+    expect(parseBanner('Dragonite protected itself!')).toMatchObject({ kind: 'protect', side: 'mine', species: 'Dragonite' });
+  });
+  test('"The opposing X protected itself!" → protect (opp)', () => {
+    expect(parseBanner('The opposing Charizard protected itself!')).toMatchObject({ kind: 'protect', side: 'opp', species: 'Charizard' });
+  });
+  test('confusion (real capture) → status', () => {
+    expect(parseBanner('The opposing Incineroar is confused!')).toMatchObject({ kind: 'status', side: 'opp', species: 'Incineroar', status: 'confusion' });
+  });
+  test('"X fell asleep!" → status sleep (not a stat-change "fell")', () => {
+    expect(parseBanner('Garchomp fell asleep!')).toMatchObject({ kind: 'status', side: 'mine', species: 'Garchomp', status: 'sleep' });
+  });
+  test('"badly poisoned" resolves to toxic, not poison', () => {
+    expect(parseBanner('The opposing Garchomp was badly poisoned!')).toMatchObject({ kind: 'status', side: 'opp', species: 'Garchomp', status: 'toxic' });
+    expect(parseBanner('Garchomp was poisoned!')).toMatchObject({ kind: 'status', side: 'mine', species: 'Garchomp', status: 'poison' });
+  });
+});
+
 describe('parseBanner — terminal states', () => {
   test('forfeit (ligature-repaired)', () => {
     expect(parseBanner('The battle has ended due to a torteit.')).toMatchObject({ kind: 'end', reason: 'forfeit' });

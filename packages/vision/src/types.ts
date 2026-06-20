@@ -35,6 +35,9 @@ export interface RegionMap {
   /** The two opponent HP-percent readouts (white digits on the nameplate bar), left
    *  plate → o1, right → o2. OCR'd for the exact remaining HP% (the inference signal). */
   oppHpText?: [Rect, Rect];
+  /** My two HP readouts — ABSOLUTE "cur/max" digits on the bottom nameplates (m1, m2).
+   *  OCR'd for exact current HP (mine shows absolute, opponents show percent). */
+  myHpText?: [Rect, Rect];
 }
 
 /** Active-slot refs as the turn-log grammar uses them. */

@@ -33,8 +33,15 @@ export type BattleMessage =
   | { kind: 'flinch'; side: Side; label: string; species: string | null }
   | { kind: 'weather'; side: Side; label: string; species: string | null; weather: string }
   | { kind: 'statChange'; side: Side; label: string; species: string | null; stats: string[]; dir: 'rose' | 'fell' }
-  | { kind: 'effectiveness'; level: 'super' | 'notVery'; side: Side; label: string; species: string | null }
+  | { kind: 'effectiveness'; level: 'super' | 'notVery' | 'extremely' | 'immune'; side: Side; label: string; species: string | null }
   | { kind: 'heal'; side: Side; label: string; species: string | null; source: string }
+  | { kind: 'ability'; side: Side; label: string; species: string | null; ability: string }
+  | { kind: 'residual'; side: Side; label: string; species: string | null; source: string }
+  | { kind: 'status'; side: Side; label: string; species: string | null; status: string }
+  | { kind: 'protect'; side: Side; label: string; species: string | null }
+  | { kind: 'miss'; side: Side; label: string; species: string | null }
+  | { kind: 'weatherStart'; weather: string }
+  | { kind: 'weatherEnd' }
   | { kind: 'screen'; screen: string }
   | { kind: 'end'; reason: 'forfeit' | 'win' | 'loss'; trainer?: string }
   | { kind: 'unknown'; raw: string };
@@ -44,7 +51,7 @@ export type BattleMessage =
 const LIGATURE_FIX: [RegExp, string][] = [
   [/\btainted\b/gi, 'fainted'],
   [/\btlinched\b/gi, 'flinched'],
-  [/\bett?ective\b/gi, 'effective'],
+  [/\be[ft]{1,2}ective\b/gi, 'effective'],
   [/\bbutt?eted\b/gi, 'buffeted'],
   [/\btorteit\b/gi, 'forfeit'],
 ];
@@ -57,6 +64,7 @@ export function repairOcr(s: string): string {
 }
 
 const clean = (s: string) => s.trim().replace(/\s+/g, ' ').replace(/[’`´]/g, "'").replace(/[!.]+$/, '').trim();
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 
 /** Fuzzy-resolve a banner mon-label to a legal species (null if not confident — a
  *  nickname, or too garbled; caller falls back to the nameplate appearance match).
@@ -96,11 +104,23 @@ export function parseBanner(raw: string): BattleMessage {
   if (/light screen made your side stronger/i.test(lc)) return { kind: 'screen', screen: 'Light Screen' };
   if (/reflect made your side stronger/i.test(lc)) return { kind: 'screen', screen: 'Reflect' };
 
-  // --- effectiveness ("It's super effective on [the opposing] X!") ---
-  if ((m = /^it'?s (super|not very) effective on (.+)$/i.exec(text))) {
-    const level = /super/i.test(m[1]!) ? 'super' : 'notVery';
+  // --- field: weather start / end (no single mon) ---
+  if (/the effects of the weather (?:disappeared|wore off)/i.test(lc)) return { kind: 'weatherEnd' };
+  if (/(?:it |)(?:started to rain|began to rain)|it'?s raining/i.test(lc)) return { kind: 'weatherStart', weather: 'rain' };
+  if (/a sandstorm kicked up|sandstorm is raging/i.test(lc)) return { kind: 'weatherStart', weather: 'sandstorm' };
+  if (/sunlight turned (?:harsh|extremely harsh)|sunlight is strong/i.test(lc)) return { kind: 'weatherStart', weather: 'sun' };
+  if (/it started to (?:hail|snow)|snow began to fall|it'?s snowing/i.test(lc)) return { kind: 'weatherStart', weather: 'snow' };
+
+  // --- effectiveness ("It's {super|not very|extremely} effective on [the opposing] X!") ---
+  if ((m = /^it'?s (super|not very|extremely) effective on (.+)$/i.exec(text))) {
+    const level = /super/i.test(m[1]!) ? 'super' : /extremely/i.test(m[1]!) ? 'extremely' : 'notVery';
     const { side, label } = splitSide(m[2]!);
     return { kind: 'effectiveness', level, side, label, species: resolveSpecies(label) };
+  }
+  // immunity ("It doesn't affect X…" / "It had no effect on X")
+  if ((m = /^it (?:doesn'?t affect|had no effect on|has no effect on) (.+)$/i.exec(text))) {
+    const { side, label } = splitSide(m[1]!);
+    return { kind: 'effectiveness', level: 'immune', side, label, species: resolveSpecies(label) };
   }
 
   // --- switch-in: "Go! X the NICK!" (mine) / "<Trainer> sent out X!" (opp) ---
@@ -131,6 +151,28 @@ export function parseBanner(raw: string): BattleMessage {
     return { kind: 'statChange', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()), stats: parseStats(m[2]!), dir: /rose/i.test(m[3]!) ? 'rose' : 'fell' };
   if ((m = /^(.+?) drank down all the matcha that (.+?) made/i.exec(rest)))
     return { kind: 'heal', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()), source: m[2]!.trim() };
+  if ((m = /^(.+?) is exerting its (\w+)$/i.exec(rest)))
+    return { kind: 'ability', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()), ability: cap(m[2]!) };
+  if ((m = /^(.+?) was damaged by (?:the )?(.+)$/i.exec(rest)) || (m = /^(.+?) is hurt by (?:its )?(.+)$/i.exec(rest)))
+    return { kind: 'residual', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()), source: m[2]!.trim().toLowerCase() };
+  if ((m = /^(.+?) avoided the attack$/i.exec(rest)) || (m = /^(.+?)'?s attack missed$/i.exec(rest)))
+    return { kind: 'miss', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()) };
+  if ((m = /^(.+?) protected itself$/i.exec(rest)))
+    return { kind: 'protect', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()) };
+  // --- status conditions. "badly poisoned" before "poisoned"; confusion seen in the
+  //     wild ("The opposing Incineroar is confused!"), the rest follow standard wording. ---
+  {
+    const status =
+      /^.+? (?:is|was) paralyzed/i.test(rest) ? 'paralysis' :
+      /^.+? was burned/i.test(rest) ? 'burn' :
+      /^.+? was badly poisoned/i.test(rest) ? 'toxic' :
+      /^.+? was poisoned/i.test(rest) ? 'poison' :
+      /^.+? fell asleep/i.test(rest) ? 'sleep' :
+      /^.+? (?:is|was) frozen solid/i.test(rest) ? 'freeze' :
+      /^.+? (?:is|became) confused/i.test(rest) ? 'confusion' : null;
+    if (status && (m = /^(.+?) (?:is|was|became|fell)\b/i.exec(rest)))
+      return { kind: 'status', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()), status };
+  }
   if ((m = /^(.+?) fainted$/i.exec(rest)))
     return { kind: 'faint', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()) };
   if ((m = /^(.+?) used (.+)$/i.exec(rest)))

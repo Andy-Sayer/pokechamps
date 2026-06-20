@@ -30,6 +30,12 @@ const detail = (e: BattleMessage): string => {
     case 'statChange': return `${e.species ?? e.label}: ${e.stats.join('/')} ${e.dir}`;
     case 'effectiveness': return `${e.level} on ${e.species ?? e.label}`;
     case 'heal': return `${e.species ?? e.label} (from ${e.source})`;
+    case 'ability': return `${e.species ?? e.label} (${e.ability})`;
+    case 'residual': return `${e.species ?? e.label} (${e.source})`;
+    case 'status': return `${e.species ?? e.label} (${e.status})`;
+    case 'protect': case 'miss': return `${e.species ?? e.label}`;
+    case 'weatherStart': return `(${e.weather})`;
+    case 'weatherEnd': return 'cleared';
     case 'screen': return e.screen;
     case 'end': return `${e.reason}${e.trainer ? ` (${e.trainer})` : ''}`;
     default: return '';
@@ -48,15 +54,25 @@ for (let i = 0; i < files.length; i++) {
   const band = { x: Math.max(0, r.x - 4), y: Math.max(0, r.y - 2), w: Math.min(W, Math.round(r.w * 1.12)), h: r.h + 6 };
   const c = img.clone().crop(band);
   const d = c.bitmap.data; const n = c.bitmap.width * c.bitmap.height;
-  let bright = 0;
-  for (let p = 0; p < n; p++) { const lum = 0.299 * d[p*4]! + 0.587 * d[p*4+1]! + 0.114 * d[p*4+2]!; if (lum > 225) bright++; }
+  // Gate + binarize on WHITE (bright AND low-saturation) — the banner text colour.
+  // Plain luminance also fired on coloured effects (fire/explosions) and light-coloured
+  // mons (e.g. Pelipper), flooding OCR with garbage. Saturation rejects all of that.
+  const isWhite = (p: number) => {
+    const r0 = d[p*4]!, g0 = d[p*4+1]!, b0 = d[p*4+2]!;
+    return Math.min(r0, g0, b0) > 175 && Math.max(r0, g0, b0) - Math.min(r0, g0, b0) < 45;
+  };
+  let white = 0;
+  for (let p = 0; p < n; p++) if (isWhite(p)) white++;
   scanned++;
-  if (bright < 400) continue;                                  // no banner text
-  const g = c.greyscale().scale(3);
+  if (white < 250) continue;                                  // no banner text
+  const g = c.clone();
   g.scan(0, 0, g.bitmap.width, g.bitmap.height, function (x, y, idx) {
-    const o = this.bitmap.data[idx]! > 175 ? 0 : 255;
+    const mn = Math.min(this.bitmap.data[idx]!, this.bitmap.data[idx+1]!, this.bitmap.data[idx+2]!);
+    const mx = Math.max(this.bitmap.data[idx]!, this.bitmap.data[idx+1]!, this.bitmap.data[idx+2]!);
+    const o = mn > 175 && mx - mn < 45 ? 0 : 255;             // white text -> black on white
     this.bitmap.data[idx] = this.bitmap.data[idx + 1] = this.bitmap.data[idx + 2] = o;
   });
+  g.scale(3);
   await g.write(tmp as `${string}.png`);
   const { data } = await worker.recognize(tmp);
   const text = data.text.trim().replace(/\s+/g, ' ');
@@ -64,11 +80,31 @@ for (let i = 0; i < files.length; i++) {
   last = text;
   banners++;
   const e = parseBanner(text);
-  if (e.kind === 'unknown') { unknown++; continue; }
+  if (e.kind === 'unknown') { unknown++; if (process.env.DEBUG_UNK) console.log(`  UNK [${String(i).padStart(4)}] ${JSON.stringify(text)}`); continue; }
   events.push({ i, e });
 }
 await worker.terminate();
 
-console.log(`\n=== EVENT TIMELINE (${events.length} events from ${banners} banners / ${scanned} frames) ===`);
-for (const { i, e } of events) console.log(`  [${String(i).padStart(4)}] ${e.kind.padEnd(13)} ${('side' in e ? e.side : '--').padEnd(5)} ${detail(e)}`);
+// A banner persists across many frames, so the same event is re-read repeatedly
+// (with OCR jitter on the move text). Collapse CONSECUTIVE same-event reads by a
+// structural signature — kind + side + species — so a single use/switch/faint
+// shows once. Move text is deliberately excluded (it jitters: "Iron Head" vs
+// "lron Head"); a mon only acts once before a different event intervenes, so the
+// next genuine occurrence (separated by other events) is still kept.
+const sig = (e: BattleMessage): string => {
+  const id = ('species' in e ? (e.species ?? e.label) : '') || '';
+  const side = 'side' in e ? e.side : '-';
+  let extra = '';
+  if (e.kind === 'effectiveness') extra = e.level;
+  else if (e.kind === 'statChange') extra = `${e.stats.join(',')}${e.dir}`;
+  else if (e.kind === 'ability') extra = e.ability;
+  else if (e.kind === 'residual') extra = e.source;
+  else if (e.kind === 'status') extra = e.status;
+  else if (e.kind === 'weatherStart') extra = e.weather;
+  return [e.kind, side, id, extra].join('|');
+};
+const shown = events.filter((ev, idx) => idx === 0 || sig(ev.e) !== sig(events[idx - 1]!.e));
+
+console.log(`\n=== EVENT TIMELINE (${shown.length} events [${events.length} pre-dedup] from ${banners} banners / ${scanned} frames) ===`);
+for (const { i, e } of shown) console.log(`  [${String(i).padStart(4)}] ${e.kind.padEnd(13)} ${('side' in e ? e.side : '--').padEnd(5)} ${detail(e)}`);
 console.log(`\n(${unknown} banners parsed as unknown — animation/garbage)`);

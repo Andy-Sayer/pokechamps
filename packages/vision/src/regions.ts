@@ -37,34 +37,45 @@ export function toPixels(r: Rect, width: number, height: number): { x: number; y
   return { x: Math.round(r.x * width), y: Math.round(r.y * height), w: Math.round(r.w * width), h: Math.round(r.h * height) };
 }
 
-// Champions doubles battle layout. Normalized [0,1]. PARTIALLY CALIBRATED on a
-// real 1080p match:
-//   VERIFIED: battleText — the bottom message banner ("X used Y!", "X has Mega
-//     Evolved into Mega X!", etc.); OCR'd at conf 94 (white text, left-aligned).
-//   TODO: per-slot name/hpBar boxes still measured roughly — opp nameplates are
-//     top-right, mine bottom-left. HP CONVENTION: the opponent's HP shows as a
-//     PERCENT number on the nameplate ("100%"); mine shows as an ABSOLUTE number
-//     ("162"). So damage is read by OCR'ing the per-slot HP delta (pixel hpBar is a
-//     cross-check). Opp species ICON for appearance-match lives in the nameplate
-//     (~slot0 x0.62 w0.043 / slot1 x0.85 w0.037, y0.035 h0.069) — see colorHist.
+// Champions doubles battle layout (command/FIGHT phase). Normalized [0,1].
+// CALIBRATED on a real 1080p dongle match (command-live.png, 2026-06-20):
+//   VERIFIED: battleText banner; both opp HP-% boxes; both my absolute-HP boxes.
+//   MEASURED (good, refine later): per-slot name + hpBar boxes. HP CONVENTION — opp
+//     shows a PERCENT ("100%", read via oppHpText), mine an ABSOLUTE "cur/max" (read
+//     via myHpText); pixel hpBar is the cross-check. Layout: opp plates TOP-RIGHT,
+//     mine BOTTOM-LEFT. statusIcon + moveMenu still TODO. Opp species ICON for
+//     appearance-match lives in the nameplate (~slot0 x0.62 w0.043 / slot1 x0.85
+//     w0.037, y0.035 h0.069) — see colorHist.
 const TODO: Rect = { x: 0, y: 0, w: 0, h: 0 };
 
 export const CHAMPIONS_DOUBLES_PLACEHOLDER: RegionMap = {
-  label: 'champions-doubles (battleText verified; slots rough)',
-  battleText: { x: 0.140, y: 0.737, w: 0.600, h: 0.055 },  // VERIFIED bottom banner
+  label: 'champions-doubles (calibrated 2026-06-20 dongle)',
+  // CALIBRATED on the 2026-06-20 live dongle match (find-banner.ts over seq frames):
+  // banner is white, LEFT-anchored at x≈304px (0.158), text rows ≈808..836px (peak
+  // y815), right edge grows with length to ≈1418px on the longest lines. Box tightened
+  // to the text band so animation flashes / empty strip don't trip the OCR gate.
+  battleText: { x: 0.150, y: 0.739, w: 0.630, h: 0.040 },  // px x288 y798 w1210 h43
   moveMenu: [TODO, TODO, TODO, TODO],                     // 4 move slots when choosing
+  // CALIBRATED on command-live.png (2026-06-20 dongle match): opp plates cluster
+  // TOP-RIGHT (slot0 left of slot1), mine BOTTOM-LEFT (slot0 left of slot1). name =
+  // species text box; hpBar = the green→red fill bar (readHpFraction) — its right
+  // (100%) extent is approximate until refined against a damaged bar.
   slots: [
-    // Opponent mons usually top, mine bottom — rough guesses, calibrate.
-    { side: 'opp',  index: 0, name: { x: 0.55, y: 0.10, w: 0.30, h: 0.05 }, hpBar: { x: 0.55, y: 0.16, w: 0.30, h: 0.02 }, statusIcon: TODO },
-    { side: 'opp',  index: 1, name: { x: 0.15, y: 0.22, w: 0.30, h: 0.05 }, hpBar: { x: 0.15, y: 0.28, w: 0.30, h: 0.02 }, statusIcon: TODO },
-    { side: 'mine', index: 0, name: { x: 0.10, y: 0.58, w: 0.30, h: 0.05 }, hpBar: { x: 0.10, y: 0.64, w: 0.30, h: 0.02 }, statusIcon: TODO },
-    { side: 'mine', index: 1, name: { x: 0.55, y: 0.66, w: 0.30, h: 0.05 }, hpBar: { x: 0.55, y: 0.72, w: 0.30, h: 0.02 }, statusIcon: TODO },
+    { side: 'opp',  index: 0, name: { x: 0.599, y: 0.046, w: 0.156, h: 0.037 }, hpBar: { x: 0.652, y: 0.096, w: 0.124, h: 0.0185 }, statusIcon: TODO },
+    { side: 'opp',  index: 1, name: { x: 0.810, y: 0.046, w: 0.156, h: 0.037 }, hpBar: { x: 0.860, y: 0.100, w: 0.124, h: 0.0185 }, statusIcon: TODO },
+    { side: 'mine', index: 0, name: { x: 0.078, y: 0.869, w: 0.146, h: 0.037 }, hpBar: { x: 0.090, y: 0.921, w: 0.160, h: 0.0185 }, statusIcon: TODO },
+    { side: 'mine', index: 1, name: { x: 0.287, y: 0.866, w: 0.146, h: 0.037 }, hpBar: { x: 0.301, y: 0.919, w: 0.160, h: 0.0185 }, statusIcon: TODO },
   ],
-  // Opponent HP-% readouts (white digits on the bar). slot A (left) VERIFIED — reads
-  // "100" via white-isolation + digit whitelist; slot B (right) needs an x nudge (its
-  // leading "1" clipped at x≈1845 → shift left). 1080p-derived normalized boxes.
+  // Opponent HP-% readouts (white digits over the bar) — VERIFIED on command-live.png:
+  // both read a clean "100%", o2 shifted left so its leading "1" is no longer clipped.
   oppHpText: [
-    { x: 0.740, y: 0.1185, w: 0.0911, h: 0.0370 },   // o1 — frame x1420 y128 w175 h40
-    { x: 0.9365, y: 0.1185, w: 0.0625, h: 0.0370 },  // o2 — ~x1798 (left of the clip)
+    { x: 0.6865, y: 0.1167, w: 0.0781, h: 0.0370 },  // o1 — px x1318 y126 w150 h40
+    { x: 0.8922, y: 0.1185, w: 0.0807, h: 0.0370 },  // o2 — px x1713 y128 w155 h40
+  ],
+  // My HP readouts — ABSOLUTE "cur/max" digits on the bottom plates — VERIFIED
+  // ("155/155" and "194/207" read clean).
+  myHpText: [
+    { x: 0.1172, y: 0.9380, w: 0.1120, h: 0.0444 },  // m1 — px x225 y1013 w215 h48
+    { x: 0.3359, y: 0.9380, w: 0.1172, h: 0.0444 },  // m2 — px x645 y1013 w225 h48
   ],
 };
