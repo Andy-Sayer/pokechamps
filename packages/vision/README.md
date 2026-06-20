@@ -46,25 +46,22 @@ your team ("Staraptor" @1.00, "Grimmsnarl", "Sinistcha") + items. The opponent's
 **failed** cross-art (public icons 18–44/64 apart) AND alignment-fragile on game art
 (±6px → 22/64 bit flips); a colour histogram **succeeded** (54/54 jitter, 6/6 frame).
 
-**Stubbed — needs the capture dongle + continuous footage to finish:**
-- `frameGrabber.ts` `UvcFrameGrabber` — real HDMI capture. **Pre-flight: confirm
-  Switch 2 gameplay isn't HDCP-protected** (almost certainly fine).
-- `ocr.ts` `TesseractOcrReader` — consolidate the proven OCR (jimp crop+greyscale+
-  upscale → tesseract); per-region whitelists.
-- `data/sprite-refs.json` — colour-hist reference table, **seeded with 6** game-art
-  species via `scripts/bootstrap-refs.ts <frame.png> <id1,…>`. Grow toward 208 by
-  feeding more team-preview frames (preview slots get named by the in-battle text
-  reveal). `sprite.ts` `loadSpriteRefs` (dHash) stays stubbed — superseded.
-- `regions.ts` a battle-`RegionMap` (HP bars/names/log) — refine against dongle
-  frames; `myTeam` OCR boxes need a final nudge on a clean frame.
-- `stateMachine.ts` — turn-assembly transitions need live (uncut) frame timing.
+**Shipped 2026-06-20 (hardware landed):**
+- Capture: `scripts/serve.ts` (HDMI device owner + browser tap, Guermok dongle 1080p)
+  + `scripts/record.ts` (frame archiver). `scripts/youtube.ts` adds a **dongle-free**
+  frame source from any match VOD.
+- Banner read: `scripts/read-battle.ts` (white-gate OCR) → `bannerParse.ts` (full event
+  grammar) → a coherent timeline, validated on a real VOD.
+- HP-number read: `scripts/read-hp.ts` + `hpRead.ts` — opp % and my `cur/max`, validated
+  vs ground truth (the o2 low-value misread chased + fixed).
+- `regions.ts` `CHAMPIONS_DOUBLES_PLACEHOLDER` calibrated; `stateMachine.ts` live loop
+  scaffolded; TUI `VisionProposalPanel` (`/vision`) ratifies a proposed turn.
 
-## Next (when hardware lands)
-1. Opponent team read — primary path: OCR the in-battle text log (proven to read
-   cleanly) for the 2–4 mons revealed in-match. Full-6 preview: keep growing
-   `data/sprite-refs.json` with `bootstrap-refs.ts` (colour-hist; the 6-species seed
-   already matches 54/54 jitter, 6/6 cross-frame).
-2. Consolidate `TesseractOcrReader`; lock the team-preview px against a clean frame.
-3. Implement `UvcFrameGrabber` (~2-5 fps RGBA); add a battle `RegionMap`.
-4. Flesh out `BattleStateMachine.feed` (text→actions, HP-diff→damage, debounce).
-5. TUI confirm/edit surface consuming `TurnProposal`.
+**Remaining:** consolidate the proven OCR into `ocr.ts` `TesseractOcrReader`; point
+`visionSource.readFrame` at the HP *number* (not the bar); settle-gating + a self-damage
+reconciler; grow `data/sprite-refs.json` toward 208; `UvcFrameGrabber` for live grab
+(capture works via `serve.ts` today).
+
+## Plan
+
+Full roadmap + file-level grounding: [`docs/notes/vision-plan.md`](../../docs/notes/vision-plan.md).

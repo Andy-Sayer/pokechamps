@@ -12,5 +12,6 @@ Long-form notes that don't belong in CLAUDE.md (which stays a tight, always-load
 - [roadmap.md](roadmap.md) — strategic pillar-grouped backlog + the J north-star (end-to-end replay validation); the month plan above is the near-term cut of this
 - [mechanics-coverage.md](mechanics-coverage.md) — full audit of every move/ability/item/weather/terrain across the 3 layers (calc / live engine / lookahead) + the prioritized gap backlog; the single source of truth for "what's left to model"
 - [sim-divergences.md](sim-divergences.md) — the EMPIRICAL gap list: where our search disagrees with the real `@pkmn/sim` engine, measured by the diff-harness (run `npx tsx packages/core/src/scripts/sim-diff-report.ts`)
+- [vision-plan.md](vision-plan.md) — the @pokechamps/vision live turn-read plan: what's shipped (capture, banner grammar, HP-number OCR — validated on a YouTube VOD) and the prioritized integration roadmap (consolidate OCR → number-based HP read → settle-gating → self-damage reconciler)
 
 Update these alongside the code that backs them. A note that disagrees with the code is worse than no note at all.
