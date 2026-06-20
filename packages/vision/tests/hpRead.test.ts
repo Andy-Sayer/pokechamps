@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { binarizeWhiteDigits, parseHpNumber, readOpponentHpPercents } from '../src/hpRead.js';
+import { binarizeWhiteDigits, parseHpNumber, parseAbsHp, readOpponentHpPercents } from '../src/hpRead.js';
 import { CHAMPIONS_DOUBLES_PLACEHOLDER } from '../src/regions.js';
 import type { Frame } from '../src/types.js';
 
@@ -11,6 +11,17 @@ describe('parseHpNumber', () => {
     expect(parseHpNumber('o0')).toBe(0);        // OCR slop → digits only
     expect(parseHpNumber('')).toBeNull();
     expect(parseHpNumber('---')).toBeNull();
+  });
+});
+
+describe('parseAbsHp', () => {
+  test('parses my-side cur/max, requires both numbers', () => {
+    expect(parseAbsHp('183/183')).toEqual({ cur: 183, max: 183 });
+    expect(parseAbsHp('117/175')).toEqual({ cur: 117, max: 175 });
+    expect(parseAbsHp('0/207')).toEqual({ cur: 0, max: 207 });
+    expect(parseAbsHp('183183')).toBeNull();   // dropped "/" → don't trust it
+    expect(parseAbsHp('183')).toBeNull();
+    expect(parseAbsHp('')).toBeNull();
   });
 });
 

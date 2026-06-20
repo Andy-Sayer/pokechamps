@@ -39,6 +39,16 @@ export function parseHpNumber(text: string): number | null {
 
 const clampPct = (n: number) => Math.max(0, Math.min(100, n));
 
+/** Parse my-side ABSOLUTE "cur/max" HP ("183/183", "117/175") → {cur, max}. Requires
+ *  BOTH numbers: a dropped "/" that merges them ("183183") → null, so the caller falls
+ *  back to the bar rather than trust a bogus value. */
+export function parseAbsHp(text: string): { cur: number; max: number } | null {
+  const nums = text.match(/\d+/g);
+  if (!nums || nums.length < 2) return null;
+  const cur = parseInt(nums[0]!, 10), max = parseInt(nums[1]!, 10);
+  return max > 0 ? { cur, max } : null;
+}
+
 /** Crop a normalized rect out of a Frame as a tight RGBA buffer. */
 function crop(frame: Frame, r: Rect): { pixels: Uint8ClampedArray; w: number; h: number } {
   const { x, y, w, h } = toPixels(r, frame.width, frame.height);

@@ -6,6 +6,7 @@ import type { Frame, FrameRead, RegionMap, TurnProposal } from './types.js';
 import type { FrameGrabber } from './frameGrabber.js';
 import type { OcrReader } from './ocr.js';
 import { readHpFraction } from './hpBar.js';
+import { parseHpNumber, parseAbsHp } from './hpRead.js';
 import { matchSpecies } from './fuzzyMatch.js';
 import { toPixels } from './regions.js';
 import { BattleStateMachine } from './stateMachine.js';
@@ -28,24 +29,37 @@ export function cropRegion(frame: Frame, r: { x: number; y: number; w: number; h
   return { data: out, width: w, height: h };
 }
 
-/** Read one frame into a FrameRead: HP fractions from the bars + name/text OCR.
- *  NOTE: opp HP is more reliable via the nameplate NUMBER (white-isolation + digit
- *  OCR — see hpRead.readOpponentHpPercents) than the bar, which carries an overlaid
- *  number; wire that in here once deps.ocr can OCR a preprocessed pixel buffer. */
+/** Read one frame into a FrameRead: HP from the nameplate NUMBER (preferred) with the
+ *  bar as fallback, plus name/text OCR. The bar carries an overlaid number + a skew, so
+ *  the digit read is the game's own exact value: opp shows a PERCENT (`oppHpText`), mine
+ *  an ABSOLUTE "cur/max" (`myHpText`). Falls back to the bar fraction when the number is
+ *  unreadable (mid-animation), so a frame is never worse off than the bar alone. */
 export async function readFrame(frame: Frame, deps: VisionDeps): Promise<FrameRead> {
-  const slots = await Promise.all(deps.regions.slots.map(async sr => {
+  const { regions } = deps;
+  const slots = await Promise.all(regions.slots.map(async sr => {
     const bar = cropRegion(frame, sr.hpBar);
-    const hpFraction = readHpFraction(bar.data, bar.width, bar.height);
+    const barFraction = readHpFraction(bar.data, bar.width, bar.height);
+
+    // Nameplate number: opp = percent (PSM 8, single word); mine = cur/max (PSM 7, line).
+    let numFraction: number | null = null;
+    if (sr.side === 'opp' && regions.oppHpText) {
+      const pct = parseHpNumber(await deps.ocr.read(frame, regions.oppHpText[sr.index], { mode: 'digits', psm: 8 }));
+      if (pct != null) numFraction = Math.max(0, Math.min(100, pct)) / 100;
+    } else if (sr.side === 'mine' && regions.myHpText) {
+      const abs = parseAbsHp(await deps.ocr.read(frame, regions.myHpText[sr.index], { mode: 'digits', psm: 7 }));
+      if (abs) numFraction = Math.max(0, Math.min(1, abs.cur / abs.max));
+    }
+
     const speciesRaw = (await deps.ocr.read(frame, sr.name)).trim();
     const m = speciesRaw ? matchSpecies(speciesRaw) : null;
     return {
       side: sr.side, index: sr.index,
       species: m && m.score >= 0.6 ? m.value : null,
       speciesRaw, speciesConfidence: m?.score ?? 0,
-      hpFraction, status: null,
+      hpFraction: numFraction ?? barFraction, status: null,
     };
   }));
-  const battleText = (await deps.ocr.read(frame, deps.regions.battleText)).trim();
+  const battleText = (await deps.ocr.read(frame, regions.battleText)).trim();
   return { ts: frame.ts, slots, battleText };
 }
 
