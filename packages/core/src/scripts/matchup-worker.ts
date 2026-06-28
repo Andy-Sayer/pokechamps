@@ -9,7 +9,7 @@ import { createInterface } from 'node:readline';
 import { evaluateMatchup } from '../domain/teamSim.js';
 import type { PokemonSet } from '../domain/types.js';
 
-interface Task { id: number; mine: PokemonSet[]; oppSets: PokemonSet[]; oppAnchor: string; depth: number; budgetMs?: number }
+interface Task { id: number; mine: PokemonSet[]; oppSets: PokemonSet[]; oppAnchor: string; depth: number; budgetMs?: number; bringK?: number }
 
 const rl = createInterface({ input: process.stdin });
 rl.on('line', line => {
@@ -18,7 +18,7 @@ rl.on('line', line => {
   let task: Task;
   try { task = JSON.parse(t); } catch { return; }
   try {
-    const m = evaluateMatchup(task.mine, task.oppSets, task.oppAnchor, task.depth, task.budgetMs);
+    const m = evaluateMatchup(task.mine, task.oppSets, task.oppAnchor, task.depth, task.budgetMs, { bringK: task.bringK });
     process.stdout.write(JSON.stringify({ id: task.id, ok: true, matchup: m }) + '\n');
   } catch (err) {
     process.stdout.write(JSON.stringify({ id: task.id, ok: false, error: err instanceof Error ? err.message : String(err) }) + '\n');
