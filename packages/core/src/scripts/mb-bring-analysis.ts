@@ -11,8 +11,8 @@
 //
 //   NODE_OPTIONS=--max-old-space-size=8192 \
 //     npx tsx packages/core/src/scripts/mb-bring-analysis.ts [--meta N] [--oppK O] [--budget ms] [--depth N] [--team file.json]
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { dataDirPath } from '../domain/data.js';
 import { loadPikaData, metaTeams } from '../domain/metaTeams.js';
 import { MatchupPool, type MatchupTask } from '../domain/matchupPool.js';
@@ -60,6 +60,16 @@ const rows: Row[] = scenarios.map((s, i) => {
   const heur = res[2 * i]!; const exh = res[2 * i + 1]!;
   return { mine: corpus[s.mi]!.label, opp: corpus[s.oi]!.label, heur: heur.myBring, exh: exh.myBring, gap: exh.score - heur.score, match: setEq(heur.myBring, exh.myBring) };
 });
+
+// --labels writes a self-contained calibration dataset: each scenario's teams +
+// the exhaustive-best bring (the label). mb-calibrate-brings.ts re-scores brings
+// against these with candidate weights — instant, no re-search.
+const labelsArg = argStr('--labels', '');
+if (labelsArg) {
+  const labels = scenarios.map((s, i) => ({ mine: corpus[s.mi]!.sets, opp: corpus[s.oi]!.sets, best: res[2 * i + 1]!.myBring }));
+  writeFileSync(resolve(labelsArg), JSON.stringify(labels));
+  console.error(`[labels] wrote ${labels.length} scenarios → ${labelsArg}`);
+}
 
 const n = rows.length;
 const matches = rows.filter(r => r.match).length;
