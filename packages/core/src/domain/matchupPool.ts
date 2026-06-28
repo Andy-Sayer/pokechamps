@@ -13,7 +13,7 @@ import { cpus } from 'node:os';
 import { evaluateMatchup, type Matchup } from './teamSim.js';
 import type { PokemonSet } from './types.js';
 
-export interface MatchupTask { mine: PokemonSet[]; oppSets: PokemonSet[]; oppAnchor: string; depth: number; budgetMs?: number; bringK?: number }
+export interface MatchupTask { mine: PokemonSet[]; oppSets: PokemonSet[]; oppAnchor: string; depth: number; budgetMs?: number; bringK?: number; oppBringK?: number }
 
 const WORKER = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'matchup-worker.ts');
 
@@ -89,14 +89,14 @@ export class MatchupPool {
   async run(tasks: MatchupTask[]): Promise<Matchup[]> {
     this.ensure();
     if (!this.usable) {
-      return tasks.map(t => evaluateMatchup(t.mine, t.oppSets, t.oppAnchor, t.depth, t.budgetMs, { bringK: t.bringK }));
+      return tasks.map(t => evaluateMatchup(t.mine, t.oppSets, t.oppAnchor, t.depth, t.budgetMs, { bringK: t.bringK, oppBringK: t.oppBringK }));
     }
     try {
       return await Promise.all(tasks.map(t => this.one(t)));
     } catch {
       // A worker died mid-run → finish synchronously rather than lose the run.
       this.usable = false;
-      return tasks.map(t => evaluateMatchup(t.mine, t.oppSets, t.oppAnchor, t.depth, t.budgetMs, { bringK: t.bringK }));
+      return tasks.map(t => evaluateMatchup(t.mine, t.oppSets, t.oppAnchor, t.depth, t.budgetMs, { bringK: t.bringK, oppBringK: t.oppBringK }));
     }
   }
 

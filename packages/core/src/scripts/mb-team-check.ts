@@ -21,9 +21,13 @@ const argNum = (f: string, d: number) => { const i = process.argv.indexOf(f); re
 const DEPTH = argNum('--depth', 5);
 const META_N = argNum('--meta', 8);
 // --bringK > 1 makes the bring a searched MAXIMIN over each side's top-K
-// candidate brings instead of the scoreBrings top-1 heuristic. Cost ~K² per
-// board; use a smaller --budget to compensate.
-const BRING_K = argNum('--bringK', 1);
+// candidate brings instead of the scoreBrings top-1 heuristic. --allBrings sets
+// MY side exhaustive (all 15 of C(6,4) — "simulate every permutation", the
+// offline ground truth); --oppBringK tunes the opponent's response breadth
+// separately (kept smaller for tractability). Cost ~ bringK × oppBringK per
+// board; pair with a smaller --budget.
+const BRING_K = process.argv.includes('--allBrings') ? 15 : argNum('--bringK', 1);
+const OPP_BRING_K = argNum('--oppBringK', BRING_K);
 // Budgeted anytime deepening (1→DEPTH under a per-board wall-clock cap) matches
 // how the validated baseline was scored. This momentum team (rain + double
 // Tailwind) is badly under-rated at a shallow FIXED depth — its payoff sits near
@@ -42,10 +46,10 @@ const gauntlet = [
 ];
 
 console.log(`team: ${teamPath.split(/[\\/]/).pop()} — ${team.map(s => s.species).join(', ')}`);
-console.log(`gauntlet: ${meta.length} real M-B meta teams + ${MB_THREATS.length} hand threats · deepen 1→${DEPTH}${BUDGET ? ` · ${BUDGET / 1000}s/board` : ' (fixed)'} · bringK ${BRING_K}${BRING_K > 1 ? ' (searched bring)' : ' (heuristic bring)'}\n`);
+console.log(`gauntlet: ${meta.length} real M-B meta teams + ${MB_THREATS.length} hand threats · deepen 1→${DEPTH}${BUDGET ? ` · ${BUDGET / 1000}s/board` : ' (fixed)'} · bring ${BRING_K >= 15 ? 'EXHAUSTIVE (all 15)' : `top-${BRING_K}`}×opp-${OPP_BRING_K}${BRING_K > 1 ? ' searched' : ' heuristic'}\n`);
 
 const pool = new MatchupPool();
-const results = await pool.run(gauntlet.map(g => ({ mine: team, oppSets: g.sets, oppAnchor: g.anchor, depth: DEPTH, budgetMs: BUDGET || undefined, bringK: BRING_K })));
+const results = await pool.run(gauntlet.map(g => ({ mine: team, oppSets: g.sets, oppAnchor: g.anchor, depth: DEPTH, budgetMs: BUDGET || undefined, bringK: BRING_K, oppBringK: OPP_BRING_K })));
 pool.close();
 
 const rows = gauntlet.map((g, i) => ({ anchor: g.anchor, score: results[i]!.score, verdict: results[i]!.verdict, bring: results[i]!.myBring }));
