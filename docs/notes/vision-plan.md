@@ -91,10 +91,19 @@ compressed/downscaled and likely carries extra chrome — a GameShare banner, pe
 labels, a guest cursor — and possibly a different resolution / letterbox. So it needs
 (a) a per-source `RegionMap` override + the `find-banner.ts` one-frame sanity check
 (shared with P5), and (b) OCR + colour-hist tolerance to compression artifacts.
-**OPEN — confirm the delivery path first:** does the share land on the user's own
-Switch (→ HDMI capture as usual, mostly P5), on a PC screen-share app (Discord window
-capture), or via the phone/app? The CV-robustness work is largely the same either way,
-but the *grabber* differs. Don't build until the path is known.
+**MEASURED 2026-06-28 (delivery path confirmed):** the user joins via GameShare and
+captures the composite on their own Switch HDMI through the dongle (`serve.ts`). The
+shared screen is an **exact 5/6 (0.8333) CENTRED inset** of the 1920×1080 capture —
+a **1600×900** region with symmetric **160px L/R + 90px T/B** borders (found via
+`scripts/share-border.ts` luma profile on a live frame). So the fix is a pure
+scale+offset, NOT a re-calibration: **`insetRegionMap(map, GAMESHARE_INSET)`** in
+`regions.ts` remaps any full-frame `RegionMap` into the inset (tested,
+`gameshare-inset.test.ts`). **Remaining:** (a) wire a `gameshare` flag into
+`runVision`/`visionSource` that wraps the active map via `insetRegionMap` when the
+share is on; (b) the inset shrinks 1080p→900p so OCR runs on smaller text — verify
+HP/banner OCR still reads at inset scale (may need a larger upscale factor); (c) note
+the battle layout itself is still **doubles**-calibrated — a 1v1/singles game needs
+its own `RegionMap` regardless of GameShare.
 
 ## Validation loop
 

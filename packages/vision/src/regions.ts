@@ -37,6 +37,34 @@ export function toPixels(r: Rect, width: number, height: number): { x: number; y
   return { x: Math.round(r.x * width), y: Math.round(r.y * height), w: Math.round(r.w * width), h: Math.round(r.h * height) };
 }
 
+/** A shared-screen inset (e.g. Switch 2 GameShare): the shared game is shrunk by
+ *  `scale` and offset to (x, y), all NORMALIZED to the capture frame. */
+export interface ScreenInset { x: number; y: number; scale: number }
+
+/** MEASURED 2026-06-28 on a live GameShare dongle frame (scripts/share-border.ts):
+ *  the shared screen is an exact 5/6 (0.8333) CENTRED inset of the 1920×1080
+ *  capture — a 1600×900 region with symmetric 160px L/R + 90px T/B borders. */
+export const GAMESHARE_INSET: ScreenInset = { x: 160 / 1920, y: 90 / 1080, scale: 5 / 6 };
+
+const insetRect = (r: Rect, ins: ScreenInset): Rect => ({
+  x: ins.x + r.x * ins.scale, y: ins.y + r.y * ins.scale, w: r.w * ins.scale, h: r.h * ins.scale,
+});
+
+/** Remap a full-frame RegionMap into a shrunk inset (GameShare). Every box is
+ *  scaled + offset by the inset, so the SAME calibration drives a GameShare feed
+ *  with no re-measuring — just `insetRegionMap(map)` when the share is detected. */
+export function insetRegionMap(map: RegionMap, ins: ScreenInset = GAMESHARE_INSET): RegionMap {
+  const R = (r: Rect) => insetRect(r, ins);
+  return {
+    label: `${map.label} [gameshare ${ins.scale.toFixed(3)}@${(ins.x * 100).toFixed(1)},${(ins.y * 100).toFixed(1)}%]`,
+    battleText: R(map.battleText),
+    moveMenu: map.moveMenu.map(R) as [Rect, Rect, Rect, Rect],
+    slots: map.slots.map(s => ({ ...s, name: R(s.name), hpBar: R(s.hpBar), statusIcon: R(s.statusIcon) })),
+    oppHpText: map.oppHpText ? [R(map.oppHpText[0]), R(map.oppHpText[1])] : undefined,
+    myHpText: map.myHpText ? [R(map.myHpText[0]), R(map.myHpText[1])] : undefined,
+  };
+}
+
 // Champions doubles battle layout (command/FIGHT phase). Normalized [0,1].
 // CALIBRATED on a real 1080p dongle match (command-live.png, 2026-06-20):
 //   VERIFIED: battleText banner; both opp HP-% boxes; both my absolute-HP boxes.
