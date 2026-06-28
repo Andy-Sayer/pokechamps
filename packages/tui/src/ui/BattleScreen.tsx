@@ -1,4 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { createInterface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
@@ -612,6 +615,13 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // /vision (and, once HDMI capture is wired, by the runVision loop); cleared on
   // accept/reject. While set, it owns input focus.
   const [visionProposal, setVisionProposal] = useState<ProposalLike | null>(null);
+  // `/watch` — spawn the live read pipeline (read-live.ts) over serve's capture
+  // tap; each completed turn it emits arrives as a ratifiable proposal. The OCR
+  // engine runs in the child process, never in this Ink render.
+  const [watching, setWatching] = useState(false);
+  const watchProc = useRef<ChildProcess | null>(null);
+  // Kill the watch reader if the battle screen unmounts (don't leak the child).
+  useEffect(() => () => { try { watchProc.current?.kill(); } catch { /* gone */ } }, []);
   const [draftActions, setDraftActions] = useState<MoveAction[]>([]);
   // Boost lines logged DURING a turn join the turn's ordered timeline (instead of
   // applying immediately), so they take effect at their input position — a defense
@@ -2542,6 +2552,52 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       : `Vision: applied ${lines.length} line(s). Review the draft, then /next to finalize.`);
   };
 
+  const stopWatch = () => {
+    const p = watchProc.current;
+    watchProc.current = null;
+    if (p) { try { p.kill(); } catch { /* already gone */ } }
+    setWatching(false);
+  };
+
+  const startWatch = (full: boolean) => {
+    // Seed the reader with the active mons per slot so its tracker resolves
+    // m1/m2/o1/o2 from the first turn.
+    const a = activeIdx, mt = match.myTeam, ot = match.opponentTeam;
+    const leads: string[] = [];
+    if (a.mine[0] != null && mt[a.mine[0]]) leads.push(`m1=${mt[a.mine[0]]!.species}`);
+    if (a.mine[1] != null && mt[a.mine[1]]) leads.push(`m2=${mt[a.mine[1]]!.species}`);
+    if (a.theirs[0] != null && ot[a.theirs[0]]) leads.push(`o1=${ot[a.theirs[0]]!.species}`);
+    if (a.theirs[1] != null && ot[a.theirs[1]]) leads.push(`o2=${ot[a.theirs[1]]!.species}`);
+    let proc: ChildProcess;
+    try {
+      // read-live.ts lives in the vision package; resolved relative to this file
+      // (dev/tsx). A bundled TUI won't have it → spawn 'error' handles that.
+      const readLive = fileURLToPath(new URL('../../../vision/scripts/read-live.ts', import.meta.url));
+      const flags = [readLive, '--leads', leads.join(',')];
+      if (full) flags.push('--full');
+      proc = spawn(process.execPath, ['--import', 'tsx', ...flags], { stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      setMessage(`Watch: couldn't launch the reader — ${(e as Error).message}`);
+      return;
+    }
+    watchProc.current = proc;
+    proc.on('error', () => { setMessage('Watch: reader failed to spawn (needs tsx + the vision package — dev run only).'); stopWatch(); });
+    proc.on('exit', () => { if (watchProc.current === proc) { watchProc.current = null; setWatching(false); } });
+    // The child prints one JSON proposal per completed turn on stdout; surface it
+    // in the ratify panel. (stderr carries human logs we ignore.)
+    const rl = createInterface({ input: proc.stdout! });
+    rl.on('line', (line) => {
+      const s = line.trim();
+      if (s[0] !== '{') return;
+      try {
+        const p = JSON.parse(s) as { lines?: string[]; confidence?: number };
+        if (Array.isArray(p.lines) && p.lines.length) setVisionProposal({ lines: p.lines, confidence: p.confidence ?? 0.9, notes: [] });
+      } catch { /* partial/garbled line — ignore */ }
+    });
+    setWatching(true);
+    setMessage(`Watch ON${full ? ' (full frame)' : ' (GameShare inset)'} — reading the live feed. Start the capture server first (npm run -w @pokechamps/vision serve). Read turns pop up to ratify; /watch again to stop.`);
+  };
+
   const runBattleCommand = (id: BattleCommandId, args = ''): boolean => {
     switch (id) {
       case 'ask': {
@@ -2680,6 +2736,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         // The live HDMI capture is a SEPARATE process (device owner) watched in a
         // browser — not embedded in the TUI. Surface the how-to in-app.
         setMessage('Live feed: run  npm run -w @pokechamps/vision serve  in a terminal, then open http://localhost:8099 (double-click image = fullscreen). Separate process from the TUI; if it freezes, Ctrl+C + re-run.');
+        return true;
+      }
+      case 'watch': {
+        if (watching) { stopWatch(); setMessage('Watch off.'); }
+        else startWatch(args.trim() === 'full');
         return true;
       }
       case 'crit': setShowCrits(c => { savePrefs({ showCrits: !c }); return !c; }); return true;

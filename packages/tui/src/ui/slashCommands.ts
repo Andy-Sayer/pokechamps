@@ -34,6 +34,7 @@ export type BattleCommandId =
   | 'summary'
   | 'vision'
   | 'feed'
+  | 'watch'
   | 'help'
   | 'quit';
 
@@ -63,6 +64,7 @@ export const BATTLE_COMMANDS: readonly BattleCommand[] = [
   { id: 'summary',  aliases: ['summary', 'sum'],      description: 'Match summary: per-mon damage dealt / taken, KOs, turn count' },
   { id: 'vision',   aliases: ['vision', 'vis'],       description: 'Ratify vision-built turn-log lines (semicolon-separated): /vision m1 > Close Combat > o1 > 33; o1 ko — opens the proposal panel. HDMI capture feeds these automatically once wired.' },
   { id: 'feed',     aliases: ['feed'],                description: 'How to watch the live HDMI capture (separate process): run "npm run -w @pokechamps/vision serve" in a terminal, then open http://localhost:8099' },
+  { id: 'watch',    aliases: ['watch'],               description: 'Auto-read the live feed into ratify proposals: /watch starts (GameShare inset), /watch full (full frame), /watch again stops. Run "serve" first.' },
   { id: 'help',     aliases: ['help', 'h', '?'],      description: 'Show available commands' },
   { id: 'quit',     aliases: ['quit', 'q', 'end'],    description: 'End the match and return to the menu' },
 ];
