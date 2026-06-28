@@ -85,11 +85,14 @@ are abundant; spread labels are mostly hidden.** So start where the data is:
 Why now: the bring-weight calibration was a **proven negative result** — a linear
 re-weighting of the heuristic caps at ~28% agreement with the exhaustive bring
 and doesn't generalize, so a learned evaluator is the real path to a smart live
-bring (see [[project_mb_team]]). **Finding:** the cached corpus yields only **24
-usable rows** (full OTS 6 + bring of 4 + decided) from 17 games — pipeline-proven
-but ≪ trainable. **Next (step 3 prereq):** a batch OTS-replay fetch
-(`fetch-replay --search`, as J.5 did) → hundreds of rows → then the baseline
-model + held-out eval vs `scoreBrings`.
+bring (see [[project_mb_team]]). **Corpus grown 2026-06-28:** a batch OTS **Bo3** fetch (`fetch-replay --search …
+--out data/replays-train --quiet`, Reg F/H/I bo3) pulled 204 games → **361 usable
+rows** (full OTS 6 + bring of 4 + decided; 437/442 rows are full OTS teams), up
+from 24. Trainable for a baseline. (Showdown `search.json` has no pagination, so
+this is ~the recent list per format — repeat over days to grow further.)
+**Next (step 3):** a baseline bring/outcome model + held-out eval — the test of
+"does a learned bring beat `scoreBrings`?" (win-prediction accuracy on a held-out
+split, vs a scoreBrings-higher-score-wins baseline + the 50% floor).
 
 ## The build (when picked up — incremental, each step shippable)
 
