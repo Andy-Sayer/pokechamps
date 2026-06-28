@@ -15,9 +15,9 @@
 //   -- --port 9000    listen port (or PC_CAPTURE_PORT)
 //   PC_CAPTURE_DEVICE="Other Name"   override the device name
 
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer, type ServerResponse } from 'node:http';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ffmpegPath from 'ffmpeg-static';
@@ -34,7 +34,7 @@ const BOUNDARY = 'pokeframe';
 const out = resolve(dirname(fileURLToPath(import.meta.url)), '../fixtures/live/latest.png');
 mkdirSync(dirname(out), { recursive: true });
 
-const ff = spawn(ffmpegPath as unknown as string, [
+const FF_ARGS = [
   '-hide_banner', '-loglevel', 'warning',
   // Low-latency input: low fps is plenty for a menu game (less data + CPU than 60),
   // a small rtbuf drops stale frames instead of queuing them, nobuffer = no extra
@@ -49,25 +49,57 @@ const ff = spawn(ffmpegPath as unknown as string, [
   // smooth, low-latency view (the view doesn't need full res; the tap has it).
   '-map', '0:v', '-s', '1280x720', '-c:v', 'mjpeg', '-q:v', '7', '-r', FPS,
   '-f', 'mpjpeg', '-boundary_tag', BOUNDARY, 'pipe:1',
-], { stdio: ['ignore', 'pipe', 'pipe'] });
+];
 
-// Explain a device-busy quick exit instead of letting it look like a crash.
-const started = Date.now();
-let tail = '';
-ff.stderr?.on('data', (b: Buffer) => { process.stderr.write(b); tail = (tail + b.toString()).slice(-4000); });
-ff.on('exit', (code) => {
-  if (code && (Date.now() - started < 2500 || /I\/O error|Could not run graph|in use/i.test(tail))) {
-    console.error('\n[serve] ffmpeg exited immediately — the capture device is busy.');
-    console.error('[serve] Close Windows Camera / OBS and end any Discord/Teams/Zoom webcam call, then retry.');
-    console.error(`[serve] (device: "${DEVICE}" — override with PC_CAPTURE_DEVICE=...)`);
-  }
-  process.exit(code ?? 0);
-});
-
-// Fan ffmpeg's mpjpeg stdout out to every connected /stream client. New clients
-// join mid-stream and resync at the next JPEG boundary — browsers handle that.
+// Fan ffmpeg's mpjpeg stdout to every connected /stream client. The client set
+// PERSISTS across ffmpeg restarts — browsers join mid-stream and resync at the
+// next JPEG boundary, so an ffmpeg respawn never needs a manual page reload.
 const clients = new Set<ServerResponse>();
-ff.stdout!.on('data', (chunk: Buffer) => { for (const c of clients) c.write(chunk); });
+
+// AUTO-RECOVER. ffmpeg fails two ways: it EXITS (device busy / crash) and it
+// STALLS (stays alive but stops emitting frames when the HDMI/GameShare input
+// blips — both the tap and the MJPEG stream freeze). On exit we respawn with
+// backoff; a watchdog kills+respawns it when the tap stops advancing. The HTTP
+// server stays up throughout, so the feed self-heals without a restart.
+let ff: ChildProcess | null = null;
+let ffStartedAt = 0;
+let shuttingDown = false;
+let consecutiveFast = 0;
+
+function startFfmpeg(): void {
+  if (shuttingDown) return;
+  ffStartedAt = Date.now();
+  let tail = '';
+  const proc = spawn(ffmpegPath as unknown as string, FF_ARGS, { stdio: ['ignore', 'pipe', 'pipe'] });
+  ff = proc;
+  proc.stderr?.on('data', (b: Buffer) => { process.stderr.write(b); tail = (tail + b.toString()).slice(-4000); });
+  proc.stdout!.on('data', (chunk: Buffer) => { for (const c of clients) c.write(chunk); });
+  proc.on('error', () => { /* spawn failure surfaces via the exit handler's retry */ });
+  proc.on('exit', (code) => {
+    if (ff === proc) ff = null;
+    if (shuttingDown) return;
+    consecutiveFast = Date.now() - ffStartedAt < 2500 ? consecutiveFast + 1 : 0;
+    const busy = /I\/O error|Could not run graph|in use/i.test(tail);
+    const delay = Math.min(10_000, 500 * 2 ** Math.min(consecutiveFast, 4));
+    console.error(busy
+      ? `[serve] capture device busy (close Camera/OBS/Discord webcam holding "${DEVICE}") — retrying in ${delay}ms…`
+      : `[serve] ffmpeg exited (code ${code}) — restarting in ${delay}ms…`);
+    setTimeout(startFfmpeg, delay);
+  });
+}
+
+// Stall watchdog: once ffmpeg is past warm-up, if the 1080p tap hasn't advanced
+// in STALL_MS the input froze — kill ffmpeg so the exit handler respawns it.
+const STALL_MS = 5000, WARMUP_MS = 6000;
+setInterval(() => {
+  if (!ff || shuttingDown || Date.now() - ffStartedAt < WARMUP_MS) return;
+  try {
+    const age = Date.now() - statSync(out).mtimeMs;
+    if (age > STALL_MS) { console.error(`[serve] feed stalled (${(age / 1000).toFixed(0)}s — input blip) — restarting ffmpeg…`); ff.kill(); }
+  } catch { /* tap not written yet */ }
+}, 3000);
+
+startFfmpeg();
 
 const PAGE = `<!doctype html><meta charset="utf-8"><title>PokeChamps — Switch feed</title>
 <style>html,body{margin:0;background:#000;height:100%;overflow:hidden}
@@ -95,4 +127,4 @@ createServer((req, res) => {
   console.error(`[serve] OPEN http://localhost:${PORT} in a browser (double-click image = fullscreen). Ctrl+C to stop.`);
 });
 
-process.on('SIGINT', () => { ff.kill('SIGINT'); process.exit(0); });
+process.on('SIGINT', () => { shuttingDown = true; ff?.kill('SIGINT'); process.exit(0); });
