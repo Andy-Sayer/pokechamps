@@ -15,6 +15,11 @@ training-data work (§1) and the standing roadmap. Build the rest first.
 
 ## 1. Historic game data → training data for a purpose-trained model
 
+> **Fleshed out 2026-06-28 →** [`training-data-plan.md`](training-data-plan.md)
+> (record schema grounded in `Match`/`SearchResult`/`BattleTranscript`, data
+> sources, the first target task = bring/outcome value, the incremental build).
+> The summary below stands; the plan doc is the detail.
+
 **Idea.** Accumulate a corpus of *real* games (state → action → outcome) and use
 it to train a purpose-built model for the decisions the engine currently makes
 heuristically — move choice, bring selection, opponent-spread priors. This is
