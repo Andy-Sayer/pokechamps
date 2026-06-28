@@ -5,6 +5,12 @@ this note exists so the intent + the research behind it isn't lost. Both move
 the project toward a tighter perceive → decide → act loop on top of the existing
 engine + the vision adapter.
 
+**Sequencing (set 2026-06-28):** the **Switch-control / Bluetooth work (§2) is
+the LAST thing to build.** Its software scaffold is in (`@pokechamps/control`),
+but everything past the scaffold — the real hardware backend, `menuNav`
+calibration, the live-search wiring — comes *after* everything else: the
+training-data work (§1) and the standing roadmap. Build the rest first.
+
 ---
 
 ## 1. Historic game data → training data for a purpose-trained model
@@ -68,7 +74,8 @@ flagged Bluetooth as the appealing mechanism ("super cool for the program to
 control the switch using bluetooth").
 
 **Scaffold shipped 2026-06-28 — `@pokechamps/control`** (the OUTPUT adapter,
-mirror of `@pokechamps/vision`). Built software-first: the action vocabulary +
+mirror of `@pokechamps/vision`). **Lowest priority — see Sequencing above; the
+work below the scaffold is the LAST thing to build.** Built software-first: the action vocabulary +
 controller state model + a neutral-watchdog `Controller` + a `MockBackend` + a
 **dry-run** (the confirm-before-press surface that prints the input sequence and
 sends nothing) + tests (16). The `SerialBackend` is a clearly-stubbed seam and
