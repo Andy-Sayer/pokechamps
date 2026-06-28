@@ -1,0 +1,17 @@
+{
+  "name": "@pokechamps/control",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Control output adapter: turn the engine's recommended action into Nintendo Switch controller input. The mirror of @pokechamps/vision (the input adapter). Software-first scaffold — a MockBackend + dry-run today; a serial-driven microcontroller (ESP32+PABotBase2 / wired Pico) backend when hardware is wired. Confirm-before-press by default. Windows can't be a Bluetooth-Classic HID peripheral, hence the MCU path — see docs/notes/future-directions.md.",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "dry-run": "tsx scripts/dry-run.ts"
+  }
+}

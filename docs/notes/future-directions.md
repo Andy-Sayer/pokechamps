@@ -67,6 +67,17 @@ perceive → decide → act loop toward (semi-)automated play. The user specific
 flagged Bluetooth as the appealing mechanism ("super cool for the program to
 control the switch using bluetooth").
 
+**Scaffold shipped 2026-06-28 — `@pokechamps/control`** (the OUTPUT adapter,
+mirror of `@pokechamps/vision`). Built software-first: the action vocabulary +
+controller state model + a neutral-watchdog `Controller` + a `MockBackend` + a
+**dry-run** (the confirm-before-press surface that prints the input sequence and
+sends nothing) + tests (16). The `SerialBackend` is a clearly-stubbed seam and
+`menuNav` is a calibration-flagged best-guess (`MENU_NAV_CALIBRATED = false`).
+**Remaining (deferred, named):** the real serial backend + firmware frame
+encoders (need hardware) · `menuNav` calibration against the real Champions UI ·
+wiring the live endgame-search recommendation → `GameAction` · the full auto
+closed-loop (act → verify-by-vision) behind a flag. See `packages/control/README.md`.
+
 ### The crux: pure Windows Bluetooth can't do it
 
 The Switch accepts wireless controllers as a **Bluetooth *Classic* (BR/EDR) HID

@@ -13,6 +13,7 @@ export default defineConfig({
       'packages/tui',
       'packages/web',
       'packages/vision',
+      'packages/control',
     ],
   },
 });

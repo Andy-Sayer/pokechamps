@@ -12,7 +12,7 @@
   },
   "scripts": {
     "start": "npm -w @pokechamps/tui start",
-    "typecheck": "npm -w @pokechamps/core run typecheck && npm -w @pokechamps/tui run typecheck && npm -w @pokechamps/server run typecheck && npm -w @pokechamps/web run typecheck && npm -w @pokechamps/vision run typecheck",
+    "typecheck": "npm -w @pokechamps/core run typecheck && npm -w @pokechamps/tui run typecheck && npm -w @pokechamps/server run typecheck && npm -w @pokechamps/web run typecheck && npm -w @pokechamps/vision run typecheck && npm -w @pokechamps/control run typecheck",
     "server": "npm -w @pokechamps/server start",
     "server:dev": "npm -w @pokechamps/server run dev",
     "server:docker": "docker compose up --build",
@@ -23,7 +23,7 @@
     "refresh-pikalytics": "npm -w @pokechamps/core run refresh-pikalytics",
     "demo-team": "npm -w @pokechamps/core run demo-team",
     "validate-format": "npm -w @pokechamps/core run validate-format",
-    "test": "npm -w @pokechamps/core test && npm -w @pokechamps/server test && npm -w @pokechamps/tui test && npm -w @pokechamps/web test && npm -w @pokechamps/vision test",
+    "test": "npm -w @pokechamps/core test && npm -w @pokechamps/server test && npm -w @pokechamps/tui test && npm -w @pokechamps/web test && npm -w @pokechamps/vision test && npm -w @pokechamps/control test",
     "test:watch": "npm -w @pokechamps/core run test:watch"
   }
 }
