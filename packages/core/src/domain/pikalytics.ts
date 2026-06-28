@@ -68,12 +68,13 @@ export function pikalyticsAvailable(): boolean {
 export function mergeEntry(speciesName: string, entry: PikalyticsEntry): void {
   const data = load();
   if (data) {
-    // The on-the-fly fetcher passes rank/usage 0 (it has no index ranking), so
-    // preserve any KNOWN rank/usage — otherwise re-scouting a top mon (e.g.
-    // Sneasler) would clobber its ranking to 0.
+    // The on-the-fly fetcher's per-species parse has no INDEX-derived fields
+    // (rank/usage/winRate/record live only in the format index), so preserve any
+    // KNOWN values — otherwise re-scouting a top mon clobbers its ranking to 0
+    // and strips the win-rate/record the offline refresh captured.
     const prev = data.pokemon[speciesName];
     data.pokemon[speciesName] = prev
-      ? { ...entry, rank: prev.rank || entry.rank, usage: prev.usage || entry.usage }
+      ? { ...entry, rank: prev.rank || entry.rank, usage: prev.usage || entry.usage, winRate: entry.winRate ?? prev.winRate, record: entry.record ?? prev.record }
       : entry;
   } else {
     // No cache file yet — seed an in-memory one so subsequent gets work.
