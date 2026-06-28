@@ -170,7 +170,19 @@ function comb4(n: number): number[][] {
   return out;
 }
 
-export function scoreBrings(myTeam: PokemonSet[], opponent: OpponentEntry[], field: FieldState = NEUTRAL_FIELD): BringScore[] {
+/** Tunable weights for the bring score. Calibrated against the exhaustive-best
+ *  bring (`mb-bring-analysis` → `mb-calibrate-brings`) so the fast live heuristic
+ *  approximates what full simulation would pick. */
+export interface BringWeights {
+  offense: number; defense: number; speed: number; matchup: number;
+  speedControl: number; redirection: number; tactics: number; threat: number;
+}
+export const DEFAULT_BRING_WEIGHTS: BringWeights = {
+  offense: 0.4, defense: 0.3, speed: 5, matchup: 8,
+  speedControl: 30, redirection: 20, tactics: 0.35, threat: 12,
+};
+
+export function scoreBrings(myTeam: PokemonSet[], opponent: OpponentEntry[], field: FieldState = NEUTRAL_FIELD, w: BringWeights = DEFAULT_BRING_WEIGHTS): BringScore[] {
   const level = myTeam[0]?.level ?? 50;
   const opponentSets = opponent.map(o => resolvedOpponentSet(o, level));
   // safeScore: a broken species (one calc can't construct) shouldn't crash
@@ -241,17 +253,17 @@ export function scoreBrings(myTeam: PokemonSet[], opponent: OpponentEntry[], fie
     const rationale: string[] = [];
     if (teamHasSpeedControl) {
       const hasIt = indices.some(i => hasRole(myTeam[i]!, 'speedControl'));
-      if (hasIt) { roles += 30; rationale.push('Includes speed control'); }
+      if (hasIt) { roles += w.speedControl; rationale.push('Includes speed control'); }
       else rationale.push('Missing speed control (team has one available)');
     }
     if (teamHasRedirection) {
       const hasIt = indices.some(i => hasRole(myTeam[i]!, 'redirection'));
-      if (hasIt) { roles += 20; rationale.push('Includes redirection'); }
+      if (hasIt) { roles += w.redirection; rationale.push('Includes redirection'); }
     }
     // Synergy: best instance per pattern fully inside this bring, top 3.
     const bringSpecies = new Set(indices.map(i => myTeam[i]!.species));
     const combos = bestPerPatternWithin(myTactics, bringSpecies).slice(0, 3);
-    const tactics = Math.round(combos.reduce((s, t) => s + t.score * 0.35, 0));
+    const tactics = Math.round(combos.reduce((s, t) => s + t.score * w.tactics, 0));
     for (const t of combos) rationale.push(`Combo: ${t.name} — ${tacticLabel(t)}`);
     // Threats: ±12 per strong opponent combo depending on whether the bring
     // packs a counter for it.
@@ -259,10 +271,10 @@ export function scoreBrings(myTeam: PokemonSet[], opponent: OpponentEntry[], fie
     for (const t of oppThreats) {
       const counter = PATTERN_COUNTERS[t.pattern];
       const covered = !!counter && indices.some(i => counter(myTeam[i]!));
-      threats += covered ? 12 : -12;
+      threats += covered ? w.threat : -w.threat;
       rationale.push(`${covered ? 'Covers' : '⚠ No answer to'} opp ${t.name}: ${tacticLabel(t)}`);
     }
-    const total = offense * 0.4 + defense * 0.3 + speed * 5 + roles + matchup * 8 + tactics + threats;
+    const total = offense * w.offense + defense * w.defense + speed * w.speed + roles + matchup * w.matchup + tactics + threats;
     out.push({
       myIndices: indices,
       offense: Math.round(offense),
