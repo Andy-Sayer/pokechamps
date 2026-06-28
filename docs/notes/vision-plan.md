@@ -81,6 +81,21 @@ Guard / Quick Guard, the status-infliction variants not yet seen, post-game line
 offline against a VOD — the dongle-free **integration** test for P1–P4. `UvcFrameGrabber`
 for live (capture already works through `serve.ts`).
 
+**P9 (later, user request) — Switch 2 GameShare as a frame source.** Make the read
+pipeline work when someone **GameShares** their Switch 2 game to the user — i.e. the
+user is watching a *shared/streamed* view, not capturing their own HDMI. Treat it as
+another swappable frame source alongside the dongle + `youtube.ts`: grab the shared
+view and feed the same `readFrame` → state-machine path (the parser/engine never
+change). The crux is **robustness**, not new architecture: a GameShare stream is
+compressed/downscaled and likely carries extra chrome — a GameShare banner, per-player
+labels, a guest cursor — and possibly a different resolution / letterbox. So it needs
+(a) a per-source `RegionMap` override + the `find-banner.ts` one-frame sanity check
+(shared with P5), and (b) OCR + colour-hist tolerance to compression artifacts.
+**OPEN — confirm the delivery path first:** does the share land on the user's own
+Switch (→ HDMI capture as usual, mostly P5), on a PC screen-share app (Discord window
+capture), or via the phone/app? The CV-robustness work is largely the same either way,
+but the *grabber* differs. Don't build until the path is known.
+
 ## Validation loop
 
 `youtube.ts` is the regression harness: pull any Champions VOD → frames →
