@@ -8,6 +8,16 @@ unchanged. (Package overview: [`packages/vision/README.md`](../../packages/visio
 **Scaffolded earlier; capture + full banner grammar + HP-number OCR landed
 2026-06-20.** Work on `main`.
 
+**LIVE LOOP WIRED END-TO-END 2026-06-28.** The read pipeline is now driven live:
+`serve` (self-healing — respawn + stall watchdog) → `LatestTapGrabber` (polls the
+tap) → `read-live.ts` (runVision → per-turn JSON) → TUI **`/watch`** (spawns it;
+proposals auto-pop the ratify panel; OCR in the child, not the Ink render).
+Validated on a real **GameShare** doubles frame (5/6 inset via `insetRegionMap`):
+4/4 species + 4/4 HP correct after `readAbsHpRobust` (multi-scale my-HP — the
+inset shrinks text so the best upscale varies per mon). **Remaining = live
+shakeout only:** P3 gapFrames timing on real banner-frame sequences, the
+interactive `/watch` run, and P4 (self-damage reconciler). P1/P2 below are done.
+
 ## TL;DR
 
 Every stage now exists as a piece and the **read half is validated end-to-end on a
