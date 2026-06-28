@@ -33,6 +33,7 @@ export type BattleCommandId =
   | 'share'
   | 'summary'
   | 'vision'
+  | 'feed'
   | 'help'
   | 'quit';
 
@@ -61,6 +62,7 @@ export const BATTLE_COMMANDS: readonly BattleCommand[] = [
   { id: 'share',    aliases: ['share', 'sh'],         description: 'Live-share this match (remote mode): /share for a spectator link, /share off to revoke' },
   { id: 'summary',  aliases: ['summary', 'sum'],      description: 'Match summary: per-mon damage dealt / taken, KOs, turn count' },
   { id: 'vision',   aliases: ['vision', 'vis'],       description: 'Ratify vision-built turn-log lines (semicolon-separated): /vision m1 > Close Combat > o1 > 33; o1 ko — opens the proposal panel. HDMI capture feeds these automatically once wired.' },
+  { id: 'feed',     aliases: ['feed'],                description: 'How to watch the live HDMI capture (separate process): run "npm run -w @pokechamps/vision serve" in a terminal, then open http://localhost:8099' },
   { id: 'help',     aliases: ['help', 'h', '?'],      description: 'Show available commands' },
   { id: 'quit',     aliases: ['quit', 'q', 'end'],    description: 'End the match and return to the menu' },
 ];

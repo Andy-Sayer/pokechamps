@@ -2676,6 +2676,12 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         setMessage('Opponent sprites are disabled (they glitched while typing). Nothing to toggle.');
         return true;
       }
+      case 'feed': {
+        // The live HDMI capture is a SEPARATE process (device owner) watched in a
+        // browser — not embedded in the TUI. Surface the how-to in-app.
+        setMessage('Live feed: run  npm run -w @pokechamps/vision serve  in a terminal, then open http://localhost:8099 (double-click image = fullscreen). Separate process from the TUI; if it freezes, Ctrl+C + re-run.');
+        return true;
+      }
       case 'crit': setShowCrits(c => { savePrefs({ showCrits: !c }); return !c; }); return true;
       case 'allmoves': setShowAllMoves(a => { savePrefs({ showAllMoves: !a }); return !a; }); return true;
       case 'info': setInfoPickerOpen(true); return true;
