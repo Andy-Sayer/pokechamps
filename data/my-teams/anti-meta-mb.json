@@ -1,16 +1,45 @@
 [
   {
-    "species": "Sinistcha",
+    "species": "Archaludon",
     "level": 50,
     "nature": "Calm",
-    "ability": "Hospitality",
-    "item": "Kasib Berry",
+    "ability": "Stamina",
+    "item": "Leftovers",
     "evs": {
       "hp": 252,
       "atk": 0,
-      "def": 108,
+      "def": 4,
+      "spa": 36,
+      "spd": 196,
+      "spe": 20
+    },
+    "ivs": {
+      "hp": 31,
+      "atk": 31,
+      "def": 31,
+      "spa": 31,
+      "spd": 31,
+      "spe": 31
+    },
+    "moves": [
+      "Electro Shot",
+      "Dragon Pulse",
+      "Flash Cannon",
+      "Protect"
+    ]
+  },
+  {
+    "species": "Sableye",
+    "level": 50,
+    "nature": "Calm",
+    "ability": "Prankster",
+    "item": "Roseli Berry",
+    "evs": {
+      "hp": 252,
+      "atk": 0,
+      "def": 68,
       "spa": 0,
-      "spd": 156,
+      "spd": 196,
       "spe": 0
     },
     "ivs": {
@@ -22,39 +51,10 @@
       "spe": 31
     },
     "moves": [
-      "Rage Powder",
-      "Matcha Gotcha",
-      "Trick Room",
-      "Protect"
-    ]
-  },
-  {
-    "species": "Rotom-Wash",
-    "level": 50,
-    "nature": "Bold",
-    "ability": "Levitate",
-    "item": "Leftovers",
-    "evs": {
-      "hp": 252,
-      "atk": 0,
-      "def": 132,
-      "spa": 60,
-      "spd": 0,
-      "spe": 64
-    },
-    "ivs": {
-      "hp": 31,
-      "atk": 31,
-      "def": 31,
-      "spa": 31,
-      "spd": 31,
-      "spe": 31
-    },
-    "moves": [
-      "Thunderbolt",
-      "Hydro Pump",
+      "Rain Dance",
+      "Light Screen",
       "Will-O-Wisp",
-      "Protect"
+      "Encore"
     ]
   },
   {
@@ -87,69 +87,11 @@
     ]
   },
   {
-    "species": "Sneasler",
-    "level": 50,
-    "nature": "Jolly",
-    "ability": "Unburden",
-    "item": "White Herb",
-    "evs": {
-      "hp": 12,
-      "atk": 252,
-      "def": 0,
-      "spa": 0,
-      "spd": 0,
-      "spe": 252
-    },
-    "ivs": {
-      "hp": 31,
-      "atk": 31,
-      "def": 31,
-      "spa": 31,
-      "spd": 31,
-      "spe": 31
-    },
-    "moves": [
-      "Protect",
-      "Close Combat",
-      "Dire Claw",
-      "Fake Out"
-    ]
-  },
-  {
-    "species": "Kingambit",
-    "level": 50,
-    "nature": "Adamant",
-    "ability": "Defiant",
-    "item": "Black Glasses",
-    "evs": {
-      "hp": 252,
-      "atk": 252,
-      "def": 0,
-      "spa": 0,
-      "spd": 12,
-      "spe": 0
-    },
-    "ivs": {
-      "hp": 31,
-      "atk": 31,
-      "def": 31,
-      "spa": 31,
-      "spd": 31,
-      "spe": 31
-    },
-    "moves": [
-      "Iron Head",
-      "Protect",
-      "Kowtow Cleave",
-      "Sucker Punch"
-    ]
-  },
-  {
     "species": "Garchomp",
     "level": 50,
-    "nature": "Adamant",
+    "nature": "Jolly",
     "ability": "Rough Skin",
-    "item": "Choice Scarf",
+    "item": "Life Orb",
     "evs": {
       "hp": 12,
       "atk": 252,
@@ -169,8 +111,66 @@
     "moves": [
       "Earthquake",
       "Rock Slide",
-      "Stomping Tantrum",
+      "Protect",
       "Dragon Claw"
+    ]
+  },
+  {
+    "species": "Talonflame",
+    "level": 50,
+    "nature": "Jolly",
+    "ability": "Gale Wings",
+    "item": "",
+    "evs": {
+      "hp": 12,
+      "atk": 252,
+      "def": 0,
+      "spa": 0,
+      "spd": 0,
+      "spe": 252
+    },
+    "ivs": {
+      "hp": 31,
+      "atk": 31,
+      "def": 31,
+      "spa": 31,
+      "spd": 31,
+      "spe": 31
+    },
+    "moves": [
+      "Acrobatics",
+      "Tailwind",
+      "Flare Blitz",
+      "Protect"
+    ]
+  },
+  {
+    "species": "Grimmsnarl",
+    "level": 50,
+    "nature": "Bold",
+    "ability": "Prankster",
+    "item": "Light Clay",
+    "evs": {
+      "hp": 252,
+      "atk": 0,
+      "def": 148,
+      "spa": 0,
+      "spd": 116,
+      "spe": 0
+    },
+    "ivs": {
+      "hp": 31,
+      "atk": 31,
+      "def": 31,
+      "spa": 31,
+      "spd": 31,
+      "spe": 31
+    },
+    "moves": [
+      "Spirit Break",
+      "Scary Face",
+      "Fake Tears",
+      "Parting Shot"
     ]
   }
 ]
