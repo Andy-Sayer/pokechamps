@@ -416,7 +416,10 @@ export interface ChampionsFormat {
   speciesClause: boolean;
   legality: { allow: string[]; ban: string[] };
   items: { allow: string[]; ban: string[] };
-  moves: { ban: string[] };
+  // `ban` is a GLOBAL move ban. `removeBySpecies` is per-species: Champions cuts
+  // specific moves from specific mons (e.g. Metagross loses Heavy Slam) — cuts
+  // @pkmn/dex doesn't carry — keyed by species name → removed move names.
+  moves: { ban: string[]; removeBySpecies?: Record<string, string[]> };
 }
 
 export const ZERO_EVS: Stats = { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };

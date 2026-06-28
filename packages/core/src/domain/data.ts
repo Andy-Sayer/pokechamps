@@ -337,9 +337,16 @@ export function getLearnset(speciesName: string, format = loadFormat()): string[
   }
   if (!ids.size) return [];
   const bannedIds = new Set(format.moves.ban.map(toId));
+  // Champions cuts specific moves from specific species (e.g. Metagross loses
+  // Heavy Slam) — per-species removals @pkmn/dex doesn't carry. Strip any that
+  // apply to a species in this mon's prevo chain (`seen`).
+  const removedIds = new Set<string>();
+  for (const [sp, moves] of Object.entries(format.moves.removeBySpecies ?? {})) {
+    if (seen.has(toId(sp))) for (const mv of moves) removedIds.add(toId(mv));
+  }
   const names: string[] = [];
   for (const moveId of ids) {
-    if (bannedIds.has(moveId)) continue;
+    if (bannedIds.has(moveId) || removedIds.has(moveId)) continue;
     const m = getMove(moveId) as any;
     if (m?.name) names.push(m.name);
   }

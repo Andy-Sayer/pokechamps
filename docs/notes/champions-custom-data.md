@@ -53,6 +53,42 @@ filled directly into `SPECIES_PATCHES` + `MEGA_ABILITY_OVERRIDES` + `species.jso
 WITHOUT a full `npm run refresh-data` (avoids a wide dex re-dump mid-cycle); the
 patches are in `SPECIES_PATCHES` so the next refresh reproduces them.
 
+## Reg M-B move changes (2026-06-28)
+
+Champions rebalanced some moves; `@pkmn/dex` carries NONE of these (mainline
+data ≠ Champions custom data). Three kinds, handled separately:
+
+**1. Learnset removals — ✅ PATCHED.** Per-species move cuts live in
+`format.champions.json` `moves.removeBySpecies` (species name → removed move
+names) and are stripped by `getLearnset()` — so they apply everywhere move pools
+are derived (opp autocomplete, tactics potential-mode, bring threat detection,
+replay/sim legality). Compiled from The Game Haus + Game8 patch notes (UNION —
+each list was incomplete; the in-game data is the final authority and the map is
+a one-line edit if any entry is wrong):
+
+| Species | Removed |
+|---|---|
+| Metagross | Heavy Slam, Knock Off |
+| Annihilape | Final Gambit |
+| Grimmsnarl | Thunder Wave, False Surrender |
+| Scrafty | Parting Shot |
+| Overqwil | Mortal Spin |
+| Gholdengo | Thunder Wave |
+| Pyroar | Earth Power |
+
+Test: `champions-move-removals.test.ts` (removed gone, real moves kept,
+per-species scoping verified).
+
+**2. Move-DATA changes — NOT yet applied.** *Make It Rain*: accuracy 100→95,
+self SpA drop −1→−2. A `moves.json` data patch (analogous to `SPECIES_PATCHES`)
++ the −2 secondary in the self-debuff path; affects display/inference, not
+maximin (accuracy isn't priced).
+
+**3. Move-MECHANIC changes — NOT yet applied.** *Rage Fist* now resets its power
+when Annihilape switches out (M-B nerf). Engine work — the search + live engine
+model Rage Fist as +1×/hit-taken-this-turn; a switch-out reset would refine it.
+Low priority.
+
 ## Caveats / accepted simplifications
 
 - Piercing Drill is modeled in the **search** only. The forward damage calc

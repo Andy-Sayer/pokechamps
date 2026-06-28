@@ -72,6 +72,15 @@
     "ban": []
   },
   "moves": {
-    "ban": []
+    "ban": [],
+    "removeBySpecies": {
+      "Metagross": ["Heavy Slam", "Knock Off"],
+      "Annihilape": ["Final Gambit"],
+      "Grimmsnarl": ["Thunder Wave", "False Surrender"],
+      "Scrafty": ["Parting Shot"],
+      "Overqwil": ["Mortal Spin"],
+      "Gholdengo": ["Thunder Wave"],
+      "Pyroar": ["Earth Power"]
+    }
   }
 }
