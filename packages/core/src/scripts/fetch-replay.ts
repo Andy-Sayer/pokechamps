@@ -11,12 +11,17 @@
  * commit. Search mode skips ids already cached.
  */
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseReplayLog } from '../domain/showdownReplay.js';
 import { ingestTranscript } from '../domain/replayDriver.js';
 
-const outDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'tests', 'replays');
+// Default: the committed J-corpus dir. `--out <dir>` redirects a bulk TRAINING
+// fetch elsewhere (gitignored) so it doesn't bloat the corpus test. `--quiet`
+// skips the per-replay ingest summary (faster for big batches).
+const outArg = process.argv.indexOf('--out');
+const outDir = outArg >= 0 ? resolve(process.argv[outArg + 1]!) : join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'tests', 'replays');
+const quiet = process.argv.includes('--quiet');
 
 async function main() {
   const arg = process.argv[2];
@@ -59,7 +64,8 @@ async function fetchOne(id: string) {
   console.log(`[fetch-replay] wrote ${outFile} (${log.split('\n').length} lines)`);
 
   // Sanity: parse + ingest and summarise, so a fixture that breaks the
-  // pipeline is caught at fetch time, not in CI.
+  // pipeline is caught at fetch time, not in CI. Skipped in --quiet bulk fetches.
+  if (quiet) return;
   try {
     summarize(log);
   } catch (e) {

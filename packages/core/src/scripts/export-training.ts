@@ -3,7 +3,7 @@
 // outcome), which is what bring-selection training actually needs. The first
 // build increment of training-data-plan.md (types → EXPORTER → model+eval → wiring).
 //   npx tsx packages/core/src/scripts/export-training.ts
-import { readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseReplayLog } from '../domain/showdownReplay.js';
@@ -11,18 +11,22 @@ import { bringOutcomeRows, type BringOutcomeRow } from '../domain/trainingData.j
 import { dataDirPath } from '../domain/data.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const replayDir = join(here, '..', '..', 'tests', 'replays');
+// Committed J-corpus + the gitignored bulk training fetch (fetch-replay --out).
+const replayDirs = [join(here, '..', '..', 'tests', 'replays'), join(dataDirPath(), 'replays-train')];
 const outDir = join(dataDirPath(), 'training');
 mkdirSync(outDir, { recursive: true });
 const outPath = join(outDir, 'bring-outcomes.jsonl');
 
 const rows: BringOutcomeRow[] = [];
 let games = 0;
-for (const f of readdirSync(replayDir).filter(n => n.endsWith('.log'))) {
-  try {
-    rows.push(...bringOutcomeRows(parseReplayLog(readFileSync(join(replayDir, f), 'utf8')), f.replace('.log', '')));
-    games++;
-  } catch (e) { console.error(`  skip ${f}: ${(e as Error).message}`); }
+for (const dir of replayDirs) {
+  if (!existsSync(dir)) continue;
+  for (const f of readdirSync(dir).filter(n => n.endsWith('.log'))) {
+    try {
+      rows.push(...bringOutcomeRows(parseReplayLog(readFileSync(join(dir, f), 'utf8')), f.replace('.log', '')));
+      games++;
+    } catch (e) { console.error(`  skip ${f}: ${(e as Error).message}`); }
+  }
 }
 writeFileSync(outPath, rows.map(r => JSON.stringify(r)).join('\n') + '\n');
 
