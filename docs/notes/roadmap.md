@@ -11,6 +11,8 @@
 
 > **See also:** [`accuracy-roadmap.md`](accuracy-roadmap.md) — a focused, tiered punch-list of damage/state/inference/search fidelity gaps and the order to close them. Maintained alongside this strategic doc.
 
+> **Exploratory / longer-horizon:** [`future-directions.md`](future-directions.md) — two not-yet-scheduled ideas captured 2026-06-28: (1) historic game data → a purpose-trained model (extends the J replay-ingest pipeline + match snapshots + vision capture; opt-in, not an LLM — per the AI-direction feedback); (2) programmatic Switch control (Bluetooth/MCU input injection) to close the perceive→decide→act loop with the vision adapter. Includes the Bluetooth research.
+
 ## Context
 
 **Last updated 2026-05-29.** 594 tests across 4 workspaces, all green.
