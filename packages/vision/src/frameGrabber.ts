@@ -1,9 +1,44 @@
+import { statSync } from 'node:fs';
 import type { Frame } from './types.js';
+import { loadFrame } from './decode.js';
 
 /** Source of capture frames. The vision loop calls next() repeatedly (~2-5 fps). */
 export interface FrameGrabber {
   next(): Promise<Frame | null>;   // null = stream ended
   close?(): void | Promise<void>;
+}
+
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+/** Polls serve.ts's single continuously-overwritten PNG tap (`latest.png`) and
+ *  yields each NEW frame (dedup by mtime). It only READS the file, so it runs
+ *  alongside the serve process that owns the capture device. `next()` blocks
+ *  until a fresh, complete frame is available (torn mid-writes are retried), or
+ *  returns null once `stop()` is true. */
+export class LatestTapGrabber implements FrameGrabber {
+  private lastMtime = 0;
+  private stopped = false;
+  constructor(
+    private readonly path: string,
+    private readonly opts: { pollMs?: number; stop?: () => boolean } = {},
+  ) {}
+  async next(): Promise<Frame | null> {
+    const pollMs = this.opts.pollMs ?? 200;
+    while (!this.stopped && !this.opts.stop?.()) {
+      let mt = 0;
+      try { mt = statSync(this.path).mtimeMs; } catch { /* tap not written yet */ }
+      if (mt && mt !== this.lastMtime) {
+        try {
+          const frame = await loadFrame(this.path);
+          this.lastMtime = mt;
+          return frame;
+        } catch { /* torn mid-write — retry on the next poll */ }
+      }
+      await sleep(pollMs);
+    }
+    return null;
+  }
+  close(): void { this.stopped = true; }
 }
 
 /** Replays a fixed list of frames once — tests + dev against saved screenshots. */

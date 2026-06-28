@@ -19,7 +19,7 @@ console.log('ROW luma (y:val):\n' + rows);
 
 // Auto-detect the inset: first/last col & row whose full-line mean luma clears
 // the dark-border threshold (borders ~15-30, content ~120-190 → 70 separates).
-const T = 70;
+const T = Number(process.argv[3] ?? 70);
 let left = 0; while (left < W && colL(left) < T) left++;
 let right = W - 1; while (right > 0 && colL(right) < T) right--;
 let top = 0; while (top < H && rowL(top) < T) top++;
