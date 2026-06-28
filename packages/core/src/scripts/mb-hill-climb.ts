@@ -38,6 +38,10 @@ const META_N = argNum('--meta', 8);
 const DEPTH = argNum('--depth', 5);
 const BUDGET_SCOUT = argNum('--scout', 8000);
 const BUDGET_VERIFY = argNum('--verify', 15000);
+// bringK > 1 optimises the HONEST maximin: each matchup searches both sides'
+// top-K candidate brings instead of the scoreBrings top-1 (which inflated avg by
+// letting the opp bring naively). Cost ~K²/board — pair with smaller budgets.
+const BRING_K = argNum('--bringK', 1);
 const FROM = argStr('--from', 'anti-meta.json');
 const OUT = argStr('--out', 'anti-meta-mb.json');
 const VERIFY_TOP = 6;
@@ -56,7 +60,7 @@ interface Fit { floor: number; avg: number; flex: number; matchups: Matchup[] }
 const better = (a: Fit, b: Fit) => a.floor !== b.floor ? a.floor > b.floor : a.avg !== b.avg ? a.avg > b.avg : a.flex > b.flex;
 
 async function fullFit(team: PokemonSet[], budget: number): Promise<Fit> {
-  const ms = await pool.run(gauntlet.map(g => ({ mine: team, oppSets: g.sets, oppAnchor: g.anchor, depth: DEPTH, budgetMs: budget })));
+  const ms = await pool.run(gauntlet.map(g => ({ mine: team, oppSets: g.sets, oppAnchor: g.anchor, depth: DEPTH, budgetMs: budget, bringK: BRING_K })));
   const floor = Math.min(...ms.map(m => m.score));
   const avg = ms.reduce((s, m) => s + m.score, 0) / ms.length;
   const flex = new Set(ms.flatMap(m => m.myBring)).size;
@@ -65,7 +69,7 @@ async function fullFit(team: PokemonSet[], budget: number): Promise<Fit> {
 const fmt = (t: PokemonSet[]) => t.map(s => s.species).join(', ');
 
 const baseline: PokemonSet[] = JSON.parse(readFileSync(teamFile(FROM), 'utf8'));
-console.log(`gauntlet: ${gauntlet.length} boards · swap pool ${swapPool.length} · deepen 1→${DEPTH} · scout ${BUDGET_SCOUT / 1000}s / verify ${BUDGET_VERIFY / 1000}s`);
+console.log(`gauntlet: ${gauntlet.length} boards · swap pool ${swapPool.length} · deepen 1→${DEPTH} · scout ${BUDGET_SCOUT / 1000}s / verify ${BUDGET_VERIFY / 1000}s · bringK ${BRING_K}${BRING_K > 1 ? ' (searched maximin bring)' : ''}`);
 console.log(`from ${FROM} → out ${OUT}`);
 console.log(`baseline: ${fmt(baseline)}`);
 let best = { label: 'baseline', team: baseline, fit: await fullFit(baseline, BUDGET_VERIFY) };
@@ -93,7 +97,7 @@ for (let round = 1; round <= ROUNDS; round++) {
     }
   }
   // SCOUT: every trial vs the worst board only, one parallel batch.
-  const scoutTasks: MatchupTask[] = trials.map(t => ({ mine: t.team, oppSets: worst.sets, oppAnchor: worst.anchor, depth: DEPTH, budgetMs: BUDGET_SCOUT }));
+  const scoutTasks: MatchupTask[] = trials.map(t => ({ mine: t.team, oppSets: worst.sets, oppAnchor: worst.anchor, depth: DEPTH, budgetMs: BUDGET_SCOUT, bringK: BRING_K }));
   const scout = await pool.run(scoutTasks);
   const survivors = trials
     .map((t, i) => ({ ...t, w: scout[i]!.score }))
