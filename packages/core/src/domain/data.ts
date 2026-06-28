@@ -43,6 +43,13 @@ export function dataDirPath(): string {
   return dataDir;
 }
 
+/** The Pikalytics format slug for the active Champions regulation set. Single
+ *  source of truth: keys data/pikalytics.<slug>.json and every /ai/pokedex
+ *  fetch (refresh-pikalytics, the on-the-fly fetcher, metaTeams). Update this
+ *  one constant on a regulation switch — see docs/notes/regulation-m-b.md.
+ *  (The server's cache.ts holds its own copy across the package boundary.) */
+export const CHAMPIONS_PIKA_FORMAT = 'gen9championsvgc2026regmb';
+
 function loadJsonIfExists<T>(filename: string): Record<string, T> | null {
   const p = join(dataDir, filename);
   if (!existsSync(p)) return null;

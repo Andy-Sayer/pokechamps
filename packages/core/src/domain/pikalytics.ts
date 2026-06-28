@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { PikalyticsFile, PikalyticsEntry } from '../scripts/refresh-pikalytics.js';
-import { loadFormat, toId } from './data.js';
+import { loadFormat, toId, CHAMPIONS_PIKA_FORMAT } from './data.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDir = join(__dirname, '..', '..', '..', '..', 'data');
@@ -11,10 +11,9 @@ let cache: { format: string; data: PikalyticsFile | null } | null = null;
 
 function load(): PikalyticsFile | null {
   const fmt = loadFormat();
-  // The Pikalytics file is keyed by format slug. Today only Reg M-A's slug is
-  // known; if the active format changes, refresh-pikalytics needs an updated
-  // FORMAT constant.
-  const slug = 'gen9championsvgc2026regma';
+  // The Pikalytics file is keyed by format slug, sourced from the single
+  // CHAMPIONS_PIKA_FORMAT constant (update it on a regulation switch).
+  const slug = CHAMPIONS_PIKA_FORMAT;
   void fmt;
   if (cache && cache.format === slug) return cache.data;
   const path = join(dataDir, `pikalytics.${slug}.json`);
@@ -79,9 +78,9 @@ export function mergeEntry(speciesName: string, entry: PikalyticsEntry): void {
   } else {
     // No cache file yet — seed an in-memory one so subsequent gets work.
     cache = {
-      format: 'gen9championsvgc2026regma',
+      format: CHAMPIONS_PIKA_FORMAT,
       data: {
-        format: 'gen9championsvgc2026regma',
+        format: CHAMPIONS_PIKA_FORMAT,
         fetchedAt: new Date().toISOString().slice(0, 10),
         topPokemon: [],
         pokemon: { [speciesName]: entry },

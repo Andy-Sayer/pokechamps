@@ -1,18 +1,25 @@
-// Adapt the validated baseline to Reg M-B by ENGINE hill-climb (no LLM judgement)
-// against the M-A meta gauntlet + the hand-built M-B threat teams. Optimises the
-// FULL-gauntlet floor, so a swap is adopted only if it raises the worst matchup
-// WITHOUT opening a worse one — which is exactly what manual single-swaps failed
-// to guarantee (they traded Metagross for Mawile/Tyranitar).
+// Adapt a team to Reg M-B by ENGINE hill-climb (no LLM judgement) against the
+// REAL M-B meta gauntlet (reconstructed from the regmb Pikalytics dump) + the
+// hand-built threat teams kept as off-meta spice. Optimises the FULL-gauntlet
+// floor, so a swap is adopted only if it raises the worst matchup WITHOUT
+// opening a worse one — which is exactly what manual single-swaps failed to
+// guarantee (they traded Metagross for Mawile/Tyranitar).
 //
 //   NODE_OPTIONS=--max-old-space-size=8192 \
-//     npx tsx packages/core/src/scripts/mb-hill-climb.ts [--save] [--rounds N] [--pool N]
+//     npx tsx packages/core/src/scripts/mb-hill-climb.ts [--save] [--from team.json]
+//       [--out name.json] [--rounds N] [--pool N] [--scout ms] [--verify ms]
+//
+// --from selects the starting team (default anti-meta.json); --out the save
+// target (default anti-meta-mb.json). On --save the result overwrites --out
+// ONLY if it beats whatever is already there, so running from several starts in
+// sequence keeps the best and never regresses the saved team.
 //
 // Two-stage per round (mirrors optimize-spreads' parallel batching):
 //   1. SCOUT every (slot × candidate) swap against ONLY the current worst board
 //      in one parallel batch — cheap, prunes to swaps that actually fix it.
 //   2. VERIFY the top survivors on the FULL gauntlet; adopt the best that beats
 //      the incumbent's (floor, avg, flex).
-import { writeFileSync, readFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDirPath, toId, getItem } from '../domain/data.js';
 import { loadPikaData, metaTeams, buildSet, baseSpeciesFor } from '../domain/metaTeams.js';
@@ -23,6 +30,7 @@ import type { PokemonSet } from '../domain/types.js';
 import { MB_THREATS } from './mbThreats.js';
 
 const argNum = (f: string, d: number) => { const i = process.argv.indexOf(f); return i >= 0 ? Number(process.argv[i + 1]) : d; };
+const argStr = (f: string, d: string) => { const i = process.argv.indexOf(f); return i >= 0 ? String(process.argv[i + 1]) : d; };
 const SAVE = process.argv.includes('--save');
 const ROUNDS = argNum('--rounds', 2);
 const POOL_N = argNum('--pool', 16);
@@ -30,12 +38,15 @@ const META_N = argNum('--meta', 8);
 const DEPTH = argNum('--depth', 5);
 const BUDGET_SCOUT = argNum('--scout', 8000);
 const BUDGET_VERIFY = argNum('--verify', 15000);
+const FROM = argStr('--from', 'anti-meta.json');
+const OUT = argStr('--out', 'anti-meta-mb.json');
 const VERIFY_TOP = 6;
+const teamFile = (name: string) => (name.includes('/') || name.includes('\\') ? name : join(dataDirPath(), 'my-teams', name));
 
 const pika = loadPikaData();
 const gauntlet = [
-  ...metaTeams(pika, META_N, 3).map(m => ({ anchor: `[M-A] ${m.anchor}`, sets: m.sets })),
-  ...MB_THREATS.map(m => ({ anchor: `[M-B] ${m.anchor}`, sets: m.sets })),
+  ...metaTeams(pika, META_N, 3).map(m => ({ anchor: `[meta] ${m.anchor}`, sets: m.sets })),
+  ...MB_THREATS.map(m => ({ anchor: `[hand] ${m.anchor}`, sets: m.sets })),
 ];
 const swapPool = pika.topPokemon.slice(0, POOL_N);
 const pool = new MatchupPool();
@@ -53,8 +64,9 @@ async function fullFit(team: PokemonSet[], budget: number): Promise<Fit> {
 }
 const fmt = (t: PokemonSet[]) => t.map(s => s.species).join(', ');
 
-const baseline: PokemonSet[] = JSON.parse(readFileSync(join(dataDirPath(), 'my-teams', 'anti-meta.json'), 'utf8'));
+const baseline: PokemonSet[] = JSON.parse(readFileSync(teamFile(FROM), 'utf8'));
 console.log(`gauntlet: ${gauntlet.length} boards · swap pool ${swapPool.length} · deepen 1→${DEPTH} · scout ${BUDGET_SCOUT / 1000}s / verify ${BUDGET_VERIFY / 1000}s`);
+console.log(`from ${FROM} → out ${OUT}`);
 console.log(`baseline: ${fmt(baseline)}`);
 let best = { label: 'baseline', team: baseline, fit: await fullFit(baseline, BUDGET_VERIFY) };
 console.log(`  floor ${Math.round(best.fit.floor)} avg ${Math.round(best.fit.avg)} flex ${best.fit.flex}\n`);
@@ -112,11 +124,23 @@ console.log(`floor ${Math.round(best.fit.floor)} · avg ${Math.round(best.fit.av
 const combos = detectTactics(best.team.map(profileFromSet)).slice(0, 4);
 if (combos.length) console.log('combos: ' + combos.map(t => `${t.name} (${tacticLabel(t)})`).join(' · '));
 
-if (SAVE && best.label !== 'baseline') {
-  const file = join(dataDirPath(), 'my-teams', 'anti-meta-mb.json');
-  writeFileSync(file, JSON.stringify(best.team, null, 2));
-  console.log(`\nsaved ${file}`);
-} else if (best.label === 'baseline') {
-  console.log('\nno swap beat the baseline — nothing saved.');
+if (SAVE) {
+  const outPath = teamFile(OUT);
+  // Never regress the saved team: if --out already holds a team (and it isn't
+  // the one we started from), only overwrite when we genuinely beat it. This is
+  // what makes "run from several --from starts in sequence, keep the best" work.
+  let okToSave = best.label !== 'baseline';
+  if (existsSync(outPath) && teamFile(FROM) !== outPath) {
+    const existing: PokemonSet[] = JSON.parse(readFileSync(outPath, 'utf8'));
+    const existingFit = await fullFit(existing, BUDGET_VERIFY);
+    okToSave = better(best.fit, existingFit);
+    console.log(`\nexisting ${OUT}: floor ${Math.round(existingFit.floor)} avg ${Math.round(existingFit.avg)} → ${okToSave ? 'OVERWRITE' : 'KEEP existing'}`);
+  }
+  if (okToSave) {
+    writeFileSync(outPath, JSON.stringify(best.team, null, 2));
+    console.log(`saved ${outPath}`);
+  } else if (best.label === 'baseline') {
+    console.log('\nno swap beat the baseline — nothing saved.');
+  }
 }
 pool.close();

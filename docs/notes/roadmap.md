@@ -678,5 +678,16 @@ Next:
 - Reg M-B switch on 2026-06-17 — runbook in regulation-m-b.md. Raichunite X/Y
   pre-staged into items.allow 2026-06-16; both Mega Raichu cores (Y No Guard
   nukes, X Electric Surge terrain) verified through the existing detectors by
-  tests/regulation-m-b.test.ts. Remaining switch-day work is the species roster
-  + Pikalytics format id once the official list drops.
+  tests/regulation-m-b.test.ts.
+- **Reg M-B meta analysis + team re-tune ✅ 2026-06-28.** Pikalytics now has
+  real `regmb` usage, so the format slug was repointed (single
+  `CHAMPIONS_PIKA_FORMAT` constant) and `refresh-pikalytics.ts` hardened for the
+  M-B /ai schema (usage `N/A`/win-rate-ranked, `undefined%` teammates, blank
+  nature → inferred from spread shape). `mb-meta-report.ts` is the offline,
+  engine-driven meta read (no LLM judgement): rain + Whimsicott Tailwind + Trick
+  Room dominate, and **no new battle-mechanic gaps** — every mechanic the field
+  uses is already modelled. The optimization gauntlet (`mb-team-check.ts` /
+  `mb-hill-climb.ts`) now reconstructs the REAL meta (`[meta]` boards) + keeps
+  the hand-built threats (`[hand]`); the team is being re-tuned against it from
+  both the current M-B team and the M-A baseline, keeping the better (no
+  regression). See `regulation-m-b.md` STATUS 2026-06-28 + [[project_mb_team]].

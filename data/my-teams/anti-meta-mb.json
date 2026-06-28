@@ -1,17 +1,17 @@
 [
   {
-    "species": "Pelipper",
+    "species": "Sinistcha",
     "level": 50,
-    "nature": "Timid",
-    "ability": "Drizzle",
-    "item": "Damp Rock",
+    "nature": "Calm",
+    "ability": "Hospitality",
+    "item": "Kasib Berry",
     "evs": {
       "hp": 252,
       "atk": 0,
-      "def": 0,
-      "spa": 124,
-      "spd": 0,
-      "spe": 132
+      "def": 108,
+      "spa": 0,
+      "spd": 156,
+      "spe": 0
     },
     "ivs": {
       "hp": 31,
@@ -22,9 +22,9 @@
       "spe": 31
     },
     "moves": [
-      "Hurricane",
-      "Weather Ball",
-      "Tailwind",
+      "Rage Powder",
+      "Matcha Gotcha",
+      "Trick Room",
       "Protect"
     ]
   },
@@ -116,18 +116,18 @@
     ]
   },
   {
-    "species": "Talonflame",
+    "species": "Kingambit",
     "level": 50,
-    "nature": "Jolly",
-    "ability": "Gale Wings",
-    "item": "",
+    "nature": "Adamant",
+    "ability": "Defiant",
+    "item": "Black Glasses",
     "evs": {
-      "hp": 12,
+      "hp": 252,
       "atk": 252,
       "def": 0,
       "spa": 0,
-      "spd": 0,
-      "spe": 252
+      "spd": 12,
+      "spe": 0
     },
     "ivs": {
       "hp": 31,
@@ -138,10 +138,10 @@
       "spe": 31
     },
     "moves": [
-      "Acrobatics",
-      "Tailwind",
-      "Flare Blitz",
-      "Protect"
+      "Iron Head",
+      "Protect",
+      "Kowtow Cleave",
+      "Sucker Punch"
     ]
   },
   {

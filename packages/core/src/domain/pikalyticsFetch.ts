@@ -10,11 +10,12 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEntry, type PikalyticsEntry, type PikalyticsFile } from '../scripts/refresh-pikalytics.js';
 import { mergeEntry } from './pikalytics.js';
+import { CHAMPIONS_PIKA_FORMAT } from './data.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDir = join(__dirname, '..', '..', '..', '..', 'data');
 const BASE = 'https://www.pikalytics.com/ai/pokedex';
-const FORMAT = 'gen9championsvgc2026regma';
+const FORMAT = CHAMPIONS_PIKA_FORMAT;
 
 // Dedup concurrent fetches for the same species. Also remembers failures so
 // we don't hammer the endpoint repeatedly within one session.

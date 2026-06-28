@@ -4,11 +4,12 @@
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CHAMPIONS_PIKA_FORMAT } from '../domain/data.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDir = join(__dirname, '..', '..', '..', '..', 'data');
 
-const FORMAT = 'gen9championsvgc2026regma';
+const FORMAT = CHAMPIONS_PIKA_FORMAT;
 const TOP_N = 60;
 const BASE = 'https://www.pikalytics.com/ai/pokedex';
 const REQUEST_DELAY_MS = 200; // be polite to pikalytics across the per-species fetches
@@ -23,6 +24,11 @@ interface FeaturedSet { player: string; record: string; item?: string; ability?:
 export interface PikalyticsEntry {
   rank: number;
   usage: number;
+  // Reg M-B's /ai index reports usage as "N/A" and ranks by raw game volume,
+  // exposing win rate + W-L-T record instead. These carry that signal so the
+  // meta report has a quantitative metric when `usage` is 0.
+  winRate?: number;
+  record?: string;
   baseStats?: BaseStats;
   moves: PercentRow[];
   abilities: PercentRow[];
@@ -45,30 +51,46 @@ async function fetchText(url: string): Promise<string> {
   return await res.text();
 }
 
-// Parse the format index. We only need the top-N species names.
-function parseTopN(md: string, n: number): string[] {
-  const out: string[] = [];
-  // Rows look like: "| 1 | **Sneasler** | 43.80% | [View](...) | [AI](...) |"
-  const re = /^\|\s*(\d+)\s*\|\s*\*\*([^*]+)\*\*\s*\|\s*([\d.]+)%/gm;
+interface IndexRow { rank: number; name: string; usage: number; winRate?: number; record?: string }
+
+// Parse the format index's usage table. Reg M-A rows are
+// "| 1 | **Sneasler** | 43.80% | [View](...) | [AI](...) |" (usage %), while
+// Reg M-B reports "| 1 | **Garchomp** | N/A% | 52.366% | 15196-13822-15 | ... |"
+// — usage is "N/A", the table is ranked by raw game volume, and win rate +
+// W-L-T record follow. Tolerate both: usage falls back to 0 on "N/A"; win
+// rate / record are captured when the extra columns are present.
+export function parseIndexRows(md: string, n: number): IndexRow[] {
+  const out: IndexRow[] = [];
+  const re = /^\|\s*(\d+)\s*\|\s*\*\*([^*]+)\*\*\s*\|\s*([\d.]+|N\/A)%\s*(?:\|\s*([\d.]+)%\s*\|\s*([\d-]+))?/gm;
   let m: RegExpExecArray | null;
   while ((m = re.exec(md)) !== null) {
     const rank = parseInt(m[1]!, 10);
     if (rank > n) break;
-    out.push(m[2]!.trim());
+    out.push({
+      rank,
+      name: m[2]!.trim(),
+      usage: m[3] === 'N/A' ? 0 : parseFloat(m[3]!),
+      winRate: m[4] ? parseFloat(m[4]) : undefined,
+      record: m[5]?.trim(),
+    });
     if (out.length >= n) break;
   }
   return out;
 }
 
-// "- **Name**: 99.540%" lines under a "## Common <Section>" header.
+// "- **Name**: 99.540%" lines under a "## Common <Section>" header. Reg M-B's
+// Common Teammates section renders "- **Whimsicott**: undefined%" (the names
+// are correct and correlation-ordered, only the percentage is absent), so a
+// non-numeric percentage is tolerated as 0 — keeping the name is what matters
+// for teammate-correlation team composition.
 function parsePercentSection(md: string, header: string): PercentRow[] {
   const sec = sectionBody(md, `## ${header}`);
   if (!sec) return [];
   const out: PercentRow[] = [];
-  const re = /^-\s+\*\*([^*]+)\*\*:\s+([\d.]+)%/gm;
+  const re = /^-\s+\*\*([^*]+)\*\*:\s+([\d.]+|undefined)%/gm;
   let m: RegExpExecArray | null;
   while ((m = re.exec(sec)) !== null) {
-    out.push({ name: m[1]!.trim(), pct: parseFloat(m[2]!) });
+    out.push({ name: m[1]!.trim(), pct: m[2] === 'undefined' ? 0 : parseFloat(m[2]!) });
   }
   return out;
 }
@@ -98,13 +120,37 @@ function parseBaseStats(md: string): BaseStats | undefined {
 }
 
 // FAQ phrasing: "Jolly nature with an EV spread of `2/32/0/0/0/32`. This
-// configuration accounts for 22.880% of competitive builds."
+// configuration accounts for 22.880% of competitive builds." Reg M-B leaves the
+// nature BLANK ("a **** nature with an EV spread of ..."), so the nature group
+// is optional and inferred from the spread shape when absent — a neutral
+// fallback would understate offensive sets and make the gauntlet artificially
+// weak (the wrong direction for an anti-meta stress test).
 function parseTopSpread(md: string): Spread | undefined {
-  const re = /\*\*([A-Za-z]+)\*\*\s+nature\s+with\s+an\s+EV\s+spread\s+of\s+`(\d+\/\d+\/\d+\/\d+\/\d+\/\d+)`[^%]*?([\d.]+)%/;
+  const re = /\*\*([A-Za-z]*)\*\*\s+nature\s+with\s+an\s+EV\s+spread\s+of\s+`(\d+\/\d+\/\d+\/\d+\/\d+\/\d+)`[^%]*?([\d.]+)%/;
   const m = md.match(re);
   if (!m) return undefined;
-  const parts = m[2]!.split('/').map(s => parseInt(s, 10)) as [number, number, number, number, number, number];
-  return { nature: m[1]!, sp: parts, pct: parseFloat(m[3]!) };
+  const sp = m[2]!.split('/').map(s => parseInt(s, 10)) as [number, number, number, number, number, number];
+  const nature = m[1]! || inferNatureFromSp(sp);
+  return { nature, sp, pct: parseFloat(m[3]!) };
+}
+
+// Reg M-B's /ai export omits the nature label, so derive a sensible one purely
+// from the EV-spread SHAPE (deterministic, no meta judgement): a speed-invested
+// offensive build gets the +Spe nature cutting its unused attacking stat
+// (Jolly / Timid); a no-speed offensive build the +offence nature (Adamant /
+// Modest); a defensive build a +bulk nature cutting the unused attacking stat
+// (Bold / Impish / Calm / Careful). SP units are 0–32. Imperfect at the
+// Jolly-vs-Adamant margin, but far better than a neutral fallback.
+export function inferNatureFromSp(sp: number[]): string {
+  const [, atk = 0, def = 0, spa = 0, spd = 0, spe = 0] = sp;
+  const INVEST = 8; // ≈60 EV — the floor for "built for this stat"
+  const physical = atk >= spa; // tie → treat as physical
+  const maxOff = Math.max(atk, spa);
+  if (maxOff >= INVEST && spe >= INVEST) return physical ? 'Jolly' : 'Timid';
+  if (maxOff >= INVEST) return physical ? 'Adamant' : 'Modest';
+  // Bulky / no real offence: boost the bigger defence, cut the smaller attack.
+  const cutAtk = atk <= spa;
+  return def >= spd ? (cutAtk ? 'Bold' : 'Impish') : (cutAtk ? 'Calm' : 'Careful');
 }
 
 function parseFeaturedSets(md: string, species: string): FeaturedSet[] {
@@ -144,28 +190,22 @@ export function parseEntry(md: string, species: string): Omit<PikalyticsEntry, '
 async function main() {
   console.log(`[refresh-pikalytics] Fetching format index for ${FORMAT}...`);
   const indexMd = await fetchText(`${BASE}/${FORMAT}`);
-  const top = parseTopN(indexMd, TOP_N);
-  if (!top.length) throw new Error('Could not parse top-N species from format index — markup may have changed.');
+  const rows = parseIndexRows(indexMd, TOP_N);
+  if (!rows.length) throw new Error('Could not parse top-N species from format index — markup may have changed.');
+  const top = rows.map(r => r.name);
   console.log(`[refresh-pikalytics] Top ${top.length}: ${top.join(', ')}`);
 
-  // Rebuild the usage percentages from the index in the same single pass.
-  const usageByRank = new Map<string, { rank: number; usage: number }>();
-  const re = /^\|\s*(\d+)\s*\|\s*\*\*([^*]+)\*\*\s*\|\s*([\d.]+)%/gm;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(indexMd)) !== null) {
-    const rank = parseInt(m[1]!, 10);
-    if (rank > TOP_N) break;
-    usageByRank.set(m[2]!.trim(), { rank, usage: parseFloat(m[3]!) });
-  }
-
   const pokemon: Record<string, PikalyticsEntry> = {};
-  for (const species of top) {
-    const url = `${BASE}/${FORMAT}/${encodeURIComponent(species)}`;
-    const meta = usageByRank.get(species) ?? { rank: 0, usage: 0 };
-    console.log(`  - ${species} (rank ${meta.rank}, ${meta.usage}%)`);
+  for (const row of rows) {
+    const url = `${BASE}/${FORMAT}/${encodeURIComponent(row.name)}`;
+    const metric = row.usage > 0 ? `${row.usage}% usage` : row.winRate != null ? `${row.winRate}% WR` : 'no metric';
+    console.log(`  - ${row.name} (rank ${row.rank}, ${metric})`);
     try {
       const md = await fetchText(url);
-      pokemon[species] = { rank: meta.rank, usage: meta.usage, ...parseEntry(md, species) };
+      pokemon[row.name] = {
+        rank: row.rank, usage: row.usage, winRate: row.winRate, record: row.record,
+        ...parseEntry(md, row.name),
+      };
     } catch (e) {
       console.warn(`    skipped: ${(e as Error).message}`);
     }

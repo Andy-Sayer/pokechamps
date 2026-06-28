@@ -8,10 +8,10 @@
 import type Database from 'better-sqlite3';
 import { parseEntry, type PikalyticsEntry } from '@pokechamps/core/scripts/refresh-pikalytics.js';
 
-// The format slug Pikalytics uses for the Reg M-A endpoint. Mirrors the
-// constant in @pokechamps/core/scripts/refresh-pikalytics.ts. When the format
-// rolls, both constants need to update.
-export const PIKALYTICS_FORMAT = 'gen9championsvgc2026regma';
+// The format slug Pikalytics uses for the active Champions endpoint. Mirrors
+// CHAMPIONS_PIKA_FORMAT in @pokechamps/core (domain/data.ts) across the package
+// boundary. When the regulation rolls, both need to update.
+export const PIKALYTICS_FORMAT = 'gen9championsvgc2026regmb';
 const BASE = 'https://www.pikalytics.com/ai/pokedex';
 
 interface CachedRow {

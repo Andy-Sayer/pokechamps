@@ -5,7 +5,7 @@
 // (suggestions) and anti-meta-team.ts (battle-simulated counter-teaming).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { getSpecies, getItem, toId, dataDirPath, loadFormat, isLegalSpecies } from './data.js';
+import { getSpecies, getItem, toId, dataDirPath, loadFormat, isLegalSpecies, CHAMPIONS_PIKA_FORMAT } from './data.js';
 import { evFromSp } from './pikalytics.js';
 import type { PokemonSet } from './types.js';
 import { MAX_IVS } from './types.js';
@@ -21,9 +21,10 @@ export interface PikaMon {
 }
 export interface PikaData { topPokemon: string[]; pokemon: Record<string, PikaMon> }
 
-/** Format id matches data/pikalytics.<format>.json — update on regulation
- *  change (see docs/notes/regulation-m-b.md runbook). */
-export const PIKA_FORMAT = 'gen9championsvgc2026regma';
+/** Format id matches data/pikalytics.<format>.json — sourced from the single
+ *  constant in data.ts (update there on a regulation change; see the
+ *  docs/notes/regulation-m-b.md runbook). Re-exported for existing callers. */
+export const PIKA_FORMAT = CHAMPIONS_PIKA_FORMAT;
 
 export function loadPikaData(): PikaData {
   return JSON.parse(readFileSync(join(dataDirPath(), `pikalytics.${PIKA_FORMAT}.json`), 'utf8')) as PikaData;

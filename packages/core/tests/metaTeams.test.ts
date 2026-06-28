@@ -26,11 +26,21 @@ describe('metaTeams', () => {
   });
 
   test('mega formes resolve to base species + stone', () => {
+    // The dex helper maps a mega forme name back to its base species.
     expect(baseSpeciesFor('Charizard-Mega-Y')).toBe('Charizard');
-    const used = new Set<string>();
-    const s = buildSet(pika, 'Charizard-Mega-Y', used)!;
-    expect(s.species).toBe('Charizard');
-    expect((getItem(s.item!) as { megaStone?: unknown }).megaStone).toBeTruthy();
+    // Reg M-B keys megas by BASE species in the usage table (e.g. "Charizard"
+    // whose top item is Charizardite Y); Reg M-A keyed them by forme name
+    // ("Charizard-Mega-Y"). buildSet handles both via baseSpeciesFor — find the
+    // first top mon that builds into a mega and assert it resolves to base +
+    // stone, independent of which keying the data uses.
+    let mega = null as ReturnType<typeof buildSet>;
+    let name = '';
+    for (const n of pika.topPokemon) {
+      const s = buildSet(pika, n, new Set());
+      if (s && (getItem(s.item ?? '') as { megaStone?: unknown }).megaStone) { mega = s; name = n; break; }
+    }
+    expect(mega).toBeTruthy();
+    expect(mega!.species).toBe(baseSpeciesFor(name));
   });
 
   test('composeTeam: 6 mons, unique species, unique items, ≤1 mega stone', () => {

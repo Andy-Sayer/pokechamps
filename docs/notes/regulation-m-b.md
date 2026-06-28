@@ -5,6 +5,39 @@ Researched 2026-06-12. Reg M-A ends **June 17, 2026**; Regulation Set M-B runs
 published yet — it drops with the update on the 17th. This note holds the
 confirmed facts and the exact steps to flip the app over on day one.
 
+## STATUS 2026-06-28: real meta data INGESTED + team re-tune underway
+
+Pikalytics now publishes `gen9championsvgc2026regmb` (built from ~2 weeks of
+post-launch Reg M-B tournaments), so the "no usage data yet" constraint is over.
+Done this pass:
+- **Format slug repointed `regma → regmb`** via a single source of truth
+  (`CHAMPIONS_PIKA_FORMAT` in `domain/data.ts`; the server keeps its own copy
+  across the package boundary). Runbook step 4 ✅.
+- **Parser hardened for the M-B /ai schema** (`refresh-pikalytics.ts`): the M-B
+  export reports usage as `N/A` (ranks by raw game volume, exposing **win rate**
+  + W-L-T record instead), renders Common Teammates as `undefined%` (names
+  intact), and leaves the FAQ **nature blank**. The parser now tolerates all
+  three and **infers the nature from the EV-spread shape** (`inferNatureFromSp`)
+  — a neutral fallback would make the gauntlet artificially weak. `winRate`/
+  `record` added to `PikalyticsEntry`. Covered by `tests/pikalytics-parse.test.ts`.
+- **Freshness verified**: the `/ai` header's `Data Date: 2026-05` is a
+  mislabeled template field; the dump is genuinely current (M-B-only species
+  present: Swampert-Mega, Staraptor-Mega, Grimmsnarl, Gholdengo, Floette-Eternal;
+  Recent Top Teams are all Reg M-B events). `mb-meta-report.ts` prints this.
+- **Real meta** (rank by usage volume): Garchomp, Sinistcha, Basculegion,
+  Whimsicott, Kingambit, Staraptor, Incineroar, Charizard-Y, Raichu-Y, Pelipper,
+  Sneasler, Archaludon, Grimmsnarl… Dominant structure is **rain**
+  (Archaludon+Pelipper+Swampert-Mega) + **Whimsicott Tailwind/Prankster** +
+  **Trick Room** (Sinistcha/Farigiraf). **No new mechanic-port gaps** — every
+  mechanic the field leans on (Prankster, Fake Out incl. Raichu-Y, Tailwind,
+  Trick Room, Choice lock incl. Basculegion Scarf, Unburden+White Herb, and
+  resist berries — 8 of top 25) is already modelled. Terrain setters and
+  Protosynthesis/Quark Drive are absent from the top 25 (stay low-value).
+- **Gauntlet rebuilt** from the real meta (`mb-team-check.ts` / `mb-hill-climb.ts`
+  label real-usage boards `[meta]` and keep the hand-built threats as `[hand]`
+  spice). `mb-hill-climb.ts` gained `--from`/`--out` + a no-regression save guard
+  so a team can be tuned from several starts, keeping the best.
+
 ## STATUS 2026-06-16: format STAGED
 
 The Serebii M-B additions list is live, so the format is pre-staged off it:
@@ -79,10 +112,14 @@ Grimmsnarl, Falinks, Overqwil, Houndstone, Annihilape, Gholdengo.
      introduces.
    - Check for removals — rotations can drop species/items too.
 3. `npm run validate-format` — every id must resolve.
-4. Pikalytics: the format id moves from `gen9championsvgc2026regma` to (likely)
-   `gen9championsvgc2026regmb` — update the fetch id in the pikalytics store
-   and refresh `data/pikalytics.*.json`; meta-priors (usage, common spreads)
-   reset with the new meta.
+4. Pikalytics ✅ DONE 2026-06-28: the format id is now `gen9championsvgc2026regmb`,
+   sourced from the single `CHAMPIONS_PIKA_FORMAT` constant in `domain/data.ts`
+   (the server's `pikalytics/cache.ts` mirrors it). `npm run refresh-pikalytics`
+   wrote `data/pikalytics.gen9championsvgc2026regmb.json`. NOTE the M-B /ai
+   export degrades vs M-A (usage `N/A` → win-rate-ranked, teammates `undefined%`,
+   blank nature) — `refresh-pikalytics.ts` was hardened to tolerate all three +
+   infer nature from the spread shape. Re-verify the parser if the export layout
+   changes again.
 5. `npx tsx packages/core/src/scripts/tactics-catalog.ts` — regenerate the
    combo catalog over the new legal lists (new Raichu cores will appear).
 6. `npx tsx packages/core/src/scripts/smoketest.ts` + `npm test`.

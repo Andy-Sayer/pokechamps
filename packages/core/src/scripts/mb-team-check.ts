@@ -1,14 +1,14 @@
-// Reg M-B team stress-test. There is NO M-B usage data yet, so the gauntlet is
-// the M-A Pikalytics meta (most of it carries forward) PLUS a hand-built set of
-// M-B threat teams built around the strong, calc-correct new megas/species
-// (Mega Mawile / Metagross / Swampert / Raichu-X + Gholdengo / Annihilape).
-// These threat teams are a BEST-GUESS meta, not real usage — they exist to
-// surface M-B-specific holes, not to optimise against a known field.
+// Reg M-B team stress-test. The gauntlet is the REAL M-B Pikalytics meta
+// (reconstructed from data/pikalytics.gen9championsvgc2026regmb.json via
+// metaTeams — top-usage anchors filled by their teammate correlations) PLUS the
+// hand-built M-B threat teams kept as off-meta spice (strong calc-correct
+// megas: Mawile / Metagross / Swampert-rain / Raichu-X / Blaziken).
 //
 //   npx tsx packages/core/src/scripts/mb-team-check.ts [team.json] [--depth N] [--meta N]
 //
 // Reports each matchup's maximin score (under mutual best play; + favors us),
-// the floor + average over the M-A gauntlet and over the M-B threats separately.
+// the floor + average over the real meta gauntlet and over the hand threats
+// separately. Labels: [meta] = real-usage teams, [hand] = hand-built threats.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDirPath } from '../domain/data.js';
@@ -31,14 +31,14 @@ const teamPath = teamArg ? (teamArg.includes('/') || teamArg.includes('\\') ? te
 
 const team: PokemonSet[] = JSON.parse(readFileSync(teamPath, 'utf8'));
 const pika = loadPikaData();
-const metaA = metaTeams(pika, META_N, 3);
+const meta = metaTeams(pika, META_N, 3);
 const gauntlet = [
-  ...metaA.map(m => ({ anchor: `[M-A] ${m.anchor}`, sets: m.sets })),
-  ...MB_THREATS.map(m => ({ anchor: `[M-B] ${m.anchor}`, sets: m.sets })),
+  ...meta.map(m => ({ anchor: `[meta] ${m.anchor}`, sets: m.sets })),
+  ...MB_THREATS.map(m => ({ anchor: `[hand] ${m.anchor}`, sets: m.sets })),
 ];
 
 console.log(`team: ${teamPath.split(/[\\/]/).pop()} — ${team.map(s => s.species).join(', ')}`);
-console.log(`gauntlet: ${metaA.length} M-A meta teams + ${MB_THREATS.length} M-B threat teams · deepen 1→${DEPTH}${BUDGET ? ` · ${BUDGET / 1000}s/board` : ' (fixed)'}\n`);
+console.log(`gauntlet: ${meta.length} real M-B meta teams + ${MB_THREATS.length} hand threats · deepen 1→${DEPTH}${BUDGET ? ` · ${BUDGET / 1000}s/board` : ' (fixed)'}\n`);
 
 const pool = new MatchupPool();
 const results = await pool.run(gauntlet.map(g => ({ mine: team, oppSets: g.sets, oppAnchor: g.anchor, depth: DEPTH, budgetMs: BUDGET || undefined })));
@@ -50,9 +50,9 @@ for (const r of rows) {
   console.log(`  ${r.anchor.padEnd(28)} ${String(Math.round(r.score)).padStart(6)}  ${r.verdict.padEnd(7)}  bring: ${r.bring.join(', ')}`);
 }
 const stat = (xs: number[]) => ({ floor: Math.min(...xs), avg: Math.round(xs.reduce((s, x) => s + x, 0) / xs.length) });
-const mbScores = rows.filter(r => r.anchor.startsWith('[M-B]')).map(r => r.score);
-const maScores = rows.filter(r => r.anchor.startsWith('[M-A]')).map(r => r.score);
+const handScores = rows.filter(r => r.anchor.startsWith('[hand]')).map(r => r.score);
+const metaScores = rows.filter(r => r.anchor.startsWith('[meta]')).map(r => r.score);
 const all = stat(rows.map(r => r.score));
-console.log(`\nM-A  floor ${Math.round(stat(maScores).floor)}  avg ${stat(maScores).avg}`);
-console.log(`M-B  floor ${Math.round(stat(mbScores).floor)}  avg ${stat(mbScores).avg}`);
-console.log(`ALL  floor ${Math.round(all.floor)}  avg ${all.avg}`);
+console.log(`\nMETA  floor ${Math.round(stat(metaScores).floor)}  avg ${stat(metaScores).avg}`);
+console.log(`HAND  floor ${Math.round(stat(handScores).floor)}  avg ${stat(handScores).avg}`);
+console.log(`ALL   floor ${Math.round(all.floor)}  avg ${all.avg}`);
