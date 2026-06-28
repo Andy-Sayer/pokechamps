@@ -671,10 +671,13 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   const [pikaPreview, setPikaPreview] = useState<'run' | 'idle' | null>(
     stickyPrefs.pikaPreview === 'run' || stickyPrefs.pikaPreview === 'idle' ? stickyPrefs.pikaPreview : null,
   );
-  // `/sprites` — opt-in sixel sprites of the active opponents above the
-  // matchup grid (Theme 6). Sticky; default off. `spriteTick` re-renders when
-  // an async fetch lands. Iterate visuals via scripts/preview-sprites.ts.
-  const [showSprites, setShowSprites] = useState(!!stickyPrefs.showSprites);
+  // Opponent sprite display (Theme 6) is DISABLED: the sixel/half-block strips
+  // re-rendered on every keystroke while typing a turn, stretching/glitching the
+  // mini sprites. Hard-off here (so every `showSprites &&` render path and the
+  // fetch effect short-circuit) — see the no-op `/sprites` command below. The
+  // sprite infra (spriteCache/spriteStrip/SixelImage) is left in place so this
+  // is a one-line revert if a glitch-free render is built later.
+  const showSprites = false;
   const [, setSpriteTick] = useState(0);
   // `/export` overlay — shows the current team as a Showdown export so the
   // user can copy it without leaving the match. Esc closes.
@@ -2668,16 +2671,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       case 'summary': setSummaryOpen(s => !s); return true;
       case 'override': setOverrideOpen(true); return true;
       case 'sprites': {
-        setShowSprites(s => {
-          const next = !s;
-          savePrefs({ showSprites: next });
-          if (next) {
-            setMessage(sixelSupported()
-              ? 'Sprites on (sixel).'
-              : 'Sprites on (half-block — set POKECHAMPS_SIXEL=1 if your terminal renders real sixels).');
-          } else setMessage('Sprites off.');
-          return next;
-        });
+        // Removed — the sprite strips glitched (stretched) re-rendering on each
+        // keystroke. Kept as a no-op so the command + its help line don't error.
+        setMessage('Opponent sprites are disabled (they glitched while typing). Nothing to toggle.');
         return true;
       }
       case 'crit': setShowCrits(c => { savePrefs({ showCrits: !c }); return !c; }); return true;
