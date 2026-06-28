@@ -2,7 +2,7 @@
 // on a settled turn, emit a parser-ready TurnProposal for the TUI to confirm.
 // The deterministic primitives (readHpFraction, matchSpecies, emitTurnLog) are
 // ready; what's stubbed is the glue that needs a real Frame + OCR engine.
-import type { Frame, FrameRead, RegionMap, TurnProposal } from './types.js';
+import type { Frame, FrameRead, RegionMap, TurnProposal, Rect } from './types.js';
 import type { FrameGrabber } from './frameGrabber.js';
 import type { OcrReader } from './ocr.js';
 import { readHpFraction } from './hpBar.js';
@@ -29,6 +29,19 @@ export function cropRegion(frame: Frame, r: { x: number; y: number; w: number; h
   return { data: out, width: w, height: h };
 }
 
+/** My "cur/max" HP digits are fragile at small (GameShare-inset) scales — the
+ *  italic text garbles and the best OCR upscale VARIES per frame (one mon reads
+ *  at ×5, another only at ×4). Try a few upscales and accept the first SANE parse
+ *  (cur ≤ max, max in a plausible L50 HP range), so a per-region scale quirk can't
+ *  poison the read. Falls through to null (→ bar fallback) when none are sane. */
+export async function readAbsHpRobust(ocr: OcrReader, frame: Frame, region: Rect): Promise<{ cur: number; max: number } | null> {
+  for (const scale of [4, 5, 3]) {
+    const abs = parseAbsHp(await ocr.read(frame, region, { mode: 'digits', psm: 7, scale }));
+    if (abs && abs.cur <= abs.max && abs.max >= 1 && abs.max <= 999) return abs;
+  }
+  return null;
+}
+
 /** Read one frame into a FrameRead: HP from the nameplate NUMBER (preferred) with the
  *  bar as fallback, plus name/text OCR. The bar carries an overlaid number + a skew, so
  *  the digit read is the game's own exact value: opp shows a PERCENT (`oppHpText`), mine
@@ -46,7 +59,7 @@ export async function readFrame(frame: Frame, deps: VisionDeps): Promise<FrameRe
       const pct = parseHpNumber(await deps.ocr.read(frame, regions.oppHpText[sr.index], { mode: 'digits', psm: 8 }));
       if (pct != null) numFraction = Math.max(0, Math.min(100, pct)) / 100;
     } else if (sr.side === 'mine' && regions.myHpText) {
-      const abs = parseAbsHp(await deps.ocr.read(frame, regions.myHpText[sr.index], { mode: 'digits', psm: 7 }));
+      const abs = await readAbsHpRobust(deps.ocr, frame, regions.myHpText[sr.index]);
       if (abs) numFraction = Math.max(0, Math.min(1, abs.cur / abs.max));
     }
 
