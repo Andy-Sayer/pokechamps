@@ -77,6 +77,20 @@ are abundant; spread labels are mostly hidden.** So start where the data is:
   Improves the heuristic inverse solver in `inference.ts`. Deferred because the
   label supply is thin until we lean on sim-generated data.
 
+## Status (2026-06-28)
+
+**Started — steps 1–2 shipped.** `domain/trainingData.ts` (`BringOutcomeRow` +
+`bringOutcomeRows`) + `scripts/export-training.ts` walk the replay corpus into a
+`data/training/bring-outcomes.jsonl` dataset; `training-data.test.ts` pins it.
+Why now: the bring-weight calibration was a **proven negative result** — a linear
+re-weighting of the heuristic caps at ~28% agreement with the exhaustive bring
+and doesn't generalize, so a learned evaluator is the real path to a smart live
+bring (see [[project_mb_team]]). **Finding:** the cached corpus yields only **24
+usable rows** (full OTS 6 + bring of 4 + decided) from 17 games — pipeline-proven
+but ≪ trainable. **Next (step 3 prereq):** a batch OTS-replay fetch
+(`fetch-replay --search`, as J.5 did) → hundreds of rows → then the baseline
+model + held-out eval vs `scoreBrings`.
+
 ## The build (when picked up — incremental, each step shippable)
 
 1. **`ObservedState` + `DecisionRecord` types** (`domain/trainingData.ts`) — the
