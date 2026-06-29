@@ -33,7 +33,29 @@ const toSimMon = (s: PokemonSet): SimMon => ({
  *  Showdown choice string for the current request ('default' is always legal). */
 export type Policy = (battle: Battle, sideIdx: number) => string;
 
-export interface GameResult { winner: 'p1' | 'p2' | 'tie'; turns: number }
+export interface GameResult {
+  winner: 'p1' | 'p2' | 'tie';
+  turns: number;
+  /** 'kos' = a side was wiped out (clean last-standing win); 'timeout' = the turn
+   *  cap was hit and the winner came from the official VGC tiebreak. A timeout
+   *  win is a weaker signal than a KO win (useful when weighting training rows). */
+  resolution: 'kos' | 'timeout';
+}
+
+/** Official Play! Pokémon end-of-time tiebreak: (1) most un-fainted Pokémon, then
+ *  (2) greatest total remaining HP%, else a genuine draw. This is ALSO the aim
+ *  the policy plays toward when it can't force a clean wipe — exactly what the
+ *  endgameSearch value function maximizes (material first, then HP). */
+function officialTiebreak(roster: { p1: RM[]; p2: RM[] }): 'p1' | 'p2' | 'tie' {
+  const aliveCount = (s: RM[]) => s.filter(m => !m.fainted).length;
+  const totalHp = (s: RM[]) => s.reduce((t, m) => t + (m.fainted ? 0 : m.hpPct), 0);
+  const c1 = aliveCount(roster.p1), c2 = aliveCount(roster.p2);
+  if (c1 !== c2) return c1 > c2 ? 'p1' : 'p2';            // (1) most Pokémon remaining
+  const h1 = totalHp(roster.p1), h2 = totalHp(roster.p2);
+  if (Math.abs(h1 - h2) > 1e-6) return h1 > h2 ? 'p1' : 'p2'; // (2) greater total remaining HP%
+  return 'tie';                                          // (3) genuine draw
+}
+type RM = { fainted: boolean; hpPct: number };
 
 /** Highest-base-power move at the first living foe; first healthy bench mon for a
  *  forced switch. Always legal (reads the sim's own per-slot legal-move list). */
@@ -100,15 +122,12 @@ export async function playGame(
     if (key === stallKey) stalls++; else { stallKey = key; stalls = 0; }
   }
   // Win = LAST SIDE STANDING. When the sim ends naturally, `battle.winner` is
-  // exactly that (Showdown ends the game when a side has no mon left). If we hit
-  // the turn cap first (rare — a stall loop), resolve by who has MORE mons alive,
-  // which is the same objective ("closer to having the last mon standing"), not a
-  // damage/KO-speed race. A genuine tie only when both sides are equally alive.
+  // exactly that (Showdown ends the game when a side has no mon left) → a clean
+  // 'kos' result. If we hit the turn cap first ("time ran out"), resolve by the
+  // official VGC tiebreak (most mons, then total HP%) — a 'timeout' result.
   const w = (battle as { winner?: string }).winner;
-  if (battle.ended && (w === 'p1' || w === 'p2')) return { winner: w, turns: battle.turn };
-  if (battle.ended) return { winner: 'tie', turns: battle.turn };
+  if (battle.ended && (w === 'p1' || w === 'p2')) return { winner: w, turns: battle.turn, resolution: 'kos' };
   const roster = readRoster(battle);
-  const alive = (side: { fainted: boolean }[]) => side.filter(m => !m.fainted).length;
-  const a1 = alive(roster.p1), a2 = alive(roster.p2);
-  return { winner: a1 > a2 ? 'p1' : a2 > a1 ? 'p2' : 'tie', turns: battle.turn };
+  if (battle.ended) return { winner: officialTiebreak(roster), turns: battle.turn, resolution: 'kos' };
+  return { winner: officialTiebreak(roster), turns: battle.turn, resolution: 'timeout' };
 }
