@@ -55,14 +55,19 @@ export async function bestBringVsOpponent(
   const shortlistIn = ordered.slice(0, myBringK);
 
   // DISPOSE: each shortlisted bring vs ALL opp candidate brings → maximin win-rate.
+  // Fire every (bring × oppBring) game batch CONCURRENTLY — awaiting them in a
+  // nested loop starved the pool to `games`-wide (one batch at a time) while ~28
+  // workers idled; submitting all at once lets the pool run wide (~Kx faster).
+  // Same computation/result; only the scheduling changes.
+  const cells = await Promise.all(
+    shortlistIn.flatMap(({ bring, modelP }) =>
+      oppBrings.map(async ob => ({ bring, modelP, oppBring: ob, wr: (await bringWinRate(pool, bring, ob, games, 2, pilotP2)).winRate })),
+    ),
+  );
   const shortlist: BringRec['shortlist'] = [];
   let best: BringRec | null = null;
   for (const { bring, modelP } of shortlistIn) {
-    const perOppBring: { oppBring: PokemonSet[]; wr: number }[] = [];
-    for (const ob of oppBrings) {
-      const r = await bringWinRate(pool, bring, ob, games, 2, pilotP2);
-      perOppBring.push({ oppBring: ob, wr: r.winRate });
-    }
+    const perOppBring = cells.filter(c => c.bring === bring).map(c => ({ oppBring: c.oppBring, wr: c.wr }));
     const maximinWr = Math.min(...perOppBring.map(p => p.wr));
     shortlist.push({ bring, modelP, maximinWr });
     if (!best || maximinWr > best.maximinWr) best = { bring, maximinWr, perOppBring, oppBrings, shortlist };
