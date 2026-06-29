@@ -42,15 +42,19 @@ const t0 = Date.now();
 const lines: string[] = [`# Reg M-B prep sheets — ${sp(team)}`, '', `_Sim-grounded (${GAMES} games/matchup); bring is maximin over the opponent's likely brings._`, ''];
 
 for (const opp of gauntlet) {
+  // OUR best bring vs them (robust over their likely brings).
   const rec = await bestBringVsOpponent(pool, team, opp.sets, { myBringK: 5, oppBringK: 2, games: GAMES });
-  const thr = threats(rec.bring, rec.oppBrings[0]!);
+  // THEIR best bring vs us — the same eval with sides flipped → a PLAYOUT-VALIDATED
+  // opponent-bring prediction (stronger than the live heuristic).
+  const oppRec = await bestBringVsOpponent(pool, opp.sets, team, { myBringK: 4, oppBringK: 2, games: GAMES });
+  const thr = threats(rec.bring, oppRec.bring); // threats vs what they'll actually bring
   lines.push(`## vs ${opp.anchor}`);
-  lines.push(`- **Bring:** ${sp(rec.bring)}  — **${pct(rec.maximinWr)}** (worst-case vs their likely brings)`);
-  lines.push(`- **They likely bring:** ${rec.oppBrings.map(sp).join('  ·  ')}`);
+  lines.push(`- **Bring (you):** ${sp(rec.bring)}  — **${pct(rec.maximinWr)}** (worst-case vs their likely brings)`);
+  lines.push(`- **They'll likely bring (sim):** ${sp(oppRec.bring)}  — ${pct(oppRec.maximinWr)} for them`);
   lines.push(`- **Per opp-bring:** ${rec.perOppBring.map(p => `${pct(p.wr)} vs ${sp(p.oppBring)}`).join('  ·  ')}`);
   if (thr.length) lines.push(`- **Guaranteed-OHKO threats:** ${thr.join(';  ')}`);
   lines.push('');
-  console.log(`vs ${opp.anchor.padEnd(12)} bring ${sp(rec.bring).padEnd(40)} maximin ${pct(rec.maximinWr)}`);
+  console.log(`vs ${opp.anchor.padEnd(12)} you ${sp(rec.bring).padEnd(38)} ${pct(rec.maximinWr)}  ·  they ${sp(oppRec.bring)}`);
 }
 pool.close();
 
