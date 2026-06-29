@@ -32,7 +32,7 @@ for (const opp of opps) {
     const myBring = combo.map(i => team[i]!);
     const ci = cells.length;
     cells.push({ oppAnchor: opp.anchor, myBring, oppBring });
-    for (let k = 0; k < GAMES; k++) { tasks.push({ p1: myBring, p2: oppBring, seed: [k + 1, 2 * k + 5, 3 * k + 7, 5 * k + 11], depth: DEPTH }); taskCell.push(ci); }
+    for (let k = 0; k < GAMES; k++) { tasks.push({ p1: myBring, p2: oppBring, seed: [k + 1, 2 * k + 5, 3 * k + 7, 5 * k + 11], depth: DEPTH, pilotOpp: true }); taskCell.push(ci); }
   }
 }
 console.log(`${opps.length} opponents × ${combos.length} brings = ${cells.length} matchups · ${GAMES} games each · ${tasks.length} games total`);
