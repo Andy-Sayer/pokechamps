@@ -44,11 +44,12 @@ export function simAvailable(): boolean {
   return BattleCtor != null;
 }
 
-/** Does the loaded sim's dex know this species/forme? Champions CUSTOM megas
- *  (e.g. Dragonite-Mega) don't exist in `@pkmn/sim`, so a line that mega-evolves
- *  one can't be resolved — callers use this to skip such positions cleanly
- *  rather than feed the sim a `mega` flag it silently mishandles. Returns false
- *  when the sim isn't loaded. */
+/** Does the loaded sim's dex know this species/forme? As of @pkmn/sim 0.10.11 the
+ *  Champions mega formes (Dragonite-Mega, Eelektross-Mega, …) ARE present and
+ *  mega-evolve correctly — every Champions-legal mega is covered (pinned by
+ *  champions-sim-ready.test.ts). This is now a coverage probe for NEW/unstaged
+ *  content rather than a "skip Champions megas" guard. Returns false when the sim
+ *  isn't loaded. */
 export function simHasSpecies(name: string): boolean {
   if (!SimDex || !name) return false;
   const s = SimDex.species.get(name);

@@ -17,7 +17,7 @@ const getItem = (name: string) => dex.items.get(name);
 // (Mega Staraptor) is a STANDARD ability needing no emulation — the search already
 // inverts self-stat-drops via hasContrary (so Close Combat boosts its Def/SpD). (The
 // Raichu X/Y customs are NOT here — Electric Surge / No Guard don't affect damage.)
-const MEGA_ABILITY_OVERRIDES: Record<string, string> = {
+export const MEGA_ABILITY_OVERRIDES: Record<string, string> = {
   'Pyroar-Mega': 'Fire Mane',          // custom effect — emulated in damage.ts (×1.5 Fire)
   'Eelektross-Mega': 'Eelevate',       // custom effect — Levitate immunity + Beast Boost snowball
   // The rest are STANDARD abilities (effects handled natively by calc/search); pinned

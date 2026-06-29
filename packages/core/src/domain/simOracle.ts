@@ -140,8 +140,10 @@ export async function runExactOracle(
   // mon (megaActive): our sets stay base-forme + stone, so telling the sim to
   // mega on this turn's choice reproduces the mega stats/ability for the turn.
   // (Opp mega'd mons need no flag — their candidates carry the mega forme
-  // species directly.) Champions CUSTOM megas don't exist in the sim; the
-  // choice probe below rejects them with an honest error.
+  // species directly.) As of @pkmn/sim 0.10.11 the Champions mega formes resolve
+  // natively (the bump added the Eelevate/Fire Mane abilities; all legal formes
+  // were already present) — so mega lines now succeed; the choice probe below
+  // still honestly rejects anything genuinely absent.
   const myParts: string[] = [];
   for (const [slot, sp] of myActives.entries()) {
     const alreadyMega = !!input.mine[pos.p1active[slot]!]?.megaActive;
