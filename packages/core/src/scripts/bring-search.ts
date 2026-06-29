@@ -66,6 +66,9 @@ for (const opp of opponents) {
   const curWr = rec.shortlist.find(s => key(s.bring) === key(cur))?.maximinWr ?? NaN;
   rows.push({ anchor: opp.anchor, curWr, bestWr: rec.maximinWr, bestBring: rec.bring, curBring: cur });
   truth.push({ anchor: opp.anchor, brings: rec.shortlist.map(s => ({ species: s.bring.map(b => b.species), maximinWr: s.maximinWr })) });
+  // Incremental save after each opponent — a long all-day cement run stays
+  // harvestable (and resumable-by-hand) even if it's killed before finishing.
+  if (SAVE) writeFileSync(join(dataDirPath(), SAVE), JSON.stringify(truth, null, 2) + '\n', 'utf8');
 
   if (single) {
     const ranked = rec.shortlist.slice().sort((a, b) => b.maximinWr - a.maximinWr);
