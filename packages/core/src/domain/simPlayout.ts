@@ -42,6 +42,9 @@ export interface GameResult {
    *  cap was hit and the winner came from the official VGC tiebreak. A timeout
    *  win is a weaker signal than a KO win (useful when weighting training rows). */
   resolution: 'kos' | 'timeout';
+  /** The sim's full `|`-protocol event log, when `opts.trace` is set — so a game
+   *  can be replayed/eyeballed to confirm the policy plays sensibly. */
+  log?: string[];
 }
 
 /** Official Play! Pokémon end-of-time tiebreak: (1) most un-fainted Pokémon, then
@@ -220,7 +223,7 @@ export function makeSearchPolicy(p1Sets: PokemonSet[], p2Sets: PokemonSet[], dep
  *  of each bring; full HP, neutral field. Deterministic given `seed`. */
 export async function playGame(
   p1: PokemonSet[], p2: PokemonSet[],
-  opts?: { seed?: [number, number, number, number]; turnCap?: number; policy?: Policy },
+  opts?: { seed?: [number, number, number, number]; turnCap?: number; policy?: Policy; trace?: boolean },
 ): Promise<GameResult | { error: string }> {
   if (!(await ensureSimLoaded())) return { error: '@pkmn/sim not installed — npm i @pkmn/sim to simulate' };
   const policy = opts?.policy ?? greedyPolicy;
@@ -247,9 +250,12 @@ export async function playGame(
   // exactly that (Showdown ends the game when a side has no mon left) → a clean
   // 'kos' result. If we hit the turn cap first ("time ran out"), resolve by the
   // official VGC tiebreak (most mons, then total HP%) — a 'timeout' result.
+  const log = opts?.trace ? ((battle as { log?: string[] }).log ?? []).slice() : undefined;
   const w = (battle as { winner?: string }).winner;
-  if (battle.ended && (w === 'p1' || w === 'p2')) return { winner: w, turns: battle.turn, resolution: 'kos' };
+  const out = (winner: GameResult['winner'], resolution: GameResult['resolution']): GameResult =>
+    log ? { winner, turns: battle.turn, resolution, log } : { winner, turns: battle.turn, resolution };
+  if (battle.ended && (w === 'p1' || w === 'p2')) return out(w, 'kos');
   const roster = readRoster(battle);
-  if (battle.ended) return { winner: officialTiebreak(roster), turns: battle.turn, resolution: 'kos' };
-  return { winner: officialTiebreak(roster), turns: battle.turn, resolution: 'timeout' };
+  if (battle.ended) return out(officialTiebreak(roster), 'kos');
+  return out(officialTiebreak(roster), 'timeout');
 }
