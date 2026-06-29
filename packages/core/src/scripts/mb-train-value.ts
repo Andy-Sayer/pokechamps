@@ -4,7 +4,7 @@
 // metric before model: log-loss + accuracy vs two baselines (static-score-sign,
 // always-majority). Split by OPPONENT so train/test never share a matchup.
 //   npx tsx packages/core/src/scripts/mb-train-value.ts
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDirPath } from '../domain/data.js';
 import { matchupFeatures, FEATURE_NAMES } from '../domain/bringFeatures.js';
@@ -90,3 +90,10 @@ console.log('\nbiggest model-vs-static corrections (test):');
 for (const d of diffs) {
   console.log(`  vs ${d.r.oppAnchor.padEnd(12)} ${d.r.myBring.map(s => s.species).slice(0, 2).join('/')}…  actual ${Math.round(d.wr * 100)}%  model ${Math.round(d.pm * 100)}%  static ${Math.round(d.ps * 100)}%`);
 }
+
+// Persist a PRODUCTION model trained on ALL matchups (no held-out) — the hybrid
+// proposer (domain/bringValueModel.ts) loads these weights. Gitignored (derived).
+const full = fit(data, allCols);
+const modelOut = { featureNames: [...FEATURE_NAMES], weights: full.w, bias: full.b, trainedOn: data.length, date: new Date().toISOString().slice(0, 10) };
+writeFileSync(join(dataDirPath(), 'training', 'bring-value-model.json'), JSON.stringify(modelOut, null, 2));
+console.log(`\nsaved full-data model (${data.length} matchups) → data/training/bring-value-model.json`);
