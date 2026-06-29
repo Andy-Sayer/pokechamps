@@ -5,7 +5,10 @@
 // parser must still ingest all of it — names + spreads are what team
 // composition and the meta report rely on. See refresh-pikalytics.ts.
 import { describe, test, expect } from 'vitest';
-import { parseEntry, parseIndexRows, inferNatureFromSp } from '../src/scripts/refresh-pikalytics.js';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { parseEntry, parseIndexRows, inferNatureFromSp, type PikalyticsFile } from '../src/scripts/refresh-pikalytics.js';
+import { dataDirPath, CHAMPIONS_PIKA_FORMAT } from '../src/domain/data.js';
 
 // Trimmed real-shape Reg M-B per-species page (Garchomp): blank nature,
 // undefined teammate %, real move/ability/item %.
@@ -101,5 +104,36 @@ describe('parseIndexRows — M-A usage% and M-B N/A+winRate layouts', () => {
     expect(rows[0]!.usage).toBe(0);
     expect(rows[0]!.winRate).toBe(52.366);
     expect(rows[0]!.record).toBe('15196-13822-15');
+  });
+});
+
+// Regression for the recurring "live games add to the cache differently to the
+// warm-up" bug. Root cause was format-level ranking (rank/usage/winRate/record)
+// living on the per-species entry, which the live per-species fetch cannot
+// produce. Ranking now lives in PikalyticsFile.ranking; entries are pure set
+// data, so the warm-up and a live parseEntry() result are the SAME shape and a
+// live fetch can't strip or stub anything. See project-pikalytics-ai-endpoint.
+describe('schema split — ranking is NOT on the per-species entry', () => {
+  const SET_KEYS = ['baseStats', 'moves', 'abilities', 'items', 'teammates', 'topSpread', 'featuredSets'];
+  const RANK_KEYS = ['rank', 'usage', 'winRate', 'record'];
+
+  test('parseEntry (the live path) yields pure set data — no ranking fields', () => {
+    const e = parseEntry(MB_SPECIES_MD, 'Garchomp');
+    for (const k of RANK_KEYS) expect(e).not.toHaveProperty(k);
+    // refresh-pikalytics writes `pokemon[name] = parseEntry(...)`, so warm-up and
+    // live entries are identical in shape — there is no ranking to clobber.
+    expect(Object.keys(e).every(k => SET_KEYS.includes(k))).toBe(true);
+  });
+
+  test('the tracked dump keeps ranking apart from set data', () => {
+    const file = join(dataDirPath(), `pikalytics.${CHAMPIONS_PIKA_FORMAT}.json`);
+    if (!existsSync(file)) return; // dump is regenerable; skip if absent
+    const d = JSON.parse(readFileSync(file, 'utf8')) as PikalyticsFile;
+    for (const [name, e] of Object.entries(d.pokemon)) {
+      for (const k of RANK_KEYS) {
+        expect(e, `${name} entry must not carry ranking field "${k}"`).not.toHaveProperty(k);
+      }
+    }
+    expect(Object.keys(d.ranking ?? {}).length, 'warm-up must populate the ranking map').toBeGreaterThan(0);
   });
 });
