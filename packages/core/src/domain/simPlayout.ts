@@ -219,14 +219,66 @@ export function makeSearchPolicy(p1Sets: PokemonSet[], p2Sets: PokemonSet[], dep
   };
 }
 
+// --- Opponent-piloting prior (idea 5): play the opponent's team to its GAME PLAN ---
+// The simulated opponent otherwise runs the same maximin search as us, which may not
+// commit to the team's setup the way a real pilot does. This biases the opponent's
+// MOVES toward the team's plan — the turn-1-ish setup commits humans reliably make —
+// and defers to the search otherwise. (Ability weather like Drizzle/Drought needs no
+// override: the sim auto-sets it on switch-in.)
+
+export interface PilotPlan { trickRoom: boolean; tailwind: boolean; weatherMove?: string; weatherId?: string; fakeOut: boolean }
+
+// Weather-MOVE id → the weather id it sets (ability weather is excluded — automatic).
+const WEATHER_MOVE_TO_ID: Record<string, string> = { sunnyday: 'sunnyday', raindance: 'raindance', sandstorm: 'sandstorm', snowscape: 'snow', chillyreception: 'snow' };
+
+/** Derive a team's setup plan from its movesets (the moves we'll force when unmet). */
+export function derivePilotPlan(sets: PokemonSet[]): PilotPlan {
+  const moves = new Set(sets.flatMap(s => (s.moves ?? []).map(m => toId(m))));
+  const weatherMove = Object.keys(WEATHER_MOVE_TO_ID).find(m => moves.has(m));
+  return { trickRoom: moves.has('trickroom'), tailwind: moves.has('tailwind'), weatherMove, weatherId: weatherMove ? WEATHER_MOVE_TO_ID[weatherMove] : undefined, fakeOut: moves.has('fakeout') };
+}
+
+/** Policy that pilots `p2Sets`'s team to `plan`: force the plan move (Trick Room /
+ *  Tailwind / weather move / Fake Out) on a slot whose condition is unmet, partner
+ *  plays greedy; if no plan move applies this turn, defer entirely to the search. */
+export function makePilotPolicy(p1Sets: PokemonSet[], p2Sets: PokemonSet[], depth: number, plan: PilotPlan): Policy {
+  const search = makeSearchPolicy(p1Sets, p2Sets, depth);
+  return (battle, i) => {
+    const side = battle.sides[i] as any;
+    const req = side.activeRequest;
+    if (!req || req.wait || req.forceSwitch || !req.active) return search(battle, i);
+    const bf = (battle as any).field;
+    const trUp = !!bf?.pseudoWeather?.trickroom;
+    const twUp = !!side.sideConditions?.tailwind;
+    const weather = toId(bf?.weather ?? '');
+    const lf = livingFoeSlots(battle, i);
+    let fired = false;
+    const parts = (req.active as any[]).map((slot, s) => {
+      if (!slot || !slot.moves) return null;
+      const idxOf = (id: string) => (slot.moves as any[]).findIndex(m => !m.disabled && toId(m.id ?? m.move) === id);
+      let idx = -1, target = '';
+      if (plan.trickRoom && !trUp && (idx = idxOf('trickroom')) >= 0) { /* field move, no target */ }
+      else if (plan.weatherMove && plan.weatherId && weather !== plan.weatherId && (idx = idxOf(plan.weatherMove)) >= 0) { /* field */ }
+      else if (plan.tailwind && !twUp && (idx = idxOf('tailwind')) >= 0) { /* side */ }
+      else if (plan.fakeOut && ((side.active?.[s] as any)?.activeTurns ?? 0) === 0 && (idx = idxOf('fakeout')) >= 0) { target = lf.length ? ` ${lf[0]}` : ''; }
+      if (idx >= 0) { fired = true; return `move ${idx + 1}${target}`; }
+      return null; // fill with greedy below (only if some other slot fired)
+    });
+    if (!fired) return search(battle, i); // no plan this turn → full search (stronger play)
+    return parts.map((p, s) => p ?? ((req.active as any[])[s]?.moves ? slotMoveChoice((req.active as any[])[s], lf) : 'pass')).join(', ');
+  };
+}
+
 /** Play `p1` vs `p2` (each a bring of ≤4) to a winner. Leads are the first two
- *  of each bring; full HP, neutral field. Deterministic given `seed`. */
+ *  of each bring; full HP, neutral field. Deterministic given `seed`. `p2Policy`
+ *  lets the opponent use a different policy (e.g. makePilotPolicy) than us. */
 export async function playGame(
   p1: PokemonSet[], p2: PokemonSet[],
-  opts?: { seed?: [number, number, number, number]; turnCap?: number; policy?: Policy; trace?: boolean },
+  opts?: { seed?: [number, number, number, number]; turnCap?: number; policy?: Policy; p2Policy?: Policy; trace?: boolean },
 ): Promise<GameResult | { error: string }> {
   if (!(await ensureSimLoaded())) return { error: '@pkmn/sim not installed — npm i @pkmn/sim to simulate' };
   const policy = opts?.policy ?? greedyPolicy;
+  const p2Policy = opts?.p2Policy ?? policy;
   const turnCap = opts?.turnCap ?? 300;
   const lead = (n: number) => (n >= 2 ? [0, 1] : [0]);
   const battle = buildBattle({
@@ -242,7 +294,7 @@ export async function playGame(
     const key = `${battle.turn}|${(battle as { requestState?: string }).requestState ?? ''}`;
     const forceDefault = key === stallKey && stalls >= 2;
     const c1 = forceDefault ? 'default' : policy(battle, 0);
-    const c2 = forceDefault ? 'default' : policy(battle, 1);
+    const c2 = forceDefault ? 'default' : p2Policy(battle, 1);
     try { battle.makeChoices(c1, c2); } catch { try { battle.makeChoices('default', 'default'); } catch { break; } }
     if (key === stallKey) stalls++; else { stallKey = key; stalls = 0; }
   }
