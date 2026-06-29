@@ -2,16 +2,16 @@
   {
     "species": "Archaludon",
     "level": 50,
-    "nature": "Calm",
+    "nature": "Modest",
     "ability": "Stamina",
     "item": "Leftovers",
     "evs": {
-      "hp": 252,
+      "hp": 132,
       "atk": 0,
-      "def": 4,
-      "spa": 36,
-      "spd": 196,
-      "spe": 20
+      "def": 0,
+      "spa": 148,
+      "spd": 0,
+      "spe": 236
     },
     "ivs": {
       "hp": 31,
