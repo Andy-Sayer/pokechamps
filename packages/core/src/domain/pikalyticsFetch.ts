@@ -64,24 +64,25 @@ async function doFetch(species: string): Promise<void> {
   }
 }
 
-// Atomic-ish write: read existing file → merge → write to temp → rename.
-// On Windows rename across same dir is atomic enough; on POSIX it is too.
+// Persist on-the-fly fetches to a SEPARATE live SIDECAR — NEVER the canonical
+// warm-up file (`pikalytics.<fmt>.json`), which only refresh-pikalytics owns. The
+// live entries are sparse (parsed per-species, no index-derived rank/usage/winRate/
+// record), so merging them into the curated file stripped those fields and added
+// zero-usage stubs ("live games adding differently to the warm-up"). The sidecar
+// keeps the cross-session cache without ever mutating the curated data; the load
+// path (pikalytics.ts) merges it with the canonical file ALWAYS winning.
+// Atomic-ish write: read → merge → write temp → rename.
 function persistEntry(species: string, entry: PikalyticsEntry): void {
   try {
     if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
-    const path = join(dataDir, `pikalytics.${FORMAT}.json`);
+    const path = join(dataDir, `pikalytics.${FORMAT}.live.json`);
     let data: PikalyticsFile;
     if (existsSync(path)) {
       data = JSON.parse(readFileSync(path, 'utf8'));
     } else {
       data = { format: FORMAT, fetchedAt: new Date().toISOString().slice(0, 10), topPokemon: [], pokemon: {} };
     }
-    // Preserve a known rank/usage — this background entry carries rank/usage 0,
-    // which must not overwrite the static top-N ranking of an already-ranked mon.
-    const prev = data.pokemon[species];
-    data.pokemon[species] = prev
-      ? { ...entry, rank: prev.rank || entry.rank, usage: prev.usage || entry.usage }
-      : entry;
+    data.pokemon[species] = entry; // sidecar holds only live-fetched entries
     const tmp = `${path}.tmp`;
     writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8');
     renameSync(tmp, path);

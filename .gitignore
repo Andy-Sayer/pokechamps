@@ -15,6 +15,9 @@ data/replays-train/
 # Creator-intel: fetched captions + derived threat teams (regenerable from a URL).
 data/captions/
 data/threats/
+# Live on-the-fly Pikalytics sidecar — per-session fetches; the curated warm-up
+# file (pikalytics.<fmt>.json) is tracked, this live cache is not.
+data/pikalytics.*.live.json
 # Sim-grounded matchup prep sheets (regenerable via mb-prep-sheets).
 data/prep/
 *.tsbuildinfo

@@ -22,6 +22,18 @@ function load(): PikalyticsFile | null {
     return null;
   }
   const data = JSON.parse(readFileSync(path, 'utf8')) as PikalyticsFile;
+  // Merge the LIVE sidecar (on-the-fly fetches, pikalyticsFetch.ts) for species the
+  // curated warm-up file lacks. Canonical ALWAYS wins — a sparse live stub never
+  // overrides real data, and the canonical file on disk is never mutated by play.
+  const livePath = join(dataDir, `pikalytics.${slug}.live.json`);
+  if (existsSync(livePath)) {
+    try {
+      const live = JSON.parse(readFileSync(livePath, 'utf8')) as PikalyticsFile;
+      for (const [name, entry] of Object.entries(live.pokemon ?? {})) {
+        if (!data.pokemon[name]) data.pokemon[name] = entry;
+      }
+    } catch { /* corrupt sidecar → ignore, canonical stands */ }
+  }
   cache = { format: slug, data };
   return data;
 }
