@@ -12,6 +12,11 @@ data/sprites/
 data/training/
 data/bring-labels.json
 data/replays-train/
+# Creator-intel: fetched captions + derived threat teams (regenerable from a URL).
+data/captions/
+data/threats/
+# Sim-grounded matchup prep sheets (regenerable via mb-prep-sheets).
+data/prep/
 *.tsbuildinfo
 
 # Server runtime sqlite data (native dev) — Docker uses a named volume

@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDirPath } from '../domain/data.js';
 import { loadPikaData, metaTeams } from '../domain/metaTeams.js';
+import { loadCreatorThreats } from '../domain/creatorIntel.js';
 import { MatchupPool } from '../domain/matchupPool.js';
 import type { PokemonSet } from '../domain/types.js';
 import { MB_THREATS } from './mbThreats.js';
@@ -40,13 +41,15 @@ const teamPath = teamArg ? (teamArg.includes('/') || teamArg.includes('\\') ? te
 const team: PokemonSet[] = JSON.parse(readFileSync(teamPath, 'utf8'));
 const pika = loadPikaData();
 const meta = metaTeams(pika, META_N, 3);
+const creator = loadCreatorThreats(); // emerging threats harvested from creator videos
 const gauntlet = [
   ...meta.map(m => ({ anchor: `[meta] ${m.anchor}`, sets: m.sets })),
   ...MB_THREATS.map(m => ({ anchor: `[hand] ${m.anchor}`, sets: m.sets })),
+  ...creator, // already tagged "[creator] <name>"
 ];
 
 console.log(`team: ${teamPath.split(/[\\/]/).pop()} — ${team.map(s => s.species).join(', ')}`);
-console.log(`gauntlet: ${meta.length} real M-B meta teams + ${MB_THREATS.length} hand threats · deepen 1→${DEPTH}${BUDGET ? ` · ${BUDGET / 1000}s/board` : ' (fixed)'} · bring ${BRING_K >= 15 ? 'EXHAUSTIVE (all 15)' : `top-${BRING_K}`}×opp-${OPP_BRING_K}${BRING_K > 1 ? ' searched' : ' heuristic'}\n`);
+console.log(`gauntlet: ${meta.length} real M-B meta teams + ${MB_THREATS.length} hand threats${creator.length ? ` + ${creator.length} creator threats` : ''} · deepen 1→${DEPTH}${BUDGET ? ` · ${BUDGET / 1000}s/board` : ' (fixed)'} · bring ${BRING_K >= 15 ? 'EXHAUSTIVE (all 15)' : `top-${BRING_K}`}×opp-${OPP_BRING_K}${BRING_K > 1 ? ' searched' : ' heuristic'}\n`);
 
 const pool = new MatchupPool();
 const results = await pool.run(gauntlet.map(g => ({ mine: team, oppSets: g.sets, oppAnchor: g.anchor, depth: DEPTH, budgetMs: BUDGET || undefined, bringK: BRING_K, oppBringK: OPP_BRING_K })));
