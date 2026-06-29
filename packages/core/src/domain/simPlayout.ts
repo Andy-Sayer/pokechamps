@@ -108,6 +108,7 @@ const entryOf = (set: PokemonSet): OpponentEntry => ({
   species: set.species, ability: set.ability, item: set.item,
   knownMoves: set.moves, candidates: [set], candidateLikelihoods: [1],
 });
+const PROTECT_MOVE_IDS = new Set(['protect', 'detect', 'kingsshield', 'banefulbunker', 'spikyshield', 'obstruct', 'silktrap', 'burningbulwark']);
 const WEATHER_MAP: Record<string, FieldState['weather']> = {
   sunnyday: 'Sun', desolateland: 'Harsh Sunshine', raindance: 'Rain', primordialsea: 'Heavy Rain',
   sandstorm: 'Sand', snow: 'Snow', snowscape: 'Snow', hail: 'Hail',
@@ -143,6 +144,14 @@ function buildInput(battle: Battle, i: number, mineSets: PokemonSet[], oppSets: 
   const mineSlots = i === 0 ? out.p1 : out.p2;
   const oppSlots = i === 0 ? out.p2 : out.p1;
   const boostOf = (slots: typeof mineSlots, sp: string) => slots.find(s => s && toId(s.baseSpecies) === toId(sp))?.boosts;
+  // "Protected last turn" from the sim's lastMove → seeds the search's consecutive-
+  // protect ban, so the per-turn policy stops re-offering a Protect that would fail.
+  const protectedLast = (sideIdx: number, sp: string): boolean => {
+    const p = (battle.sides[sideIdx] as any).active?.find((a: any) => a && toId(a.species?.baseSpecies ?? a.species?.name ?? '') === toId(sp));
+    const lm = p?.lastMove;
+    const id = typeof lm === 'string' ? lm : lm?.id;
+    return id ? PROTECT_MOVE_IDS.has(toId(id)) : false;
+  };
 
   let myMegaSpent = false, oppMegaSpent = false;
   const mine: SearchMyMon[] = [];
@@ -151,7 +160,7 @@ function buildInput(battle: Battle, i: number, mineSets: PokemonSet[], oppSets: 
     if (!r || r.fainted) continue;
     const mega = toId(r.species) !== toId(set.species);
     if (mega) myMegaSpent = true;
-    mine.push({ set, hpPercent: r.hpPct, active: r.active, megaActive: mega || undefined, status: r.status || undefined, boosts: boostOf(mineSlots, set.species) });
+    mine.push({ set, hpPercent: r.hpPct, active: r.active, megaActive: mega || undefined, status: r.status || undefined, boosts: boostOf(mineSlots, set.species), protectedLastTurn: r.active ? protectedLast(i, set.species) : undefined });
   }
   const opp: SearchOppMon[] = [];
   for (const set of oppSets) {
@@ -159,7 +168,7 @@ function buildInput(battle: Battle, i: number, mineSets: PokemonSet[], oppSets: 
     if (!r || r.fainted) continue;
     const mega = toId(r.species) !== toId(set.species);
     if (mega) oppMegaSpent = true;
-    opp.push({ entry: entryOf(set), hpPercent: r.hpPct, active: r.active, megaActive: mega || undefined, status: r.status || undefined, boosts: boostOf(oppSlots, set.species) });
+    opp.push({ entry: entryOf(set), hpPercent: r.hpPct, active: r.active, megaActive: mega || undefined, status: r.status || undefined, boosts: boostOf(oppSlots, set.species), protectedLastTurn: r.active ? protectedLast(1 - i, set.species) : undefined });
   }
   return { mine, opp, field: readField(battle, i), myMegaSpent, oppMegaSpent, allOppRevealed: true };
 }

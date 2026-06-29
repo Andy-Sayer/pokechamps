@@ -61,6 +61,9 @@ export interface SearchMyMon {
   boosts?: Partial<Record<string, number>>;
   /** Non-volatile status (burn halves physical damage, paralysis halves speed). */
   status?: string;
+  /** This mon used a Protect-variant LAST turn — seeds the consecutive-protect ban
+   *  so a per-turn policy doesn't re-offer a Protect that would just fail. */
+  protectedLastTurn?: boolean;
   /** Focus Sash / Sturdy survival (my items are known, so prob is 0 or 1). */
   survival?: Survival;
   /** Already under Leech Seed — the OPP search-index of the seeder (heals it). */
@@ -93,6 +96,8 @@ export interface SearchOppMon {
   megaActive?: boolean;
   boosts?: Partial<Record<string, number>>;
   status?: string;
+  /** Used a Protect-variant last turn (seeds the consecutive-protect ban). */
+  protectedLastTurn?: boolean;
   /** Focus Sash / Sturdy survival — probabilistic (from inference or usage %). */
   survival?: Survival;
   /** A KNOWN-but-not-yet-brought mon, folded in so the opponent can switch it in
@@ -1984,8 +1989,11 @@ function initialState(input: SearchInput): State {
     oppHp: input.opp.map(o => o.hpPercent),
     myActive: myActive.slice(0, MAX_ACTIVE),
     oppActive: oppActive.slice(0, MAX_ACTIVE),
-    myProtectStreak: input.mine.map(() => 0),
-    oppProtectStreak: input.opp.map(() => 0),
+    // Seed the consecutive-protect streak from the live state so a per-turn policy
+    // (which rebuilds the input each turn) doesn't forget it Protected last turn and
+    // re-offer a move that would just fail.
+    myProtectStreak: input.mine.map(m => (m.protectedLastTurn ? 1 : 0)),
+    oppProtectStreak: input.opp.map(o => (o.protectedLastTurn ? 1 : 0)),
     oppSeen: input.opp.map(o => !o.phantom),
     trickRoom: !!input.field.trickRoom,
     myTailwind: !!input.field.myTailwind,
