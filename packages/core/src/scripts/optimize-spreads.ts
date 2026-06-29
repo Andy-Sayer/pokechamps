@@ -15,11 +15,11 @@
 // incumbent, loop until no improvement or the deadline. Saves on every gain.
 import { writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { dataDirPath, toId } from '../domain/data.js';
+import { dataDirPath, toId, getNature } from '../domain/data.js';
 import { spFromEv } from '../domain/pikalytics.js';
 import { loadPikaData, metaTeams } from '../domain/metaTeams.js';
 import { MatchupPool, type MatchupTask } from '../domain/matchupPool.js';
-import { candidateSpreads } from '../domain/breakpoints.js';
+import { candidateSpreads, attackingStat } from '../domain/breakpoints.js';
 import type { Matchup } from '../domain/teamSim.js';
 import type { PokemonSet } from '../domain/types.js';
 
@@ -56,10 +56,58 @@ function spStr(s: PokemonSet): string {
 }
 const rainMon = (s: PokemonSet) => s.moves.some(m => /hurricane|weather ball/i.test(m)) || toId(s.ability ?? '') === 'drizzle';
 
+// --- Nature co-variation --------------------------------------------------
+// candidateSpreads moves EVs but keeps the incumbent nature, which let a
+// physical-bulk spread keep a special-bulk nature (e.g. Calm on 140 Def / 0 SpD
+// — the +SpD boost wasted). Stamp each EV candidate with COHERENT natures: the
+// minus is the offensive stat the mon doesn't use; the plus is one of the
+// candidate's top-invested stats. Keep the incumbent as a floor so the gauntlet
+// can never be forced into a worse nature than today's.
+type Plus = 'atk' | 'def' | 'spa' | 'spd' | 'spe';
+const NATURE_BY: Record<string, string> = {
+  'atk|spa': 'Adamant', 'atk|def': 'Lonely', 'atk|spd': 'Naughty', 'atk|spe': 'Brave',
+  'def|atk': 'Bold', 'def|spa': 'Impish', 'def|spd': 'Lax', 'def|spe': 'Relaxed',
+  'spa|atk': 'Modest', 'spa|def': 'Mild', 'spa|spd': 'Rash', 'spa|spe': 'Quiet',
+  'spd|atk': 'Calm', 'spd|spa': 'Careful', 'spd|def': 'Gentle', 'spd|spe': 'Sassy',
+  'spe|atk': 'Timid', 'spe|spa': 'Jolly', 'spe|def': 'Hasty', 'spe|spd': 'Naive',
+};
+function coherentNatures(set: PokemonSet, evs: PokemonSet['evs']): string[] {
+  const stat = attackingStat(set);                        // 'atk' | 'spa' | null
+  // Minus = the offensive stat the mon doesn't attack with; for a pure support,
+  // keep the incumbent's unused side rather than inventing one to drop.
+  const minus = stat === 'atk' ? 'spa' : stat === 'spa' ? 'atk'
+    : ((getNature(set.nature) as { minus?: string } | undefined)?.minus ?? 'atk');
+  const out = new Set<string>([set.nature]);              // never lose the incumbent
+  if (minus === 'hp') return [...out];
+  const plusable: Plus[] = (['def', 'spd', 'spe'] as Plus[]).filter(s => s !== minus);
+  if (stat && stat !== minus) plusable.push(stat);
+  const ranked = plusable
+    .map(s => ({ s, ev: evs[s] ?? 0 }))
+    .filter(x => x.ev > 0)
+    .sort((a, b) => b.ev - a.ev)
+    .slice(0, 2);                                         // top-2 invested → coherent natures
+  for (const { s } of ranked) { const n = NATURE_BY[`${s}|${minus}`]; if (n) out.add(n); }
+  return [...out];
+}
+function expandWithNatures(cands: { label: string; set: PokemonSet }[]): { label: string; set: PokemonSet }[] {
+  const out: { label: string; set: PokemonSet }[] = [];
+  const seen = new Set<string>();
+  for (const c of cands) {
+    for (const nat of coherentNatures(c.set, c.set.evs)) {
+      const e = c.set.evs;
+      const key = `${nat}|${e.hp}|${e.atk}|${e.def}|${e.spa}|${e.spd}|${e.spe}`;
+      if (seen.has(key)) continue; seen.add(key);
+      out.push({ label: `${c.label} · ${nat}`, set: { ...c.set, nature: nat } });
+    }
+  }
+  return out;
+}
+
 console.log('\nbaseline…');
 let baseFit = fitOf(await pool.run(tasksFor(team)));
 console.log(`  floor ${Math.round(baseFit.floor)} avg ${Math.round(baseFit.avg)}`);
 const original = team.map(s => spStr(s));
+const originalNat = team.map(s => s.nature);
 
 let roundN = 0;
 while (timeLeft() > 0) {
@@ -68,7 +116,7 @@ while (timeLeft() > 0) {
   console.log(`\n=== round ${roundN} (${hhmm(timeLeft())} left) ===`);
   for (let i = 0; i < team.length; i++) {
     if (timeLeft() <= 0) break;
-    const cands = candidateSpreads(team[i]!, defenders, defenders, rainMon(team[i]!));
+    const cands = expandWithNatures(candidateSpreads(team[i]!, defenders, defenders, rainMon(team[i]!)));
     // One big parallel batch: every candidate × every meta opponent.
     const t0 = Date.now();
     const flat: MatchupTask[] = cands.flatMap(c => meta.map(opp => ({ mine: team.map((s, k) => (k === i ? c.set : s)), oppSets: opp.sets, oppAnchor: opp.anchor, depth: MAXDEPTH, budgetMs: BUDGET })));
@@ -90,7 +138,7 @@ while (timeLeft() > 0) {
 }
 
 console.log('\n=== OPTIMIZED SPREADS ===');
-team.forEach((s, i) => console.log(`  ${s.species.padEnd(11)} ${s.nature.padEnd(8)} ${spStr(s)}${original[i] !== spStr(s) ? '  <- changed' : ''}`));
+team.forEach((s, i) => console.log(`  ${s.species.padEnd(11)} ${s.nature.padEnd(8)} ${spStr(s)}${(original[i] !== spStr(s) || originalNat[i] !== s.nature) ? '  <- changed' : ''}`));
 console.log(`\nfinal floor ${Math.round(baseFit.floor)} avg ${Math.round(baseFit.avg)}`);
 if (SAVE) { writeFileSync(teamPath, JSON.stringify(team, null, 2)); console.log(`saved ${teamPath}`); }
 pool.close();
