@@ -21,14 +21,12 @@ interface Spread { nature: string; sp: [number, number, number, number, number, 
 interface BaseStats { hp: number; atk: number; def: number; spa: number; spd: number; spe: number }
 interface FeaturedSet { player: string; record: string; item?: string; ability?: string; moves: string[] }
 
+// Per-species SET data only — identical in shape whether sourced from the
+// offline warm-up or an on-the-fly live fetch. Format-level ranking (rank/usage/
+// winRate/record) is NOT here: it lives in `PikalyticsFile.ranking`, because it
+// is a property of where a mon sits in the meta, not of its set, and the live
+// per-species endpoint cannot produce it (those fields exist only on the index).
 export interface PikalyticsEntry {
-  rank: number;
-  usage: number;
-  // Reg M-B's /ai index reports usage as "N/A" and ranks by raw game volume,
-  // exposing win rate + W-L-T record instead. These carry that signal so the
-  // meta report has a quantitative metric when `usage` is 0.
-  winRate?: number;
-  record?: string;
   baseStats?: BaseStats;
   moves: PercentRow[];
   abilities: PercentRow[];
@@ -38,11 +36,25 @@ export interface PikalyticsEntry {
   featuredSets: FeaturedSet[];
 }
 
+// Format-level ranking, written ONLY by the offline warm-up (the index carries
+// these). Reg M-B's /ai index reports usage as "N/A" and ranks by raw game
+// volume, exposing win rate + W-L-T record instead — hence usage may be 0 with
+// winRate/record carrying the signal.
+export interface PikalyticsRanking {
+  rank: number;
+  usage: number;
+  winRate?: number;
+  record?: string;
+}
+
 export interface PikalyticsFile {
   format: string;
   fetchedAt: string;
   topPokemon: string[];
   pokemon: Record<string, PikalyticsEntry>;
+  // species name -> ranking. Optional so a live-only sidecar (no index data)
+  // and pre-split files both load; readers treat a missing entry as unranked.
+  ranking?: Record<string, PikalyticsRanking>;
 }
 
 async function fetchText(url: string): Promise<string> {
@@ -175,7 +187,7 @@ function parseFeaturedSets(md: string, species: string): FeaturedSet[] {
   return out;
 }
 
-export function parseEntry(md: string, species: string): Omit<PikalyticsEntry, 'rank' | 'usage'> {
+export function parseEntry(md: string, species: string): PikalyticsEntry {
   return {
     baseStats: parseBaseStats(md),
     moves: parsePercentSection(md, 'Common Moves'),
@@ -196,16 +208,15 @@ async function main() {
   console.log(`[refresh-pikalytics] Top ${top.length}: ${top.join(', ')}`);
 
   const pokemon: Record<string, PikalyticsEntry> = {};
+  const ranking: Record<string, PikalyticsRanking> = {};
   for (const row of rows) {
     const url = `${BASE}/${FORMAT}/${encodeURIComponent(row.name)}`;
     const metric = row.usage > 0 ? `${row.usage}% usage` : row.winRate != null ? `${row.winRate}% WR` : 'no metric';
     console.log(`  - ${row.name} (rank ${row.rank}, ${metric})`);
     try {
       const md = await fetchText(url);
-      pokemon[row.name] = {
-        rank: row.rank, usage: row.usage, winRate: row.winRate, record: row.record,
-        ...parseEntry(md, row.name),
-      };
+      pokemon[row.name] = parseEntry(md, row.name);
+      ranking[row.name] = { rank: row.rank, usage: row.usage, winRate: row.winRate, record: row.record };
     } catch (e) {
       console.warn(`    skipped: ${(e as Error).message}`);
     }
@@ -217,6 +228,7 @@ async function main() {
     fetchedAt: new Date().toISOString().slice(0, 10),
     topPokemon: top,
     pokemon,
+    ranking,
   };
   if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
   const path = join(dataDir, `pikalytics.${FORMAT}.json`);

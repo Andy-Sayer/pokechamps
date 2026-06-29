@@ -129,7 +129,7 @@ for (const anchor of pika.topPokemon.slice(0, 12)) addSeed(`${anchor} stack`, co
     return Math.min(150, best);
   };
   const underdogs = Object.keys(pika.pokemon)
-    .filter(n => (pika.pokemon[n]!.rank ?? 0) > 20)
+    .filter(n => (pika.ranking?.[n]?.rank ?? 999) > 20)
     .map(name => {
       const set = buildSet(pika, name, new Set());
       if (!set) return null;

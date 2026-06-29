@@ -11,7 +11,6 @@ import type { PokemonSet } from './types.js';
 import { MAX_IVS } from './types.js';
 
 export interface PikaMon {
-  rank: number; usage: number;
   moves: { name: string; pct: number }[];
   abilities: { name: string; pct: number }[];
   items: { name: string; pct: number }[];
@@ -19,7 +18,12 @@ export interface PikaMon {
   topSpread?: { nature: string; sp: number[]; pct: number };
   featuredSets?: { player: string; record: string; item: string; ability: string; moves: string[] }[];
 }
-export interface PikaData { topPokemon: string[]; pokemon: Record<string, PikaMon> }
+export interface PikaRank { rank: number; usage: number; winRate?: number; record?: string }
+export interface PikaData {
+  topPokemon: string[];
+  pokemon: Record<string, PikaMon>;
+  ranking?: Record<string, PikaRank>;
+}
 
 /** Format id matches data/pikalytics.<format>.json — sourced from the single
  *  constant in data.ts (update there on a regulation change; see the

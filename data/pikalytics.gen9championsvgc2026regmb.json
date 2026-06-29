@@ -55,10 +55,6 @@
   ],
   "pokemon": {
     "Garchomp": {
-      "rank": 1,
-      "usage": 0,
-      "winRate": 52.366,
-      "record": "15196-13822-15",
       "baseStats": {
         "hp": 108,
         "atk": 130,
@@ -323,10 +319,6 @@
       ]
     },
     "Sinistcha": {
-      "rank": 2,
-      "usage": 0,
-      "winRate": 50.202,
-      "record": "9812-9733-8",
       "baseStats": {
         "hp": 71,
         "atk": 60,
@@ -591,10 +583,6 @@
       ]
     },
     "Basculegion": {
-      "rank": 3,
-      "usage": 0,
-      "winRate": 54.22,
-      "record": "15818-13355-11",
       "baseStats": {
         "hp": 120,
         "atk": 112,
@@ -863,10 +851,6 @@
       ]
     },
     "Whimsicott": {
-      "rank": 4,
-      "usage": 0,
-      "winRate": 52.238,
-      "record": "8875-8114-10",
       "baseStats": {
         "hp": 60,
         "atk": 67,
@@ -1135,10 +1119,6 @@
       ]
     },
     "Kingambit": {
-      "rank": 5,
-      "usage": 0,
-      "winRate": 55.431,
-      "record": "14895-11975-13",
       "baseStats": {
         "hp": 100,
         "atk": 135,
@@ -1403,10 +1383,6 @@
       ]
     },
     "Staraptor": {
-      "rank": 6,
-      "usage": 0,
-      "winRate": 43.845,
-      "record": "1706-2185",
       "baseStats": {
         "hp": 85,
         "atk": 120,
@@ -1563,10 +1539,6 @@
       ]
     },
     "Incineroar": {
-      "rank": 7,
-      "usage": 0,
-      "winRate": 51.881,
-      "record": "12102-11224-15",
       "baseStats": {
         "hp": 95,
         "atk": 115,
@@ -1831,10 +1803,6 @@
       ]
     },
     "Charizard": {
-      "rank": 8,
-      "usage": 0,
-      "winRate": 53.825,
-      "record": "11084-9508-10",
       "baseStats": {
         "hp": 78,
         "atk": 84,
@@ -1962,10 +1930,6 @@
       "featuredSets": []
     },
     "Raichu": {
-      "rank": 9,
-      "usage": 0,
-      "winRate": 44.648,
-      "record": "1288-1597-2",
       "baseStats": {
         "hp": 60,
         "atk": 90,
@@ -2109,10 +2073,6 @@
       "featuredSets": []
     },
     "Pelipper": {
-      "rank": 10,
-      "usage": 0,
-      "winRate": 50.345,
-      "record": "4743-4678-3",
       "baseStats": {
         "hp": 60,
         "atk": 50,
@@ -2377,10 +2337,6 @@
       ]
     },
     "Sneasler": {
-      "rank": 11,
-      "usage": 0,
-      "winRate": 51.97,
-      "record": "11338-10478-12",
       "baseStats": {
         "hp": 80,
         "atk": 130,
@@ -2649,10 +2605,6 @@
       ]
     },
     "Archaludon": {
-      "rank": 12,
-      "usage": 0,
-      "winRate": 51.427,
-      "record": "5349-5052-8",
       "baseStats": {
         "hp": 90,
         "atk": 105,
@@ -2921,10 +2873,6 @@
       ]
     },
     "Grimmsnarl": {
-      "rank": 13,
-      "usage": 0,
-      "winRate": 45.964,
-      "record": "1827-2148-2",
       "baseStats": {
         "hp": 95,
         "atk": 120,
@@ -3193,10 +3141,6 @@
       ]
     },
     "Sylveon": {
-      "rank": 14,
-      "usage": 0,
-      "winRate": 50.531,
-      "record": "4800-4699-4",
       "baseStats": {
         "hp": 95,
         "atk": 65,
@@ -3461,10 +3405,6 @@
       ]
     },
     "Swampert": {
-      "rank": 15,
-      "usage": 0,
-      "winRate": 50.23,
-      "record": "1967-1949-1",
       "baseStats": {
         "hp": 100,
         "atk": 110,
@@ -3604,10 +3544,6 @@
       "featuredSets": []
     },
     "Metagross": {
-      "rank": 16,
-      "usage": 0,
-      "winRate": 48.649,
-      "record": "1871-1975-2",
       "baseStats": {
         "hp": 80,
         "atk": 135,
@@ -3751,10 +3687,6 @@
       "featuredSets": []
     },
     "Farigiraf": {
-      "rank": 17,
-      "usage": 0,
-      "winRate": 49.835,
-      "record": "4842-4874-3",
       "baseStats": {
         "hp": 120,
         "atk": 90,
@@ -4023,10 +3955,6 @@
       ]
     },
     "Floette-Eternal": {
-      "rank": 18,
-      "usage": 0,
-      "winRate": 56.023,
-      "record": "10307-8090-8",
       "baseStats": {
         "hp": 74,
         "atk": 65,
@@ -4146,10 +4074,6 @@
       "featuredSets": []
     },
     "Gholdengo": {
-      "rank": 19,
-      "usage": 0,
-      "winRate": 46.756,
-      "record": "1462-1665-2",
       "baseStats": {
         "hp": 87,
         "atk": 60,
@@ -4410,10 +4334,6 @@
       ]
     },
     "Aerodactyl": {
-      "rank": 20,
-      "usage": 0,
-      "winRate": 50.868,
-      "record": "5129-4954-3",
       "baseStats": {
         "hp": 80,
         "atk": 105,
@@ -4682,10 +4602,6 @@
       ]
     },
     "Maushold": {
-      "rank": 21,
-      "usage": 0,
-      "winRate": 50.268,
-      "record": "2153-2130-1",
       "baseStats": {
         "hp": 74,
         "atk": 75,
@@ -4954,10 +4870,6 @@
       ]
     },
     "Annihilape": {
-      "rank": 22,
-      "usage": 0,
-      "winRate": 44.968,
-      "record": "420-514",
       "baseStats": {
         "hp": 110,
         "atk": 115,
@@ -5166,10 +5078,6 @@
       ]
     },
     "Sableye": {
-      "rank": 23,
-      "usage": 0,
-      "winRate": 46.05,
-      "record": "1690-1980-1",
       "baseStats": {
         "hp": 50,
         "atk": 75,
@@ -5422,10 +5330,6 @@
       ]
     },
     "Mawile": {
-      "rank": 24,
-      "usage": 0,
-      "winRate": 47.643,
-      "record": "818-899-1",
       "baseStats": {
         "hp": 50,
         "atk": 85,
@@ -5537,10 +5441,6 @@
       "featuredSets": []
     },
     "Ninetales-Alola": {
-      "rank": 25,
-      "usage": 0,
-      "winRate": 50.286,
-      "record": "1496-1479-1",
       "baseStats": {
         "hp": 73,
         "atk": 67,
@@ -5745,10 +5645,6 @@
       ]
     },
     "Torkoal": {
-      "rank": 26,
-      "usage": 0,
-      "winRate": 48.236,
-      "record": "1613-1731",
       "baseStats": {
         "hp": 70,
         "atk": 85,
@@ -6013,10 +5909,6 @@
       ]
     },
     "Froslass": {
-      "rank": 27,
-      "usage": 0,
-      "winRate": 55.651,
-      "record": "3504-2792-4",
       "baseStats": {
         "hp": 70,
         "atk": 80,
@@ -6136,10 +6028,6 @@
       "featuredSets": []
     },
     "Talonflame": {
-      "rank": 28,
-      "usage": 0,
-      "winRate": 48.025,
-      "record": "1799-1947",
       "baseStats": {
         "hp": 78,
         "atk": 81,
@@ -6368,10 +6256,6 @@
       ]
     },
     "Rotom-Wash": {
-      "rank": 29,
-      "usage": 0,
-      "winRate": 47.357,
-      "record": "2507-2787-3",
       "baseStats": {
         "hp": 50,
         "atk": 65,
@@ -6572,10 +6456,6 @@
       ]
     },
     "Glimmora": {
-      "rank": 30,
-      "usage": 0,
-      "winRate": 50.143,
-      "record": "2453-2439-2",
       "baseStats": {
         "hp": 83,
         "atk": 55,
@@ -6780,10 +6660,6 @@
       ]
     },
     "Delphox": {
-      "rank": 31,
-      "usage": 0,
-      "winRate": 51.291,
-      "record": "2342-2224-3",
       "baseStats": {
         "hp": 75,
         "atk": 69,
@@ -6899,10 +6775,6 @@
       "featuredSets": []
     },
     "Dragonite": {
-      "rank": 32,
-      "usage": 0,
-      "winRate": 53.809,
-      "record": "3247-2787-5",
       "baseStats": {
         "hp": 91,
         "atk": 134,
@@ -7083,10 +6955,6 @@
       ]
     },
     "Tyranitar": {
-      "rank": 33,
-      "usage": 0,
-      "winRate": 48.363,
-      "record": "2378-2539-2",
       "baseStats": {
         "hp": 100,
         "atk": 134,
@@ -7243,10 +7111,6 @@
       ]
     },
     "Blastoise": {
-      "rank": 34,
-      "usage": 0,
-      "winRate": 49.705,
-      "record": "1096-1109",
       "baseStats": {
         "hp": 79,
         "atk": 83,
@@ -7370,10 +7234,6 @@
       "featuredSets": []
     },
     "Milotic": {
-      "rank": 35,
-      "usage": 0,
-      "winRate": 45.495,
-      "record": "1433-1717-2",
       "baseStats": {
         "hp": 95,
         "atk": 60,
@@ -7582,10 +7442,6 @@
       ]
     },
     "Venusaur": {
-      "rank": 36,
-      "usage": 0,
-      "winRate": 49.334,
-      "record": "3072-3155-4",
       "baseStats": {
         "hp": 80,
         "atk": 82,
@@ -7790,10 +7646,6 @@
       ]
     },
     "Hydreigon": {
-      "rank": 37,
-      "usage": 0,
-      "winRate": 50.64,
-      "record": "1544-1505",
       "baseStats": {
         "hp": 92,
         "atk": 105,
@@ -8054,10 +7906,6 @@
       ]
     },
     "Politoed": {
-      "rank": 38,
-      "usage": 0,
-      "winRate": 51.1,
-      "record": "1323-1266-3",
       "baseStats": {
         "hp": 90,
         "atk": 75,
@@ -8226,10 +8074,6 @@
       ]
     },
     "Tsareena": {
-      "rank": 39,
-      "usage": 0,
-      "winRate": 46.248,
-      "record": "474-551-1",
       "baseStats": {
         "hp": 72,
         "atk": 120,
@@ -8398,10 +8242,6 @@
       ]
     },
     "Gengar": {
-      "rank": 40,
-      "usage": 0,
-      "winRate": 50.577,
-      "record": "1620-1583-3",
       "baseStats": {
         "hp": 60,
         "atk": 65,
@@ -8525,10 +8365,6 @@
       "featuredSets": []
     },
     "Kangaskhan": {
-      "rank": 41,
-      "usage": 0,
-      "winRate": 48.374,
-      "record": "1324-1413",
       "baseStats": {
         "hp": 105,
         "atk": 95,
@@ -8685,10 +8521,6 @@
       ]
     },
     "Pyroar": {
-      "rank": 42,
-      "usage": 0,
-      "winRate": 52.721,
-      "record": "435-390-2",
       "baseStats": {
         "hp": 86,
         "atk": 68,
@@ -8800,10 +8632,6 @@
       "featuredSets": []
     },
     "Gardevoir": {
-      "rank": 43,
-      "usage": 0,
-      "winRate": 48.647,
-      "record": "953-1006",
       "baseStats": {
         "hp": 68,
         "atk": 65,
@@ -8935,10 +8763,6 @@
       "featuredSets": []
     },
     "Corviknight": {
-      "rank": 44,
-      "usage": 0,
-      "winRate": 49.361,
-      "record": "1622-1664",
       "baseStats": {
         "hp": 98,
         "atk": 87,
@@ -9095,10 +8919,6 @@
       ]
     },
     "Scrafty": {
-      "rank": 45,
-      "usage": 0,
-      "winRate": 45.439,
-      "record": "264-317",
       "baseStats": {
         "hp": 65,
         "atk": 90,
@@ -9267,10 +9087,6 @@
       ]
     },
     "Vivillon": {
-      "rank": 46,
-      "usage": 0,
-      "winRate": 54.187,
-      "record": "1443-1220",
       "baseStats": {
         "hp": 80,
         "atk": 52,
@@ -9431,10 +9247,6 @@
       ]
     },
     "Eelektross": {
-      "rank": 47,
-      "usage": 0,
-      "winRate": 39.839,
-      "record": "198-299",
       "baseStats": {
         "hp": 85,
         "atk": 115,
@@ -9542,10 +9354,6 @@
       "featuredSets": []
     },
     "Scovillain": {
-      "rank": 48,
-      "usage": 0,
-      "winRate": 57.63,
-      "record": "2087-1534-3",
       "baseStats": {
         "hp": 65,
         "atk": 108,
@@ -9669,10 +9477,6 @@
       "featuredSets": []
     },
     "Primarina": {
-      "rank": 49,
-      "usage": 0,
-      "winRate": 42.747,
-      "record": "498-667",
       "baseStats": {
         "hp": 80,
         "atk": 74,
@@ -9829,10 +9633,6 @@
       ]
     },
     "Ceruledge": {
-      "rank": 50,
-      "usage": 0,
-      "winRate": 54.056,
-      "record": "693-589",
       "baseStats": {
         "hp": 75,
         "atk": 125,
@@ -10047,6 +9847,308 @@
           ]
         }
       ]
+    }
+  },
+  "ranking": {
+    "Garchomp": {
+      "rank": 1,
+      "usage": 0,
+      "winRate": 52.366,
+      "record": "15196-13822-15"
+    },
+    "Sinistcha": {
+      "rank": 2,
+      "usage": 0,
+      "winRate": 50.202,
+      "record": "9812-9733-8"
+    },
+    "Basculegion": {
+      "rank": 3,
+      "usage": 0,
+      "winRate": 54.22,
+      "record": "15818-13355-11"
+    },
+    "Whimsicott": {
+      "rank": 4,
+      "usage": 0,
+      "winRate": 52.238,
+      "record": "8875-8114-10"
+    },
+    "Kingambit": {
+      "rank": 5,
+      "usage": 0,
+      "winRate": 55.431,
+      "record": "14895-11975-13"
+    },
+    "Staraptor": {
+      "rank": 6,
+      "usage": 0,
+      "winRate": 43.845,
+      "record": "1706-2185"
+    },
+    "Incineroar": {
+      "rank": 7,
+      "usage": 0,
+      "winRate": 51.881,
+      "record": "12102-11224-15"
+    },
+    "Charizard": {
+      "rank": 8,
+      "usage": 0,
+      "winRate": 53.825,
+      "record": "11084-9508-10"
+    },
+    "Raichu": {
+      "rank": 9,
+      "usage": 0,
+      "winRate": 44.648,
+      "record": "1288-1597-2"
+    },
+    "Pelipper": {
+      "rank": 10,
+      "usage": 0,
+      "winRate": 50.345,
+      "record": "4743-4678-3"
+    },
+    "Sneasler": {
+      "rank": 11,
+      "usage": 0,
+      "winRate": 51.97,
+      "record": "11338-10478-12"
+    },
+    "Archaludon": {
+      "rank": 12,
+      "usage": 0,
+      "winRate": 51.427,
+      "record": "5349-5052-8"
+    },
+    "Grimmsnarl": {
+      "rank": 13,
+      "usage": 0,
+      "winRate": 45.964,
+      "record": "1827-2148-2"
+    },
+    "Sylveon": {
+      "rank": 14,
+      "usage": 0,
+      "winRate": 50.531,
+      "record": "4800-4699-4"
+    },
+    "Swampert": {
+      "rank": 15,
+      "usage": 0,
+      "winRate": 50.23,
+      "record": "1967-1949-1"
+    },
+    "Metagross": {
+      "rank": 16,
+      "usage": 0,
+      "winRate": 48.649,
+      "record": "1871-1975-2"
+    },
+    "Farigiraf": {
+      "rank": 17,
+      "usage": 0,
+      "winRate": 49.835,
+      "record": "4842-4874-3"
+    },
+    "Floette-Eternal": {
+      "rank": 18,
+      "usage": 0,
+      "winRate": 56.023,
+      "record": "10307-8090-8"
+    },
+    "Gholdengo": {
+      "rank": 19,
+      "usage": 0,
+      "winRate": 46.756,
+      "record": "1462-1665-2"
+    },
+    "Aerodactyl": {
+      "rank": 20,
+      "usage": 0,
+      "winRate": 50.868,
+      "record": "5129-4954-3"
+    },
+    "Maushold": {
+      "rank": 21,
+      "usage": 0,
+      "winRate": 50.268,
+      "record": "2153-2130-1"
+    },
+    "Annihilape": {
+      "rank": 22,
+      "usage": 0,
+      "winRate": 44.968,
+      "record": "420-514"
+    },
+    "Sableye": {
+      "rank": 23,
+      "usage": 0,
+      "winRate": 46.05,
+      "record": "1690-1980-1"
+    },
+    "Mawile": {
+      "rank": 24,
+      "usage": 0,
+      "winRate": 47.643,
+      "record": "818-899-1"
+    },
+    "Ninetales-Alola": {
+      "rank": 25,
+      "usage": 0,
+      "winRate": 50.286,
+      "record": "1496-1479-1"
+    },
+    "Torkoal": {
+      "rank": 26,
+      "usage": 0,
+      "winRate": 48.236,
+      "record": "1613-1731"
+    },
+    "Froslass": {
+      "rank": 27,
+      "usage": 0,
+      "winRate": 55.651,
+      "record": "3504-2792-4"
+    },
+    "Talonflame": {
+      "rank": 28,
+      "usage": 0,
+      "winRate": 48.025,
+      "record": "1799-1947"
+    },
+    "Rotom-Wash": {
+      "rank": 29,
+      "usage": 0,
+      "winRate": 47.357,
+      "record": "2507-2787-3"
+    },
+    "Glimmora": {
+      "rank": 30,
+      "usage": 0,
+      "winRate": 50.143,
+      "record": "2453-2439-2"
+    },
+    "Delphox": {
+      "rank": 31,
+      "usage": 0,
+      "winRate": 51.291,
+      "record": "2342-2224-3"
+    },
+    "Dragonite": {
+      "rank": 32,
+      "usage": 0,
+      "winRate": 53.809,
+      "record": "3247-2787-5"
+    },
+    "Tyranitar": {
+      "rank": 33,
+      "usage": 0,
+      "winRate": 48.363,
+      "record": "2378-2539-2"
+    },
+    "Blastoise": {
+      "rank": 34,
+      "usage": 0,
+      "winRate": 49.705,
+      "record": "1096-1109"
+    },
+    "Milotic": {
+      "rank": 35,
+      "usage": 0,
+      "winRate": 45.495,
+      "record": "1433-1717-2"
+    },
+    "Venusaur": {
+      "rank": 36,
+      "usage": 0,
+      "winRate": 49.334,
+      "record": "3072-3155-4"
+    },
+    "Hydreigon": {
+      "rank": 37,
+      "usage": 0,
+      "winRate": 50.64,
+      "record": "1544-1505"
+    },
+    "Politoed": {
+      "rank": 38,
+      "usage": 0,
+      "winRate": 51.1,
+      "record": "1323-1266-3"
+    },
+    "Tsareena": {
+      "rank": 39,
+      "usage": 0,
+      "winRate": 46.248,
+      "record": "474-551-1"
+    },
+    "Gengar": {
+      "rank": 40,
+      "usage": 0,
+      "winRate": 50.577,
+      "record": "1620-1583-3"
+    },
+    "Kangaskhan": {
+      "rank": 41,
+      "usage": 0,
+      "winRate": 48.374,
+      "record": "1324-1413"
+    },
+    "Pyroar": {
+      "rank": 42,
+      "usage": 0,
+      "winRate": 52.721,
+      "record": "435-390-2"
+    },
+    "Gardevoir": {
+      "rank": 43,
+      "usage": 0,
+      "winRate": 48.647,
+      "record": "953-1006"
+    },
+    "Corviknight": {
+      "rank": 44,
+      "usage": 0,
+      "winRate": 49.361,
+      "record": "1622-1664"
+    },
+    "Scrafty": {
+      "rank": 45,
+      "usage": 0,
+      "winRate": 45.439,
+      "record": "264-317"
+    },
+    "Vivillon": {
+      "rank": 46,
+      "usage": 0,
+      "winRate": 54.187,
+      "record": "1443-1220"
+    },
+    "Eelektross": {
+      "rank": 47,
+      "usage": 0,
+      "winRate": 39.839,
+      "record": "198-299"
+    },
+    "Scovillain": {
+      "rank": 48,
+      "usage": 0,
+      "winRate": 57.63,
+      "record": "2087-1534-3"
+    },
+    "Primarina": {
+      "rank": 49,
+      "usage": 0,
+      "winRate": 42.747,
+      "record": "498-667"
+    },
+    "Ceruledge": {
+      "rank": 50,
+      "usage": 0,
+      "winRate": 54.056,
+      "record": "693-589"
     }
   }
 }

@@ -18,6 +18,7 @@ const file = join(dataDirPath(), `pikalytics.${CHAMPIONS_PIKA_FORMAT}.json`);
 const data = JSON.parse(readFileSync(file, 'utf8')) as PikalyticsFile;
 const names = data.topPokemon.slice(0, TOP);
 const entry = (n: string): PikalyticsEntry | undefined => data.pokemon[n];
+const rankOf = (n: string) => data.ranking?.[n];
 
 // --- Freshness verdict ----------------------------------------------------
 // The /ai header's "Data Date" field is unreliable (templated). The real proof
@@ -34,10 +35,11 @@ console.log(`## Top ${TOP} by usage rank (usage% is N/A in M-B; win rate shown)`
 for (const n of names) {
   const e = entry(n);
   if (!e) continue;
-  const wr = e.winRate != null ? `${e.winRate.toFixed(1)}% WR` : `${e.usage}% usage`;
+  const r = rankOf(n);
+  const wr = r?.winRate != null ? `${r.winRate.toFixed(1)}% WR` : `${r?.usage ?? 0}% usage`;
   const item = e.items[0]?.name ?? '?';
   const ability = e.abilities[0]?.name ?? '?';
-  console.log(`  ${String(e.rank).padStart(2)}. ${n.padEnd(18)} ${wr.padEnd(11)} ${ability} @ ${item}`);
+  console.log(`  ${String(r?.rank ?? names.indexOf(n) + 1).padStart(2)}. ${n.padEnd(18)} ${wr.padEnd(11)} ${ability} @ ${item}`);
 }
 
 // --- Mechanic prevalence --------------------------------------------------

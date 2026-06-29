@@ -53,10 +53,10 @@ async function doFetch(species: string): Promise<void> {
     const res = await fetch(url, { headers: { 'User-Agent': 'pokechamps-tui/0.1 (background-fetch)' } });
     if (!res.ok) { failed.add(species); return; }
     const md = await res.text();
-    const parsed = parseEntry(md, species);
-    // Background-fetched entries get rank=0 (unranked relative to top-10)
-    // and usage=0; the static top-10 entries keep their original ranks.
-    const entry: PikalyticsEntry = { rank: 0, usage: 0, ...parsed };
+    // parseEntry yields pure SET data — the same shape the warm-up stores. No
+    // ranking is fabricated here (it lives in the index the warm-up owns), so a
+    // live fetch never strips or stubs the curated file.
+    const entry = parseEntry(md, species);
     mergeEntry(species, entry);
     persistEntry(species, entry);
   } catch {
@@ -65,12 +65,12 @@ async function doFetch(species: string): Promise<void> {
 }
 
 // Persist on-the-fly fetches to a SEPARATE live SIDECAR — NEVER the canonical
-// warm-up file (`pikalytics.<fmt>.json`), which only refresh-pikalytics owns. The
-// live entries are sparse (parsed per-species, no index-derived rank/usage/winRate/
-// record), so merging them into the curated file stripped those fields and added
-// zero-usage stubs ("live games adding differently to the warm-up"). The sidecar
-// keeps the cross-session cache without ever mutating the curated data; the load
-// path (pikalytics.ts) merges it with the canonical file ALWAYS winning.
+// warm-up file (`pikalytics.<fmt>.json`), which only refresh-pikalytics owns.
+// Live entries are now the SAME shape as the warm-up's (pure set data; ranking
+// lives apart in the canonical file), so this is purely a git-hygiene boundary:
+// it keeps live-learned species out of the tracked curated dump rather than
+// patching a schema mismatch. The load path (pikalytics.ts) merges the sidecar
+// with the canonical file ALWAYS winning.
 // Atomic-ish write: read → merge → write temp → rename.
 function persistEntry(species: string, entry: PikalyticsEntry): void {
   try {

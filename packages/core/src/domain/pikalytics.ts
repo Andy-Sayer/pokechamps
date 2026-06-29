@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { PikalyticsFile, PikalyticsEntry } from '../scripts/refresh-pikalytics.js';
+import type { PikalyticsFile, PikalyticsEntry, PikalyticsRanking } from '../scripts/refresh-pikalytics.js';
 import { loadFormat, toId, CHAMPIONS_PIKA_FORMAT } from './data.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -69,6 +69,21 @@ export function pikalyticsTopPokemon(): string[] {
   return load()?.topPokemon ?? [];
 }
 
+// Format-level ranking for a species (rank/usage/winRate/record). Lives apart
+// from the set data because it comes from the format index, which the live
+// per-species fetch can't see — so a live-only species returns null (unranked),
+// which callers treat as "off the top list".
+export function getRanking(speciesName: string): PikalyticsRanking | null {
+  const data = load();
+  if (!data?.ranking) return null;
+  if (data.ranking[speciesName]) return data.ranking[speciesName]!;
+  const id = toId(speciesName);
+  for (const [name, r] of Object.entries(data.ranking)) {
+    if (toId(name) === id) return r;
+  }
+  return null;
+}
+
 // True when at least one Pikalytics entry is loaded — UI can use this to
 // decide whether to surface "(no data — run npm run refresh-pikalytics)" hints.
 export function pikalyticsAvailable(): boolean {
@@ -80,14 +95,9 @@ export function pikalyticsAvailable(): boolean {
 export function mergeEntry(speciesName: string, entry: PikalyticsEntry): void {
   const data = load();
   if (data) {
-    // The on-the-fly fetcher's per-species parse has no INDEX-derived fields
-    // (rank/usage/winRate/record live only in the format index), so preserve any
-    // KNOWN values — otherwise re-scouting a top mon clobbers its ranking to 0
-    // and strips the win-rate/record the offline refresh captured.
-    const prev = data.pokemon[speciesName];
-    data.pokemon[speciesName] = prev
-      ? { ...entry, rank: prev.rank || entry.rank, usage: prev.usage || entry.usage, winRate: entry.winRate ?? prev.winRate, record: entry.record ?? prev.record }
-      : entry;
+    // Entries are pure SET data now (ranking lives in data.ranking, untouched
+    // here), so a live fetch slots in directly — no field-preservation needed.
+    data.pokemon[speciesName] = entry;
   } else {
     // No cache file yet — seed an in-memory one so subsequent gets work.
     cache = {

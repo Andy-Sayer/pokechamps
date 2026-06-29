@@ -55,8 +55,6 @@
   ],
   "pokemon": {
     "Sneasler": {
-      "rank": 1,
-      "usage": 43.8,
       "baseStats": {
         "hp": 80,
         "atk": 130,
@@ -297,8 +295,6 @@
       ]
     },
     "Garchomp": {
-      "rank": 2,
-      "usage": 40.4,
       "baseStats": {
         "hp": 108,
         "atk": 130,
@@ -555,8 +551,6 @@
       ]
     },
     "Kingambit": {
-      "rank": 3,
-      "usage": 38.21,
       "baseStats": {
         "hp": 100,
         "atk": 135,
@@ -785,8 +779,6 @@
       ]
     },
     "Basculegion": {
-      "rank": 4,
-      "usage": 38.16,
       "baseStats": {
         "hp": 120,
         "atk": 112,
@@ -1027,8 +1019,6 @@
       ]
     },
     "Incineroar": {
-      "rank": 5,
-      "usage": 35.84,
       "baseStats": {
         "hp": 95,
         "atk": 115,
@@ -1277,8 +1267,6 @@
       ]
     },
     "Sinistcha": {
-      "rank": 6,
-      "usage": 26.87,
       "baseStats": {
         "hp": 71,
         "atk": 60,
@@ -1531,8 +1519,6 @@
       ]
     },
     "Floette-Mega": {
-      "rank": 7,
-      "usage": 21.37,
       "baseStats": {
         "hp": 74,
         "atk": 85,
@@ -1624,8 +1610,6 @@
       "featuredSets": []
     },
     "Charizard-Mega-Y": {
-      "rank": 8,
-      "usage": 17.86,
       "baseStats": {
         "hp": 78,
         "atk": 104,
@@ -1717,8 +1701,6 @@
       "featuredSets": []
     },
     "Pelipper": {
-      "rank": 9,
-      "usage": 15.69,
       "baseStats": {
         "hp": 60,
         "atk": 50,
@@ -1959,8 +1941,6 @@
       ]
     },
     "Aerodactyl": {
-      "rank": 10,
-      "usage": 15.26,
       "baseStats": {
         "hp": 80,
         "atk": 105,
@@ -2189,8 +2169,6 @@
       ]
     },
     "Archaludon": {
-      "rank": 11,
-      "usage": 13.81,
       "baseStats": {
         "hp": 90,
         "atk": 105,
@@ -2431,8 +2409,6 @@
       ]
     },
     "Rotom-Wash": {
-      "rank": 12,
-      "usage": 13.46,
       "baseStats": {
         "hp": 50,
         "atk": 65,
@@ -2669,8 +2645,6 @@
       ]
     },
     "Farigiraf": {
-      "rank": 13,
-      "usage": 13.23,
       "baseStats": {
         "hp": 120,
         "atk": 90,
@@ -2927,8 +2901,6 @@
       ]
     },
     "Milotic": {
-      "rank": 14,
-      "usage": 10.83,
       "baseStats": {
         "hp": 95,
         "atk": 60,
@@ -3137,8 +3109,6 @@
       ]
     },
     "Whimsicott": {
-      "rank": 15,
-      "usage": 10.64,
       "baseStats": {
         "hp": 60,
         "atk": 67,
@@ -3379,8 +3349,6 @@
       ]
     },
     "Froslass-Mega": {
-      "rank": 16,
-      "usage": 9.37,
       "baseStats": {
         "hp": 70,
         "atk": 80,
@@ -3472,8 +3440,6 @@
       "featuredSets": []
     },
     "Aegislash": {
-      "rank": 17,
-      "usage": 8.32,
       "baseStats": {
         "hp": 60,
         "atk": 50,
@@ -3698,8 +3664,6 @@
       ]
     },
     "Sylveon": {
-      "rank": 18,
-      "usage": 8.01,
       "baseStats": {
         "hp": 95,
         "atk": 65,
@@ -3936,8 +3900,6 @@
       ]
     },
     "Aerodactyl-Mega": {
-      "rank": 19,
-      "usage": 7.94,
       "baseStats": {
         "hp": 80,
         "atk": 135,
@@ -4029,8 +3991,6 @@
       "featuredSets": []
     },
     "Talonflame": {
-      "rank": 20,
-      "usage": 7.57,
       "baseStats": {
         "hp": 78,
         "atk": 81,
@@ -4287,8 +4247,6 @@
       ]
     },
     "Tyranitar-Mega": {
-      "rank": 21,
-      "usage": 7.08,
       "baseStats": {
         "hp": 100,
         "atk": 164,
@@ -4388,8 +4346,6 @@
       "featuredSets": []
     },
     "Maushold": {
-      "rank": 22,
-      "usage": 6.85,
       "baseStats": {
         "hp": 74,
         "atk": 75,
@@ -4590,8 +4546,6 @@
       ]
     },
     "Delphox-Mega": {
-      "rank": 23,
-      "usage": 6.51,
       "baseStats": {
         "hp": 75,
         "atk": 69,
@@ -4695,8 +4649,6 @@
       "featuredSets": []
     },
     "Gengar-Mega": {
-      "rank": 24,
-      "usage": 6.47,
       "baseStats": {
         "hp": 60,
         "atk": 65,
@@ -4800,8 +4752,6 @@
       "featuredSets": []
     },
     "Corviknight": {
-      "rank": 25,
-      "usage": 5.93,
       "baseStats": {
         "hp": 98,
         "atk": 87,
@@ -5026,8 +4976,6 @@
       ]
     },
     "Dragonite-Mega": {
-      "rank": 26,
-      "usage": 5.52,
       "baseStats": {
         "hp": 91,
         "atk": 124,
@@ -5131,8 +5079,6 @@
       "featuredSets": []
     },
     "Torkoal": {
-      "rank": 27,
-      "usage": 5.29,
       "baseStats": {
         "hp": 70,
         "atk": 85,
@@ -5289,8 +5235,6 @@
       ]
     },
     "Meganium-Mega": {
-      "rank": 28,
-      "usage": 5.28,
       "baseStats": {
         "hp": 80,
         "atk": 92,
@@ -5378,8 +5322,6 @@
       "featuredSets": []
     },
     "Scovillain-Mega": {
-      "rank": 29,
-      "usage": 4.82,
       "baseStats": {
         "hp": 65,
         "atk": 138,
@@ -5479,8 +5421,6 @@
       "featuredSets": []
     },
     "Blastoise-Mega": {
-      "rank": 30,
-      "usage": 4.82,
       "baseStats": {
         "hp": 79,
         "atk": 103,
@@ -5580,8 +5520,6 @@
       "featuredSets": []
     },
     "Venusaur": {
-      "rank": 31,
-      "usage": 4.74,
       "baseStats": {
         "hp": 80,
         "atk": 82,
@@ -5758,8 +5696,6 @@
       ]
     },
     "Excadrill": {
-      "rank": 32,
-      "usage": 4.67,
       "baseStats": {
         "hp": 110,
         "atk": 135,
@@ -5968,8 +5904,6 @@
       ]
     },
     "Kangaskhan-Mega": {
-      "rank": 33,
-      "usage": 4.41,
       "baseStats": {
         "hp": 105,
         "atk": 125,
@@ -6073,8 +6007,6 @@
       "featuredSets": []
     },
     "Kommo-o": {
-      "rank": 34,
-      "usage": 4.38,
       "baseStats": {
         "hp": 75,
         "atk": 110,
@@ -6323,8 +6255,6 @@
       ]
     },
     "Primarina": {
-      "rank": 35,
-      "usage": 4.34,
       "baseStats": {
         "hp": 80,
         "atk": 74,
@@ -6501,8 +6431,6 @@
       ]
     },
     "Gardevoir-Mega": {
-      "rank": 36,
-      "usage": 4.17,
       "baseStats": {
         "hp": 68,
         "atk": 85,
@@ -6606,8 +6534,6 @@
       "featuredSets": []
     },
     "Sableye": {
-      "rank": 37,
-      "usage": 3.77,
       "baseStats": {
         "hp": 50,
         "atk": 75,
@@ -6836,8 +6762,6 @@
       ]
     },
     "Dragonite": {
-      "rank": 38,
-      "usage": 3.72,
       "baseStats": {
         "hp": 91,
         "atk": 134,
@@ -7054,8 +6978,6 @@
       ]
     },
     "Scizor-Mega": {
-      "rank": 39,
-      "usage": 3.72,
       "baseStats": {
         "hp": 70,
         "atk": 150,
@@ -7147,8 +7069,6 @@
       "featuredSets": []
     },
     "Tyranitar": {
-      "rank": 40,
-      "usage": 3.71,
       "baseStats": {
         "hp": 100,
         "atk": 134,
@@ -7329,8 +7249,6 @@
       ]
     },
     "Politoed": {
-      "rank": 41,
-      "usage": 3.31,
       "baseStats": {
         "hp": 90,
         "atk": 75,
@@ -7579,8 +7497,6 @@
       ]
     },
     "Ninetales-Alola": {
-      "rank": 42,
-      "usage": 3.15,
       "baseStats": {
         "hp": 73,
         "atk": 67,
@@ -7821,8 +7737,6 @@
       ]
     },
     "Venusaur-Mega": {
-      "rank": 43,
-      "usage": 3.14,
       "baseStats": {
         "hp": 80,
         "atk": 100,
@@ -7918,8 +7832,6 @@
       "featuredSets": []
     },
     "Rotom-Heat": {
-      "rank": 44,
-      "usage": 2.73,
       "baseStats": {
         "hp": 50,
         "atk": 65,
@@ -8084,8 +7996,6 @@
       ]
     },
     "Lopunny-Mega": {
-      "rank": 45,
-      "usage": 2.57,
       "baseStats": {
         "hp": 65,
         "atk": 136,
@@ -8189,8 +8099,6 @@
       "featuredSets": []
     },
     "Dragapult": {
-      "rank": 46,
-      "usage": 2.35,
       "baseStats": {
         "hp": 88,
         "atk": 120,
@@ -8363,8 +8271,6 @@
       ]
     },
     "Aggron-Mega": {
-      "rank": 47,
-      "usage": 2.33,
       "baseStats": {
         "hp": 70,
         "atk": 140,
@@ -8456,8 +8362,6 @@
       "featuredSets": []
     },
     "Hydreigon": {
-      "rank": 48,
-      "usage": 2.23,
       "baseStats": {
         "hp": 92,
         "atk": 105,
@@ -8694,8 +8598,6 @@
       ]
     },
     "Palafin": {
-      "rank": 49,
-      "usage": 2.09,
       "baseStats": {
         "hp": 100,
         "atk": 70,
@@ -8880,8 +8782,6 @@
       ]
     },
     "Glimmora-Mega": {
-      "rank": 50,
-      "usage": 2.07,
       "baseStats": {
         "hp": 83,
         "atk": 90,
@@ -8973,8 +8873,6 @@
       "featuredSets": []
     },
     "Abomasnow": {
-      "rank": 0,
-      "usage": 0,
       "baseStats": {
         "hp": 90,
         "atk": 92,
@@ -8990,8 +8888,6 @@
       "featuredSets": []
     },
     "Charizard": {
-      "rank": 0,
-      "usage": 0,
       "baseStats": {
         "hp": 78,
         "atk": 84,
@@ -9123,8 +9019,6 @@
       "featuredSets": []
     },
     "Absol": {
-      "rank": 0,
-      "usage": 0,
       "baseStats": {
         "hp": 65,
         "atk": 130,
@@ -9140,8 +9034,6 @@
       "featuredSets": []
     },
     "Blastoise": {
-      "rank": 0,
-      "usage": 0,
       "baseStats": {
         "hp": 79,
         "atk": 83,
@@ -9281,8 +9173,6 @@
       "featuredSets": []
     },
     "Aggron": {
-      "rank": 0,
-      "usage": 0,
       "baseStats": {
         "hp": 70,
         "atk": 110,
@@ -9298,8 +9188,6 @@
       "featuredSets": []
     },
     "Kleavor": {
-      "rank": 0,
-      "usage": 0,
       "baseStats": {
         "hp": 70,
         "atk": 135,
@@ -9476,8 +9364,6 @@
       ]
     },
     "Froslass": {
-      "rank": 0,
-      "usage": 0,
       "baseStats": {
         "hp": 70,
         "atk": 80,
@@ -9597,8 +9483,6 @@
       "featuredSets": []
     },
     "Gengar": {
-      "rank": 0,
-      "usage": 0,
       "baseStats": {
         "hp": 60,
         "atk": 65,
@@ -9710,8 +9594,6 @@
       "featuredSets": []
     },
     "Manectric": {
-      "rank": 0,
-      "usage": 0,
       "baseStats": {
         "hp": 70,
         "atk": 75,
@@ -9839,8 +9721,6 @@
       "featuredSets": []
     },
     "Hatterene": {
-      "rank": 0,
-      "usage": 0,
       "baseStats": {
         "hp": 57,
         "atk": 90,
@@ -9997,8 +9877,6 @@
       ]
     },
     "Orthworm": {
-      "rank": 0,
-      "usage": 0,
       "baseStats": {
         "hp": 70,
         "atk": 85,
@@ -10119,8 +9997,6 @@
       ]
     },
     "Scizor": {
-      "rank": 0,
-      "usage": 0,
       "baseStats": {
         "hp": 70,
         "atk": 130,
@@ -10275,6 +10151,256 @@
           ]
         }
       ]
+    }
+  },
+  "ranking": {
+    "Sneasler": {
+      "rank": 1,
+      "usage": 43.8
+    },
+    "Garchomp": {
+      "rank": 2,
+      "usage": 40.4
+    },
+    "Kingambit": {
+      "rank": 3,
+      "usage": 38.21
+    },
+    "Basculegion": {
+      "rank": 4,
+      "usage": 38.16
+    },
+    "Incineroar": {
+      "rank": 5,
+      "usage": 35.84
+    },
+    "Sinistcha": {
+      "rank": 6,
+      "usage": 26.87
+    },
+    "Floette-Mega": {
+      "rank": 7,
+      "usage": 21.37
+    },
+    "Charizard-Mega-Y": {
+      "rank": 8,
+      "usage": 17.86
+    },
+    "Pelipper": {
+      "rank": 9,
+      "usage": 15.69
+    },
+    "Aerodactyl": {
+      "rank": 10,
+      "usage": 15.26
+    },
+    "Archaludon": {
+      "rank": 11,
+      "usage": 13.81
+    },
+    "Rotom-Wash": {
+      "rank": 12,
+      "usage": 13.46
+    },
+    "Farigiraf": {
+      "rank": 13,
+      "usage": 13.23
+    },
+    "Milotic": {
+      "rank": 14,
+      "usage": 10.83
+    },
+    "Whimsicott": {
+      "rank": 15,
+      "usage": 10.64
+    },
+    "Froslass-Mega": {
+      "rank": 16,
+      "usage": 9.37
+    },
+    "Aegislash": {
+      "rank": 17,
+      "usage": 8.32
+    },
+    "Sylveon": {
+      "rank": 18,
+      "usage": 8.01
+    },
+    "Aerodactyl-Mega": {
+      "rank": 19,
+      "usage": 7.94
+    },
+    "Talonflame": {
+      "rank": 20,
+      "usage": 7.57
+    },
+    "Tyranitar-Mega": {
+      "rank": 21,
+      "usage": 7.08
+    },
+    "Maushold": {
+      "rank": 22,
+      "usage": 6.85
+    },
+    "Delphox-Mega": {
+      "rank": 23,
+      "usage": 6.51
+    },
+    "Gengar-Mega": {
+      "rank": 24,
+      "usage": 6.47
+    },
+    "Corviknight": {
+      "rank": 25,
+      "usage": 5.93
+    },
+    "Dragonite-Mega": {
+      "rank": 26,
+      "usage": 5.52
+    },
+    "Torkoal": {
+      "rank": 27,
+      "usage": 5.29
+    },
+    "Meganium-Mega": {
+      "rank": 28,
+      "usage": 5.28
+    },
+    "Scovillain-Mega": {
+      "rank": 29,
+      "usage": 4.82
+    },
+    "Blastoise-Mega": {
+      "rank": 30,
+      "usage": 4.82
+    },
+    "Venusaur": {
+      "rank": 31,
+      "usage": 4.74
+    },
+    "Excadrill": {
+      "rank": 32,
+      "usage": 4.67
+    },
+    "Kangaskhan-Mega": {
+      "rank": 33,
+      "usage": 4.41
+    },
+    "Kommo-o": {
+      "rank": 34,
+      "usage": 4.38
+    },
+    "Primarina": {
+      "rank": 35,
+      "usage": 4.34
+    },
+    "Gardevoir-Mega": {
+      "rank": 36,
+      "usage": 4.17
+    },
+    "Sableye": {
+      "rank": 37,
+      "usage": 3.77
+    },
+    "Dragonite": {
+      "rank": 38,
+      "usage": 3.72
+    },
+    "Scizor-Mega": {
+      "rank": 39,
+      "usage": 3.72
+    },
+    "Tyranitar": {
+      "rank": 40,
+      "usage": 3.71
+    },
+    "Politoed": {
+      "rank": 41,
+      "usage": 3.31
+    },
+    "Ninetales-Alola": {
+      "rank": 42,
+      "usage": 3.15
+    },
+    "Venusaur-Mega": {
+      "rank": 43,
+      "usage": 3.14
+    },
+    "Rotom-Heat": {
+      "rank": 44,
+      "usage": 2.73
+    },
+    "Lopunny-Mega": {
+      "rank": 45,
+      "usage": 2.57
+    },
+    "Dragapult": {
+      "rank": 46,
+      "usage": 2.35
+    },
+    "Aggron-Mega": {
+      "rank": 47,
+      "usage": 2.33
+    },
+    "Hydreigon": {
+      "rank": 48,
+      "usage": 2.23
+    },
+    "Palafin": {
+      "rank": 49,
+      "usage": 2.09
+    },
+    "Glimmora-Mega": {
+      "rank": 50,
+      "usage": 2.07
+    },
+    "Abomasnow": {
+      "rank": 0,
+      "usage": 0
+    },
+    "Charizard": {
+      "rank": 0,
+      "usage": 0
+    },
+    "Absol": {
+      "rank": 0,
+      "usage": 0
+    },
+    "Blastoise": {
+      "rank": 0,
+      "usage": 0
+    },
+    "Aggron": {
+      "rank": 0,
+      "usage": 0
+    },
+    "Kleavor": {
+      "rank": 0,
+      "usage": 0
+    },
+    "Froslass": {
+      "rank": 0,
+      "usage": 0
+    },
+    "Gengar": {
+      "rank": 0,
+      "usage": 0
+    },
+    "Manectric": {
+      "rank": 0,
+      "usage": 0
+    },
+    "Hatterene": {
+      "rank": 0,
+      "usage": 0
+    },
+    "Orthworm": {
+      "rank": 0,
+      "usage": 0
+    },
+    "Scizor": {
+      "rank": 0,
+      "usage": 0
     }
   }
 }
