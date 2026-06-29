@@ -181,6 +181,7 @@ function App() {
     return <OpponentLeadPicker
       stores={stores}
       opponent={route.opponent}
+      myTeam={route.myTeam}
       onConfirm={leadIndices => {
         const match: Match = {
           id: `${Date.now()}`,

@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { PokemonSet, OpponentEntry } from '@pokechamps/core/domain/types.js';
-import { scoreBrings, matchupGrid, predictOppLeads, type BringScore } from '@pokechamps/core/domain/bring.js';
+import { scoreBrings, matchupGrid, predictOppLeads, defaultOpponentSet, type BringScore } from '@pokechamps/core/domain/bring.js';
+import { predictOppBring } from '@pokechamps/core/domain/oppBringPredict.js';
 import { tacticLabel } from '@pokechamps/core/domain/tactics.js';
 import { speciesTypes } from '@pokechamps/core/domain/typechart.js';
 import { pikalyticsAvailable } from '@pokechamps/core/domain/pikalytics.js';
@@ -68,6 +69,13 @@ export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: B
   // Lead prediction runs full learnset-potential tactic detection — memoized
   // so it doesn't re-run on every keystroke render.
   const oppLead = useMemo(() => predictOppLeads(opponent), [opponent]);
+  // Secondary task: what 4 the opponent likely brings vs OUR team (scored with the
+  // same technique as our own bring, sides flipped) — so we choose knowing what to
+  // expect. Species-only at preview → default sets.
+  const oppBringPred = useMemo(
+    () => (opponent.length >= 4 ? predictOppBring(opponent.map(e => defaultOpponentSet(e, 50)), myTeam, 2) : null),
+    [opponent, myTeam],
+  );
 
   // Effective selection: custom picks (when valid) override the suggestion
   // cursor. Used for the matchup preview and Enter-to-confirm.
@@ -203,6 +211,11 @@ export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: B
             </Box>
           ) : (
             <>
+              {oppBringPred && (
+                <Text color="magenta">
+                  Likely opp bring: <Text bold>{oppBringPred.likely.map(m => m.species).join('/')}</Text> <Text dimColor>(conf {Math.round(oppBringPred.confidence * 100)}%{oppBringPred.alternatives[0] ? ` · also ${oppBringPred.alternatives[0].bring.map(m => m.species).join('/')}` : ''})</Text>
+                </Text>
+              )}
               {oppLead && (
                 <Text color="magenta">
                   Likely opp lead: {oppLead.species[0]} + {oppLead.species[1]} <Text dimColor>— their strongest pair combo: {oppLead.tactic.name} ({tacticLabel(oppLead.tactic)})</Text>
