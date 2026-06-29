@@ -90,9 +90,22 @@ bring (see [[project_mb_team]]). **Corpus grown 2026-06-28:** a batch OTS **Bo3*
 rows** (full OTS 6 + bring of 4 + decided; 437/442 rows are full OTS teams), up
 from 24. Trainable for a baseline. (Showdown `search.json` has no pagination, so
 this is ~the recent list per format — repeat over days to grow further.)
-**Next (step 3):** a baseline bring/outcome model + held-out eval — the test of
-"does a learned bring beat `scoreBrings`?" (win-prediction accuracy on a held-out
-split, vs a scoreBrings-higher-score-wins baseline + the 50% floor).
+**Baseline model (step 3) ✅ built — honest NEGATIVE result.** `mb-bring-model.ts`
+(logistic regression over (my−opp) bring stat-sum features, game-level split):
+train ~56% ≈ majority, test 72% (small-sample noise on 81 rows), BST-heuristic
+28% (anti-correlated — restricted-legend formats make BST-diff meaningless). So
+crude bring stat-sums DON'T predict the winner — the same lesson as the
+`scoreBrings` calibration (28% ceiling): **bring quality isn't in simple aggregate
+features**; VGC outcomes are dominated by play + specific matchups. NOT wired.
+
+**Where this leaves it.** Two experiments now agree the easy path fails. A
+genuinely smart LIVE bring model needs EITHER (a) a much bigger corpus (thousands
+of OTS games, fetched over time — `search.json` has no pagination) + RICH
+matchup-aware features (per-opp type/speed/role coverage, synergy, not stat
+sums), a real ML investment; OR (b) accept that exact bring-SEARCH (offline,
+already shipped via `--allBrings`) is the right tool where the opp's six is known,
+and the live preview heuristic has inherent limits. The full pipeline +
+harnesses are committed for whenever (a) is resourced.
 
 ## The build (when picked up — incremental, each step shippable)
 
