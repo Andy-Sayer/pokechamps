@@ -19,7 +19,12 @@ import { NEUTRAL_FIELD, type PokemonSet } from '../domain/types.js';
 const arg = process.argv[2] ?? '2';
 const GAMES = parseInt(process.argv[3] ?? '4', 10);
 const team = JSON.parse(readFileSync(join(dataDirPath(), 'my-teams', 'anti-meta-mb.json'), 'utf8')) as PokemonSet[];
-const opp = metaTeams(loadPikaData(), 12, 3).find(o => o.anchor.toLowerCase() === arg.toLowerCase()) ?? metaTeams(loadPikaData(), 12, 3)[parseInt(arg, 10)] ?? metaTeams(loadPikaData(), 12, 3)[2]!;
+// `custom` mode: use our HAND-TUNED team as the opponent → inference must recover
+// NON-Pikalytics spreads, isolating the damage signal from the shared-prior confound.
+const metas = metaTeams(loadPikaData(), 12, 3);
+const opp = arg === 'custom'
+  ? { anchor: 'custom-spreads (anti-meta-mb)', sets: team }
+  : (metas.find(o => o.anchor.toLowerCase() === arg.toLowerCase()) ?? metas[parseInt(arg, 10)] ?? metas[2]!);
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 const mineBy = new Map(team.map(s => [norm(s.species), s]));
 const oppBy = new Map(opp.sets.map(s => [norm(s.species), s]));
