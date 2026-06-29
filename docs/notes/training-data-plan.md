@@ -1,5 +1,17 @@
 # Training-data plan — historic games → a purpose-trained model
 
+> **PIVOT (2026-06-28): native SIMULATION replaced replay-scraping as the primary
+> data source.** The scraped gen9 replay corpus was a proxy (no Champions megas,
+> hidden EV spreads) and the baseline proved bring-quality isn't in simple features.
+> Then we discovered `@pkmn/sim` 0.10.11 simulates Champions **natively** (megas +
+> custom abilities — see `project_sim_champions_native`), so we can PLAY matchups
+> out on the exact engine with KNOWN spreads (`domain/simPlayout.ts` —
+> `project_sim_playout`). Current direction: use played-out **win-rates** directly
+> in the bring/team decision (gated by the Step-0 validation, `sim-playout-validate.ts`,
+> on whether they beat the static opening-search score). A LEARNED model distilled
+> from these simulated games (Tasks A-C below) is now a DEFERRED follow-on, only if
+> the live-preview bring decision needs a fast approximation of the slow playout.
+
 Fleshes out [`future-directions.md`](future-directions.md) §1. **Guardrails
 (standing AI direction):** a purpose-trained model, **not** an LLM; **opt-in**;
 **advisory** — it augments or sits beside the deterministic search, never

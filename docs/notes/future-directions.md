@@ -19,6 +19,12 @@ training-data work (§1) and the standing roadmap. Build the rest first.
 > (record schema grounded in `Match`/`SearchResult`/`BattleTranscript`, data
 > sources, the first target task = bring/outcome value, the incremental build).
 > The summary below stands; the plan doc is the detail.
+>
+> **PIVOT (2026-06-28):** the data source is now native SIMULATION on the exact
+> engine (`@pkmn/sim` 0.10.11 turned out to simulate Champions megas natively), not
+> scraped gen9 replays (a hidden-spread proxy). We play matchups out (`simPlayout`)
+> for KNOWN-spread, Champions-native outcomes; a learned model distilled from them
+> is deferred behind directly using played-out win-rates in the decision.
 
 **Idea.** Accumulate a corpus of *real* games (state → action → outcome) and use
 it to train a purpose-built model for the decisions the engine currently makes
