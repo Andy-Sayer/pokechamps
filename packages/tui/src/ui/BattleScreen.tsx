@@ -3103,129 +3103,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   return (
     <Box flexDirection="column" padding={1}>
       <Text bold color="cyan">Battle — turn {match.turns.length + 1}{draftActions.length ? ' (composing)' : ''}</Text>
-      {!match.outcome && bestSearch && bestSearch.plays.length > 0 && (() => {
-        const v = bestSearch.verdict;
-        // "forced" only when the search PROVED it (worst-case rolls, survival
-        // items, all opp mons known). Otherwise a hedged, number-driven read.
-        const wc = bestSearch.winChance;
-        let vText: string;
-        let vColor: string;
-        if (bestSearch.forced) {
-          vText = v === 'winning' ? 'forced win' : 'forced loss';
-          vColor = v === 'winning' ? 'green' : 'red';
-        } else if (wc != null) {
-          vText = `~${Math.round(wc * 100)}% to win`;
-          vColor = wc >= 0.6 ? 'green' : wc <= 0.35 ? 'red' : 'yellow';
-        } else {
-          vText = v === 'winning' ? 'likely win' : v === 'losing' ? 'likely loss' : 'even';
-          vColor = v === 'winning' ? 'green' : v === 'losing' ? 'red' : 'yellow';
-        }
-        const turns = bestSearch.depth;
-        // Confidence chip: turns ahead + an HONEST, scope-derived breadth report
-        // (lines explored this ply, candidate spreads behind the cells, mega
-        // combos, and the non-attack action kinds ACTUALLY in the tree — so it
-        // never claims "switches" until they're real nodes).
-        let conf = `${turns} turn${turns === 1 ? '' : 's'} ahead`;
-        const ex = bestSearch.explored;
-        if (ex) {
-          const parts: string[] = [];
-          const lines = ex.myActions * ex.oppActions;
-          if (lines > 1) parts.push(`${lines} lines/ply`);
-          if (ex.spreads > 1) parts.push(`${ex.spreads} spreads`);
-          if (ex.megaBranches > 1) parts.push(`mega ×${ex.megaBranches}`);
-          const extra = ex.actionClasses.filter(c => c !== 'attack');
-          if (extra.length) parts.push(`incl ${extra.join('/')}`);
-          if (parts.length) conf += ` · ${parts.join(' · ')}`;
-        }
-        const fmtPlays = (ps: typeof bestSearch.plays) => ps
-          .map(p => p.self ? `${p.mySpecies}→${p.move}` : `${p.mySpecies}→${p.move || '—'}→${p.targetSpecies}`)
-          .join(' · ');
-        const plays = fmtPlays(bestSearch.plays);
-        const mega = bestSearch.megaMon ? `mega ${bestSearch.megaMon} · ` : '';
-        // Pivotal assumptions behind the verdict (e.g. contingent-speed outspeed).
-        const whyText = (bestSearch.assumptions ?? []).map(a => a.text).join('; ');
-        // Break-points: damage cutpoints to watch against the real roll this turn.
-        const watchText = (bestSearch.breakpoints ?? []).map(b => {
-          const pct = b.prob != null ? ` ~${Math.round(b.prob * 100)}%` : '';
-          if (b.direction === 'ko') {
-            return `${b.move} on ${b.subject}:${pct} to OHKO${b.spreadNote ? ` (${b.spreadNote})` : ''}`;
-          }
-          return `${b.move} on ${b.subject}:${pct} → ${b.thenNote}`;
-        }).join(' · ');
-        // "How they beat us" — the opponent's minimizing reply (rendered losing).
-        const oppLineText = v === 'losing' && bestSearch.oppLine ? fmtPlays(bestSearch.oppLine) : '';
-        // "1D chess" — the opponent's flat, obvious greedy play (always shown).
-        const oneDChessText = bestSearch.obviousOppPlay ? fmtPlays(bestSearch.obviousOppPlay) : '';
-        // Compact risk breakdown: "label NN%", joined — labels are self-explanatory.
-        const riskText = bestSearch.risks
-          .map(r => `${r.label}${r.prob != null ? ` ${Math.round(r.prob * 100)}%` : ''}`)
-          .join(' · ');
-        // Mechanics in this position the fast search only approximates — surfaced
-        // so the verdict's blind spots are explicit (one example per class).
-        const unmodeledText = (bestSearch.unmodeled ?? [])
-          .map(u => `${u.label}${u.examples[0] ? ` (${u.examples[0]})` : ''}`)
-          .join(' · ');
-        // Hail Mary: dice rolls needed when verdict is losing but a win is possible.
-        const hm = bestSearch.hailMary;
-        let hmLine: string | null = null;
-        if (hm) {
-          if (hm.noRealisticOut) {
-            hmLine = '~lost — no realistic out';
-          } else {
-            // Single out: the headline ~% already states the odds — don't repeat
-            // it after the label. Multiple outs: show each one's % as a breakdown
-            // (the headline is their product).
-            const outText = hm.outs.length === 1
-              ? hm.outs[0]!.label
-              : hm.outs.map(o => `${o.label} (${Math.round(o.prob * 100)}%)`).join(' + ');
-            hmLine = `only out: ~${Math.round(hm.combined * 100)}% — ${outText}`;
-          }
-        }
-        // Whether any detail is hidden behind /why right now (drives the hint).
-        const hasDetail = !!(watchText || whyText || oppLineText || oneDChessText || unmodeledText || bestSearch.adapted);
-        return (
-          <Box flexDirection="column" borderStyle="round" borderColor={vColor} paddingX={1} marginTop={1}>
-            {/* PRIMARY: verdict headline, then the recommended play(s) in bold. */}
-            <Text>
-              <Text color="magenta" bold>⌁ best play</Text>  <Text color={vColor} bold>{vText}</Text>  <Text dimColor>· {conf}</Text>
-            </Text>
-            <Text>  {mega ? <Text color="cyan">{mega}</Text> : null}<Text bold>{plays}</Text></Text>
-            {/* ALWAYS-ON, decision-critical: risks, and (when losing) the only-out. */}
-            {riskText ? <Text><Text dimColor>  risks: </Text><Text color="yellow">{riskText}</Text></Text> : null}
-            {hmLine ? <Text color={v === 'losing' ? 'red' : 'yellow'} bold>  {hmLine}</Text> : null}
-            {/* ON-DEMAND (/why): the search internals. */}
-            {showWhy && watchText ? <Text dimColor>  watch: {watchText}</Text> : null}
-            {showWhy && whyText ? <Text dimColor>  why: {whyText}</Text> : null}
-            {showWhy && oppLineText ? <Text dimColor>  they win via: {oppLineText}</Text> : null}
-            {showWhy && oneDChessText ? <Text dimColor>  1D chess (opp likely): {oneDChessText}</Text> : null}
-            {showWhy && bestSearch.adapted ? <Text dimColor>  spread refined from observed damage</Text> : null}
-            {showWhy && unmodeledText ? <Text color="yellow">  ⚠ approximating: {unmodeledText} — <Text color="white">/exact</Text> for ground truth</Text> : null}
-            {!showWhy && hasDetail ? <Text dimColor>  /why for detail</Text> : null}
-          </Box>
-        );
-      })()}
-      {/* Stable placeholder so the hero region never flashes empty between logging
-          a turn and depth-1 settling (the search runs on a macrotask). */}
-      {!match.outcome && !bestSearch && (
-        <Box borderStyle="round" borderColor="gray" paddingX={1} marginTop={1}>
-          <Text dimColor>⌁ computing best play…</Text>
-        </Box>
-      )}
-      {/* "Work outwards" deep probe: a tentative narrow read several plies past what
-          full breadth can afford. Only shown when it sees DEEPER than the verified
-          verdict, so it adds information rather than repeating it. Behind /why. */}
-      {showWhy && !match.outcome && deepProbe && deepProbe.plays.length > 0 && (!bestSearch || deepProbe.depth > bestSearch.depth) && (() => {
-        const v = deepProbe.verdict;
-        const vColor = v === 'winning' ? 'green' : v === 'losing' ? 'red' : 'yellow';
-        const plays = deepProbe.plays
-          .map(p => p.self ? `${p.mySpecies}→${p.move}` : `${p.mySpecies}→${p.move || '—'}→${p.targetSpecies}`)
-          .join(' · ');
-        return (
-          <Text dimColor>
-            <Text color="blue">⌁ deep probe</Text> (depth {deepProbe.depth}, most-likely spread · tentative): {plays} <Text color={vColor}>— {v}</Text>
-          </Text>
-        );
-      })()}
+      {/* ⌁ best-play box is rendered just ABOVE the input composer (see below), so
+          the recommendation and the action box stay on screen together (the screen
+          is tall; the reference rosters/grid above can scroll off). */}
       {match.outcome && (
         <Box flexDirection="column" borderStyle="double" borderColor={match.outcome === 'victory' ? 'green' : match.outcome === 'defeat' ? 'red' : 'yellow'} paddingX={2} marginY={1}>
           <Text bold color={match.outcome === 'victory' ? 'green' : match.outcome === 'defeat' ? 'red' : 'yellow'}>
@@ -3587,6 +3467,133 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
               }}
             />
           </Box>
+        );
+      })()}
+
+      {/* ⌁ BEST PLAY — kept directly above the input composer so the recommendation
+          and the action box are always on screen together (the reference rosters /
+          matchup grid above can scroll off; what you act on does not). */}
+      {!match.outcome && bestSearch && bestSearch.plays.length > 0 && (() => {
+        const v = bestSearch.verdict;
+        // "forced" only when the search PROVED it (worst-case rolls, survival
+        // items, all opp mons known). Otherwise a hedged, number-driven read.
+        const wc = bestSearch.winChance;
+        let vText: string;
+        let vColor: string;
+        if (bestSearch.forced) {
+          vText = v === 'winning' ? 'forced win' : 'forced loss';
+          vColor = v === 'winning' ? 'green' : 'red';
+        } else if (wc != null) {
+          vText = `~${Math.round(wc * 100)}% to win`;
+          vColor = wc >= 0.6 ? 'green' : wc <= 0.35 ? 'red' : 'yellow';
+        } else {
+          vText = v === 'winning' ? 'likely win' : v === 'losing' ? 'likely loss' : 'even';
+          vColor = v === 'winning' ? 'green' : v === 'losing' ? 'red' : 'yellow';
+        }
+        const turns = bestSearch.depth;
+        // Confidence chip: turns ahead + an HONEST, scope-derived breadth report
+        // (lines explored this ply, candidate spreads behind the cells, mega
+        // combos, and the non-attack action kinds ACTUALLY in the tree — so it
+        // never claims "switches" until they're real nodes).
+        let conf = `${turns} turn${turns === 1 ? '' : 's'} ahead`;
+        const ex = bestSearch.explored;
+        if (ex) {
+          const parts: string[] = [];
+          const lines = ex.myActions * ex.oppActions;
+          if (lines > 1) parts.push(`${lines} lines/ply`);
+          if (ex.spreads > 1) parts.push(`${ex.spreads} spreads`);
+          if (ex.megaBranches > 1) parts.push(`mega ×${ex.megaBranches}`);
+          const extra = ex.actionClasses.filter(c => c !== 'attack');
+          if (extra.length) parts.push(`incl ${extra.join('/')}`);
+          if (parts.length) conf += ` · ${parts.join(' · ')}`;
+        }
+        const fmtPlays = (ps: typeof bestSearch.plays) => ps
+          .map(p => p.self ? `${p.mySpecies}→${p.move}` : `${p.mySpecies}→${p.move || '—'}→${p.targetSpecies}`)
+          .join(' · ');
+        const plays = fmtPlays(bestSearch.plays);
+        const mega = bestSearch.megaMon ? `mega ${bestSearch.megaMon} · ` : '';
+        // Pivotal assumptions behind the verdict (e.g. contingent-speed outspeed).
+        const whyText = (bestSearch.assumptions ?? []).map(a => a.text).join('; ');
+        // Break-points: damage cutpoints to watch against the real roll this turn.
+        const watchText = (bestSearch.breakpoints ?? []).map(b => {
+          const pct = b.prob != null ? ` ~${Math.round(b.prob * 100)}%` : '';
+          if (b.direction === 'ko') {
+            return `${b.move} on ${b.subject}:${pct} to OHKO${b.spreadNote ? ` (${b.spreadNote})` : ''}`;
+          }
+          return `${b.move} on ${b.subject}:${pct} → ${b.thenNote}`;
+        }).join(' · ');
+        // "How they beat us" — the opponent's minimizing reply (rendered losing).
+        const oppLineText = v === 'losing' && bestSearch.oppLine ? fmtPlays(bestSearch.oppLine) : '';
+        // "1D chess" — the opponent's flat, obvious greedy play (always shown).
+        const oneDChessText = bestSearch.obviousOppPlay ? fmtPlays(bestSearch.obviousOppPlay) : '';
+        // Compact risk breakdown: "label NN%", joined — labels are self-explanatory.
+        const riskText = bestSearch.risks
+          .map(r => `${r.label}${r.prob != null ? ` ${Math.round(r.prob * 100)}%` : ''}`)
+          .join(' · ');
+        // Mechanics in this position the fast search only approximates — surfaced
+        // so the verdict's blind spots are explicit (one example per class).
+        const unmodeledText = (bestSearch.unmodeled ?? [])
+          .map(u => `${u.label}${u.examples[0] ? ` (${u.examples[0]})` : ''}`)
+          .join(' · ');
+        // Hail Mary: dice rolls needed when verdict is losing but a win is possible.
+        const hm = bestSearch.hailMary;
+        let hmLine: string | null = null;
+        if (hm) {
+          if (hm.noRealisticOut) {
+            hmLine = '~lost — no realistic out';
+          } else {
+            // Single out: the headline ~% already states the odds — don't repeat
+            // it after the label. Multiple outs: show each one's % as a breakdown
+            // (the headline is their product).
+            const outText = hm.outs.length === 1
+              ? hm.outs[0]!.label
+              : hm.outs.map(o => `${o.label} (${Math.round(o.prob * 100)}%)`).join(' + ');
+            hmLine = `only out: ~${Math.round(hm.combined * 100)}% — ${outText}`;
+          }
+        }
+        // Whether any detail is hidden behind /why right now (drives the hint).
+        const hasDetail = !!(watchText || whyText || oppLineText || oneDChessText || unmodeledText || bestSearch.adapted);
+        return (
+          <Box flexDirection="column" borderStyle="round" borderColor={vColor} paddingX={1} marginTop={1}>
+            {/* PRIMARY: verdict headline, then the recommended play(s) in bold. */}
+            <Text>
+              <Text color="magenta" bold>⌁ best play</Text>  <Text color={vColor} bold>{vText}</Text>  <Text dimColor>· {conf}</Text>
+            </Text>
+            <Text>  {mega ? <Text color="cyan">{mega}</Text> : null}<Text bold>{plays}</Text></Text>
+            {/* ALWAYS-ON, decision-critical: risks, and (when losing) the only-out. */}
+            {riskText ? <Text><Text dimColor>  risks: </Text><Text color="yellow">{riskText}</Text></Text> : null}
+            {hmLine ? <Text color={v === 'losing' ? 'red' : 'yellow'} bold>  {hmLine}</Text> : null}
+            {/* ON-DEMAND (/why): the search internals. */}
+            {showWhy && watchText ? <Text dimColor>  watch: {watchText}</Text> : null}
+            {showWhy && whyText ? <Text dimColor>  why: {whyText}</Text> : null}
+            {showWhy && oppLineText ? <Text dimColor>  they win via: {oppLineText}</Text> : null}
+            {showWhy && oneDChessText ? <Text dimColor>  1D chess (opp likely): {oneDChessText}</Text> : null}
+            {showWhy && bestSearch.adapted ? <Text dimColor>  spread refined from observed damage</Text> : null}
+            {showWhy && unmodeledText ? <Text color="yellow">  ⚠ approximating: {unmodeledText} — <Text color="white">/exact</Text> for ground truth</Text> : null}
+            {!showWhy && hasDetail ? <Text dimColor>  /why for detail</Text> : null}
+          </Box>
+        );
+      })()}
+      {/* Stable placeholder so the hero region never flashes empty between logging
+          a turn and depth-1 settling (the search runs on a macrotask). */}
+      {!match.outcome && !bestSearch && (
+        <Box borderStyle="round" borderColor="gray" paddingX={1} marginTop={1}>
+          <Text dimColor>⌁ computing best play…</Text>
+        </Box>
+      )}
+      {/* "Work outwards" deep probe: a tentative narrow read several plies past what
+          full breadth can afford. Only shown when it sees DEEPER than the verified
+          verdict, so it adds information rather than repeating it. Behind /why. */}
+      {showWhy && !match.outcome && deepProbe && deepProbe.plays.length > 0 && (!bestSearch || deepProbe.depth > bestSearch.depth) && (() => {
+        const v = deepProbe.verdict;
+        const vColor = v === 'winning' ? 'green' : v === 'losing' ? 'red' : 'yellow';
+        const plays = deepProbe.plays
+          .map(p => p.self ? `${p.mySpecies}→${p.move}` : `${p.mySpecies}→${p.move || '—'}→${p.targetSpecies}`)
+          .join(' · ');
+        return (
+          <Text dimColor>
+            <Text color="blue">⌁ deep probe</Text> (depth {deepProbe.depth}, most-likely spread · tentative): {plays} <Text color={vColor}>— {v}</Text>
+          </Text>
         );
       })()}
 
