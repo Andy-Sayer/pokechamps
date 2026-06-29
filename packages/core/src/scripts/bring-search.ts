@@ -8,7 +8,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDirPath } from '../domain/data.js';
-import { loadPikaData, metaTeams } from '../domain/metaTeams.js';
+import { loadPikaData, metaTeams, buildSet } from '../domain/metaTeams.js';
 import { scoreBrings } from '../domain/bring.js';
 import { entryOf } from '../domain/teamSim.js';
 import { PlayoutPool } from '../domain/playoutPool.js';
@@ -29,13 +29,28 @@ const SAVE = (() => { const i = process.argv.indexOf('--save'); return i >= 0 ? 
 const truth: { anchor: string; brings: { species: string[]; maximinWr: number }[] }[] = [];
 
 const myTeam = JSON.parse(readFileSync(join(dataDirPath(), 'my-teams', TEAM), 'utf8')) as PokemonSet[];
+const pika = loadPikaData();
 const hand = MB_THREATS.map(m => ({ anchor: m.anchor, sets: m.sets }));
-const meta = metaTeams(loadPikaData(), 12, 4).map(m => ({ anchor: m.anchor, sets: m.sets }));
+const meta = metaTeams(pika, 12, 4).map(m => ({ anchor: m.anchor, sets: m.sets }));
 const all = [...hand, ...meta];
 const lower = OPP.toLowerCase();
-const opponents = lower === 'hand' ? hand : lower === 'meta' ? meta : lower === 'all' ? all
+let opponents = lower === 'hand' ? hand : lower === 'meta' ? meta : lower === 'all' ? all
   : all.filter(g => g.anchor.toLowerCase().includes(lower));
-if (opponents.length === 0) { console.error(`no opponent matching "${OPP}"`); process.exit(1); }
+// Arbitrary opponent: a comma-separated species list (the 6 you actually face at
+// preview) → build their probable sets from Pikalytics so the sim can recommend
+// our bring vs the real team, not just a known gauntlet anchor.
+if (opponents.length === 0 && OPP.includes(',')) {
+  const species = OPP.split(',').map(s => s.trim()).filter(Boolean);
+  const used = new Set<string>();
+  const sets: PokemonSet[] = [];
+  for (const sp of species) {
+    const set = buildSet(pika, sp, used);
+    if (set) { sets.push(set); if (set.item) used.add(set.item); }
+  }
+  if (sets.length >= 4) opponents = [{ anchor: `custom (${species.join('/')})`, sets }];
+  else console.error(`built only ${sets.length}/${species.length} sets from Pikalytics — check species names`);
+}
+if (opponents.length === 0) { console.error(`no opponent matching "${OPP}" (anchor substring, hand/meta/all, or a comma-separated species list)`); process.exit(1); }
 
 const key = (b: PokemonSet[]) => b.map(s => s.species).sort().join(',');
 const pct = (x: number) => `${Math.round(x * 100)}%`;
