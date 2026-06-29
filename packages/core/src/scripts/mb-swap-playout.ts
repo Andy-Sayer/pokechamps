@@ -54,7 +54,7 @@ async function gauntletWR(pool: PlayoutPool, myTeam: PokemonSet[]) {
   for (const g of gauntlet) {
     const myBring = scoreBrings(myTeam, g.sets.map(entryOf))[0]!.myIndices.map(i => myTeam[i]!);
     const oppBring = scoreBrings(g.sets, myTeam.map(entryOf))[0]!.myIndices.map(i => g.sets[i]!);
-    const r = await bringWinRate(pool, myBring, oppBring, GAMES);
+    const r = await bringWinRate(pool, myBring, oppBring, GAMES, 2, true); // opponent piloted to its plan
     per.push({ opp: g.anchor, wr: r.winRate });
   }
   return { avg: per.reduce((a, c) => a + c.wr, 0) / per.length, floor: Math.min(...per.map(p => p.wr)), per };
