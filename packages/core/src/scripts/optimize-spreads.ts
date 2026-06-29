@@ -24,6 +24,7 @@ import type { Matchup } from '../domain/teamSim.js';
 import type { PokemonSet } from '../domain/types.js';
 
 const arg = (f: string, d: number) => { const i = process.argv.indexOf(f); return i >= 0 ? Number(process.argv[i + 1]) : d; };
+const argStr = (f: string, d: string) => { const i = process.argv.indexOf(f); return i >= 0 ? String(process.argv[i + 1]) : d; };
 const SAVE = process.argv.includes('--save');
 const BUDGET = arg('--budget', 25000);
 const MAXDEPTH = arg('--maxdepth', 5);
@@ -41,7 +42,7 @@ const defenders = meta.flatMap(m => m.sets).filter((s, i, a) => a.findIndex(x =>
 const pool = new MatchupPool(THREADS);
 console.log(`spread optimizer · ${meta.length} meta teams · ${BUDGET / 1000}s/matchup, deepen 1→${MAXDEPTH} · ${THREADS} threads · budget ${HOURS}h`);
 
-const teamPath = join(dataDirPath(), 'my-teams', 'anti-meta.json');
+const teamPath = join(dataDirPath(), 'my-teams', argStr('--team', 'anti-meta-mb.json'));
 let team: PokemonSet[] = JSON.parse(readFileSync(teamPath, 'utf8'));
 
 interface Fit { floor: number; avg: number }
