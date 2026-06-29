@@ -5,7 +5,7 @@
 //   npx tsx packages/core/src/scripts/bring-search.ts [team.json] [opp] [--games N]
 // opp = an anchor substring (single, detailed ranking) OR "hand" / "meta" / "all"
 // (sweep the hand threats / meta gauntlet / both, summary contrasting current vs best).
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDirPath } from '../domain/data.js';
 import { loadPikaData, metaTeams } from '../domain/metaTeams.js';
@@ -22,6 +22,11 @@ const TEAM = positional[0]?.endsWith('.json') ? positional[0]! : 'anti-meta-mb.j
 const OPP = positional.find(a => !a.endsWith('.json')) ?? 'Blaziken';
 const GAMES = argNum('--games', 16);
 const OPP_K = argNum('--oppK', 2);
+const SAVE = (() => { const i = process.argv.indexOf('--save'); return i >= 0 ? process.argv[i + 1] : undefined; })();
+
+// Per-opponent playout ground truth (every bring's maximin wr) — the fixed target
+// the heuristic is calibrated against. Saved with --save for offline iteration.
+const truth: { anchor: string; brings: { species: string[]; maximinWr: number }[] }[] = [];
 
 const myTeam = JSON.parse(readFileSync(join(dataDirPath(), 'my-teams', TEAM), 'utf8')) as PokemonSet[];
 const hand = MB_THREATS.map(m => ({ anchor: m.anchor, sets: m.sets }));
@@ -45,6 +50,7 @@ for (const opp of opponents) {
   const rec = await bestBringVsOpponent(pp, myTeam, opp.sets, { myBringK: 15, oppBringK: OPP_K, games: GAMES, pilotP2: true });
   const curWr = rec.shortlist.find(s => key(s.bring) === key(cur))?.maximinWr ?? NaN;
   rows.push({ anchor: opp.anchor, curWr, bestWr: rec.maximinWr, bestBring: rec.bring, curBring: cur });
+  truth.push({ anchor: opp.anchor, brings: rec.shortlist.map(s => ({ species: s.bring.map(b => b.species), maximinWr: s.maximinWr })) });
 
   if (single) {
     const ranked = rec.shortlist.slice().sort((a, b) => b.maximinWr - a.maximinWr);
@@ -59,6 +65,11 @@ for (const opp of opponents) {
   }
 }
 pp.close();
+
+if (SAVE) {
+  writeFileSync(join(dataDirPath(), SAVE), JSON.stringify(truth, null, 2) + '\n', 'utf8');
+  console.log(`\nsaved playout ground truth (${truth.length} opponents × ${truth[0]?.brings.length ?? 0} brings) → data/${SAVE}`);
+}
 
 if (!single) {
   const curFloor = Math.min(...rows.map(r => r.curWr)), bestFloor = Math.min(...rows.map(r => r.bestWr));

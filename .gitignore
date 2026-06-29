@@ -11,6 +11,8 @@ data/sprites/
 # Training-data artifacts (derived from the replay corpus — regenerable).
 data/training/
 data/bring-labels.json
+# Bring-search playout ground truth (regenerable via bring-search ... --save).
+data/bring-truth.*.json
 data/replays-train/
 # Creator-intel: fetched captions + derived threat teams (regenerable from a URL).
 data/captions/
