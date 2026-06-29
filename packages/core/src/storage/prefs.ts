@@ -15,6 +15,10 @@ export interface UiPrefs {
   pikaPreview?: string | null;
   /** Battle grid: sixel sprites of the active opponents (/sprites). */
   showSprites?: boolean;
+  /** Best-play box: show the search internals (watch/why/oppLine/1D-chess/…) (/why). */
+  showWhy?: boolean;
+  /** Matchup grid: show ALL 6 opponents instead of just the live/brought ones (/grid). */
+  showFullGrid?: boolean;
 }
 
 const FILE = 'prefs.json';

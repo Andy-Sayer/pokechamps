@@ -665,6 +665,13 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // `a` expands the matchup grid to show ALL 4 of my moves per opp instead
   // of just the voted-best one. Off by default to keep the compact view.
   const [showAllMoves, setShowAllMoves] = useState(!!stickyPrefs.showAllMoves);
+  // /why expands the best-play box's search internals (watch/why/oppLine/1D-chess/
+  // approximating); off by default so the box stays a glanceable recommendation —
+  // only the play + risks + (when losing) the only-out are always shown.
+  const [showWhy, setShowWhy] = useState(!!stickyPrefs.showWhy);
+  // /grid expands the matchup grid to ALL 6 opponents; off by default so the grid
+  // is just the live/brought board you're actually playing.
+  const [showFullGrid, setShowFullGrid] = useState(!!stickyPrefs.showFullGrid);
   // `/help` overlay — full syntax cheat-sheet. Closes on Esc or the next
   // /help invocation.
   const [helpOpen, setHelpOpen] = useState(false);
@@ -2745,6 +2752,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       }
       case 'crit': setShowCrits(c => { savePrefs({ showCrits: !c }); return !c; }); return true;
       case 'allmoves': setShowAllMoves(a => { savePrefs({ showAllMoves: !a }); return !a; }); return true;
+      case 'why': setShowWhy(w => { savePrefs({ showWhy: !w }); setMessage(`Search detail ${!w ? 'on' : 'off'}.`); return !w; }); return true;
+      case 'grid': setShowFullGrid(g => { savePrefs({ showFullGrid: !g }); setMessage(`Full grid ${!g ? 'on (all 6)' : 'off (live board)'}.`); return !g; }); return true;
       case 'info': setInfoPickerOpen(true); return true;
       case 'help':
         setHelpOpen(h => !h);
@@ -3172,27 +3181,40 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             hmLine = `only out: ~${Math.round(hm.combined * 100)}% — ${outText}`;
           }
         }
+        // Whether any detail is hidden behind /why right now (drives the hint).
+        const hasDetail = !!(watchText || whyText || oppLineText || oneDChessText || unmodeledText || bestSearch.adapted);
         return (
-          <>
+          <Box flexDirection="column" borderStyle="round" borderColor={vColor} paddingX={1} marginTop={1}>
+            {/* PRIMARY: verdict headline, then the recommended play(s) in bold. */}
             <Text>
-              <Text color="magenta">⌁ best play </Text><Text dimColor>({conf})</Text><Text color="magenta">: </Text>
-              {mega ? <Text color="cyan">{mega}</Text> : null}{plays}  <Text color={vColor}>— {vText}</Text>
+              <Text color="magenta" bold>⌁ best play</Text>  <Text color={vColor} bold>{vText}</Text>  <Text dimColor>· {conf}</Text>
             </Text>
-            {watchText ? <Text dimColor>   watch: {watchText}</Text> : null}
-            {whyText ? <Text dimColor>   why: {whyText}</Text> : null}
-            {oppLineText ? <Text dimColor>   they win via: {oppLineText}</Text> : null}
-            {oneDChessText ? <Text dimColor>   1D chess (opp likely): {oneDChessText}</Text> : null}
-            {bestSearch.adapted ? <Text dimColor>   spread refined from observed damage</Text> : null}
-            {riskText ? <Text dimColor>   risks: {riskText}</Text> : null}
-            {unmodeledText ? <Text color="yellow">   ⚠ approximating: {unmodeledText} — <Text color="white">/exact</Text> for ground truth</Text> : null}
-            {hmLine ? <Text dimColor>   {hmLine}</Text> : null}
-          </>
+            <Text>  {mega ? <Text color="cyan">{mega}</Text> : null}<Text bold>{plays}</Text></Text>
+            {/* ALWAYS-ON, decision-critical: risks, and (when losing) the only-out. */}
+            {riskText ? <Text><Text dimColor>  risks: </Text><Text color="yellow">{riskText}</Text></Text> : null}
+            {hmLine ? <Text color={v === 'losing' ? 'red' : 'yellow'} bold>  {hmLine}</Text> : null}
+            {/* ON-DEMAND (/why): the search internals. */}
+            {showWhy && watchText ? <Text dimColor>  watch: {watchText}</Text> : null}
+            {showWhy && whyText ? <Text dimColor>  why: {whyText}</Text> : null}
+            {showWhy && oppLineText ? <Text dimColor>  they win via: {oppLineText}</Text> : null}
+            {showWhy && oneDChessText ? <Text dimColor>  1D chess (opp likely): {oneDChessText}</Text> : null}
+            {showWhy && bestSearch.adapted ? <Text dimColor>  spread refined from observed damage</Text> : null}
+            {showWhy && unmodeledText ? <Text color="yellow">  ⚠ approximating: {unmodeledText} — <Text color="white">/exact</Text> for ground truth</Text> : null}
+            {!showWhy && hasDetail ? <Text dimColor>  /why for detail</Text> : null}
+          </Box>
         );
       })()}
+      {/* Stable placeholder so the hero region never flashes empty between logging
+          a turn and depth-1 settling (the search runs on a macrotask). */}
+      {!match.outcome && !bestSearch && (
+        <Box borderStyle="round" borderColor="gray" paddingX={1} marginTop={1}>
+          <Text dimColor>⌁ computing best play…</Text>
+        </Box>
+      )}
       {/* "Work outwards" deep probe: a tentative narrow read several plies past what
           full breadth can afford. Only shown when it sees DEEPER than the verified
-          verdict, so it adds information rather than repeating it. */}
-      {!match.outcome && deepProbe && deepProbe.plays.length > 0 && (!bestSearch || deepProbe.depth > bestSearch.depth) && (() => {
+          verdict, so it adds information rather than repeating it. Behind /why. */}
+      {showWhy && !match.outcome && deepProbe && deepProbe.plays.length > 0 && (!bestSearch || deepProbe.depth > bestSearch.depth) && (() => {
         const v = deepProbe.verdict;
         const vColor = v === 'winning' ? 'green' : v === 'losing' ? 'red' : 'yellow';
         const plays = deepProbe.plays
@@ -3378,7 +3400,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
               ))}
             </Text>
           )}
-          <Text bold>Matchups</Text>
+          <Text bold>Matchups{!showFullGrid ? <Text dimColor> (live board · /grid for all 6)</Text> : null}</Text>
           {/* Half-block sprites are plain text → safe anywhere in the layout.
               The SIXEL strip lives at the very END of the frame instead (see
               the bottom of this component) — SixelImage's cursor math is only
@@ -3394,7 +3416,13 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             return (
               <Box key={`mu-${mi}`} flexDirection="column" marginTop={mi === 0 ? 0 : 1}>
                 <Text color="green">m{mi + 1} {match.myMegaForme?.[m.myIdx] ?? m.mySet.species} <Text dimColor>[HP {m.myHp.toFixed(0)}% · spd {m.mySpeed}{m.mySpeedMega != null ? ` (mega ${m.myMegaForme}: ${m.mySpeedMega})` : ''}]</Text>{match.myCharging?.[m.myIdx] ? <Text color="cyan"> ⚡charging {match.myCharging[m.myIdx]!.move}</Text> : null}</Text>
-                {m.rows.map(row => {
+                {m.rows.filter(row => {
+                  // Default to the board you're actually playing: the live actives
+                  // + the brought mons. /grid restores all 6 (incl. un-brought).
+                  if (showFullGrid) return true;
+                  const isActive = row.oppIdx === activeIdx.theirs[0] || row.oppIdx === activeIdx.theirs[1];
+                  return isActive || oppBroughtIndices.includes(row.oppIdx as any);
+                }).map(row => {
                   const a0 = activeIdx.theirs[0];
                   const a1 = activeIdx.theirs[1];
                   const isActive = row.oppIdx === a0 || row.oppIdx === a1;

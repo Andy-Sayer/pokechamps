@@ -22,6 +22,8 @@ export type BattleCommandId =
   | 'info'
   | 'crit'
   | 'allmoves'
+  | 'why'
+  | 'grid'
   | 'review'
   | 'pika'
   | 'sprites'
@@ -52,6 +54,8 @@ export const BATTLE_COMMANDS: readonly BattleCommand[] = [
   { id: 'info',     aliases: ['info', 'i'],           description: 'Open the opponent info picker' },
   { id: 'crit',     aliases: ['crit', 'c'],           description: 'Toggle crit damage column in matchup grid' },
   { id: 'allmoves', aliases: ['allmoves', 'all', 'a'], description: 'Toggle all-my-moves view per opp' },
+  { id: 'why',      aliases: ['why', 'd'],            description: 'Toggle the best-play box detail (watch/why/oppLine/1D-chess/approximating); off = just the play + risks' },
+  { id: 'grid',     aliases: ['grid', 'g'],           description: 'Toggle the full 6-opponent matchup grid; off = just the live/brought board' },
   { id: 'review',   aliases: ['review', 'r'],         description: 'Ask Pikachu (Claude) to review the last turn' },
   { id: 'pika',     aliases: ['pika', 'p'],           description: 'Toggle a Pikachu sprite (for sixel preview)' },
   { id: 'sprites',  aliases: ['sprites', 'spr'],      description: 'Toggle sprites of the active opponents above the matchup grid (sixel, or half-block on any terminal; sticky)' },
