@@ -74,7 +74,13 @@ function resolvedOpponentSet(entry: OpponentEntry, level: number): PokemonSet {
   return defaultOpponentSet(entry, level);
 }
 
-const SPEED_CONTROL_MOVES = new Set(['Tailwind', 'Trick Room', 'Icy Wind', 'Electroweb', 'Thunder Wave']);
+// Speed control = anything that swings the speed order in our favour: our-side
+// boosts (Tailwind), the inverter (Trick Room), foe-speed drops (Icy Wind /
+// Electroweb / paralysis / Scary Face / Cotton Spore / String Shot). Scary Face
+// et al. were missing, so a Prankster speed-dropper (e.g. Grimmsnarl) was wrongly
+// scored as "no speed control" — handing brings with a Tailwind setter a free
+// role edge they didn't deserve.
+const SPEED_CONTROL_MOVES = new Set(['Tailwind', 'Trick Room', 'Icy Wind', 'Electroweb', 'Thunder Wave', 'Scary Face', 'Cotton Spore', 'String Shot']);
 const REDIRECTION_MOVES = new Set(['Follow Me', 'Rage Powder']);
 const REDIRECTION_ABILITIES = new Set(['Lightning Rod', 'Storm Drain']);
 

@@ -32,20 +32,35 @@ const key = (a: string[]) => [...a].sort().join(',');
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
 interface Fit { totalRegret: number; avgRegret: number; matches: number; n: number; per: { anchor: string; regret: number; top1: string[]; best: string[] }[] }
+
+// Raw components (offense/defense/speed/matchup) don't depend on the weights, and
+// roles/tactics/threats are stored already-weighted (we don't vary those weights),
+// so compute scoreBrings ONCE per opponent and re-rank OFFLINE per candidate — the
+// grid goes from ~minutes to instant.
+interface Comp { species: string[]; offense: number; defense: number; speed: number; roles: number; matchup: number; tactics: number; threats: number }
+const precomp: { anchor: string; truthBrings: Truth[number]['brings']; comps: Comp[] }[] = [];
+for (const t of truth) {
+  const sets = oppByAnchor.get(t.anchor);
+  if (!sets || t.brings.length === 0) continue;
+  const scored = scoreBrings(myTeam, sets.map(entryOf), NEUTRAL_FIELD, DEFAULT_BRING_WEIGHTS);
+  precomp.push({
+    anchor: t.anchor, truthBrings: t.brings,
+    comps: scored.map(s => ({ species: s.myIndices.map(i => myTeam[i]!.species), offense: s.offense, defense: s.defense, speed: s.speed, roles: s.roles, matchup: s.matchup, tactics: s.tactics, threats: s.threats })),
+  });
+}
+const totalFor = (c: Comp, w: BringWeights) => c.offense * w.offense + c.defense * w.defense + c.speed * w.speed + c.roles + c.matchup * w.matchup + c.tactics + c.threats;
+
 function evaluate(w: BringWeights): Fit {
   let totalRegret = 0, matches = 0, n = 0;
   const per: Fit['per'] = [];
-  for (const t of truth) {
-    const sets = oppByAnchor.get(t.anchor);
-    if (!sets || t.brings.length === 0) continue;
-    const ranked = scoreBrings(myTeam, sets.map(entryOf), NEUTRAL_FIELD, w);
-    const top1 = ranked[0]!.myIndices.map(i => myTeam[i]!.species);
-    const top1wr = t.brings.find(b => key(b.species) === key(top1))?.maximinWr ?? 0;
-    const bestRow = t.brings.reduce((a, b) => (b.maximinWr > a.maximinWr ? b : a));
+  for (const pc of precomp) {
+    const top1 = pc.comps.slice().sort((a, b) => totalFor(b, w) - totalFor(a, w))[0]!.species;
+    const top1wr = pc.truthBrings.find(b => key(b.species) === key(top1))?.maximinWr ?? 0;
+    const bestRow = pc.truthBrings.reduce((a, b) => (b.maximinWr > a.maximinWr ? b : a));
     const regret = bestRow.maximinWr - top1wr;
     totalRegret += regret; n++;
     if (regret < 1e-9) matches++;
-    per.push({ anchor: t.anchor, regret, top1, best: bestRow.species });
+    per.push({ anchor: pc.anchor, regret, top1, best: bestRow.species });
   }
   return { totalRegret, avgRegret: totalRegret / n, matches, n, per };
 }
@@ -61,23 +76,26 @@ console.log('  per-opponent misses (heuristic top-1 vs truth-best):');
 base.per.filter(p => p.regret > 0.01).sort((a, b) => b.regret - a.regret)
   .forEach(p => console.log(`    -${Math.round(p.regret * 100)}pp  ${p.anchor.padEnd(28)} picks ${p.top1.join('/')} not ${p.best.join('/')}`));
 
-// Coordinate grid over the three damage/type levers (others held at default).
-const OFF = [0.2, 0.4, 0.6, 0.8];
+// Grid over the four damage/type/speed levers (roles/tactics/threats held at
+// default). Cheap now (offline re-rank), so we can search speed too — it's part
+// of why a frail attacker (Talonflame) out-scores a bulky support (Grimmsnarl).
+const OFF = [0.1, 0.2, 0.3, 0.4, 0.6, 0.8];
 const DEF = [0.3, 0.6, 1.0, 1.5, 2.0];
 const MATCH = [0, 1, 2, 4, 8];
+const SPE = [1, 2, 3, 5, 8];
 // drift = distance from the current defaults; tie-break toward it so we don't
 // overfit a coarse truth with extreme weights when a near-default combo ties.
-const drift = (w: BringWeights) => Math.abs(w.offense - 0.4) + Math.abs(w.defense - 0.3) / 2 + Math.abs(w.matchup - 8) / 8;
+const drift = (w: BringWeights) => Math.abs(w.offense - 0.4) + Math.abs(w.defense - 0.3) / 2 + Math.abs(w.matchup - 8) / 8 + Math.abs(w.speed - 5) / 5;
 const candidates: { w: BringWeights; f: Fit }[] = [];
-for (const offense of OFF) for (const defense of DEF) for (const matchup of MATCH) {
-  const w = { ...DEFAULT_BRING_WEIGHTS, offense, defense, matchup };
+for (const offense of OFF) for (const defense of DEF) for (const matchup of MATCH) for (const speed of SPE) {
+  const w = { ...DEFAULT_BRING_WEIGHTS, offense, defense, matchup, speed };
   candidates.push({ w, f: evaluate(w) });
 }
 candidates.sort((a, b) =>
   (a.f.totalRegret - b.f.totalRegret) || (b.f.matches - a.f.matches) || (drift(a.w) - drift(b.w)));
 console.log('\ntop weight candidates (regret · matches · drift-from-default — prefer low regret AND low drift):');
 for (const c of candidates.slice(0, 8)) {
-  console.log(`  regret ${pct(c.f.totalRegret).padStart(5)}  matches ${c.f.matches}/${c.f.n}  {off ${c.w.offense} def ${c.w.defense} match ${c.w.matchup}}  drift ${drift(c.w).toFixed(2)}`);
+  console.log(`  regret ${pct(c.f.totalRegret).padStart(5)}  matches ${c.f.matches}/${c.f.n}  {off ${c.w.offense} def ${c.w.defense} match ${c.w.matchup} spe ${c.w.speed}}  drift ${drift(c.w).toFixed(2)}`);
 }
 const best = candidates[0]!;
 report('CALIBRATED (min-regret grid)', best.w, best.f);
@@ -85,4 +103,4 @@ console.log('  remaining misses:');
 best.f.per.filter(p => p.regret > 0.01).sort((a, b) => b.regret - a.regret)
   .forEach(p => console.log(`    -${Math.round(p.regret * 100)}pp  ${p.anchor.padEnd(28)} picks ${p.top1.join('/')} not ${p.best.join('/')}`));
 console.log(`\nΔ matches ${base.matches}→${best.f.matches}/${base.n}   Δ avg regret ${pct(base.avgRegret)}→${pct(best.f.avgRegret)}`);
-console.log(`suggested DEFAULT_BRING_WEIGHTS: { offense: ${best.w.offense}, defense: ${best.w.defense}, matchup: ${best.w.matchup}, ... }`);
+console.log(`suggested DEFAULT_BRING_WEIGHTS: { offense: ${best.w.offense}, defense: ${best.w.defense}, matchup: ${best.w.matchup}, speed: ${best.w.speed}, ... }`);
