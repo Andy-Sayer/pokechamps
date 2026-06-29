@@ -1,5 +1,12 @@
 # Creator-intel ingest — spec
 
+> **Status (2026-06-29): increments 1–2 SHIPPED, LLM-free** — `fetch-captions.ts`
+> (yt-dlp), `creatorIntel.ts` (parseVtt → extractMentionedSpecies → buildThreatTeam
+> → loadCreatorThreats), `creator-intel.ts` driver, and `mb-team-check` folds in
+> `[creator]` threats. Caption extraction over-collects (confirm the 6 with
+> `--species` or vision). Remaining: 3 (vision team-read), 4 (LLM piloting), 5
+> (opponent-piloting prior into the playout policy).
+
 Turn VGC content-creator videos into **structured opponent threat intelligence**
 (recommended teams + how they're piloted) to feed the gauntlet and the opponent
 model. **NOT for our own strategy** — purely to understand what we'll face and how
