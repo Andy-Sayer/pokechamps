@@ -9,17 +9,21 @@ import { createInterface, type Interface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { cpus } from 'node:os';
-import { playGame, makeSearchPolicy, type GameResult } from './simPlayout.js';
+import { playGame, makeSearchPolicy, makePilotPolicy, derivePilotPlan, type GameResult } from './simPlayout.js';
 import type { PokemonSet } from './types.js';
 
-export interface PlayoutTask { p1: PokemonSet[]; p2: PokemonSet[]; seed: [number, number, number, number]; depth?: number; budgetMs?: number }
+export interface PlayoutTask { p1: PokemonSet[]; p2: PokemonSet[]; seed: [number, number, number, number]; depth?: number; budgetMs?: number; pilotOpp?: boolean }
 
 const WORKER = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'playout-worker.ts');
 
 interface Pending { resolve: (r: GameResult) => void; reject: (e: Error) => void; task: PlayoutTask }
 
 const playSync = async (t: PlayoutTask): Promise<GameResult> => {
-  const r = await playGame(t.p1, t.p2, { seed: t.seed, policy: makeSearchPolicy(t.p1, t.p2, t.depth ?? 2, t.budgetMs) });
+  const r = await playGame(t.p1, t.p2, {
+    seed: t.seed,
+    policy: makeSearchPolicy(t.p1, t.p2, t.depth ?? 2, t.budgetMs),
+    p2Policy: t.pilotOpp ? makePilotPolicy(t.p1, t.p2, t.depth ?? 2, derivePilotPlan(t.p2)) : undefined,
+  });
   if ('error' in r) throw new Error(r.error);
   return r;
 };
@@ -111,10 +115,10 @@ export class PlayoutPool {
  *  numbers — far less noise when comparing brings). Returns wins/games + the raw
  *  results (each a labeled training row). */
 export async function bringWinRate(
-  pool: PlayoutPool, myBring: PokemonSet[], oppBring: PokemonSet[], games: number, depth = 2,
+  pool: PlayoutPool, myBring: PokemonSet[], oppBring: PokemonSet[], games: number, depth = 2, pilotP2 = false,
 ): Promise<{ wins: number; losses: number; ties: number; winRate: number; results: GameResult[] }> {
   const tasks: PlayoutTask[] = Array.from({ length: games }, (_, k) => ({
-    p1: myBring, p2: oppBring, seed: [k + 1, 2 * k + 5, 3 * k + 7, 5 * k + 11], depth,
+    p1: myBring, p2: oppBring, seed: [k + 1, 2 * k + 5, 3 * k + 7, 5 * k + 11], depth, pilotOpp: pilotP2,
   }));
   const results = await pool.run(tasks);
   const wins = results.filter(r => r.winner === 'p1').length;

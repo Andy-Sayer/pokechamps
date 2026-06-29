@@ -45,7 +45,8 @@ const pool = new PlayoutPool();
 const shortlist = proposed.slice(0, TOPK);
 const simmed: { combo: number[]; p: number; wr: number; rec: string }[] = [];
 for (const { combo, p } of shortlist) {
-  const r = await bringWinRate(pool, combo.map(i => team[i]!), oppBring, GAMES);
+  const r = await bringWinRate(pool, combo.map(i => team[i]!), oppBring, GAMES, 2, true); // opponent piloted to its plan
+
   simmed.push({ combo, p, wr: r.winRate, rec: `${r.wins}/${r.losses}/${r.ties}` });
 }
 pool.close();

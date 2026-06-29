@@ -33,9 +33,10 @@ export interface BringRec {
  *  brings. The model proposes `myBringK` of our brings; the sim disposes (maximin). */
 export async function bestBringVsOpponent(
   pool: PlayoutPool, myTeam: PokemonSet[], oppSets: PokemonSet[],
-  opts: { myBringK?: number; oppBringK?: number; games?: number } = {},
+  opts: { myBringK?: number; oppBringK?: number; games?: number; pilotP2?: boolean } = {},
 ): Promise<BringRec> {
   const myBringK = opts.myBringK ?? 5, oppBringK = opts.oppBringK ?? 2, games = opts.games ?? 8;
+  const pilotP2 = opts.pilotP2 ?? false; // pilot the OPPONENT (p2 = their bring) to its game plan
   const myEntries = myTeam.map(entryOf);
   const combos = allBrings();
 
@@ -59,7 +60,7 @@ export async function bestBringVsOpponent(
   for (const { bring, modelP } of shortlistIn) {
     const perOppBring: { oppBring: PokemonSet[]; wr: number }[] = [];
     for (const ob of oppBrings) {
-      const r = await bringWinRate(pool, bring, ob, games);
+      const r = await bringWinRate(pool, bring, ob, games, 2, pilotP2);
       perOppBring.push({ oppBring: ob, wr: r.winRate });
     }
     const maximinWr = Math.min(...perOppBring.map(p => p.wr));

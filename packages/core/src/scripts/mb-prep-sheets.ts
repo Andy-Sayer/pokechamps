@@ -42,8 +42,9 @@ const t0 = Date.now();
 const lines: string[] = [`# Reg M-B prep sheets — ${sp(team)}`, '', `_Sim-grounded (${GAMES} games/matchup); bring is maximin over the opponent's likely brings._`, ''];
 
 for (const opp of gauntlet) {
-  // OUR best bring vs them (robust over their likely brings).
-  const rec = await bestBringVsOpponent(pool, team, opp.sets, { myBringK: 5, oppBringK: 2, games: GAMES });
+  // OUR best bring vs them (robust over their likely brings), opponent PILOTED to
+  // its game plan (idea 5) so the win-rates reflect how the team is really flown.
+  const rec = await bestBringVsOpponent(pool, team, opp.sets, { myBringK: 5, oppBringK: 2, games: GAMES, pilotP2: true });
   // THEIR best bring vs us — the same eval with sides flipped → a PLAYOUT-VALIDATED
   // opponent-bring prediction (stronger than the live heuristic).
   const oppRec = await bestBringVsOpponent(pool, opp.sets, team, { myBringK: 4, oppBringK: 2, games: GAMES });
