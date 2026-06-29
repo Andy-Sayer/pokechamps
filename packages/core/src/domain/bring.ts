@@ -182,10 +182,21 @@ function comb4(n: number): number[][] {
 export interface BringWeights {
   offense: number; defense: number; speed: number; matchup: number;
   speedControl: number; redirection: number; tactics: number; threat: number;
+  fairyPrankster: number;
 }
 export const DEFAULT_BRING_WEIGHTS: BringWeights = {
-  offense: 0.4, defense: 0.3, speed: 5, matchup: 8,
+  // defense doubled (0.3->0.6) + offense 0.4->0.6: calibrated against the playout
+  // ground truth (calibrate-bring) — up-weighting survival is the proven fix for
+  // the heuristic under-valuing bulky supports vs frail attackers (regret 11%->7%
+  // across the 17-opponent gauntlet, no meta regression).
+  offense: 0.6, defense: 0.6, speed: 5, matchup: 8,
   speedControl: 30, redirection: 20, tactics: 0.35, threat: 12,
+  // vs a Fairy-spam team (>=2 Fairies), bringing a Prankster support is the
+  // SIM-VALIDATED answer the per-pair heuristic can't see (it over-values frail
+  // paper-offense, ignores screens/debuffs/bulk). Big enough to clear the ~130
+  // offense edge a frail attacker bring otherwise wins by. Scoped to Fairy teams,
+  // so it never fires elsewhere. See project_mb_team / bring-search.
+  fairyPrankster: 150,
 };
 
 export function scoreBrings(myTeam: PokemonSet[], opponent: OpponentEntry[], field: FieldState = NEUTRAL_FIELD, w: BringWeights = DEFAULT_BRING_WEIGHTS): BringScore[] {
@@ -221,6 +232,11 @@ export function scoreBrings(myTeam: PokemonSet[], opponent: OpponentEntry[], fie
 
   const teamHasSpeedControl = myTeam.some(s => hasRole(s, 'speedControl'));
   const teamHasRedirection = myTeam.some(s => hasRole(s, 'redirection'));
+  // Fairy-spam detection: a Prankster support (screens/debuffs/WoW) is the
+  // sim-validated answer when the opponent fields multiple Fairies (Moonblast
+  // shreds Dragon-heavy brings). Only fires when we actually have such a support.
+  const oppFairyCount = opponentSets.filter(o => speciesTypes(o.species).includes('Fairy')).length;
+  const teamHasPranksterSupport = myTeam.some(s => s.ability === 'Prankster');
 
   // Tactic synergy: combos my ACTUAL sets complete (real moves/items), once
   // over all 6 — per-bring filtering below just checks containment.
@@ -265,6 +281,11 @@ export function scoreBrings(myTeam: PokemonSet[], opponent: OpponentEntry[], fie
     if (teamHasRedirection) {
       const hasIt = indices.some(i => hasRole(myTeam[i]!, 'redirection'));
       if (hasIt) { roles += w.redirection; rationale.push('Includes redirection'); }
+    }
+    if (oppFairyCount >= 2 && teamHasPranksterSupport) {
+      const hasIt = indices.some(i => myTeam[i]!.ability === 'Prankster');
+      if (hasIt) { roles += w.fairyPrankster; rationale.push(`Prankster support vs ${oppFairyCount} Fairies (sim-validated default)`); }
+      else rationale.push(`⚠ No Prankster support vs ${oppFairyCount} Fairies — sim prefers one`);
     }
     // Synergy: best instance per pattern fully inside this bring, top 3.
     const bringSpecies = new Set(indices.map(i => myTeam[i]!.species));
