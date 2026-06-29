@@ -65,18 +65,21 @@ base.per.filter(p => p.regret > 0.01).sort((a, b) => b.regret - a.regret)
 const OFF = [0.2, 0.4, 0.6, 0.8];
 const DEF = [0.3, 0.6, 1.0, 1.5, 2.0];
 const MATCH = [0, 1, 2, 4, 8];
-let best = { w: DEFAULT_BRING_WEIGHTS, f: base };
+// drift = distance from the current defaults; tie-break toward it so we don't
+// overfit a coarse truth with extreme weights when a near-default combo ties.
+const drift = (w: BringWeights) => Math.abs(w.offense - 0.4) + Math.abs(w.defense - 0.3) / 2 + Math.abs(w.matchup - 8) / 8;
+const candidates: { w: BringWeights; f: Fit }[] = [];
 for (const offense of OFF) for (const defense of DEF) for (const matchup of MATCH) {
   const w = { ...DEFAULT_BRING_WEIGHTS, offense, defense, matchup };
-  const f = evaluate(w);
-  // min total regret; tie-break: more matches, then weights closest to default (less overfit).
-  const drift = Math.abs(offense - 0.4) + Math.abs(defense - 0.3) / 2 + Math.abs(matchup - 8) / 8;
-  const bestDrift = Math.abs(best.w.offense - 0.4) + Math.abs(best.w.defense - 0.3) / 2 + Math.abs(best.w.matchup - 8) / 8;
-  if (f.totalRegret < best.f.totalRegret - 1e-9 ||
-      (Math.abs(f.totalRegret - best.f.totalRegret) < 1e-9 && (f.matches > best.f.matches || (f.matches === best.f.matches && drift < bestDrift)))) {
-    best = { w, f };
-  }
+  candidates.push({ w, f: evaluate(w) });
 }
+candidates.sort((a, b) =>
+  (a.f.totalRegret - b.f.totalRegret) || (b.f.matches - a.f.matches) || (drift(a.w) - drift(b.w)));
+console.log('\ntop weight candidates (regret · matches · drift-from-default — prefer low regret AND low drift):');
+for (const c of candidates.slice(0, 8)) {
+  console.log(`  regret ${pct(c.f.totalRegret).padStart(5)}  matches ${c.f.matches}/${c.f.n}  {off ${c.w.offense} def ${c.w.defense} match ${c.w.matchup}}  drift ${drift(c.w).toFixed(2)}`);
+}
+const best = candidates[0]!;
 report('CALIBRATED (min-regret grid)', best.w, best.f);
 console.log('  remaining misses:');
 best.f.per.filter(p => p.regret > 0.01).sort((a, b) => b.regret - a.regret)
