@@ -11,14 +11,14 @@ data/sprites/
 # Training-data artifacts (derived from the replay corpus — regenerable).
 data/training/
 data/bring-labels.json
-# Bring-search playout ground truth + derived bring sheets/matrices (regenerable
-# via bring-search / bring-matrix / bring-guide — the 4v4 Nash corpus + cheat-sheets).
+# Bring-search playout ground truth + the perf cache + the cheat-sheet (regenerable/churny).
 data/bring-truth*.json
 data/bring-matrix-*.json
-data/matrices/
 data/cell-cache.*.json
-data/bring-sheet-nash.*.md
 data/bring-guide.*.md
+# TRACKED (deliberately NOT ignored): data/matrices/<team>/ + data/bring-sheet-nash.*.md.
+# The 4v4 Nash corpus is the analytical record for the team build + the future model, and
+# it's ~8h/team to regenerate — so it's committed for durability despite being "derived".
 data/replays-train/
 # Creator-intel: fetched captions + derived threat teams (regenerable from a URL).
 data/captions/
