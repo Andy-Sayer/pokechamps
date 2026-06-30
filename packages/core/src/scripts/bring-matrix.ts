@@ -24,6 +24,11 @@ const TEAM = positional[0]?.endsWith('.json') ? positional[0]! : 'anti-meta-mb.j
 const OPP = positional.find(a => !a.endsWith('.json')) ?? 'Blaziken';
 const GAMES = argNum('--games', 6);
 const SAVE = argStr('--save', '');
+// Opponent model per 4v4 cell: 'minimax' (both search — too shallow vs setup teams,
+// over-optimistic), 'pilot' (opponent forced to its game plan), or 'worst' (the
+// opponent plays its BETTER mode = min win-rate for us — the realistic, conservative
+// choice). Default 'worst'.
+const OPP_MODE = argStr('--opp', 'worst');
 
 const myTeam = JSON.parse(readFileSync(join(dataDirPath(), 'my-teams', TEAM), 'utf8')) as PokemonSet[];
 const pika = loadPikaData();
@@ -44,9 +49,16 @@ const label = (b: PokemonSet[]) => b.map(s => s.species).join('/');
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
 const pool = new PlayoutPool();
-console.log(`4v4 matrix · ${TEAM} vs [${opp.anchor}] · ${myBrings.length} my-brings × ${theirBrings.length} their-brings · ${GAMES} games/cell · MUTUAL minimax\n`);
+console.log(`4v4 matrix · ${TEAM} vs [${opp.anchor}] · ${myBrings.length} my-brings × ${theirBrings.length} their-brings · ${GAMES} games/cell · opp=${OPP_MODE}\n`);
+const cellWr = async (mb: PokemonSet[], tb: PokemonSet[]): Promise<number> => {
+  if (OPP_MODE === 'minimax') return (await bringWinRate(pool, mb, tb, GAMES, 2, false)).winRate;
+  if (OPP_MODE === 'pilot') return (await bringWinRate(pool, mb, tb, GAMES, 2, true)).winRate;
+  // 'worst': opponent plays its better mode → take the lower of our win-rates.
+  const [a, b] = await Promise.all([bringWinRate(pool, mb, tb, GAMES, 2, true), bringWinRate(pool, mb, tb, GAMES, 2, false)]);
+  return Math.min(a.winRate, b.winRate);
+};
 const cells = await Promise.all(
-  myBrings.flatMap((mb, i) => theirBrings.map(async (tb, j) => ({ i, j, wr: (await bringWinRate(pool, mb, tb, GAMES, 2, false)).winRate }))),
+  myBrings.flatMap((mb, i) => theirBrings.map(async (tb, j) => ({ i, j, wr: await cellWr(mb, tb) }))),
 );
 pool.close();
 const M = myBrings.map(() => new Array(theirBrings.length).fill(0) as number[]);
