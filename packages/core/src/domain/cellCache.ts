@@ -20,12 +20,20 @@ export function setSig(s: PokemonSet): string {
     .join('#').toLowerCase();
 }
 
+// BUMP this (e.g. '' → 'p2') whenever the search/pilot policy changes in a way that
+// alters playout OUTCOMES — a perish/Taunt pilot, an eval tweak, a depth change. Cells
+// are keyed by it, so a policy change can't silently reuse win-rates computed under the
+// old search (the "rerun-with-a-new-search" footgun). Empty = the original key format,
+// so today's cells (incl. rain-mb's in-flight ones) stay reusable until we actually bump.
+export const POLICY_VERSION = '';
+
 /** Key for one 4v4 cell: my 4 sets (order-independent) vs their 4 (order-independent)
- *  under a given opponent model. Sides are NOT interchangeable (I am always p1). */
+ *  under a given opponent model + policy version. Sides are NOT interchangeable (p1 vs p2). */
 export function cellKey(my4: PokemonSet[], their4: PokemonSet[], oppMode: string): string {
   const a = my4.map(setSig).sort().join('+');
   const b = their4.map(setSig).sort().join('+');
-  return createHash('sha1').update(`${a}__${b}__${oppMode}`).digest('hex').slice(0, 16);
+  const suffix = POLICY_VERSION ? `__${POLICY_VERSION}` : '';
+  return createHash('sha1').update(`${a}__${b}__${oppMode}${suffix}`).digest('hex').slice(0, 16);
 }
 
 interface CellRec { wr: number; games: number }
