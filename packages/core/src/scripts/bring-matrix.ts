@@ -12,9 +12,9 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDirPath, toId, CHAMPIONS_PIKA_FORMAT } from '../domain/data.js';
 import { loadPikaData, metaTeams, buildSet } from '../domain/metaTeams.js';
-import { PlayoutPool, bringWinRate } from '../domain/playoutPool.js';
+import { PlayoutPool, cachedBringWinRate } from '../domain/playoutPool.js';
 import { maximin, solveMatrixGame } from '../domain/bringMatrixGame.js';
-import { CellCache, cellKey } from '../domain/cellCache.js';
+import { CellCache } from '../domain/cellCache.js';
 import { MB_THREATS } from './mbThreats.js';
 import type { PokemonSet } from '../domain/types.js';
 
@@ -59,23 +59,16 @@ const pct = (x: number) => `${Math.round(x * 100)}%`;
 const slug = (s: string) => s.replace(/[^\w]+/g, '_');
 
 const pool = new PlayoutPool();
-// Mon-keyed cell cache: a 4v4 result is reused whenever the same 8 sets recur
-// (across teams, and across mutations that don't touch these mons).
+// Mon-keyed cell cache (shared with bringEval/bring-search): each piloted/minimax
+// 4v4 is cached by the 8 mon sets, so 'worst' reuses both sub-results and evolution
+// reuses every bring not touching a changed mon.
 const cache = new CellCache(CHAMPIONS_PIKA_FORMAT);
 const cellWr = async (mb: PokemonSet[], tb: PokemonSet[]): Promise<number> => {
-  const key = cellKey(mb, tb, OPP_MODE);
-  const hit = cache.get(key, GAMES);
-  if (hit !== undefined) return hit;
-  let wr: number;
-  if (OPP_MODE === 'minimax') wr = (await bringWinRate(pool, mb, tb, GAMES, 2, false)).winRate;
-  else if (OPP_MODE === 'pilot') wr = (await bringWinRate(pool, mb, tb, GAMES, 2, true)).winRate;
-  else {
-    // 'worst': opponent plays its better mode → take the lower of our win-rates.
-    const [a, b] = await Promise.all([bringWinRate(pool, mb, tb, GAMES, 2, true), bringWinRate(pool, mb, tb, GAMES, 2, false)]);
-    wr = Math.min(a.winRate, b.winRate);
-  }
-  cache.put(key, wr, GAMES);
-  return wr;
+  if (OPP_MODE === 'minimax') return cachedBringWinRate(cache, pool, mb, tb, GAMES, 2, false);
+  if (OPP_MODE === 'pilot') return cachedBringWinRate(cache, pool, mb, tb, GAMES, 2, true);
+  // 'worst': opponent plays its better mode → take the lower of our win-rates.
+  const [a, b] = await Promise.all([cachedBringWinRate(cache, pool, mb, tb, GAMES, 2, true), cachedBringWinRate(cache, pool, mb, tb, GAMES, 2, false)]);
+  return Math.min(a, b);
 };
 
 // Namespace by MY team — matrices are (my-team × opponent), not opponent-only,

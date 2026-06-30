@@ -7,11 +7,12 @@
 // (sweep the hand threats / meta gauntlet / both, summary contrasting current vs best).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { dataDirPath } from '../domain/data.js';
+import { dataDirPath, CHAMPIONS_PIKA_FORMAT } from '../domain/data.js';
 import { loadPikaData, metaTeams, buildSet } from '../domain/metaTeams.js';
 import { scoreBrings } from '../domain/bring.js';
 import { entryOf } from '../domain/teamSim.js';
 import { PlayoutPool } from '../domain/playoutPool.js';
+import { CellCache } from '../domain/cellCache.js';
 import { bestBringVsOpponent } from '../domain/bringEval.js';
 import { MB_THREATS } from './mbThreats.js';
 import type { PokemonSet } from '../domain/types.js';
@@ -55,6 +56,7 @@ if (opponents.length === 0) { console.error(`no opponent matching "${OPP}" (anch
 const key = (b: PokemonSet[]) => b.map(s => s.species).sort().join(',');
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 const pp = new PlayoutPool();
+const cache = new CellCache(CHAMPIONS_PIKA_FORMAT); // shared mon-keyed 4v4 cache (reused across opponents + evolution)
 
 const rows: { anchor: string; curWr: number; bestWr: number; bestBring: PokemonSet[]; curBring: PokemonSet[] }[] = [];
 const single = opponents.length === 1;
@@ -62,7 +64,7 @@ console.log(`bring search · ${TEAM} · ${opponents.length} opponent(s) · ${GAM
 
 for (const opp of opponents) {
   const cur = scoreBrings(myTeam, opp.sets.map(entryOf))[0]!.myIndices.map(i => myTeam[i]!);
-  const rec = await bestBringVsOpponent(pp, myTeam, opp.sets, { myBringK: 15, oppBringK: OPP_K, games: GAMES, pilotP2: true });
+  const rec = await bestBringVsOpponent(pp, myTeam, opp.sets, { myBringK: 15, oppBringK: OPP_K, games: GAMES, pilotP2: true, cache });
   const curWr = rec.shortlist.find(s => key(s.bring) === key(cur))?.maximinWr ?? NaN;
   rows.push({ anchor: opp.anchor, curWr, bestWr: rec.maximinWr, bestBring: rec.bring, curBring: cur });
   truth.push({ anchor: opp.anchor, brings: rec.shortlist.map(s => ({ species: s.bring.map(b => b.species), maximinWr: s.maximinWr })) });
@@ -81,6 +83,7 @@ for (const opp of opponents) {
     const delta = rec.maximinWr - curWr;
     console.log(`  ${opp.anchor.padEnd(30)} current ${pct(curWr).padStart(4)} → best ${pct(rec.maximinWr).padStart(4)}  (${delta >= 0 ? '+' : ''}${Math.round(delta * 100)}pp)  best: ${rec.bring.map(b => b.species).join('/')}`);
   }
+  cache.save(); // persist incrementally so cells survive a killed all-day run
 }
 pp.close();
 

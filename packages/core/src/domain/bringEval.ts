@@ -7,7 +7,8 @@
 import { scoreBrings } from './bring.js';
 import { entryOf } from './teamSim.js';
 import { bringWinProb, bringModelAvailable } from './bringValueModel.js';
-import { PlayoutPool, bringWinRate } from './playoutPool.js';
+import { PlayoutPool, bringWinRate, cachedBringWinRate } from './playoutPool.js';
+import type { CellCache } from './cellCache.js';
 import type { PokemonSet } from './types.js';
 
 /** All C(6,4)=15 brings as index tuples. */
@@ -33,10 +34,11 @@ export interface BringRec {
  *  brings. The model proposes `myBringK` of our brings; the sim disposes (maximin). */
 export async function bestBringVsOpponent(
   pool: PlayoutPool, myTeam: PokemonSet[], oppSets: PokemonSet[],
-  opts: { myBringK?: number; oppBringK?: number; games?: number; pilotP2?: boolean } = {},
+  opts: { myBringK?: number; oppBringK?: number; games?: number; pilotP2?: boolean; depth?: number; cache?: CellCache } = {},
 ): Promise<BringRec> {
   const myBringK = opts.myBringK ?? 5, oppBringK = opts.oppBringK ?? 2, games = opts.games ?? 8;
   const pilotP2 = opts.pilotP2 ?? false; // pilot the OPPONENT (p2 = their bring) to its game plan
+  const depth = opts.depth ?? 2;
   const myEntries = myTeam.map(entryOf);
   const combos = allBrings();
 
@@ -61,7 +63,12 @@ export async function bestBringVsOpponent(
   // Same computation/result; only the scheduling changes.
   const cells = await Promise.all(
     shortlistIn.flatMap(({ bring, modelP }) =>
-      oppBrings.map(async ob => ({ bring, modelP, oppBring: ob, wr: (await bringWinRate(pool, bring, ob, games, 2, pilotP2)).winRate })),
+      oppBrings.map(async ob => ({
+        bring, modelP, oppBring: ob,
+        wr: opts.cache
+          ? await cachedBringWinRate(opts.cache, pool, bring, ob, games, depth, pilotP2)
+          : (await bringWinRate(pool, bring, ob, games, depth, pilotP2)).winRate,
+      })),
     ),
   );
   const shortlist: BringRec['shortlist'] = [];

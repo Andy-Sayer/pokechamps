@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { cpus } from 'node:os';
 import { playGame, makeSearchPolicy, makePilotPolicy, derivePilotPlan, type GameResult } from './simPlayout.js';
+import { type CellCache, cellKey } from './cellCache.js';
 import type { PokemonSet } from './types.js';
 
 export interface PlayoutTask { p1: PokemonSet[]; p2: PokemonSet[]; seed: [number, number, number, number]; depth?: number; budgetMs?: number; pilotOpp?: boolean }
@@ -171,4 +172,21 @@ export async function bringWinRate(
   const wins = results.filter(r => r.winner === 'p1').length;
   const ties = results.filter(r => r.winner === 'tie').length;
   return { wins, losses: games - wins - ties, ties, winRate: wins / games, results };
+}
+
+/** Cached win-rate for one 4v4 (my bring vs their bring), keyed by the mon SETS
+ *  + eval mode. The reuse layer for the gauntlet AND evolution: any caller —
+ *  bring-matrix, bringEval/bring-search — shares cells, so a mutated team only
+ *  recomputes the brings touching the changed mon. Returns the rate (callers that
+ *  need wins/games detail should use bringWinRate directly). */
+export async function cachedBringWinRate(
+  cache: CellCache, pool: PlayoutPool, my4: PokemonSet[], their4: PokemonSet[],
+  games: number, depth = 2, pilotP2 = false,
+): Promise<number> {
+  const key = cellKey(my4, their4, `${pilotP2 ? 'pilot' : 'minimax'}-d${depth}`);
+  const hit = cache.get(key, games);
+  if (hit !== undefined) return hit;
+  const wr = (await bringWinRate(pool, my4, their4, games, depth, pilotP2)).winRate;
+  cache.put(key, wr, games);
+  return wr;
 }
