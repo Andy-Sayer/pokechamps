@@ -14,6 +14,7 @@ import { dataDirPath, toId, CHAMPIONS_PIKA_FORMAT } from '../domain/data.js';
 import { loadPikaData, metaTeams, buildSet } from '../domain/metaTeams.js';
 import { PlayoutPool, bringWinRate } from '../domain/playoutPool.js';
 import { maximin, solveMatrixGame } from '../domain/bringMatrixGame.js';
+import { CellCache, cellKey } from '../domain/cellCache.js';
 import { MB_THREATS } from './mbThreats.js';
 import type { PokemonSet } from '../domain/types.js';
 
@@ -58,17 +59,32 @@ const pct = (x: number) => `${Math.round(x * 100)}%`;
 const slug = (s: string) => s.replace(/[^\w]+/g, '_');
 
 const pool = new PlayoutPool();
+// Mon-keyed cell cache: a 4v4 result is reused whenever the same 8 sets recur
+// (across teams, and across mutations that don't touch these mons).
+const cache = new CellCache(CHAMPIONS_PIKA_FORMAT);
 const cellWr = async (mb: PokemonSet[], tb: PokemonSet[]): Promise<number> => {
-  if (OPP_MODE === 'minimax') return (await bringWinRate(pool, mb, tb, GAMES, 2, false)).winRate;
-  if (OPP_MODE === 'pilot') return (await bringWinRate(pool, mb, tb, GAMES, 2, true)).winRate;
-  // 'worst': opponent plays its better mode → take the lower of our win-rates.
-  const [a, b] = await Promise.all([bringWinRate(pool, mb, tb, GAMES, 2, true), bringWinRate(pool, mb, tb, GAMES, 2, false)]);
-  return Math.min(a.winRate, b.winRate);
+  const key = cellKey(mb, tb, OPP_MODE);
+  const hit = cache.get(key, GAMES);
+  if (hit !== undefined) return hit;
+  let wr: number;
+  if (OPP_MODE === 'minimax') wr = (await bringWinRate(pool, mb, tb, GAMES, 2, false)).winRate;
+  else if (OPP_MODE === 'pilot') wr = (await bringWinRate(pool, mb, tb, GAMES, 2, true)).winRate;
+  else {
+    // 'worst': opponent plays its better mode → take the lower of our win-rates.
+    const [a, b] = await Promise.all([bringWinRate(pool, mb, tb, GAMES, 2, true), bringWinRate(pool, mb, tb, GAMES, 2, false)]);
+    wr = Math.min(a.winRate, b.winRate);
+  }
+  cache.put(key, wr, GAMES);
+  return wr;
 };
 
-const matricesDir = join(dataDirPath(), 'matrices');
+// Namespace by MY team — matrices are (my-team × opponent), not opponent-only,
+// so different teams vs the same opponent must NOT collide/overwrite. This keeps
+// every team's 4v4 corpus distinct for cross-team comparison + the bring solve.
+const teamSlug = TEAM.replace(/\.json$/, '');
+const matricesDir = join(dataDirPath(), 'matrices', teamSlug);
 mkdirSync(matricesDir, { recursive: true });
-const sheetPath = join(dataDirPath(), `bring-sheet-nash.${CHAMPIONS_PIKA_FORMAT}.md`);
+const sheetPath = join(dataDirPath(), `bring-sheet-nash.${teamSlug}.${CHAMPIONS_PIKA_FORMAT}.md`);
 interface Res { anchor: string; nash: number; maximin: number; maximinBring: string; optimistic: number; mix: { bring: string; p: number }[] }
 const sheet: Res[] = [];
 const single = opponents.length === 1;
@@ -111,7 +127,10 @@ for (const opp of opponents) {
   // Incremental: save the matrix (corpus) + the running sheet so a long run stays harvestable.
   writeFileSync(join(matricesDir, `${slug(opp.anchor)}.json`), JSON.stringify({ anchor: opp.anchor, myBrings: myBrings.map(label), theirBrings: theirBrings.map(label), M }) + '\n', 'utf8');
   writeSheet();
+  cache.save(); // persist the mon-keyed cache incrementally so a long run is harvestable
 }
 pool.close();
-console.log(`\nsaved ${sheet.length} matrices → data/matrices/ · sheet → data/bring-sheet-nash.${CHAMPIONS_PIKA_FORMAT}.md`);
+const cs = cache.stats();
+console.log(`cell-cache: ${cs.hits} hits / ${cs.misses} misses · ${cs.size} cells stored → data/cell-cache.${CHAMPIONS_PIKA_FORMAT}.json`);
+console.log(`\nsaved ${sheet.length} matrices → data/matrices/${teamSlug}/ · sheet → data/bring-sheet-nash.${teamSlug}.${CHAMPIONS_PIKA_FORMAT}.md`);
 void SAVE;

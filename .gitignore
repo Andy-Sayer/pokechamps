@@ -16,6 +16,7 @@ data/bring-labels.json
 data/bring-truth*.json
 data/bring-matrix-*.json
 data/matrices/
+data/cell-cache.*.json
 data/bring-sheet-nash.*.md
 data/bring-guide.*.md
 data/replays-train/
