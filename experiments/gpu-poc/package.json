@@ -1,0 +1,16 @@
+{
+  "name": "gpu-poc",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway PoC: GPU-batched Gen-9 damage-roll kernel vs CPU. See docs/notes/gpu-acceleration.md.",
+  "scripts": {
+    "bench": "node --import tsx bench.ts"
+  },
+  "dependencies": {
+    "@kmamal/gpu": "^0.2.1",
+    "@smogon/calc": "^0.11.0",
+    "@webgpu/types": "^0.1.71",
+    "tsx": "^4.22.4",
+    "webgpu": "^0.4.0"
+  }
+}
