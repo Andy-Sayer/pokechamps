@@ -17,6 +17,7 @@ export interface PlayoutTask { p1: PokemonSet[]; p2: PokemonSet[]; seed: [number
 const WORKER = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'playout-worker.ts');
 
 interface Pending { resolve: (r: GameResult) => void; reject: (e: Error) => void; task: PlayoutTask }
+interface QueueItem { id: number; p: Pending; tries: number }
 
 const playSync = async (t: PlayoutTask): Promise<GameResult> => {
   const r = await playGame(t.p1, t.p2, {
@@ -28,42 +29,86 @@ const playSync = async (t: PlayoutTask): Promise<GameResult> => {
   return r;
 };
 
+type Worker = { proc: ChildProcess; rl: Interface; busy: boolean; curId?: number };
+
 export class PlayoutPool {
-  private workers: { proc: ChildProcess; rl: Interface; busy: boolean }[] = [];
-  private queue: { id: number; p: Pending }[] = [];
-  private inflight = new Map<number, Pending>();
+  private workers: Worker[] = [];
+  private queue: QueueItem[] = [];
+  private inflight = new Map<number, { p: Pending; tries: number }>();
   private nextId = 1;
   private usable = true;
+  private closed = false;
+  // Circuit breaker: deaths-without-an-intervening-success. A healthy pool resets
+  // this on every completed game, so rare crashes never trip it; a fundamentally
+  // broken pool (every worker dies before finishing anything) trips fast → we give
+  // up on workers and fall back to synchronous play instead of looping forever.
+  private deathsSinceProgress = 0;
+  private static readonly MAX_TRIES = 3;
 
   constructor(private size: number = Math.max(1, Math.min(cpus().length - 1, 30))) {}
 
+  private spawnWorker(): void {
+    try {
+      const proc = spawn(process.execPath, ['--import', 'tsx', WORKER], { stdio: ['pipe', 'pipe', 'inherit'] });
+      const rl = createInterface({ input: proc.stdout! });
+      const w: Worker = { proc, rl, busy: false };
+      // Both 'error' (spawn/IO failure) and 'exit' (crash/OOM) funnel through the
+      // same recovery path; handleDown is idempotent per worker.
+      proc.on('error', () => this.handleDown(w));
+      proc.on('exit', () => this.handleDown(w));
+      rl.on('line', line => this.onLine(w, line));
+      this.workers.push(w);
+    } catch { /* couldn't spawn this one; ensure()/the breaker handle usability */ }
+  }
+
   private ensure(): void {
-    if (this.workers.length || !this.usable) return;
-    for (let i = 0; i < this.size; i++) {
-      try {
-        const proc = spawn(process.execPath, ['--import', 'tsx', WORKER], { stdio: ['pipe', 'pipe', 'inherit'] });
-        proc.on('error', () => { this.usable = false; });
-        const rl = createInterface({ input: proc.stdout! });
-        const w = { proc, rl, busy: false };
-        rl.on('line', line => this.onLine(w, line));
-        proc.on('exit', () => { w.busy = false; });
-        this.workers.push(w);
-      } catch { this.usable = false; break; }
-    }
+    if (this.workers.length || !this.usable || this.closed) return;
+    for (let i = 0; i < this.size; i++) this.spawnWorker();
     if (!this.workers.length) this.usable = false;
   }
 
-  private onLine(w: { busy: boolean }, line: string): void {
+  /** A worker died (crash, OOM, IO error). Requeue the task it was running so its
+   *  Promise never hangs, respawn a replacement to hold the pool at size, and trip
+   *  the breaker if nothing is making progress. */
+  private handleDown(w: Worker): void {
+    const idx = this.workers.indexOf(w);
+    if (idx < 0) return; // already handled (error+exit can both fire)
+    this.workers.splice(idx, 1);
+    if (this.closed) return; // shutting down — nothing to recover
+    if (w.curId !== undefined) {
+      const entry = this.inflight.get(w.curId);
+      if (entry) {
+        this.inflight.delete(w.curId);
+        if (entry.tries + 1 < PlayoutPool.MAX_TRIES) this.queue.push({ id: w.curId, p: entry.p, tries: entry.tries + 1 });
+        else entry.p.reject(new Error('playout worker crashed repeatedly'));
+      }
+    }
+    if (++this.deathsSinceProgress > this.size * 2) { this.usable = false; this.drainReject(); return; }
+    if (this.usable && this.workers.length < this.size && (this.queue.length || this.inflight.size)) this.spawnWorker();
+    this.pump();
+  }
+
+  /** Pool is unusable — fail everything outstanding so run()'s catch falls back to sync. */
+  private drainReject(): void {
+    for (const { p } of this.inflight.values()) p.reject(new Error('playout pool unusable'));
+    this.inflight.clear();
+    for (const q of this.queue) q.p.reject(new Error('playout pool unusable'));
+    this.queue = [];
+  }
+
+  private onLine(w: Worker, line: string): void {
     const s = line.trim();
     if (!s) return;
     let msg: { id: number; ok: boolean; result?: GameResult; error?: string };
     try { msg = JSON.parse(s); } catch { return; }
-    const p = this.inflight.get(msg.id);
-    if (!p) return;
+    const entry = this.inflight.get(msg.id);
+    if (!entry) return;
     this.inflight.delete(msg.id);
     w.busy = false;
-    if (msg.ok && msg.result) p.resolve(msg.result);
-    else p.reject(new Error(msg.error ?? 'worker error'));
+    w.curId = undefined;
+    this.deathsSinceProgress = 0; // progress made → reset the breaker
+    if (msg.ok && msg.result) entry.p.resolve(msg.result);
+    else entry.p.reject(new Error(msg.error ?? 'worker error'));
     this.pump();
   }
 
@@ -73,7 +118,8 @@ export class PlayoutPool {
       const next = this.queue.shift();
       if (!next) return;
       w.busy = true;
-      this.inflight.set(next.id, next.p);
+      w.curId = next.id;
+      this.inflight.set(next.id, { p: next.p, tries: next.tries });
       w.proc.stdin!.write(JSON.stringify({ id: next.id, ...next.p.task }) + '\n');
     }
   }
@@ -81,7 +127,7 @@ export class PlayoutPool {
   private one(task: PlayoutTask): Promise<GameResult> {
     return new Promise<GameResult>((resolve, reject) => {
       const id = this.nextId++;
-      this.queue.push({ id, p: { resolve, reject, task } });
+      this.queue.push({ id, p: { resolve, reject, task }, tries: 0 });
       this.pump();
     });
   }
@@ -106,6 +152,7 @@ export class PlayoutPool {
   }
 
   close(): void {
+    this.closed = true; // exits from here on are intentional, not crashes to recover
     for (const w of this.workers) { try { w.proc.stdin!.end(); } catch { /* already gone */ } }
     this.workers = [];
   }

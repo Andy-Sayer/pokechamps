@@ -86,7 +86,20 @@ const writeSheet = () => {
 console.log(`4v4 Nash matrix · ${TEAM} · ${opponents.length} opponent(s) · ${myBrings.length} my-brings · ${GAMES} games/cell · opp=${OPP_MODE}\n`);
 for (const opp of opponents) {
   const theirBrings = combos4(opp.sets.length).map(c => c.map(i => opp.sets[i]!));
-  const cells = await Promise.all(myBrings.flatMap((mb, i) => theirBrings.map(async (tb, j) => ({ i, j, wr: await cellWr(mb, tb) }))));
+  // Heartbeat: an opponent is one big Promise.all over all cells, so without this
+  // a healthy run is silent for ~15 min — indistinguishable from a hang. Logging
+  // every few cells makes silence itself the stall signal (see the pool deadlock
+  // that burned 11h producing nothing).
+  const total = myBrings.length * theirBrings.length;
+  let done = 0; const t0 = Date.now();
+  const cells = await Promise.all(myBrings.flatMap((mb, i) => theirBrings.map(async (tb, j) => {
+    const wr = await cellWr(mb, tb);
+    if (++done % 15 === 0 || done === total) {
+      const rate = done / ((Date.now() - t0) / 1000);
+      console.log(`  [${opp.anchor}] ${done}/${total} cells · ${rate.toFixed(2)} cells/s · ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+    }
+    return { i, j, wr };
+  })));
   const M = myBrings.map(() => new Array(theirBrings.length).fill(0) as number[]);
   for (const c of cells) M[c.i]![c.j] = c.wr;
   const sol = solveMatrixGame(M);
