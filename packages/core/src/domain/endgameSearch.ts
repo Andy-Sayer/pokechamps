@@ -3717,35 +3717,42 @@ function terminal(s: State, depth: number): number | null {
 }
 
 // Perish-doom weight for a live mon at the search horizon: a mon whose clock
-// is running AND that cannot escape (move-trapped by a live active trapper, or
-// no living bench to switch into) is nearly-dead material — count it at
-// count/4 of full value so the search credits a sealed perish trap even when
-// the faint itself lies beyond the horizon. A mon that can still switch out
-// keeps full value (switching clears the clock).
+// is running AND that cannot escape (trapped by a live active trapper — MOVE-trap
+// (Block/Mean Look) OR ABILITY-trap (Shadow Tag/Arena Trap/Magnet Pull) — or no
+// living bench to switch into) is nearly-dead material: count it at count/4 of
+// full value so the search credits a SEALED perish trap even when the faint lies
+// beyond the horizon. A mon that can still switch out keeps full value (switching
+// clears the clock). `esc` carries the escape-rule inputs (own species/ability/
+// item/grounded + foe abilities) so ability-trapping is recognised — without it
+// the leaf treated a Shadow-Tag-trapped foe as free (the perish-trap blind spot).
 function perishWeight(
   idx: number, hp: number[], active: number[], perish: number[], trappedByArr: (number | null)[],
   foeActive: number[], foeHp: number[],
+  esc?: { species: string; ability: string | null | undefined; item: string | undefined; grounded: boolean; foeAbility: readonly (string | null | undefined)[] },
 ): number {
   const count = perish[idx] ?? 0;
   if (count <= 0 || !active.includes(idx)) return 1;
-  const trapped = moveTrapHolds(trappedByArr[idx], foeActive, foeHp);
+  const trapped = moveTrapHolds(trappedByArr[idx], foeActive, foeHp)
+    || (!!esc && trappedBy(esc.species, esc.ability, esc.item, esc.grounded, foeActive, foeHp, esc.foeAbility));
   const hasBench = hp.some((h, k) => h > 0 && k !== idx && !active.includes(k));
   if (!trapped && hasBench) return 1;
   return count / 4;
 }
 
-function leafScore(s: State): number {
+function leafScore(t: Tables, s: State): number {
   let score = 0;
   for (let i = 0; i < s.myHp.length; i++) {
     const h = s.myHp[i]!;
     if (h <= 0) continue;
-    const w = perishWeight(i, s.myHp, s.myActive, s.myPerish, s.myTrappedBy, s.oppActive, s.oppHp);
+    const w = perishWeight(i, s.myHp, s.myActive, s.myPerish, s.myTrappedBy, s.oppActive, s.oppHp,
+      { species: t.mySpecies[i]!, ability: t.myAbility[i], item: t.myItem[i], grounded: t.myGrounded[i] ?? true, foeAbility: t.oppAbility });
     score += w * (MATERIAL + h);
   }
   for (let j = 0; j < s.oppHp.length; j++) {
     const h = s.oppHp[j]!;
     if (h <= 0 || !(s.oppSeen[j] ?? true)) continue;
-    const w = perishWeight(j, s.oppHp, s.oppActive, s.oppPerish, s.oppTrappedBy, s.myActive, s.myHp);
+    const w = perishWeight(j, s.oppHp, s.oppActive, s.oppPerish, s.oppTrappedBy, s.myActive, s.myHp,
+      { species: t.oppSpecies[j]!, ability: t.oppAbility[j], item: t.oppItem[j], grounded: t.oppGrounded[j] ?? true, foeAbility: t.myAbility });
     score -= w * (MATERIAL + h);
   }
   return score;
@@ -3828,7 +3835,7 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
   if ((++searchNodes & 2047) === 0 && Date.now() > searchDeadline) throw SEARCH_TIMEOUT;
   const term = terminal(s, depth);
   if (term !== null) return term;
-  if (depth === 0) return leafScore(s);
+  if (depth === 0) return leafScore(t, s);
 
   // Transposition-table probe (~half of internal nodes recur — measured). A cached
   // bound serves the whole subtree: EXACT returns outright; a LOWER bound that
@@ -3875,7 +3882,7 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
   const oppGuard = { wide: t.oppWideGuard, quick: t.oppQuickGuard };
   const myJoints = jointActions(s.myActive, s.oppActive, s.oppHp, t.mySpreadActors, t.myProtectMove, s.myProtectStreak, myBench, U, U, U, U, U, U, U, U, U, U, U, U, U, U, myRestrict, U, U, myPrio, myHelp, myGuard);
   const oppJoints = jointActions(s.oppActive, s.myActive, s.myHp, t.oppSpreadActors, t.oppProtectMove, s.oppProtectStreak, oppBench, U, U, U, U, U, U, U, U, U, U, U, U, U, U, oppRestrict, U, U, oppPrio, oppHelp, oppGuard);
-  if (myJoints.length === 0) return leafScore(s);
+  if (myJoints.length === 0) return leafScore(t, s);
 
   // Move ordering for sharper alpha-beta (no options dropped — exact same result,
   // fewer nodes): my highest-damage joint first so `best` climbs fast; the
@@ -5243,8 +5250,9 @@ export function searchIterative(
   input: SearchInput,
   maxDepth: number,
   onDepth?: (r: SearchResult) => void,
+  breadth?: SearchBreadth,
 ): SearchResult {
-  const search = createSearch(input);
+  const search = createSearch(input, breadth);
   let last: SearchResult = { depth: 0, score: 0, plays: [], verdict: 'even', forced: false, allOppRevealed: input.allOppRevealed ?? false, risks: [] };
   for (let d = 1; d <= maxDepth; d++) {
     last = search.toDepth(d);
@@ -5267,8 +5275,9 @@ export function searchBudgeted(
   maxDepth: number,
   budgetMs: number,
   onDepth?: (r: SearchResult) => void,
+  breadth?: SearchBreadth,
 ): SearchResult {
-  const search = createSearch(input);
+  const search = createSearch(input, breadth);
   let last: SearchResult = { depth: 0, score: 0, plays: [], verdict: 'even', forced: false, allOppRevealed: input.allOppRevealed ?? false, risks: [] };
   searchDeadline = Date.now() + budgetMs;
   searchNodes = 0;

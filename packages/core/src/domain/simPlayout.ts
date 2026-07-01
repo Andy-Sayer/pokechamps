@@ -24,7 +24,7 @@ import { ensureSimLoaded, buildBattle, readRoster, readOutcome, type SimMon } fr
 import type { PokemonSet, OpponentEntry, FieldState } from './types.js';
 import { NEUTRAL_FIELD } from './types.js';
 import { getMove, toId } from './data.js';
-import { searchIterative, searchBudgeted, type SearchInput, type SearchMyMon, type SearchOppMon, type SearchResult } from './endgameSearch.js';
+import { searchIterative, searchBudgeted, type SearchInput, type SearchMyMon, type SearchOppMon, type SearchResult, type SearchBreadth } from './endgameSearch.js';
 
 const toSimMon = (s: PokemonSet): SimMon => ({
   species: s.species, ability: s.ability, item: s.item, moves: s.moves,
@@ -183,7 +183,7 @@ function buildInput(battle: Battle, i: number, mineSets: PokemonSet[], oppSets: 
  *  ~10-15s at `depth` 2. Pass `budgetMs` to cap each decision (searchBudgeted —
  *  anytime deepening to `depth` within the budget), trading some play strength
  *  for many more games/sec; parallelise across matchups with MatchupPool. */
-export function makeSearchPolicy(p1Sets: PokemonSet[], p2Sets: PokemonSet[], depth = 2, budgetMs?: number): Policy {
+export function makeSearchPolicy(p1Sets: PokemonSet[], p2Sets: PokemonSet[], depth = 2, budgetMs?: number, breadth?: SearchBreadth): Policy {
   return (battle, i) => {
     const side = battle.sides[i] as any;
     const req = side.activeRequest;
@@ -193,7 +193,7 @@ export function makeSearchPolicy(p1Sets: PokemonSet[], p2Sets: PokemonSet[], dep
     let result: SearchResult;
     try {
       const input = buildInput(battle, i, i === 0 ? p1Sets : p2Sets, i === 0 ? p2Sets : p1Sets);
-      result = budgetMs ? searchBudgeted(input, depth, budgetMs) : searchIterative(input, depth);
+      result = budgetMs ? searchBudgeted(input, depth, budgetMs, undefined, breadth) : searchIterative(input, depth, undefined, breadth);
     } catch { return greedyPolicy(battle, i); }
     const out = readOutcome(battle);
     const mySlots = i === 0 ? out.p1 : out.p2;
