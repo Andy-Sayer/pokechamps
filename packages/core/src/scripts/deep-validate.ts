@@ -19,16 +19,14 @@ const OUT = '/tmp/deep-validate.out';
 const log = (s: string) => { console.log(s); try { appendFileSync(OUT, s + '\n'); } catch { /* ignore */ } };
 const load = (f: string) => JSON.parse(readFileSync(join(dataDirPath(), 'my-teams', f), 'utf8')) as PokemonSet[];
 
-const teams = [
-  { name: 'rain-mb', sets: load('rain-mb.json') },
-  { name: 'fakeperish-base', sets: load('fakeperish-base-mb.json') },
-  { name: 'fakeperish-opt', sets: load('fakeperish-opt-mb.json') },
-];
+const argStr = (f: string, d: string) => { const i = process.argv.indexOf(f); return i >= 0 ? String(process.argv[i + 1]) : d; };
+const teamNames = argStr('--teams', 'rain-mb,fakeperish-base,fakeperish-opt').split(',').map(s => s.trim());
+const teams = teamNames.map(n => ({ name: n, sets: load(`${n}.json`) }));
 const pika = loadPikaData();
 const allOpps = [...MB_THREATS.map(m => ({ anchor: m.anchor, sets: m.sets })), ...metaTeams(pika, 12, 4).map(m => ({ anchor: m.anchor, sets: m.sets }))];
 const pick = (s: string) => allOpps.find(o => o.anchor.toLowerCase().includes(s.toLowerCase()));
-// The decisive weather/veil cells that decide the final team + the Archaludon question.
-const oppNames = ['Ninetales', 'Swampert', 'Sylveon'];
+// Decisive cells (default = weather/veil); override with --opps for the contested-offense run.
+const oppNames = argStr('--opps', 'Ninetales,Swampert,Sylveon').split(',').map(s => s.trim());
 const opponents = oppNames.map(pick).filter((o): o is NonNullable<typeof o> => !!o);
 const SEEDS = [3, 17];
 const BUDGET = 40000, SPL = 5, MAXDEPTH = 14; // deepest
