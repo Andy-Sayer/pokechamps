@@ -20,12 +20,12 @@ import type { PokemonSet } from '../domain/types.js';
 const args = process.argv.slice(2);
 const flag = (f: string) => args.includes(f);
 const opt1 = (f: string) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : undefined; };
-const positional = args.filter(a => !a.startsWith('--') && args[args.indexOf(a) - 1] !== '--out');
+const positional = args.filter(a => !a.startsWith('--') && args[args.indexOf(a) - 1] !== '--out' && args[args.indexOf(a) - 1] !== '--base');
 const GAMES = parseInt(positional[0] ?? '16', 10);
 const OPT = positional[1] ?? 'anti-meta-mb-natopt.json';
 const ADOPT = flag('--adopt');
 const OUT = opt1('--out');
-const BASE = 'anti-meta-mb.json';
+const BASE = opt1('--base') ?? 'anti-meta-mb.json'; // the ORIGINAL team to diff the optimized one against
 const SUBSET_CAP = 5; // 2^5 = 32 subset evals; beyond this fall back to singles + leave-one-out
 
 const load = (f: string) => JSON.parse(readFileSync(join(dataDirPath(), 'my-teams', f), 'utf8')) as PokemonSet[];
