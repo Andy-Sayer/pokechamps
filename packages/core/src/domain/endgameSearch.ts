@@ -1144,6 +1144,17 @@ function findWeatherMove(moves: string[]): { move: string; weather: Weather } | 
   for (const m of moves) { const w = weatherSetByMove(m); if (w) return { move: m, weather: w }; }
   return null;
 }
+// Rock items extend their matching weather 5 → 8 turns (Damp Rock = the reason a
+// rain lead outlasts Snow Warning). Keyed item-id → coarse weather kind.
+const ROCK_WEATHER: Record<string, string> = { damprock: 'rain', heatrock: 'sun', smoothrock: 'sand', icyrock: 'snow' };
+function weatherKind(w: Weather): string {
+  const s = toId(String(w));
+  if (s.includes('rain')) return 'rain';
+  if (s.includes('sun') || s.includes('drought') || s.includes('harsh')) return 'sun';
+  if (s.includes('sand')) return 'sand';
+  if (s.includes('snow') || s.includes('hail')) return 'snow';
+  return '';
+}
 function isType(species: string, t: string): boolean {
   return ((getSpecies(species) as { types?: string[] } | undefined)?.types ?? []).includes(t);
 }
@@ -2888,15 +2899,22 @@ function resolveTurn(
 
   // Weather: tick down (stall-out), then apply this turn's setters. A switch-in
   // weather ability (Drought etc.) fires when the mon enters; a SET_WEATHER move
-  // sets it too. Both give 5 turns; later setters win.
+  // sets it too. Later setters win. Duration is 5 turns — UNLESS the setter holds
+  // the matching rock (Damp/Heat/Smooth/Icy Rock → 8 turns). This matters for
+  // weather teams' attrition clock (Damp Rock Pelipper's 8-turn rain outlasts
+  // Snow Warning's 5) — the sim models it, so the search must too. Opp rocks are
+  // only credited when the item is known (conservative default 5).
   let weather = s.weather;
   let weatherTurns = s.weatherTurns;
   if (weather && weatherTurns != null) { weatherTurns -= 1; if (weatherTurns <= 0) { weather = null; weatherTurns = undefined; } }
-  const setWeather = (w: Weather | null) => { if (w) { weather = w; weatherTurns = 5; } };
-  for (const inB of mySwitchIn.values()) setWeather(t.myWeatherAbility[inB] ?? null);
-  for (const inB of oppSwitchIn.values()) setWeather(t.oppWeatherAbility[inB] ?? null);
-  for (const [actor, target] of myTargets) if (target === SET_WEATHER) setWeather(t.myWeatherMove[actor]?.weather ?? null);
-  for (const [actor, target] of oppTargets) if (target === SET_WEATHER) setWeather(t.oppWeatherMove[actor]?.weather ?? null);
+  const setWeather = (w: Weather | null, itemId?: string) => {
+    if (!w) return;
+    weather = w; weatherTurns = ROCK_WEATHER[toId(itemId ?? '')] === weatherKind(w) ? 8 : 5;
+  };
+  for (const inB of mySwitchIn.values()) setWeather(t.myWeatherAbility[inB] ?? null, t.myItem[inB]);
+  for (const inB of oppSwitchIn.values()) setWeather(t.oppWeatherAbility[inB] ?? null, t.oppItem[inB]);
+  for (const [actor, target] of myTargets) if (target === SET_WEATHER) setWeather(t.myWeatherMove[actor]?.weather ?? null, t.myItem[actor]);
+  for (const [actor, target] of oppTargets) if (target === SET_WEATHER) setWeather(t.oppWeatherMove[actor]?.weather ?? null, t.oppItem[actor]);
 
   // Terrain: same tick + set pattern (surge abilities on switch-in, terrain moves).
   let terrain = s.terrain;
