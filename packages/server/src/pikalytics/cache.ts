@@ -92,8 +92,11 @@ export function fetchAndCache(
       const res = await fetcher(url);
       if (!res.ok) return null;
       const md = await res.text();
-      const parsed = parseEntry(md, species);
-      const entry: PikalyticsEntry = { rank: 0, usage: 0, ...parsed };
+      // parseEntry returns a complete PikalyticsEntry. Format-level ranking
+      // (rank/usage/winRate/record) was split out into PikalyticsFile.ranking
+      // in c51344a and is no longer part of PikalyticsEntry — the live per-
+      // species fetch can't produce it, so we persist pure set data here.
+      const entry: PikalyticsEntry = parseEntry(md, species);
       upsertEntry(db, species, entry);
       return entry;
     } catch {
