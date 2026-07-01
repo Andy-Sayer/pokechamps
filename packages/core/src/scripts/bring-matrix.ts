@@ -25,6 +25,15 @@ const TEAM = positional[0]?.endsWith('.json') ? positional[0]! : 'anti-meta-mb.j
 const OPP = positional.find(a => !a.endsWith('.json')) ?? 'Blaziken';
 const GAMES = argNum('--games', 6);
 const SAVE = argStr('--save', '');
+// Search settings per cell (defaults preserve the depth-2, no-budget policy that
+// produced the existing sheets/cache). --budget caps each decision (bounded,
+// hang-proof unattended runs); --spl widens the switch window; --depth raises the
+// max search depth. Non-defaults are folded into the cache key so they don't
+// collide with the depth-2 corpus.
+const DEPTH = argNum('--depth', 2);
+const BUDGET = argNum('--budget', 0);              // 0 = no cap (existing behaviour)
+const SPL = argNum('--spl', -1);                   // -1 = default switchPlyLimit
+const SEARCH_OPTS = { budgetMs: BUDGET || undefined, breadth: SPL >= 0 ? { switchPlyLimit: SPL } : undefined };
 // Opponent model per 4v4 cell: 'minimax' (both search — too shallow vs setup teams,
 // over-optimistic), 'pilot' (opponent forced to its game plan), or 'worst' (the
 // opponent plays its BETTER mode = min win-rate for us — the realistic, conservative
@@ -64,10 +73,10 @@ const pool = new PlayoutPool();
 // reuses every bring not touching a changed mon.
 const cache = new CellCache(CHAMPIONS_PIKA_FORMAT);
 const cellWr = async (mb: PokemonSet[], tb: PokemonSet[]): Promise<number> => {
-  if (OPP_MODE === 'minimax') return cachedBringWinRate(cache, pool, mb, tb, GAMES, 2, false);
-  if (OPP_MODE === 'pilot') return cachedBringWinRate(cache, pool, mb, tb, GAMES, 2, true);
+  if (OPP_MODE === 'minimax') return cachedBringWinRate(cache, pool, mb, tb, GAMES, DEPTH, false, SEARCH_OPTS);
+  if (OPP_MODE === 'pilot') return cachedBringWinRate(cache, pool, mb, tb, GAMES, DEPTH, true, SEARCH_OPTS);
   // 'worst': opponent plays its better mode → take the lower of our win-rates.
-  const [a, b] = await Promise.all([cachedBringWinRate(cache, pool, mb, tb, GAMES, 2, true), cachedBringWinRate(cache, pool, mb, tb, GAMES, 2, false)]);
+  const [a, b] = await Promise.all([cachedBringWinRate(cache, pool, mb, tb, GAMES, DEPTH, true, SEARCH_OPTS), cachedBringWinRate(cache, pool, mb, tb, GAMES, DEPTH, false, SEARCH_OPTS)]);
   return Math.min(a, b);
 };
 

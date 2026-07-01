@@ -5,9 +5,10 @@
 // stderr is inherited; ONLY stdout carries results (one JSON line per game).
 import { createInterface } from 'node:readline';
 import { playGame, makeSearchPolicy, makePilotPolicy, derivePilotPlan } from '../domain/simPlayout.js';
+import type { SearchBreadth } from '../domain/endgameSearch.js';
 import type { PokemonSet } from '../domain/types.js';
 
-interface Task { id: number; p1: PokemonSet[]; p2: PokemonSet[]; seed: [number, number, number, number]; depth?: number; budgetMs?: number; pilotOpp?: boolean }
+interface Task { id: number; p1: PokemonSet[]; p2: PokemonSet[]; seed: [number, number, number, number]; depth?: number; budgetMs?: number; pilotOpp?: boolean; breadth?: SearchBreadth }
 
 const rl = createInterface({ input: process.stdin });
 rl.on('line', line => {
@@ -17,7 +18,7 @@ rl.on('line', line => {
   try { task = JSON.parse(t); } catch { return; }
   void (async () => {
     try {
-      const policy = makeSearchPolicy(task.p1, task.p2, task.depth ?? 2, task.budgetMs);
+      const policy = makeSearchPolicy(task.p1, task.p2, task.depth ?? 2, task.budgetMs, task.breadth);
       const p2Policy = task.pilotOpp ? makePilotPolicy(task.p1, task.p2, task.depth ?? 2, derivePilotPlan(task.p2)) : undefined;
       const r = await playGame(task.p1, task.p2, { seed: task.seed, policy, p2Policy });
       process.stdout.write(JSON.stringify({ id: task.id, ok: true, result: r }) + '\n');

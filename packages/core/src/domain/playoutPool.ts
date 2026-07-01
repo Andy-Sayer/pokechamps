@@ -10,10 +10,11 @@ import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { cpus } from 'node:os';
 import { playGame, makeSearchPolicy, makePilotPolicy, derivePilotPlan, type GameResult } from './simPlayout.js';
+import type { SearchBreadth } from './endgameSearch.js';
 import { type CellCache, cellKey } from './cellCache.js';
 import type { PokemonSet } from './types.js';
 
-export interface PlayoutTask { p1: PokemonSet[]; p2: PokemonSet[]; seed: [number, number, number, number]; depth?: number; budgetMs?: number; pilotOpp?: boolean }
+export interface PlayoutTask { p1: PokemonSet[]; p2: PokemonSet[]; seed: [number, number, number, number]; depth?: number; budgetMs?: number; pilotOpp?: boolean; breadth?: SearchBreadth }
 
 const WORKER = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'playout-worker.ts');
 
@@ -23,7 +24,7 @@ interface QueueItem { id: number; p: Pending; tries: number }
 const playSync = async (t: PlayoutTask): Promise<GameResult> => {
   const r = await playGame(t.p1, t.p2, {
     seed: t.seed,
-    policy: makeSearchPolicy(t.p1, t.p2, t.depth ?? 2, t.budgetMs),
+    policy: makeSearchPolicy(t.p1, t.p2, t.depth ?? 2, t.budgetMs, t.breadth),
     p2Policy: t.pilotOpp ? makePilotPolicy(t.p1, t.p2, t.depth ?? 2, derivePilotPlan(t.p2)) : undefined,
   });
   if ('error' in r) throw new Error(r.error);
@@ -164,9 +165,11 @@ export class PlayoutPool {
  *  results (each a labeled training row). */
 export async function bringWinRate(
   pool: PlayoutPool, myBring: PokemonSet[], oppBring: PokemonSet[], games: number, depth = 2, pilotP2 = false,
+  opts: { budgetMs?: number; breadth?: SearchBreadth } = {},
 ): Promise<{ wins: number; losses: number; ties: number; winRate: number; results: GameResult[] }> {
   const tasks: PlayoutTask[] = Array.from({ length: games }, (_, k) => ({
     p1: myBring, p2: oppBring, seed: [k + 1, 2 * k + 5, 3 * k + 7, 5 * k + 11], depth, pilotOpp: pilotP2,
+    budgetMs: opts.budgetMs, breadth: opts.breadth,
   }));
   const results = await pool.run(tasks);
   const wins = results.filter(r => r.winner === 'p1').length;
@@ -181,12 +184,20 @@ export async function bringWinRate(
  *  need wins/games detail should use bringWinRate directly). */
 export async function cachedBringWinRate(
   cache: CellCache, pool: PlayoutPool, my4: PokemonSet[], their4: PokemonSet[],
-  games: number, depth = 2, pilotP2 = false,
+  games: number, depth = 2, pilotP2 = false, opts: { budgetMs?: number; breadth?: SearchBreadth } = {},
 ): Promise<number> {
-  const key = cellKey(my4, their4, `${pilotP2 ? 'pilot' : 'minimax'}-d${depth}`);
+  // Fold non-default settings into the cache mode so cells at different search
+  // settings never collide — but keep the DEFAULT key byte-identical (no suffix)
+  // so existing depth-2 cells stay reusable.
+  const spl = opts.breadth?.switchPlyLimit, sk = opts.breadth?.spreadK, b = opts.budgetMs;
+  let mode = `${pilotP2 ? 'pilot' : 'minimax'}-d${depth}`;
+  if (spl !== undefined) mode += `-spl${spl}`;
+  if (sk !== undefined) mode += `-sk${sk}`;
+  if (b) mode += `-b${b}`;
+  const key = cellKey(my4, their4, mode);
   const hit = cache.get(key, games);
   if (hit !== undefined) return hit;
-  const wr = (await bringWinRate(pool, my4, their4, games, depth, pilotP2)).winRate;
+  const wr = (await bringWinRate(pool, my4, their4, games, depth, pilotP2, opts)).winRate;
   cache.put(key, wr, games);
   return wr;
 }
