@@ -36,7 +36,12 @@ Chosen over anti‑meta‑mb and an optimized deception team (fakeperish‑opt) 
 - **Mega Raichu‑X (WIN):** turn‑1 **Garchomp EQ + Talonflame Flare Blitz focus‑KO Whimsicott** (kill the Tailwind/support); grind through with Garchomp EQ + Dragonite Draco.
 - **Mega Swampert / rain mirror (WIN):** win the weather war — **Pelipper Weather Ball KOs their Swampert**; then mega Dragonite Draco/Hurricane sweeps Pelipper → Incineroar → Archaludon. (Coin‑flip on the Nash sheet, but a clean winning line exists.)
 
-**The one structural hole — Ninetales‑Alola (LOSS, honest):** Ninetales' **Blizzard is 100% accurate in its own snow** and systematically KOs our Ice‑weak core — Garchomp is Ice **4×**, Talonflame/Dragonite **2×**. Even trading KOs back, Blizzard + Whimsicott Moonblast out‑tempo the team. **No line fixes this** — it needs a species‑level patch (a non‑Ice‑weak answer, a faster super‑effective Steel/Fire/Rock hitter, or a screens/Veil break), which is the open follow‑up. It's a rare matchup (Ninetales isn't top‑20 usage), so it's an acceptable known soft spot for now.
+**Ninetales‑Alola — the hard one, but WINNABLE (~50% with the right bring, deep‑probed 2026‑07‑01):** originally read as an auto‑loss (0/4) — but that used a Garchomp bring with **no Pelipper**. The deep probe found the real answer:
+- **Bring Pelipper, drop (or hide) Garchomp.** Pelipper's Drizzle **overrides Snow Warning** → no Aurora Veil (needs snow), Blizzard back to 70% acc. Garchomp is the 4×‑Ice liability that hands Ninetales a free Blizzard KO — the bring **Pelipper/Kingambit/Dragonite/Meowscarada** (no Garchomp) went **2/4**; **Pelipper/Garchomp/Kingambit/Dragonite went 0/4** even with rain up. So rain‑override is necessary but *not sufficient* — you must also not feed the 4× weakness.
+- **The winning line:** Pelipper leads → **Tailwind + Drizzle** (rain up, speed up); **rain‑boosted Weather Ball KOs the frail Ninetales**; Kingambit/Dragonite trade into the rest; Mega Dragonite Hurricane cleans Whimsicott. In the Garchomp variant, lead Pelipper and **pivot Garchomp in behind the rain** so it never eats a turn‑1 Blizzard.
+- **Verdict:** ~50% coin‑flip, not a loss. The residual ~50% is the leftover Ice weakness (Blizzard high‑rolls, Whimsicott Moonblast). Pushing *past* 50% still wants a species‑level patch (a non‑Ice‑weak / faster‑SE answer) — the open follow‑up — but it is no longer a free loss.
+
+**Focus Sash Whimsicott:** Sash only saves at full HP → **break it, then KO.** Either same‑turn double‑target (Garchomp EQ + Talonflame Flare Blitz, as in the Raichu game) or two hits over consecutive turns (Gale Wings **priority Acrobatics** ×2). The search does this automatically; Talonflame's priority is the clean closer.
 
 ## Bring guide (Nash‑optimal, per opponent)
 
@@ -45,7 +50,7 @@ Vary the bring across games (the mix) so you can't be counter‑brought. Hardest
 | vs | Nash | Bring (favorite → alternates) |
 |---|---:|---|
 | Torkoal (sun) | 16% | Pelipper/Garchomp/Kingambit/Meowscarada · +Talonflame/Dragonite variants |
-| Ninetales‑Alola | 19% | Pelipper/Garchomp/Kingambit/Dragonite (known hard) |
+| Ninetales‑Alola | ~50%† | **Pelipper/Kingambit/Dragonite/Meowscarada** (NOT Garchomp — deep‑probe correction) |
 | Pelipper (rain) | 26% | Talonflame/Pelipper/Garchomp/Dragonite |
 | Sylveon | 26% | Talonflame/Pelipper/Garchomp/Dragonite |
 | Garchomp mirror | 31% | Garchomp/Kingambit/Dragonite/Meowscarada |
@@ -64,7 +69,7 @@ Vary the bring across games (the mix) so you can't be counter‑brought. Hardest
 
 **Backbone:** Kingambit + Dragonite in almost every bring. Garchomp/Meowscarada come in vs grounded/physical threats and Sneasler; Pelipper leads when you want rain up; Talonflame for Tailwind vs faster teams.
 
-*Nash numbers are the adversarial floor (opponent counter‑brings + plays optimally); real‑ladder and best‑play win‑rates run meaningfully higher, as the deep validation confirmed (e.g. Sylveon 26% Nash → 2/2 under best play).*
+*Nash numbers are the adversarial floor (opponent counter‑brings + plays optimally); real‑ladder and best‑play win‑rates run meaningfully higher, as the deep validation confirmed (e.g. Sylveon 26% Nash → 2/2 under best play; Ninetales 19% Nash → ~50% deep with the corrected bring). †Ninetales' shallow‑Nash over‑weighted the Garchomp bring that loses; the Meowscarada bring is the deep‑validated answer.*
 
 ## Open follow‑up
 The **Ninetales‑Alola / weather patch** (a non‑Ice‑weak, snow/Veil‑breaking answer that keeps the Sneasler + rain‑mirror strengths) is the one worthwhile improvement — see `project_ninetales_patch` memory for the criteria (must outspeed 177 or bring priority/Scarf, hit SE while not Ice‑4×).
