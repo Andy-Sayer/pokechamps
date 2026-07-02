@@ -2,16 +2,19 @@
 
 *Data‑derived (gauntlet Nash + deep best‑play validation + played‑out traces). Not opinion — every claim traces to a sim result. Generated 2026‑07‑01.*
 
-## The team
+## The team (spreads playout‑refined 2026‑07‑01 — see "Spread & move refinement" below)
 
-| Mon | Item | Ability | Nature | Moves |
-|---|---|---|---|---|
-| **Talonflame** | — (itemless) | Gale Wings | Jolly | Acrobatics / Tailwind / Flare Blitz / Protect |
-| **Pelipper** | Damp Rock | Drizzle | Modest | Hurricane / Weather Ball / Tailwind / Wide Guard |
-| **Garchomp** | Choice Scarf | Rough Skin | Jolly | Earthquake / Rock Slide / Dragon Claw / Stomping Tantrum |
-| **Kingambit** | Chople Berry | Defiant | Adamant | Kowtow Cleave / Sucker Punch / Iron Head / Swords Dance |
-| **Dragonite** | Dragoninite (mega) | Multiscale | Modest | Hurricane / Draco Meteor / Dragon Pulse / Protect |
-| **Meowscarada** | Focus Sash | Protean | Jolly | Flower Trick / Knock Off / U‑turn / Protect |
+| Mon | Item | Ability | Nature | EVs | Moves |
+|---|---|---|---|---|---|
+| **Talonflame** | — (itemless) | Gale Wings | Impish | 220 HP / 108 Atk / 188 Spe | Acrobatics / Tailwind / Flare Blitz / Protect |
+| **Pelipper** | Damp Rock | Drizzle | Timid | 252 HP / 124 SpA / 140 Spe (SP 32/16/18) | Hurricane / Weather Ball / Tailwind / **Protect** |
+| **Garchomp** | Choice Scarf | Rough Skin | Adamant | 76 HP / 100 Atk / 84 SpD / 252 Spe | Earthquake / Rock Slide / Dragon Claw / Stomping Tantrum |
+| **Kingambit** | Chople Berry | Defiant | Adamant | 236 HP / 252 Atk / 20 Spe | Kowtow Cleave / Sucker Punch / Iron Head / Swords Dance |
+| **Dragonite** | Dragoninite (mega) | Multiscale | Modest | 156 HP / 252 SpA / 100 Spe | Hurricane / Draco Meteor / Dragon Pulse / Protect |
+| **Meowscarada** | Focus Sash | Protean | Jolly | 204 HP / 60 Atk / 252 Spe | Flower Trick / Knock Off / U‑turn / Protect |
+
+## Spread & move refinement (playout‑validated 2026‑07‑01)
+optimize‑spreads proposed changes to all 6; `attribute-spread` (real @pkmn/sim games) **adopted only the load‑bearing subset** — Talonflame/Garchomp/Meowscarada shifted toward bulk while keeping Speed, lifting the gauntlet **floor 0→50%, avg 73→86%**. Kingambit's and Dragonite's proposed changes were **rejected** (lost games) → kept at baseline. Pelipper: **Timid 18/16 speed‑creep** (Speed 113) beat the 0‑Speed max‑SpA default (43% vs 20% avg) — flips the Swampert rain mirror (0→7/8) and sweeps Metagross; Timid > Modest. **Wide Guard → Protect** (Protect 57% vs WG 48% overall; WG only wins the Swampert rain mirror via blocking Muddy Water — a rain‑mirror tech tradeoff). Dropping Pelipper's Tailwind (let Talonflame carry it) was **tested and declined** — Tailwind is load‑bearing in the many Talonflame‑less brings (Raichu 100→83 without it).
 
 ## Why this team (the bake‑off)
 
