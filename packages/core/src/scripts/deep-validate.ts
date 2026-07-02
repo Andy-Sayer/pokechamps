@@ -44,7 +44,7 @@ for (const t of teams) {
       const r = await playGame(myBring, oppBring, {
         seed: [seed, seed * 2 + 5, seed * 3 + 7, seed * 5 + 11],
         policy: makeSearchPolicy(myBring, oppBring, MAXDEPTH, BUDGET, { switchPlyLimit: SPL }),
-        p2Policy: makeSearchPolicy(oppBring, myBring, 2, 3000),
+        p2Policy: makeSearchPolicy(myBring, oppBring, 2, 3000),
       });
       if (!('error' in r) && r.winner === 'p1') wins++;
       log(`  ${t.name.padEnd(16)} vs ${opp.anchor.padEnd(20)} seed${seed}: ${('error' in r) ? 'ERR' : r.winner} · ${((Date.now() - t0) / 1000).toFixed(0)}s`);

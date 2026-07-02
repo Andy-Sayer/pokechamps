@@ -16,7 +16,8 @@ import type { PokemonSet } from '../domain/types.js';
 
 const OUT = '/tmp/tactics-trace.out';
 const log = (s: string) => { console.log(s); try { appendFileSync(OUT, s + '\n'); } catch { /* ignore */ } };
-const team = JSON.parse(readFileSync(join(dataDirPath(), 'my-teams', 'rain-mb.json'), 'utf8')) as PokemonSet[];
+const TEAM = process.argv[2] ?? 'rain-mb.json';
+const team = JSON.parse(readFileSync(join(dataDirPath(), 'my-teams', TEAM), 'utf8')) as PokemonSet[];
 const pika = loadPikaData();
 const allOpps = [...MB_THREATS.map(m => ({ anchor: m.anchor, sets: m.sets })), ...metaTeams(pika, 12, 4).map(m => ({ anchor: m.anchor, sets: m.sets }))];
 const pick = (s: string) => allOpps.find(o => o.anchor.toLowerCase().includes(s.toLowerCase()));
@@ -36,7 +37,7 @@ for (const opp of keyOpps) {
     const r = await playGame(myBring, oppBring, {
       seed: [seed, seed * 2 + 5, seed * 3 + 7, seed * 5 + 11],
       policy: makeSearchPolicy(myBring, oppBring, 14, 40000, { switchPlyLimit: 5 }),
-      p2Policy: makeSearchPolicy(oppBring, myBring, 2, 3000), trace: true,
+      p2Policy: makeSearchPolicy(myBring, oppBring, 2, 3000), trace: true,
     });
     chosen = r; chosenSeed = seed;
     if (!('error' in r) && r.winner === 'p1') break;

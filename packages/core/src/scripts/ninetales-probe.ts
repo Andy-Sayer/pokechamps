@@ -45,7 +45,7 @@ for (const [label, names] of Object.entries(brings)) {
     const r = await playGame(myBring, oppBring, {
       seed: [seed, seed * 2 + 5, seed * 3 + 7, seed * 5 + 11],
       policy: makeSearchPolicy(myBring, oppBring, 14, 40000, { switchPlyLimit: 5 }),
-      p2Policy: makeSearchPolicy(oppBring, myBring, 2, 3000), trace: true,
+      p2Policy: makeSearchPolicy(myBring, oppBring, 2, 3000), trace: true,
     });
     if ('error' in r) { log(`  ${label} seed${seed}: ERROR ${r.error}`); continue; }
     // Weather uptime: which weather was active as each turn began.

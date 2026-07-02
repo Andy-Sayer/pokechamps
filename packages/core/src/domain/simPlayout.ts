@@ -183,6 +183,7 @@ function buildInput(battle: Battle, i: number, mineSets: PokemonSet[], oppSets: 
  *  ~10-15s at `depth` 2. Pass `budgetMs` to cap each decision (searchBudgeted —
  *  anytime deepening to `depth` within the budget), trading some play strength
  *  for many more games/sec; parallelise across matchups with MatchupPool. */
+let warnedEmptyPlays = false;
 export function makeSearchPolicy(p1Sets: PokemonSet[], p2Sets: PokemonSet[], depth = 2, budgetMs?: number, breadth?: SearchBreadth): Policy {
   return (battle, i) => {
     const side = battle.sides[i] as any;
@@ -195,6 +196,14 @@ export function makeSearchPolicy(p1Sets: PokemonSet[], p2Sets: PokemonSet[], dep
       const input = buildInput(battle, i, i === 0 ? p1Sets : p2Sets, i === 0 ? p2Sets : p1Sets);
       result = budgetMs ? searchBudgeted(input, depth, budgetMs, undefined, breadth) : searchIterative(input, depth, undefined, breadth);
     } catch { return greedyPolicy(battle, i); }
+    // GUARD: empty plays on a non-forced turn means the search was built for the
+    // wrong side — almost always makeSearchPolicy called with (oppTeam, myTeam)
+    // instead of (side0Team, side1Team). That silently defaults the WHOLE side to
+    // greedy (effectiveness-blind), which corrupts playouts. Warn once, loudly.
+    if (!warnedEmptyPlays && result.plays.length === 0 && (req.active as any[]).some((s: any) => s && s.moves)) {
+      warnedEmptyPlays = true;
+      console.warn(`[makeSearchPolicy] side ${i} got EMPTY plays → entire side falling back to GREEDY. Check policy arg order: makeSearchPolicy(side0Team, side1Team), NOT (myTeam, oppTeam).`);
+    }
     const out = readOutcome(battle);
     const mySlots = i === 0 ? out.p1 : out.p2;
     const foeSlots = i === 0 ? out.p2 : out.p1;

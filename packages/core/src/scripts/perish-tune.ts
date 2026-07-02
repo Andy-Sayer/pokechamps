@@ -65,7 +65,7 @@ for (const c of configs) {
       const r = await playGame(mine, oppBring, {
         seed: [seed, seed * 2 + 5, seed * 3 + 7, seed * 5 + 11],
         policy: makeSearchPolicy(mine, oppBring, c.maxDepth, c.budget, { switchPlyLimit: c.spl }),
-        p2Policy: makeSearchPolicy(oppBring, mine, 2, 3000), // foe: fixed cheap search
+        p2Policy: makeSearchPolicy(mine, oppBring, 2, 3000), // foe: fixed cheap search (side0=mine, side1=opp)
         trace: true,
       });
       row.games++;
