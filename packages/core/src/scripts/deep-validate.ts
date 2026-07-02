@@ -28,10 +28,18 @@ const pick = (s: string) => allOpps.find(o => o.anchor.toLowerCase().includes(s.
 // Decisive cells (default = weather/veil); override with --opps for the contested-offense run.
 const oppNames = argStr('--opps', 'Ninetales,Swampert,Sylveon').split(',').map(s => s.trim());
 const opponents = oppNames.map(pick).filter((o): o is NonNullable<typeof o> => !!o);
-const SEEDS = [3, 17];
-const BUDGET = 40000, SPL = 5, MAXDEPTH = 14; // deepest
+const argNum = (f: string, d: number) => { const i = process.argv.indexOf(f); return i >= 0 ? Number(process.argv[i + 1]) : d; };
+const NSEEDS = argNum('--seeds', 2);
+const SEEDS = [3, 17, 5, 23, 41].slice(0, NSEEDS);
+// --nodes N → DETERMINISTIC reproducible search (node budget). Default keeps the old
+// wall-clock b40s. spl2 is the cheaper default when going deterministic.
+const NODES = argNum('--nodes', 0);
+const SPL = argNum('--spl', NODES ? 2 : 5), MAXDEPTH = 14, BUDGET = 40000;
+const detArgs = (a: PokemonSet[], b: PokemonSet[]) => NODES
+  ? makeSearchPolicy(a, b, MAXDEPTH, undefined, { switchPlyLimit: SPL }, NODES)  // deterministic
+  : makeSearchPolicy(a, b, MAXDEPTH, BUDGET, { switchPlyLimit: SPL });           // wall-clock
 
-log(`\n=== DEEP-VALIDATE ${new Date().toISOString()} · b${BUDGET / 1000}s/spl${SPL} · ${teams.length} teams × ${opponents.length} opps × ${SEEDS.length} seeds ===`);
+log(`\n=== DEEP-VALIDATE ${new Date().toISOString()} · ${NODES ? `${(NODES / 1e6).toFixed(1)}M-nodes(det)` : `b${BUDGET / 1000}s`}/spl${SPL} · ${teams.length} teams × ${opponents.length} opps × ${SEEDS.length} seeds ===`);
 interface Row { team: string; opp: string; wins: number; games: number }
 const rows: Row[] = [];
 for (const t of teams) {
@@ -43,8 +51,8 @@ for (const t of teams) {
       const t0 = Date.now();
       const r = await playGame(myBring, oppBring, {
         seed: [seed, seed * 2 + 5, seed * 3 + 7, seed * 5 + 11],
-        policy: makeSearchPolicy(myBring, oppBring, MAXDEPTH, BUDGET, { switchPlyLimit: SPL }),
-        p2Policy: makeSearchPolicy(myBring, oppBring, 2, 3000),
+        policy: detArgs(myBring, oppBring),
+        p2Policy: makeSearchPolicy(myBring, oppBring, 2),  // depth-2 fixed = deterministic + correct opponent
       });
       if (!('error' in r) && r.winner === 'p1') wins++;
       log(`  ${t.name.padEnd(16)} vs ${opp.anchor.padEnd(20)} seed${seed}: ${('error' in r) ? 'ERR' : r.winner} · ${((Date.now() - t0) / 1000).toFixed(0)}s`);
