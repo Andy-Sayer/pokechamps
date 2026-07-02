@@ -24,6 +24,7 @@ import { ensureSimLoaded, buildBattle, readRoster, readOutcome, type SimMon } fr
 import type { PokemonSet, OpponentEntry, FieldState } from './types.js';
 import { NEUTRAL_FIELD } from './types.js';
 import { getMove, toId } from './data.js';
+import { effectiveness } from './typechart.js';
 import { searchIterative, searchBudgeted, type SearchInput, type SearchMyMon, type SearchOppMon, type SearchResult, type SearchBreadth } from './endgameSearch.js';
 
 const toSimMon = (s: PokemonSet): SimMon => ({
@@ -62,14 +63,24 @@ function officialTiebreak(roster: { p1: RM[]; p2: RM[] }): 'p1' | 'p2' | 'tie' {
 }
 type RM = { fainted: boolean; hpPct: number };
 
-// Greedy single-slot fallback: highest-base-power legal move at the first living
-// foe. Shared by greedyPolicy and the search policy's per-slot fallback.
-function slotMoveChoice(slot: any, livingFoes: number[]): string {
-  let best = 0, bestPow = -1;
+// Greedy single-slot fallback: highest (base-power × type-effectiveness) legal move
+// at the first living foe. EFFECTIVENESS-WEIGHTED so it never clicks an immune or
+// ineffective move (e.g. Earthquake into a Flying wall) when it fires — which it
+// does whenever the search returns empty plays for a side. Choice-locked mons are
+// handled by the sim marking their other moves `disabled`, so only the locked move
+// is considered. Shared by greedyPolicy and the search policy's per-slot fallback.
+function slotMoveChoice(slot: any, livingFoes: number[], foeTypes: string[] = []): string {
+  let best = 0, bestScore = -1;
   (slot.moves as any[]).forEach((mv, k) => {
     if (mv.disabled) return;
-    const pow = (getMove(mv.move ?? mv.id) as { basePower?: number } | undefined)?.basePower ?? 0;
-    if (pow > bestPow) { bestPow = pow; best = k; }
+    const md = getMove(mv.move ?? mv.id) as { basePower?: number; type?: string } | undefined;
+    const pow = md?.basePower ?? 0;
+    // Damaging moves score power × effectiveness (0 = immune → never picked over a
+    // move that does anything); status moves get a tiny score so they win only when
+    // nothing damaging connects.
+    const eff = (pow > 0 && md?.type && foeTypes.length) ? effectiveness(md.type, foeTypes) : 1;
+    const score = pow > 0 ? pow * eff : 0.01;
+    if (score > bestScore) { bestScore = score; best = k; }
   });
   const mv = slot.moves[best];
   const tgt = (getMove(mv?.move ?? mv?.id) as { target?: string } | undefined)?.target ?? 'normal';
@@ -80,6 +91,13 @@ function slotMoveChoice(slot: any, livingFoes: number[]): string {
 function livingFoeSlots(battle: Battle, i: number): number[] {
   const foe = battle.sides[1 - i] as any;
   return foe.active.map((p: any, j: number) => (p && !p.fainted ? j + 1 : 0)).filter((n: number) => n > 0);
+}
+// Types of the foe in a given 1-based active slot (for the effectiveness-weighted
+// fallback). Empty array if the slot is empty/fainted or types can't be read.
+function foeTypesAt(battle: Battle, i: number, foeSlot1: number): string[] {
+  const p = (battle.sides[1 - i] as any).active?.[foeSlot1 - 1];
+  if (!p || p.fainted) return [];
+  try { return (typeof p.getTypes === 'function' ? p.getTypes() : p.types) ?? []; } catch { return []; }
 }
 
 /** Highest-base-power move at the first living foe; first healthy bench mon for a
@@ -97,7 +115,8 @@ export const greedyPolicy: Policy = (battle, i) => {
   }
   if (req.active) {
     const lf = livingFoeSlots(battle, i);
-    return (req.active as any[]).map(slot => (slot && slot.moves ? slotMoveChoice(slot, lf) : 'pass')).join(', ');
+    const ft = lf.length ? foeTypesAt(battle, i, lf[0]!) : [];
+    return (req.active as any[]).map(slot => (slot && slot.moves ? slotMoveChoice(slot, lf, ft) : 'pass')).join(', ');
   }
   return 'default';
 };
@@ -200,26 +219,27 @@ export function makeSearchPolicy(p1Sets: PokemonSet[], p2Sets: PokemonSet[], dep
     // wrong side — almost always makeSearchPolicy called with (oppTeam, myTeam)
     // instead of (side0Team, side1Team). That silently defaults the WHOLE side to
     // greedy (effectiveness-blind), which corrupts playouts. Warn once, loudly.
-    if (!warnedEmptyPlays && result.plays.length === 0 && (req.active as any[]).some((s: any) => s && s.moves)) {
-      warnedEmptyPlays = true;
-      console.warn(`[makeSearchPolicy] side ${i} got EMPTY plays → entire side falling back to GREEDY. Check policy arg order: makeSearchPolicy(side0Team, side1Team), NOT (myTeam, oppTeam).`);
+    if (result.plays.length === 0 && (req.active as any[]).some((s: any) => s && s.moves)) {
+      if (process.env.DBG_EMPTY) console.error(`[EMPTY-PLAYS side${i}] greedy fallback this turn`);
+      else if (!warnedEmptyPlays) { warnedEmptyPlays = true; console.warn(`[makeSearchPolicy] side ${i} got EMPTY plays → entire side falling back to GREEDY. Check policy arg order: makeSearchPolicy(side0Team, side1Team), NOT (myTeam, oppTeam).`); }
     }
     const out = readOutcome(battle);
     const mySlots = i === 0 ? out.p1 : out.p2;
     const foeSlots = i === 0 ? out.p2 : out.p1;
     const lf = livingFoeSlots(battle, i);
+    const ft = lf.length ? foeTypesAt(battle, i, lf[0]!) : [];
     return (req.active as any[]).map((slot, s) => {
       if (!slot || !slot.moves) return 'pass';
       const onField = mySlots[s];
       if (!onField) return 'pass';
       const play = result.plays.find(p => toId(p.mySpecies) === toId(onField.baseSpecies));
-      if (!play) return slotMoveChoice(slot, lf);
+      if (!play) return slotMoveChoice(slot, lf, ft);
       if (play.switch) {
         const n = (side.pokemon as any[]).findIndex(p => !p.isActive && !p.fainted && toId(p.species.baseSpecies || p.species.name) === toId(play.targetSpecies));
-        return n >= 0 ? `switch ${n + 1}` : slotMoveChoice(slot, lf);
+        return n >= 0 ? `switch ${n + 1}` : slotMoveChoice(slot, lf, ft);
       }
       const idx = (slot.moves as any[]).findIndex(m => toId(m.id ?? m.move) === toId(play.move));
-      if (idx < 0) return slotMoveChoice(slot, lf);
+      if (idx < 0) return slotMoveChoice(slot, lf, ft);
       let c = `move ${idx + 1}`;
       const tgt = (getMove(play.move) as { target?: string } | undefined)?.target;
       const needsTarget = tgt === 'normal' || tgt === 'any' || tgt === 'adjacentFoe';
