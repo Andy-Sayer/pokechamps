@@ -602,7 +602,10 @@ interface Tables {
   // Transposition table for value(): keyed by (full state, depth, maxDepth, pass)
   // → fail-soft alpha-beta bound. Per-Tables so mega combos + breadth never share
   // entries; persists across toDepth() calls (the key's maxDepth keeps trees apart).
-  tt?: Map<string, { value: number; flag: 0 | 1 | 2 }>;   // flag: 0 exact · 1 lower · 2 upper
+  // + myKey/oppKey: canonical keys of the argmax my-joint and its argmin opp reply,
+  // used to try the best move FIRST on a transposition hit (sharper alpha-beta, same
+  // result — exact). Absent on nodes that never stored a best joint (cutoffs).
+  tt?: Map<string, { value: number; flag: 0 | 1 | 2; myKey?: string; oppKey?: string }>;   // flag: 0 exact · 1 lower · 2 upper
   mySpecies: string[];
   oppSpecies: string[];
   mySpeed: number[];           // effective base speed incl. Spe stage (pre-field)
@@ -3857,6 +3860,22 @@ let searchNodes = 0;
 let searchNodeBudget = Infinity;
 export function readSearchNodes(): number { return searchNodes; }
 
+// Canonical key for a joint action (order-independent actor:target pairs), so a
+// joint stored by one visit can be matched against the (identical) joint set of a
+// transposed visit for move ordering.
+function jointKey(j: Map<number, number>): string {
+  const parts: string[] = [];
+  for (const [a, tgt] of j) parts.push(`${a}:${tgt}`);
+  return parts.sort().join(',');
+}
+// Move the joint matching `key` to the front of `list` (TT-move ordering). No-op if
+// absent. Only ever reorders — never drops — so the maximin value is unchanged.
+function hoistToFront(list: Map<number, number>[], key: string): void {
+  for (let i = 1; i < list.length; i++) {
+    if (jointKey(list[i]!) === key) { const [m] = list.splice(i, 1); list.unshift(m!); return; }
+  }
+}
+
 function value(t: Tables, s: State, depth: number, alpha: number, beta: number, pass: Pass, maxDepth: number): number {
   if ((++searchNodes & 2047) === 0 && (searchNodes > searchNodeBudget || Date.now() > searchDeadline)) throw SEARCH_TIMEOUT;
   const term = terminal(s, depth);
@@ -3870,13 +3889,11 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
   // always for an identical state at this depth/ply/pass — no stale reuse.
   const tt = t.tt;
   const ttk = tt ? ttKey(s, depth, maxDepth, pass) : '';
-  if (tt) {
-    const e = tt.get(ttk);
-    if (e) {
-      if (e.flag === 0) return e.value;
-      if (e.flag === 1 && e.value >= beta) return e.value;
-      if (e.flag === 2 && e.value <= alpha) return e.value;
-    }
+  const e = tt ? tt.get(ttk) : undefined;
+  if (e) {
+    if (e.flag === 0) return e.value;
+    if (e.flag === 1 && e.value >= beta) return e.value;
+    if (e.flag === 2 && e.value <= alpha) return e.value;
   }
 
   // Deeper plies: no root-only actions (field/setup/…), but Taunt/Encore
@@ -3916,6 +3933,10 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
   // worst<=best cutoff fires far sooner, collapsing the inner loop for losing lines.
   const myOrdered = orderJoints(myJoints, t.off, t.mySpread, t.myPrioCell);
   const oppOrdered = orderJoints(oppJoints, t.thr, t.oppSpread, t.oppPrioCell);
+  // TT-move ordering: on a transposition hit, try the previously-best joint first so
+  // `best`/`worst` reach their cutoffs immediately (exact — only reorders).
+  if (e?.myKey) hoistToFront(myOrdered, e.myKey);
+  if (e?.oppKey) hoistToFront(oppOrdered, e.oppKey);
   // Fail-soft alpha-beta over the per-turn max(my)–min(opp) tree. `alpha` is the
   // floor the caller already guarantees; `beta` the ceiling above which the caller
   // (a MIN) stops caring. Threading BOTH down — not just the node-local `best` —
@@ -3923,8 +3944,11 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
   // is abandoned, and a node that climbs past `beta` is cut wholesale. The maximin
   // value is unchanged; only the node count drops (exact).
   let best = -Infinity;
+  let bestMy: Map<number, number> | null = null;   // argmax my-joint — stored for TT-move ordering
+  let bestOpp: Map<number, number> | null = null;  // its argmin opp reply
   for (const my of myOrdered) {
     let worst = Infinity;
+    let worstOpp: Map<number, number> | null = null;
     const floor = Math.max(alpha, best);   // below this, this my-joint is moot
     const replies = oppOrdered.length ? oppOrdered : [new Map<number, number>()];
     for (const opp of replies) {
@@ -3932,15 +3956,16 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
       // The child only matters if its value lands in (floor, worst); hand it that
       // window so it can fail-high/low without a full expansion.
       const v = value(t, child, depth - 1, floor, Math.min(beta, worst), pass, maxDepth);
-      if (v < worst) worst = v;
+      if (v < worst) { worst = v; worstOpp = opp; }
       if (worst <= floor) break;   // this my-joint can't lift the node above floor — prune
     }
-    if (worst > best) best = worst;
+    if (worst > best) { best = worst; bestMy = my; bestOpp = worstOpp; }
     if (best >= beta) break;       // fail-high: the parent MIN rejects this node — cut
   }
   // Store the fail-soft bound: below alpha ⇒ upper bound, at/above beta ⇒ lower
-  // bound, strictly inside the window ⇒ exact maximin value.
-  if (tt) tt.set(ttk, { value: best, flag: best <= alpha ? 2 : best >= beta ? 1 : 0 });
+  // bound, strictly inside the window ⇒ exact maximin value. + the best joint keys
+  // for TT-move ordering on future transposition hits.
+  if (tt) tt.set(ttk, { value: best, flag: best <= alpha ? 2 : best >= beta ? 1 : 0, myKey: bestMy ? jointKey(bestMy) : undefined, oppKey: bestOpp ? jointKey(bestOpp) : undefined });
   return best;
 }
 
