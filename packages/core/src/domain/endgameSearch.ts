@@ -232,6 +232,8 @@ export interface HailMary {
 export interface SearchResult {
   /** How many plies deep this result was computed to. */
   depth: number;
+  /** Cumulative nodes explored to reach this depth (for budget calibration). */
+  nodes?: number;
   /** Maximin value of the position (higher = better for me). */
   score: number;
   /** Recommended move for each of my live actives this turn (best joint action). */
@@ -3848,9 +3850,15 @@ function ttKey(s: State, depth: number, maxDepth: number, pass: Pass): string {
 const SEARCH_TIMEOUT = { searchTimeout: true } as const;
 let searchDeadline = Infinity;
 let searchNodes = 0;
+// Node-count cutoff for the DETERMINISTIC budget mode (searchBudgeted with
+// nodeBudget). Infinity = disabled → pure wall-clock (searchDeadline), the live
+// TUI default. When set, the search cuts on nodes explored (reproducible: same
+// input → same node sequence → same stopping depth), independent of CPU load.
+let searchNodeBudget = Infinity;
+export function readSearchNodes(): number { return searchNodes; }
 
 function value(t: Tables, s: State, depth: number, alpha: number, beta: number, pass: Pass, maxDepth: number): number {
-  if ((++searchNodes & 2047) === 0 && Date.now() > searchDeadline) throw SEARCH_TIMEOUT;
+  if ((++searchNodes & 2047) === 0 && (searchNodes > searchNodeBudget || Date.now() > searchDeadline)) throw SEARCH_TIMEOUT;
   const term = terminal(s, depth);
   if (term !== null) return term;
   if (depth === 0) return leafScore(t, s);
@@ -5294,22 +5302,28 @@ export function searchBudgeted(
   budgetMs: number,
   onDepth?: (r: SearchResult) => void,
   breadth?: SearchBreadth,
+  nodeBudget?: number,
 ): SearchResult {
   const search = createSearch(input, breadth);
-  let last: SearchResult = { depth: 0, score: 0, plays: [], verdict: 'even', forced: false, allOppRevealed: input.allOppRevealed ?? false, risks: [] };
-  searchDeadline = Date.now() + budgetMs;
+  let last: SearchResult = { depth: 0, nodes: 0, score: 0, plays: [], verdict: 'even', forced: false, allOppRevealed: input.allOppRevealed ?? false, risks: [] };
+  // nodeBudget set → DETERMINISTIC mode: cut on nodes, no wall-clock. Else the
+  // wall-clock deadline (live TUI default, non-reproducible).
+  const deterministic = nodeBudget != null && nodeBudget > 0;
+  searchNodeBudget = deterministic ? nodeBudget : Infinity;
+  searchDeadline = deterministic ? Infinity : Date.now() + budgetMs;
   searchNodes = 0;
   try {
     for (let d = 1; d <= maxDepth; d++) {
       const r = search.toDepth(d);   // may throw SEARCH_TIMEOUT partway through
-      last = r;                       // only on full completion of depth d
-      onDepth?.(r);
-      if (Date.now() >= searchDeadline) break;  // no time to start a deeper pass
+      last = { ...r, nodes: searchNodes };  // only on full completion of depth d
+      onDepth?.(last);
+      if (deterministic ? searchNodes >= searchNodeBudget : Date.now() >= searchDeadline) break;
     }
   } catch (e) {
     if (e !== SEARCH_TIMEOUT) throw e;
   } finally {
     searchDeadline = Infinity;
+    searchNodeBudget = Infinity;
   }
   return last;
 }

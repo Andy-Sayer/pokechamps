@@ -203,7 +203,7 @@ function buildInput(battle: Battle, i: number, mineSets: PokemonSet[], oppSets: 
  *  anytime deepening to `depth` within the budget), trading some play strength
  *  for many more games/sec; parallelise across matchups with MatchupPool. */
 let warnedEmptyPlays = false;
-export function makeSearchPolicy(p1Sets: PokemonSet[], p2Sets: PokemonSet[], depth = 2, budgetMs?: number, breadth?: SearchBreadth): Policy {
+export function makeSearchPolicy(p1Sets: PokemonSet[], p2Sets: PokemonSet[], depth = 2, budgetMs?: number, breadth?: SearchBreadth, nodeBudget?: number): Policy {
   return (battle, i) => {
     const side = battle.sides[i] as any;
     const req = side.activeRequest;
@@ -213,7 +213,11 @@ export function makeSearchPolicy(p1Sets: PokemonSet[], p2Sets: PokemonSet[], dep
     let result: SearchResult;
     try {
       const input = buildInput(battle, i, i === 0 ? p1Sets : p2Sets, i === 0 ? p2Sets : p1Sets);
-      result = budgetMs ? searchBudgeted(input, depth, budgetMs, undefined, breadth) : searchIterative(input, depth, undefined, breadth);
+      // nodeBudget (env or arg) → DETERMINISTIC reproducible search (cut on nodes,
+      // not wall-clock). ~40M ≈ the old b40s "deepest" on typical hardware.
+      result = nodeBudget ? searchBudgeted(input, depth, 0, undefined, breadth, nodeBudget)
+        : budgetMs ? searchBudgeted(input, depth, budgetMs, undefined, breadth)
+        : searchIterative(input, depth, undefined, breadth);
     } catch { return greedyPolicy(battle, i); }
     // GUARD: empty plays on a non-forced turn means the search was built for the
     // wrong side — almost always makeSearchPolicy called with (oppTeam, myTeam)
