@@ -14,7 +14,7 @@ import type { SearchBreadth } from './endgameSearch.js';
 import { type CellCache, cellKey } from './cellCache.js';
 import type { PokemonSet } from './types.js';
 
-export interface PlayoutTask { p1: PokemonSet[]; p2: PokemonSet[]; seed: [number, number, number, number]; depth?: number; budgetMs?: number; pilotOpp?: boolean; breadth?: SearchBreadth }
+export interface PlayoutTask { p1: PokemonSet[]; p2: PokemonSet[]; seed: [number, number, number, number]; depth?: number; budgetMs?: number; pilotOpp?: boolean; breadth?: SearchBreadth; nodeBudget?: number }
 
 const WORKER = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'playout-worker.ts');
 
@@ -24,7 +24,7 @@ interface QueueItem { id: number; p: Pending; tries: number }
 const playSync = async (t: PlayoutTask): Promise<GameResult> => {
   const r = await playGame(t.p1, t.p2, {
     seed: t.seed,
-    policy: makeSearchPolicy(t.p1, t.p2, t.depth ?? 2, t.budgetMs, t.breadth),
+    policy: makeSearchPolicy(t.p1, t.p2, t.depth ?? 2, t.budgetMs, t.breadth, t.nodeBudget),
     p2Policy: t.pilotOpp ? makePilotPolicy(t.p1, t.p2, t.depth ?? 2, derivePilotPlan(t.p2)) : undefined,
   });
   if ('error' in r) throw new Error(r.error);
@@ -165,11 +165,11 @@ export class PlayoutPool {
  *  results (each a labeled training row). */
 export async function bringWinRate(
   pool: PlayoutPool, myBring: PokemonSet[], oppBring: PokemonSet[], games: number, depth = 2, pilotP2 = false,
-  opts: { budgetMs?: number; breadth?: SearchBreadth } = {},
+  opts: { budgetMs?: number; breadth?: SearchBreadth; nodeBudget?: number } = {},
 ): Promise<{ wins: number; losses: number; ties: number; winRate: number; results: GameResult[] }> {
   const tasks: PlayoutTask[] = Array.from({ length: games }, (_, k) => ({
     p1: myBring, p2: oppBring, seed: [k + 1, 2 * k + 5, 3 * k + 7, 5 * k + 11], depth, pilotOpp: pilotP2,
-    budgetMs: opts.budgetMs, breadth: opts.breadth,
+    budgetMs: opts.budgetMs, breadth: opts.breadth, nodeBudget: opts.nodeBudget,
   }));
   const results = await pool.run(tasks);
   const wins = results.filter(r => r.winner === 'p1').length;
