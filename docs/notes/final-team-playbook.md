@@ -74,5 +74,15 @@ Vary the bring across games (the mix) so you can't be counter‑brought. Hardest
 
 *Nash numbers are the adversarial floor (opponent counter‑brings + plays optimally); real‑ladder and best‑play win‑rates run meaningfully higher, as the deep validation confirmed (e.g. Sylveon 26% Nash → 2/2 under best play; Ninetales 19% Nash → ~50% deep with the corrected bring). †Ninetales' shallow‑Nash over‑weighted the Garchomp bring that loses; the Meowscarada bring is the deep‑validated answer.*
 
+## Honest re‑validation on the FIXED engine (2026‑07‑02)
+The original validation ran on a **broken engine** — three bugs found + fixed this pass: (1) the opponent policy was fed swapped args and played GREEDY, not searching (commit e4367c7); (2) the greedy fallback was type‑blind, clicking immune moves (992dad0); (3) the search budget was wall‑clock (non‑reproducible) — added a deterministic node‑budget mode (db0779a) and a pooled deterministic validator (`det-check`, d70289b). Almost every "result" before this was an artifact.
+
+**Reproducible symmetric‑fair profile (both sides equal node budget, det‑check):**
+- **Offense meta — dominant:** Sneasler 100%, Raichu 100%, Blaziken 100%, **Metagross 75%** (the earlier "Metagross soft spot" was a depth‑2‑opponent artifact — 83% flat 0.5M/1M/2M).
+- **Bulky rain (Swampert) — GENUINE 0/4 loss.** NOT Rillaboom (never brought), NOT a bring artifact (0/4 even with Meowscarada's Grass 4×). Replay‑confirmed mechanism: their **Swampert runs Ice Punch = 4× OHKO on Dragonite** (our wincon), and **Incineroar removes Meowscarada** (our Grass answer) — both breakers hard‑countered.
+- **Ninetales (Ice) — ~25%**, the rarer long‑known soft spot.
+
+**Verdict: rain‑mb‑final is a top‑tier OFFENSE team with a real WEATHER weakness (bulky rain + hail).** No structural offense hole. The Swampert fix (deferred/banked 2026‑07‑02) would be a breaker that isn't Ice‑4×‑frail and doesn't fold to Intimidate, or a second win condition that isn't Dragonite — a specific, now‑honestly‑testable problem. Also: `scoreBrings` mis‑picks the weather cells (leaves Meowscarada home vs Swampert, force‑drops Garchomp vs Ninetales) — the bring guide should override it there.
+
 ## Ninetales patch — hunted, no clean swap (2026‑07‑01)
 Deep‑sim‑tested 6 candidates (Steel: Gholdengo/Archaludon/Metagross × 2 slots; Sableye Prankster‑Rain/Light‑Screen × 2 slots). Findings: Kingambit‑slot swaps break Sneasler (its priority is load‑bearing); of the Meowscarada‑slot swaps, only Gholdengo edged the Ninetales baseline (33% vs 17%) — a 1‑game/6 difference (noise) that costs Meowscarada's whole‑meta utility. Sableye flopped (Pelipper already sets rain → its Rain Dance is redundant, and losing the offense outweighs Light Screen). **Verdict: no worthwhile patch — the team is a tight optimum.** Ninetales stays a **piloted ~coin‑flip**, not a slot swap: lead Pelipper (rain overrides snow), don't bring Garchomp (4× Blizzard), race it down. It's rare (not top‑20 usage), so it's an acceptable soft spot. **Build the team as‑is.**
