@@ -7,9 +7,12 @@
 // — never a fabricated exact set. Mega-capable mons get an entry per legal mega forme
 // (mega stats/types/ability + base learnset), since that's how they're played.
 // Generated offline by scripts/build-dossier.ts; read at preview time.
-import { getSpecies, getLearnset, getMove, loadFormat, isLegalItem, toId } from './data.js';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { getSpecies, getLearnset, getMove, loadFormat, isLegalItem, toId, dataDirPath, CHAMPIONS_PIKA_FORMAT } from './data.js';
 import { loadPikaData } from './metaTeams.js';
 import { getMegaOptions, megaFormeAbility } from './gimmicks/mega.js';
+import { effectiveness } from './typechart.js';
 import type { ChampionsFormat, Stats } from './types.js';
 
 const S = (arr: string[]) => new Set(arr.map(toId));
@@ -201,4 +204,63 @@ export function buildDossier(format: ChampionsFormat = loadFormat()): DossierEnt
     }
   }
   return out;
+}
+
+// ---- consumers: read the baked dossier + classify a faced opponent ----
+
+let _cache: DossierEntry[] | null = null;
+/** Load the baked dossier (data/mon-dossier.<format>.json). Empty if not built yet. */
+export function loadDossier(): DossierEntry[] {
+  if (_cache) return _cache;
+  const path = join(dataDirPath(), `mon-dossier.${CHAMPIONS_PIKA_FORMAT}.json`);
+  _cache = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) as DossierEntry[] : [];
+  return _cache;
+}
+/** Base-forme dossier entry for a species (the primary classification). */
+export function dossierBase(species: string): DossierEntry | undefined {
+  const id = toId(species);
+  return loadDossier().find(e => !e.forme && toId(e.species) === id);
+}
+
+const HEAVY_ROLES: RoleTag[] = ['weather', 'speedControl', 'redirect', 'intimidate'];
+const SOFT_ROLES: RoleTag[] = ['trickRoom', 'fakeOut', 'pivot', 'priority', 'setup', 'wall'];
+/** Role+type+orientation distance for analog matching (lower = more alike). A HEAVY-role
+ *  mismatch dominates — a weather setter is NOT interchangeable with a sweeper. */
+export function monDistance(a: DossierEntry, b: DossierEntry): number {
+  let d = 0;
+  for (const r of HEAVY_ROLES) if (a.roles.includes(r) !== b.roles.includes(r)) d += 3;
+  for (const r of SOFT_ROLES) if (a.roles.includes(r) !== b.roles.includes(r)) d += 0.6;
+  if (a.orientation !== b.orientation) d += 0.8;
+  const sb = new Set(b.types);
+  const inter = a.types.filter(t => sb.has(t)).length;
+  const uni = new Set([...a.types, ...b.types]).size || 1;
+  return d - 2 * (inter / uni);
+}
+/** The nearest analog to `mon` among `pool`, with its distance. `safe` = a genuinely
+ *  close match (no HEAVY-role mismatch and small distance) — else "no safe analog". */
+export function nearestAnalog(mon: DossierEntry, pool: DossierEntry[]): { analog: DossierEntry; dist: number; safe: boolean } | null {
+  let best: { analog: DossierEntry; dist: number } | null = null;
+  for (const p of pool) {
+    if (toId(p.species) === toId(mon.species) && p.forme === mon.forme) continue;
+    const dist = monDistance(mon, p);
+    if (!best || dist < best.dist) best = { analog: p, dist };
+  }
+  if (!best) return null;
+  const heavyMiss = HEAVY_ROLES.some(r => best!.analog.roles.includes(r) !== mon.roles.includes(r));
+  return { ...best, safe: !heavyMiss && best.dist <= 1.5 };
+}
+
+/** The strongest type-effectiveness this mon's LIKELY moves get vs a defender's types. */
+export function bestSEAgainst(attacker: DossierEntry, defenderTypes: string[]): { mult: number; type: string } {
+  let best = { mult: 1, type: '' };
+  for (const mid of attacker.moves) {
+    let m: ReturnType<typeof getMove>;
+    try { m = getMove(mid); } catch { continue; }
+    const t = (m as any)?.type as string | undefined;
+    const cat = (m as any)?.category as string | undefined;
+    if (!t || cat === 'Status') continue;
+    const mult = effectiveness(t, defenderTypes);
+    if (mult > best.mult) best = { mult, type: t };
+  }
+  return best;
 }
