@@ -18,7 +18,8 @@
     "demo-team": "tsx src/scripts/generate-demo-team.ts",
     "validate-format": "tsx src/scripts/validate-format.ts",
     "bring-matrix": "tsx src/scripts/bring-matrix.ts",
-    "bring-lookup": "tsx src/scripts/bring-lookup.ts"
+    "bring-lookup": "tsx src/scripts/bring-lookup.ts",
+    "build-dossier": "tsx src/scripts/build-dossier.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
