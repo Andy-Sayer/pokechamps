@@ -70,6 +70,16 @@ least per streamer)** — facecam / overlay / resolution shift the boxes, so the
 `oppTeam`/`playerTeam` grid must be *verified* (and adjusted) for each source before
 trusting any ref.
 
+**VOD size (the cost is extraction, not download).** A 1080p ladder VOD is ~1.5 GB/hr and
+extraction at 0.2 fps yields ~720 frames/hr — the OCR preview-scan over those frames is the
+real time sink (~40 min for a 1h43m VOD). Trade-off: the SHORT VODs (Draft League 15-45 min)
+are single-matchup / showcase = 1-2 opponents = ~2 sprites; the LONG ladder climbs (1.5-2 h)
+are long *because* they pack ~10-12 games = ~12 opponent teams = the diversity we need. So
+**prefer the ~1h15m ladder band** (e.g. Raichu-X `9R5YJuM-h5Y`, Eelektross `NWbeosiGkac`) —
+~40% smaller than the 2 h climbs, still a full ladder run. Extract at **0.15 fps** (the
+"Select 4" screen shows 15-90 s, so 1/6.7 s still catches it) to cut frames ~25%. Always
+`rm _vod.*` right after extraction and prune non-preview frames after `find-previews`.
+
 Per VOD:
 1. `youtube.ts <url> --start MM:SS --end MM:SS --fps 2` on a *short* window at a team
    preview (delete the `_vod` segment immediately).
