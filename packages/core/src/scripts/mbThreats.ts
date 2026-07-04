@@ -37,7 +37,9 @@ export const MB_THREATS: { anchor: string; sets: PokemonSet[] }[] = [
     S('Archaludon', 'Stamina', 'Assault Vest', 'Modest', { hp: 124, spa: 252, spe: 132 }, ['Electro Shot', 'Flash Cannon', 'Dragon Pulse', 'Body Press']),
     S('Sneasler', 'Unburden', 'White Herb', 'Jolly', { atk: 252, spe: 252 }, ['Close Combat', 'Dire Claw', 'Fake Out', 'Protect']),
     inc('Sitrus Berry'),
-    S('Rillaboom', 'Grassy Surge', 'Miracle Seed', 'Adamant', { hp: 252, atk: 252 }, ['Grassy Glide', 'Wood Hammer', 'Fake Out', 'U-turn']),
+    // Basculegion (Swift Swim rain sweeper) replaces Rillaboom — Rillaboom is NOT M-B-legal
+    // and Grassy Terrain fought the rain anyway. Swift Swim doubles speed under Pelipper.
+    S('Basculegion', 'Swift Swim', 'Life Orb', 'Adamant', { atk: 252, spe: 252 }, ['Wave Crash', 'Last Respects', 'Aqua Jet', 'Protect']),
   ] },
   { anchor: 'Mega Raichu-X (terrain)', sets: [
     S('Raichu', 'Static', 'Raichunite X', 'Modest', { spa: 252, spe: 252 }, ['Rising Voltage', 'Thunderbolt', 'Volt Switch', 'Protect']),
