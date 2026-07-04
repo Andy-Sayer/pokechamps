@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { PokemonSet, OpponentEntry } from '@pokechamps/core/domain/types.js';
 import { scoreBrings, matchupGrid, predictOppLeads, defaultOpponentSet, type BringScore } from '@pokechamps/core/domain/bring.js';
+import { bringNash, bringThreats } from '@pokechamps/core/domain/bringRecommend.js';
 import { predictOppBring } from '@pokechamps/core/domain/oppBringPredict.js';
 import { tacticLabel } from '@pokechamps/core/domain/tactics.js';
 import { speciesTypes } from '@pokechamps/core/domain/typechart.js';
@@ -15,6 +16,7 @@ export interface BringPickerProps {
   stores: Stores;
   myTeam: PokemonSet[];
   opponent: OpponentEntry[];
+  teamName: string; // matrix slug — which team's Nash corpus to read
   onConfirm: (indices: [number, number, number, number]) => void;
   onCancel: () => void;
 }
@@ -22,6 +24,7 @@ export interface BringPickerProps {
 function fmtTypes(types: string[]): string {
   return types.length ? types.join('/') : '?';
 }
+const pctStr = (x: number) => `${Math.round(x * 100)}%`;
 
 function fmtMult(m: number): string {
   if (m === 0) return ' 0 ';
@@ -44,7 +47,7 @@ function shortName(name: string, width = 8): string {
   return name.length <= width ? name.padEnd(width) : name.slice(0, width);
 }
 
-export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: BringPickerProps) {
+export function BringPicker({ stores, myTeam, opponent, teamName, onConfirm, onCancel }: BringPickerProps) {
   const [brings, setBrings] = useState<BringScore[]>([]);
   const [cursor, setCursor] = useState(0);
   const [explanation, setExplanation] = useState<string | null>(null);
@@ -89,6 +92,14 @@ export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: B
   const grid = useMemo(
     () => effectiveIndices ? matchupGrid(myTeam, opponent, effectiveIndices) : [],
     [effectiveIndices, myTeam, opponent],
+  );
+  const oppSpecies = useMemo(() => opponent.map(o => o.species), [opponent]);
+  // Sim-derived Nash bring for the faced 6 (null until a matrix corpus is built for this team).
+  const nash = useMemo(() => bringNash(teamName, oppSpecies), [teamName, oppSpecies]);
+  // Dossier threat read: which of the currently-selected bring's mons each opp mon hits SE.
+  const threats = useMemo(
+    () => effectiveIndices ? bringThreats(oppSpecies, effectiveIndices.map(i => myTeam[i]!.species)) : [],
+    [oppSpecies, effectiveIndices, myTeam],
   );
 
   useInput((input, key) => {
@@ -221,6 +232,18 @@ export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: B
                   Likely opp lead: {oppLead.species[0]} + {oppLead.species[1]} <Text dimColor>— their strongest pair combo: {oppLead.tactic.name} ({tacticLabel(oppLead.tactic)})</Text>
                 </Text>
               )}
+              {nash && (
+                <Box flexDirection="column" marginBottom={1}>
+                  <Text bold color="green">◈ Sim bring — Nash {pctStr(nash.value)}{nash.exact ? '' : <Text color="yellow"> (approx · borrowed from {nash.anchor})</Text>}</Text>
+                  <Text>   safest {pctStr(nash.maximinValue)}: <Text bold>{nash.maximinBring.join('/')}</Text></Text>
+                  {nash.mix.slice(0, 3).map((m, i) => (
+                    <Text key={`nx-${i}`} dimColor>   {pctStr(m.p).padStart(4)} {m.bring.join('/')}</Text>
+                  ))}
+                  {!nash.exact && nash.noAnalog.length > 0 && (
+                    <Text color="red">   ⚠ no safe analog: {nash.noAnalog.join(', ')} — treat as rough</Text>
+                  )}
+                </Box>
+              )}
               <Text bold>Suggested brings (type-matchup weighted)</Text>
               {brings.length === 0 && <Text dimColor>Scoring brings…</Text>}
               {brings.map((b, i) => {
@@ -257,6 +280,17 @@ export function BringPicker({ stores, myTeam, opponent, onConfirm, onCancel }: B
                   {grid[row]!.map((m, col) => (
                     <Text key={`c-${row}-${col}`} color={multColor(m)}>{fmtMult(m)}  </Text>
                   ))}
+                </Text>
+              ))}
+            </Box>
+          )}
+
+          {threats.length > 0 && (
+            <Box flexDirection="column" marginTop={1}>
+              <Text bold>Threats to your bring <Text dimColor>(their move → your mon)</Text></Text>
+              {threats.map((t, i) => (
+                <Text key={`th-${i}`} color={t.se ? 'red' : undefined}>
+                  {t.se ? '⚠' : ' '} {shortName(t.species, 12)} <Text dimColor>{(t.se ? `${t.se.mult}× ${t.se.type}→${t.se.target}` : '').padEnd(18)}</Text> <Text dimColor>{`{${t.roles.join(',') || 'atk'}}`}{t.inferred ? ' *inf' : ''}{!t.known ? ' (unknown)' : ''}</Text>
                 </Text>
               ))}
             </Box>

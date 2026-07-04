@@ -167,6 +167,7 @@ function App() {
       stores={stores}
       myTeam={route.myTeam}
       opponent={route.opponent}
+      teamName={route.teamName}
       onConfirm={indices => setRoute({
         kind: 'opponent-lead',
         myTeam: route.myTeam,
