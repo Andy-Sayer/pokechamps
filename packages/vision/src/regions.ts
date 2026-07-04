@@ -37,6 +37,19 @@ export function opponentSpriteBoxes(width: number, height: number) {
   return CHAMPIONS_TEAM_PREVIEW.oppTeam.map((s) => toPixels(s.sprite, width, height));
 }
 
+/** The two type-icon boxes for each opponent card (top-right of the card, measured on
+ *  a 1080p frame). Colour-hist match these vs a fixed 18-icon ref set to get the type
+ *  combo → dossier species shortlist. [slot][0|1] top→bottom. */
+export function typeIconBoxes(width: number, height: number): { a: ReturnType<typeof toPixels>; b: ReturnType<typeof toPixels> }[] {
+  return Array.from({ length: 6 }, (_, i) => {
+    const y = 158 / 1080 + i * 0.1167;
+    return {
+      a: toPixels({ x: 1784 / 1920, y, w: 48 / 1920, h: 48 / 1080 }, width, height),
+      b: toPixels({ x: 1834 / 1920, y, w: 48 / 1920, h: 48 / 1080 }, width, height),
+    };
+  });
+}
+
 /** Resolve a normalized Rect to integer pixel bounds for a given frame size. */
 export function toPixels(r: Rect, width: number, height: number): { x: number; y: number; w: number; h: number } {
   return { x: Math.round(r.x * width), y: Math.round(r.y * height), w: Math.round(r.w * width), h: Math.round(r.h * height) };
