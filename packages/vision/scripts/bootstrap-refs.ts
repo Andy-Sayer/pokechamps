@@ -5,8 +5,14 @@
 // background-masked colour histogram, and UPSERTS by id (so you accumulate species
 // across many frames/matches — preview slots get named by the in-battle text reveal).
 //
+// VARIANTS: colour-hist is colour-based, so shiny / visibly-different-female sprites need
+// their OWN ref — pass a variant-suffixed id (garchomp-shiny, basculegion-f,
+// basculegion-f-shiny). The suffix is stripped for the canonical species NAME, so every
+// variant maps to the same species when matched (gender/shiny "usually don't matter").
+//
 //   npx tsx packages/vision/scripts/bootstrap-refs.ts <frame.png> <id1,id2,...>
 //   e.g. ... frame.png azumarill,staraptor,arcanine,florges,sylveon,gholdengo
+//        ... frame.png garchomp-shiny,-,basculegion-f,...    ('-' skips a slot)
 
 import { Jimp } from 'jimp';
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
@@ -33,7 +39,10 @@ const fresh: ColorHistRef[] = ids.slice(0, boxes.length).flatMap((id, i) => {
   const c = img.clone().crop({ x: b.x, y: b.y, w: b.w, h: b.h });
   const hist = colorHistogram(new Uint8ClampedArray(c.bitmap.data), b.w, b.h, { bins: BINS, bgColor: CHAMPIONS_OPP_PANEL_BG })
     .map((v) => +v.toFixed(5));
-  const name = (getSpecies(id) as { name?: string } | undefined)?.name ?? id;
+  // Strip the variant suffix (-shiny / -f / -m / -f-shiny) to the base species for the
+  // canonical name; the full variant id stays the ref key so variants coexist.
+  const baseId = id.replace(/-shiny$/, '').replace(/-(f|m)$/, '');
+  const name = (getSpecies(baseId) as { name?: string } | undefined)?.name ?? baseId;
   return [{ id, name, hist }];
 });
 
