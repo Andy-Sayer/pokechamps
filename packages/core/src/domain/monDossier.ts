@@ -202,6 +202,14 @@ export function buildDossier(format: ChampionsFormat = loadFormat()): DossierEnt
       const mega = entryFor(name, opt.forme);
       if (mega) out.push(mega);
     }
+    // Regional formes (Alola/Galar/Hisui/Paldea) are legal via base-fallback but are
+    // DISTINCT species — own types/stats/learnset (Ninetales-Alola is Ice/Fairy, not
+    // Fire). Add each as its own entry, not a variant of the base.
+    for (const forme of ((getSpecies(name) as { otherFormes?: string[] }).otherFormes ?? [])) {
+      if (!/-(Alola|Galar|Hisui|Paldea)/.test(forme)) continue;
+      const r = entryFor(forme);
+      if (r) out.push(r);
+    }
   }
   return out;
 }

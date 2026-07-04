@@ -17,6 +17,15 @@ to one **species**.
 **All variants map to the same species.** So the matcher must return the *species*, not
 the variant — i.e. refs are **keyed by variant** but carry a canonical `species`.
 
+### Regional formes are DISTINCT species — the OPPOSITE of shiny/gender
+Alola / Galar / Hisui / Paldea formes have their own **types, stats, movesets** —
+Ninetales-Alola is **Ice/Fairy**, not Fire — so each gets its own ref *and* its own
+species label; they do NOT collapse to the base. The preview **type-icons disambiguate**
+them (Ice/Fairy vs Fire). **17 are legal in M-B** (via base-fallback), all now in the
+dossier (`buildDossier` enumerates each base's regional `otherFormes`) — so they're
+threat-assessed, not "unknown." Their shiny/gender still collapse onto the forme
+(`ninetalesalola-shiny` → `Ninetales-Alola`). Coverage must include all 17.
+
 ### Schema change (do first — small)
 Today refs are `{id, name, hist}` and bootstrap UPSERTs by `id`, so a shiny would
 *overwrite* the base. Change to:
