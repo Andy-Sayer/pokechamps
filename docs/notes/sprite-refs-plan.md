@@ -52,6 +52,24 @@ crop + temporal min-redness over a burst): the laser contributes equally to both
 histograms and cancels in the distance. Skip genuinely-ambiguous slots when labelling
 and re-catch that species from a cleaner frame. Inpainting is an optional later refinement.
 
+## Harvest runbook (constraints + steps)
+**Sources:** VODs from the **last ~2 months only** — keeps both the *meta* (species that
+actually appear) and the *UI* (preview layout) current; older footage risks a different
+metagame and a shifted grid. Filter with `yt-dlp --dateafter now-2months`; prefer
+well-framed channels (Wolfey, Cybertron). **Recalibrate the crop boxes per VOD (or at
+least per streamer)** — facecam / overlay / resolution shift the boxes, so the calibrated
+`oppTeam`/`playerTeam` grid must be *verified* (and adjusted) for each source before
+trusting any ref.
+
+Per VOD:
+1. `youtube.ts <url> --start MM:SS --end MM:SS --fps 2` on a *short* window at a team
+   preview (delete the `_vod` segment immediately).
+2. `calibrate-preview.ts <frame.png>` → crops the grid boxes for a visual check; if they
+   miss the sprites, adjust the box coords for that source (a named calibration).
+3. `bootstrap-refs.ts <frame.png> <ids>` (opp side by-sight; player side auto-labelled),
+   `-` to skip covered/ambiguous slots; temporal min-redness burst for laser slots.
+4. Delete the frames (keep only `sprite-refs.json`). Disk stays flat.
+
 ## Coverage tracking
 `sprite-coverage` report: for each meta species (from Pikalytics usage / the dossier),
 which variants have refs (base / shiny / ♀). Drives which VOD to harvest next, and tells
