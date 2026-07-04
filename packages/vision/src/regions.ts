@@ -27,6 +27,23 @@ export const CHAMPIONS_TEAM_PREVIEW: TeamPreviewRegions = {
  *  colour-histogram matching the opponent sprites (the sprite sits on this panel). */
 export const CHAMPIONS_OPP_PANEL_BG: readonly [number, number, number] = [131, 6, 55];
 
+/** Champions PLAYER-card background (blue-purple). The streamer's own six sit on this
+ *  card (left column) with their NAMES printed — so player-side refs are auto-labelled
+ *  (zero-guess) and fill gaps the opponent side is slow to surface. Mask this out the
+ *  same way we mask the opp panel, so a player-built ref (blue bg removed) still matches
+ *  an opponent query (magenta bg removed): both reduce to creature-only histograms. */
+export const CHAMPIONS_PLAYER_CARD_BG: readonly [number, number, number] = [68, 53, 197];
+
+/** Player-side sprite crop boxes (the streamer's team, right end of each name-card).
+ *  CALIBRATED on a fullscreen 1080p CybertronVGC preview (frame_00234): sprite sits at
+ *  x≈495px, box ≈105×100px, card centres 120px apart (y_top = 0.167 + i·0.111 verified
+ *  against Grimmsnarl row1 + Eelektross row4). Facecam covers only x<0.16, so all six
+ *  right-column sprites are clear. */
+export function playerSpriteBoxes(width: number, height: number) {
+  return Array.from({ length: 6 }, (_, i) =>
+    toPixels({ x: 0.258, y: 0.167 + i * 0.111, w: 0.055, h: 0.093 }, width, height));
+}
+
 /** The centre "Select 4 Pokémon / to send into battle." text — present ONLY on the
  *  team-preview screen. OCR this (white text) to locate previews in a VOD frame dump,
  *  so harvest doesn't hunt them by timestamp. Generous box tolerates per-source shift. */
