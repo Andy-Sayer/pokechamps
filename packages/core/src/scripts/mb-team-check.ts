@@ -12,7 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDirPath } from '../domain/data.js';
-import { loadPikaData, metaTeams } from '../domain/metaTeams.js';
+import { loadPikaData, groundedTeams } from '../domain/metaTeams.js';
 import { loadCreatorThreats } from '../domain/creatorIntel.js';
 import { MatchupPool } from '../domain/matchupPool.js';
 import type { PokemonSet } from '../domain/types.js';
@@ -40,7 +40,7 @@ const teamPath = teamArg ? (teamArg.includes('/') || teamArg.includes('\\') ? te
 
 const team: PokemonSet[] = JSON.parse(readFileSync(teamPath, 'utf8'));
 const pika = loadPikaData();
-const meta = metaTeams(pika, META_N, 3);
+const meta = groundedTeams(pika, { minCore: 4, limit: META_N });
 const creator = loadCreatorThreats(); // emerging threats harvested from creator videos
 const gauntlet = [
   ...meta.map(m => ({ anchor: `[meta] ${m.anchor}`, sets: m.sets })),
