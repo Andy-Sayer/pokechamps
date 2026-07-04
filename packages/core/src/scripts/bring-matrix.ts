@@ -7,7 +7,16 @@
 //   - Nash    = the TRUE value + optimal mix (neither sees the other's bring)
 // The Nash sits between the optimistic (their likely bring) and pessimistic
 // (maximin) bounds — the honest number. Saves M as the training corpus.
-//   npx tsx packages/core/src/scripts/bring-matrix.ts [team.json] [opp] [--games N] [--save file]
+//
+//   npm run bring-matrix -- <team.json> <opp> [--games N] [--opp worst|minimax|pilot]
+//
+// <opp> — WHAT to fight (the gauntlet). One of:
+//   all   — hand-built threats (mbThreats.ts) + Pikalytics top-usage teams (metaTeams)
+//   hand  — just the hand-built MB_THREATS archetypes
+//   meta  — just the Pikalytics usage-derived teams
+//   <anchor>       — a single opponent by name substring, e.g. "Metagross"
+//   Sp1,Sp2,...    — a custom opponent 6, built on the fly from real usage sets
+// Each opponent is a full 6; the matrix pits my 15 brings against their 15.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDirPath, toId, CHAMPIONS_PIKA_FORMAT } from '../domain/data.js';
@@ -101,7 +110,8 @@ const writeSheet = () => {
   writeFileSync(sheetPath, md + '\n', 'utf8');
 };
 
-console.log(`4v4 Nash matrix · ${TEAM} · ${opponents.length} opponent(s) · ${myBrings.length} my-brings · ${GAMES} games/cell · opp=${OPP_MODE}\n`);
+console.log(`4v4 Nash matrix · ${TEAM} · ${opponents.length} opponent(s) · ${myBrings.length} my-brings · ${GAMES} games/cell · opp=${OPP_MODE}`);
+console.log(`going against: ${opponents.map(o => o.anchor).join(', ')}\n`);
 for (const opp of opponents) {
   const theirBrings = combos4(opp.sets.length).map(c => c.map(i => opp.sets[i]!));
   // Heartbeat: an opponent is one big Promise.all over all cells, so without this
