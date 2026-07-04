@@ -79,6 +79,20 @@ Per VOD:
    `-` to skip covered/ambiguous slots; temporal min-redness burst for laser slots.
 4. Delete the frames (keep only `sprite-refs.json`). Disk stays flat.
 
+## Harvest roster (curated creators)
+Framing is per-creator, so calibrate ONCE (a `calibrate-preview` pass on one preview
+frame), then their whole catalog is harvestable. Pick well-framed, active, Reg-M-B
+ladder/tournament creators (many opponents per VOD).
+
+| Creator | Calibrated? | Notes |
+|---|---|---|
+| **CybertronVGC** | ✅ (oppTeam boxes verified, transfers across his VODs — facecam moves but the game UI is fixed) | Deep Reg M-B catalog, 1–2 h ladder VODs. Primary source. |
+| **WolfeyVGC** | ⬜ to verify | User-flagged well-framed; 2–3 h tournament VODs = many games. |
+| _(add trusted creators here)_ | ⬜ | verify framing → add. |
+
+Different creators face different opponents → diversity (long tail + regionals). Each new
+creator: one `calibrate-preview`, adjust `regions.ts` if boxes miss, then harvest.
+
 ## Coverage tracking
 `sprite-coverage` report: for each meta species (from Pikalytics usage / the dossier),
 which variants have refs (base / shiny / ♀). Drives which VOD to harvest next, and tells
