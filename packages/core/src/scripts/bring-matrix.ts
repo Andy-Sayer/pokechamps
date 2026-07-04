@@ -11,16 +11,16 @@
 //   npm run bring-matrix -- <team.json> <opp> [--games N] [--opp worst|minimax|pilot]
 //
 // <opp> — WHAT to fight (the gauntlet). One of:
-//   all   — hand-built threats (mbThreats.ts) + Pikalytics top-usage teams (metaTeams)
-//   hand  — just the hand-built MB_THREATS archetypes
-//   meta  — just the Pikalytics usage-derived teams
+//   all   — hand-built threats (mbThreats.ts) + grounded real teams (groundedTeams)
+//   hand  — just the hand-built MB_THREATS archetypes (anti-meta coverage)
+//   meta  — real top teams reconstructed from Pikalytics featured teams (records-weighted)
 //   <anchor>       — a single opponent by name substring, e.g. "Metagross"
 //   Sp1,Sp2,...    — a custom opponent 6, built on the fly from real usage sets
 // Each opponent is a full 6; the matrix pits my 15 brings against their 15.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDirPath, toId, CHAMPIONS_PIKA_FORMAT } from '../domain/data.js';
-import { loadPikaData, metaTeams, buildSet } from '../domain/metaTeams.js';
+import { loadPikaData, groundedTeams, buildSet } from '../domain/metaTeams.js';
 import { PlayoutPool, cachedBringWinRate } from '../domain/playoutPool.js';
 import { maximin, solveMatrixGame } from '../domain/bringMatrixGame.js';
 import { CellCache } from '../domain/cellCache.js';
@@ -52,7 +52,9 @@ const OPP_MODE = argStr('--opp', 'worst');
 const myTeam = JSON.parse(readFileSync(join(dataDirPath(), 'my-teams', TEAM), 'utf8')) as PokemonSet[];
 const pika = loadPikaData();
 const hand = MB_THREATS.map(m => ({ anchor: m.anchor, sets: m.sets }));
-const meta = metaTeams(pika, 12, 4).map(m => ({ anchor: m.anchor, sets: m.sets }));
+// GROUNDED: real top teams reconstructed from Pikalytics featured teams (records-
+// weighted, coherent), not usage-rank filler. minCore=4 keeps ≥4 real mons per team.
+const meta = groundedTeams(pika, { minCore: 4 }).map(m => ({ anchor: m.anchor, sets: m.sets }));
 const allOpps = [...hand, ...meta];
 const lower = OPP.toLowerCase();
 let opponents: { anchor: string; sets: PokemonSet[] }[] = [];

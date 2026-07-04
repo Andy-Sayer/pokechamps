@@ -26,6 +26,7 @@
     "bring-matrix": "npm -w @pokechamps/core run bring-matrix --",
     "bring-lookup": "npm -w @pokechamps/core run bring-lookup --",
     "build-dossier": "npm -w @pokechamps/core run build-dossier",
+    "preview-gauntlet": "npm -w @pokechamps/core run preview-gauntlet --",
     "test": "npm -w @pokechamps/core test && npm -w @pokechamps/server test && npm -w @pokechamps/tui test && npm -w @pokechamps/web test && npm -w @pokechamps/vision test && npm -w @pokechamps/control test",
     "test:watch": "npm -w @pokechamps/core run test:watch"
   }

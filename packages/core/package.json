@@ -19,7 +19,8 @@
     "validate-format": "tsx src/scripts/validate-format.ts",
     "bring-matrix": "tsx src/scripts/bring-matrix.ts",
     "bring-lookup": "tsx src/scripts/bring-lookup.ts",
-    "build-dossier": "tsx src/scripts/build-dossier.ts"
+    "build-dossier": "tsx src/scripts/build-dossier.ts",
+    "preview-gauntlet": "tsx src/scripts/preview-gauntlet.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
