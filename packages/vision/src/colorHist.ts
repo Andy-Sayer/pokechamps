@@ -40,6 +40,9 @@ export interface ColorHistOptions {
   bins?: number;
   /** Panel/background colour to mask out (skip pixels within bgThreshold of it). */
   bgColor?: RGB;
+  /** Second background colour to mask (e.g. the green "selected-card" highlight on the
+   *  player side — the focused row is drawn green, not the usual card colour). */
+  bgColor2?: RGB;
   /** Euclidean RGB radius treated as background. Default 75. */
   bgThreshold?: number;
   /** Skip near-black pixels (r+g+b below this). Default 55. */
@@ -57,6 +60,7 @@ export function colorHistogram(
 ): number[] {
   const bins = opts.bins ?? 4;
   const bg = opts.bgColor;
+  const bg2 = opts.bgColor2;
   const bgT = opts.bgThreshold ?? 75;
   const darkT = opts.darkThreshold ?? 55;
   const h = new Array(bins ** 3).fill(0);
@@ -66,6 +70,7 @@ export function colorHistogram(
     if (pixels[i + 3]! < 16) continue;                 // transparent
     if (r + g + b < darkT) continue;                   // near-black (masked bg too)
     if (bg && dist3(r, g, b, bg) < bgT) continue;      // panel background
+    if (bg2 && dist3(r, g, b, bg2) < bgT) continue;    // 2nd bg (selected-card highlight)
     const q = (v: number) => Math.min(bins - 1, (v * bins) >> 8);
     h[(q(r) * bins + q(g)) * bins + q(b)]++;
     n++;

@@ -34,6 +34,11 @@ export const CHAMPIONS_OPP_PANEL_BG: readonly [number, number, number] = [131, 6
  *  an opponent query (magenta bg removed): both reduce to creature-only histograms. */
 export const CHAMPIONS_PLAYER_CARD_BG: readonly [number, number, number] = [68, 53, 197];
 
+/** The bright-green highlight drawn on the CURRENTLY-SELECTED player card (the focused
+ *  row is green, not blue). Mask this as a 2nd bg so a highlighted row's ref isn't
+ *  poisoned with green. Measured on a CybertronVGC preview (row0 selected ≈ 183,253,7). */
+export const CHAMPIONS_PLAYER_HIGHLIGHT_BG: readonly [number, number, number] = [185, 251, 30];
+
 /** Player-side sprite crop boxes (the streamer's team, right end of each name-card).
  *  CALIBRATED on a fullscreen 1080p CybertronVGC preview (frame_00234): sprite sits at
  *  x≈495px, box ≈105×100px, card centres 120px apart (y_top = 0.167 + i·0.111 verified
