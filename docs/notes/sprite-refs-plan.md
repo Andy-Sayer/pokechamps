@@ -34,16 +34,25 @@ Today refs are `{id, name, hist}` and bootstrap UPSERTs by `id`, so a shiny woul
 - UPSERT by `key` (variants coexist). `HistogramMatcher` returns `species` → the caller
   never sees the variant. Gender/shiny "usually don't matter" → collapse to species.
 
-## Sources (priority order)
-1. **Player side of the preview (BEST — auto-labelled).** The left panel shows **name +
-   gender symbol + the actual (possibly shiny) sprite** → zero-guess base/shiny/♀ refs.
-   Extend `bootstrap-refs` to also crop the player grid (needs a `playerSpriteBoxes`
-   region, calibrated like the verified `oppTeam` one).
-2. **Opponent side (by-sight).** Sprites + type-icons, no names → identify by eye + the
-   type icons (Water/Ghost ⇒ Basculegion, Fighting/Poison+Unburden ⇒ Sneasler…). Good
-   base coverage; catches variants I can recognise.
-3. **Targeted gap-fill.** For meta species/variants still missing, pick a VOD/game that
-   features them (coverage report, below, drives this).
+## Sources
+**Coverage comes from the OPPONENT side.** A ladder VOD faces a *new* team every game, so
+one 3-hour VOD yields *dozens* of different species. The player side is the SAME ~6 mons
+all video (the streamer's team) — auto-labelled but low-diversity, a bonus not the driver.
+
+1. **Opponent side (the coverage driver).** Sprites + type-icons, no names. Make the ID
+   FAST via the **type-icons**: read the 2 icons (a fixed **18-type** closed set — easy,
+   reliable to template/colour-match; no shiny/gender/regional variation) → shortlist
+   legal species with that type combo from the dossier (usually 1–5, often unique:
+   Water/Ghost⇒Basculegion, Ice/Fairy⇒Ninetales-Alola, Fighting/Poison+Unburden⇒Sneasler)
+   → confirm the sprite from the *shortlist*, not from 200. As colour-hist refs grow, the
+   matcher pre-fills the guess and I just confirm/correct — self-improving.
+2. **Player side (bonus, auto-labelled).** Name + gender + sprite shown → 6 zero-guess
+   refs per VOD (incl. shiny/gender the streamer runs). Nice, but ~10 different-team VODs
+   ≈ one ladder VOD's opponent diversity — so it's the accelerator, not the engine.
+3. **Targeted gap-fill** for meta species/variants still missing (coverage report drives).
+
+**Efficiency unlock = a type-icon reader** (18 fixed UI icons → the type combo). Small,
+reliable build; turns opponent ID from "eyeball 200 sprites" into "confirm 1 of 1–5."
 
 ## Laser handling (settled)
 The preview's red beams are largely *static*, so temporal median can't remove them.
