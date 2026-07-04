@@ -21,17 +21,20 @@ if (!framePath || !idsCsv) {
   console.error('usage: bootstrap-refs <frame.png> <id1,id2,...>  (opponent species, top→bottom)');
   process.exit(1);
 }
-const ids = idsCsv.split(',').map((s) => s.trim()).filter(Boolean);
+// Positional: ids[i] labels box i (top→bottom). Use '-' (or empty) to SKIP a slot
+// that's facecam-covered or too small/dark to identify — don't poison a ref.
+const ids = idsCsv.split(',').map((s) => s.trim());
 
 const img = await Jimp.read(framePath);
 const boxes = opponentSpriteBoxes(img.bitmap.width, img.bitmap.height);
-const fresh: ColorHistRef[] = ids.slice(0, boxes.length).map((id, i) => {
-  const b = boxes[i];
+const fresh: ColorHistRef[] = ids.slice(0, boxes.length).flatMap((id, i) => {
+  if (!id || id === '-') return [];   // skipped slot (covered / unidentifiable)
+  const b = boxes[i]!;
   const c = img.clone().crop({ x: b.x, y: b.y, w: b.w, h: b.h });
   const hist = colorHistogram(new Uint8ClampedArray(c.bitmap.data), b.w, b.h, { bins: BINS, bgColor: CHAMPIONS_OPP_PANEL_BG })
     .map((v) => +v.toFixed(5));
   const name = (getSpecies(id) as { name?: string } | undefined)?.name ?? id;
-  return { id, name, hist };
+  return [{ id, name, hist }];
 });
 
 const out = join(dataDirPath(), 'sprite-refs.json');
