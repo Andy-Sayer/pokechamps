@@ -10,17 +10,21 @@ import { join } from 'node:path';
 import { dataDirPath, toId } from '../domain/data.js';
 import { solveMatrixGame } from '../domain/bringMatrixGame.js';
 
-// [team.json] is accepted (for CLI symmetry with the other bring scripts) but
-// unused — the matrices already encode my brings; only the opponent is needed.
+// [team.json] selects WHICH team's matrices to read: bring-matrix namespaces its
+// output by team slug (data/matrices/<slug>/), so the reader MUST match or it finds
+// nothing. Defaults to the same team bring-matrix defaults to. The matrices encode
+// my brings, so beyond the team only the opponent is needed.
 const positional = process.argv.slice(2).filter(a => !a.startsWith('--'));
+const TEAM = positional.find(a => a.endsWith('.json')) ?? 'anti-meta-mb.json';
+const teamSlug = TEAM.replace(/\.json$/, '');
 const OPP = positional.find(a => !a.endsWith('.json')) ?? '';
 if (!OPP) { console.error('usage: bring-lookup.ts [team.json] "<anchor | Sp1,Sp2,...>"'); process.exit(1); }
 
 interface Mat { anchor: string; myBrings: string[]; theirBrings: string[]; M: number[][] }
-const dir = join(dataDirPath(), 'matrices');
-if (!existsSync(dir)) { console.error('no data/matrices/ yet — run bring-matrix first (the gauntlet run fills it).'); process.exit(1); }
+const dir = join(dataDirPath(), 'matrices', teamSlug);
+if (!existsSync(dir)) { console.error(`no data/matrices/${teamSlug}/ yet — run: bring-matrix ${TEAM} (the gauntlet run fills it).`); process.exit(1); }
 const mats: Mat[] = readdirSync(dir).filter(f => f.endsWith('.json')).map(f => JSON.parse(readFileSync(join(dir, f), 'utf8')) as Mat);
-if (!mats.length) { console.error('data/matrices/ is empty — the gauntlet run is still warming up.'); process.exit(1); }
+if (!mats.length) { console.error(`data/matrices/${teamSlug}/ is empty — the gauntlet run is still warming up.`); process.exit(1); }
 
 // Each matrix's theirBrings (4-of-6 combos) union to the opponent's species set.
 const oppSpeciesOf = (m: Mat) => new Set(m.theirBrings.flatMap(b => b.split('/').map(toId)));
@@ -40,7 +44,7 @@ if (!chosen) { console.error(`no match for "${OPP}". Known: ${mats.map(m => m.an
 
 const sol = solveMatrixGame(chosen.M);
 const mix = sol.nashRow.map((p, i) => ({ bring: chosen!.myBrings[i]!, p })).filter(x => x.p > 0.03).sort((a, b) => b.p - a.p);
-console.log(`vs ${chosen.anchor}  (${note})`);
+console.log(`${teamSlug} vs ${chosen.anchor}  (${note})`);
 console.log(`  matchup value (Nash): ${pct(sol.value)}   ·   single safest bring (maximin): ${pct(sol.maximinValue)} — ${chosen.myBrings[sol.maximinRow]}`);
 console.log(`  BRING (Nash mix — vary across games):`);
 mix.forEach(x => console.log(`    ${pct(x.p).padStart(4)}  ${x.bring}`));
