@@ -27,6 +27,11 @@ export const CHAMPIONS_TEAM_PREVIEW: TeamPreviewRegions = {
  *  colour-histogram matching the opponent sprites (the sprite sits on this panel). */
 export const CHAMPIONS_OPP_PANEL_BG: readonly [number, number, number] = [131, 6, 55];
 
+/** The centre "Select 4 Pokémon / to send into battle." text — present ONLY on the
+ *  team-preview screen. OCR this (white text) to locate previews in a VOD frame dump,
+ *  so harvest doesn't hunt them by timestamp. Generous box tolerates per-source shift. */
+export const TEAM_PREVIEW_TEXT: Rect = { x: 0.33, y: 0.18, w: 0.25, h: 0.14 };
+
 /** Opponent sprite crop boxes (integer px) for a frame of the given size. */
 export function opponentSpriteBoxes(width: number, height: number) {
   return CHAMPIONS_TEAM_PREVIEW.oppTeam.map((s) => toPixels(s.sprite, width, height));
