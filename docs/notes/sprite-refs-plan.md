@@ -96,9 +96,17 @@ ladder/tournament creators (many opponents per VOD).
 
 | Creator | Calibrated? | Notes |
 |---|---|---|
-| **CybertronVGC** | ✅ (oppTeam boxes verified, transfers across his VODs — facecam moves but the game UI is fixed) | Deep Reg M-B catalog, 1–2 h ladder VODs. Primary source. |
-| **WolfeyVGC** | ⬜ to verify | User-flagged well-framed; 2–3 h tournament VODs = many games. |
+| **CybertronVGC** | ✅ oppTeam + **playerSpriteBoxes** (y_top=0.167+i·0.111) verified; transfers across his VODs (facecam moves, game UI fixed) | Primary source. Mined 2026-07-04: Pd-8eg-bDZs (SAND, +12), 9R5YJuM-h5Y (Raichu-X, +5), NWbeosiGkac (Eelektross, +Sableye/Meowscarada), + player-side targeted: dUzYKEU_8TA (Scrafty), C370Q58qnFI (Pyroar), 8BtFlPO3yLY (Pelipper). **Meta 11→34/48.** |
+| **WolfeyVGC** | ⬜ to verify | User-flagged well-framed; 2–3 h tournament VODs = many games. Needs its own calibrate-preview (framing differs from Cybertron). |
 | _(add trusted creators here)_ | ⬜ | verify framing → add. |
+
+**Remaining 14 meta gaps** (2026-07-04): Annihilape, Ceruledge, Corviknight, Froslass,
+Gardevoir, Gengar, Glimmora, Hydreigon, Mawile, Milotic, Ninetales-Alola, Scovillain,
+Tsareena, Vivillon. Common ones (Gengar/Gardevoir/Corviknight/Hydreigon/Milotic/Annihilape/
+Ninetales-Alola) will surface opponent-side in 1–2 more ladder VODs; the rarer tail
+(Ceruledge/Scovillain/Vivillon/Glimmora/Mawile/Tsareena) is faster via a player-side VOD
+titled after them, or a second creator for team diversity. Regionals still ~0 (only
+Zoroark-Hisui) — Ninetales-Alola/Tauros-Paldea/etc. need dedicated catches.
 
 Different creators face different opponents → diversity (long tail + regionals). Each new
 creator: one `calibrate-preview`, adjust `regions.ts` if boxes miss, then harvest.
