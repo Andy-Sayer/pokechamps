@@ -97,16 +97,23 @@ ladder/tournament creators (many opponents per VOD).
 | Creator | Calibrated? | Notes |
 |---|---|---|
 | **CybertronVGC** | ✅ oppTeam + **playerSpriteBoxes** (y_top=0.167+i·0.111) verified; transfers across his VODs (facecam moves, game UI fixed) | Primary source. Mined 2026-07-04: Pd-8eg-bDZs (SAND, +12), 9R5YJuM-h5Y (Raichu-X, +5), NWbeosiGkac (Eelektross, +Sableye/Meowscarada), + player-side targeted: dUzYKEU_8TA (Scrafty), C370Q58qnFI (Pyroar), 8BtFlPO3yLY (Pelipper). **Meta 11→34/48.** |
-| **WolfeyVGC** | ⬜ to verify | User-flagged well-framed; 2–3 h tournament VODs = many games. Needs its own calibrate-preview (framing differs from Cybertron). |
+| **WolfeyVGC** | ✅ framing IDENTICAL to Cybertron (fullscreen 1080p → same player/opp boxes, zero recalibration); verified on FEVwyQyRJzk | Facecam BOTTOM-RIGHT → covers only opp rows 4-5 (player column + opp rows 0-3 clear). His *tournament/ladder* VODs are real gameplay; his "Worst X Type" **analysis** vids are graphics/commentary (NOT harvestable). Gave Scovillain. |
+| **Jeans** | ✅ framing identical (fullscreen 1080p); verified on apejN-EFTXM | Facecam bottom-centre. Gave Gengar + Ninetales-Alola. |
 | _(add trusted creators here)_ | ⬜ | verify framing → add. |
 
-**Remaining 14 meta gaps** (2026-07-04): Annihilape, Ceruledge, Corviknight, Froslass,
-Gardevoir, Gengar, Glimmora, Hydreigon, Mawile, Milotic, Ninetales-Alola, Scovillain,
-Tsareena, Vivillon. Common ones (Gengar/Gardevoir/Corviknight/Hydreigon/Milotic/Annihilape/
-Ninetales-Alola) will surface opponent-side in 1–2 more ladder VODs; the rarer tail
-(Ceruledge/Scovillain/Vivillon/Glimmora/Mawile/Tsareena) is faster via a player-side VOD
-titled after them, or a second creator for team diversity. Regionals still ~0 (only
-Zoroark-Hisui) — Ninetales-Alola/Tauros-Paldea/etc. need dedicated catches.
+**Recon method (validated 2026-07-04):** before committing to a VOD, grab ONE frame at
+its MIDPOINT (`youtube.ts <url> --fps 1 --start MID --end MID+3`) and eyeball it — instantly
+filters out Showdown-teambuilder vids (2D icons, wrong art), produced analysis/commentary
+(overlay graphics), and confirms fullscreen-1080p framing. All three creators so far share
+the SAME calibration (game fills the frame), so the only per-creator variable is facecam
+position (which slots it occludes) — no box re-measuring needed.
+
+**Remaining 11 meta gaps** (2026-07-04): Annihilape, Ceruledge, Corviknight, Froslass,
+Gardevoir, Glimmora, Hydreigon, Mawile, Milotic, Tsareena, Vivillon. Common ones
+(Gardevoir/Corviknight/Hydreigon/Milotic/Annihilape) will surface opponent-side in 1–2 more
+ladder VODs; the rarer tail (Ceruledge/Vivillon/Glimmora/Mawile/Tsareena) is faster via a
+player-side VOD titled after them (Wolfey/Jeans/Cybertron all work). Regionals 2/17 (Zoroark-
+Hisui, Ninetales-Alola) — the rest need dedicated catches.
 
 Different creators face different opponents → diversity (long tail + regionals). Each new
 creator: one `calibrate-preview`, adjust `regions.ts` if boxes miss, then harvest.
