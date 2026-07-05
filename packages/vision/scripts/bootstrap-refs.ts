@@ -15,7 +15,7 @@
 //        ... frame.png garchomp-shiny,-,basculegion-f,...    ('-' skips a slot)
 
 import { Jimp } from 'jimp';
-import { writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDirPath, getSpecies, isLegalSpecies } from '@pokechamps/core/domain/data.js';
 import { colorHistogram, type ColorHistRef } from '../src/colorHist.js';
@@ -37,8 +37,15 @@ const ids = idsCsv.split(',').map((s) => s.trim());
 const img = await Jimp.read(framePath);
 const boxes = (player ? playerSpriteBoxes : opponentSpriteBoxes)(img.bitmap.width, img.bitmap.height);
 const bg = player ? CHAMPIONS_PLAYER_CARD_BG : CHAMPIONS_OPP_PANEL_BG;
-const fresh: ColorHistRef[] = ids.slice(0, boxes.length).flatMap((id, i) => {
-  if (!id || id === '-') return [];   // skipped slot (covered / unidentifiable)
+// A ref carries provenance + a `verified` flag: an allocation (crop -> species) is
+// UNVERIFIED until a human confirms it in the review sheet (scripts/review-sheet.ts).
+// The crop PNG is saved so the allocation is auditable — this is how we catch a
+// misID (e.g. shiny Grimmsnarl mislabelled "Mewtwo") before it's trusted.
+const cropDir = join(dataDirPath(), 'sprite-ref-crops');
+mkdirSync(cropDir, { recursive: true });
+const pending: { ref: ColorHistRef & { verified: boolean }; crop: InstanceType<typeof Jimp> }[] = [];
+ids.slice(0, boxes.length).forEach((id, i) => {
+  if (!id || id === '-') return;   // skipped slot (covered / unidentifiable)
   const b = boxes[i]!;
   const c = img.clone().crop({ x: b.x, y: b.y, w: b.w, h: b.h });
   const hist = colorHistogram(new Uint8ClampedArray(c.bitmap.data), b.w, b.h,
@@ -48,15 +55,17 @@ const fresh: ColorHistRef[] = ids.slice(0, boxes.length).flatMap((id, i) => {
   // canonical name; the full variant id stays the ref key so variants coexist.
   const baseId = id.replace(/-shiny$/, '').replace(/-(f|m)$/, '');
   // Legality guard: refuse to label a slot with a species not in the format allow-list.
-  // A preview slot is ALWAYS a legal opponent, so an illegal label = a misidentification
-  // (this is exactly how a shiny Grimmsnarl got mislabelled "Mewtwo"). Skip, don't poison.
+  // A preview slot is ALWAYS a legal opponent, so an illegal label = a misidentification.
   if (!isLegalSpecies(baseId)) {
     console.error(`  ⚠ slot ${i}: "${id}" -> base "${baseId}" is NOT format-legal — skipping (misID?).`);
-    return [];
+    return;
   }
   const name = (getSpecies(baseId) as { name?: string } | undefined)?.name ?? baseId;
-  return [{ id, name, hist }];
+  pending.push({ ref: { id, name, hist, verified: false }, crop: c });
 });
+// Save each crop as provenance (named by ref id) so the human can audit the allocation.
+for (const { ref, crop } of pending) await crop.write(join(cropDir, `${ref.id}.png`) as `${string}.png`);
+const fresh = pending.map((p) => p.ref);
 
 const out = join(dataDirPath(), 'sprite-refs.json');
 const existing = existsSync(out) ? (JSON.parse(readFileSync(out, 'utf8')) as { refs: ColorHistRef[] }) : { refs: [] };

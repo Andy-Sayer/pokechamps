@@ -118,6 +118,29 @@ Hisui, Ninetales-Alola) — the rest need dedicated catches.
 Different creators face different opponents → diversity (long tail + regionals). Each new
 creator: one `calibrate-preview`, adjust `regions.ts` if boxes miss, then harvest.
 
+## Allocation review + the readOppTeam SAFETY CONTRACT (do NOT skip)
+An allocation is a (crop → species) label. Both colour-hist matching AND a human eye
+misfire — a **shiny Grimmsnarl** was once labelled **Mewtwo** (a non-legal restricted
+legendary). **THE THREAT:** once `readOppTeam` feeds the bring recommender, a mislabelled
+ref makes the app read the WRONG opponent 6 → optimise the bring against the wrong team →
+recommend the wrong 4 to bring. Silent and costly. So:
+
+- **Every ref carries provenance + a `verified` flag** (`bootstrap-refs` saves the source
+  crop to `data/sprite-ref-crops/<id>.png` and sets `verified:false`). Unverified until a
+  human confirms.
+- **Review sheet:** `scripts/review-sheet.ts` → self-contained HTML contact sheet (crop +
+  species + nearest-RIVAL species/distance; red = ambiguous). Human confirms each; wrong
+  ones get relabelled (and re-set unverified). A legality guard already blocks non-allow-list
+  labels at bootstrap time.
+- **`readOppTeam` MUST gate on this (contract):** auto-accept a slot's ID only if
+  `ref.verified === true` AND `distance < ACCEPT_THRESHOLD` AND the nearest *other-species*
+  rival is a clear margin farther. Otherwise mark the slot **UNKNOWN → manual confirm** —
+  NEVER pass a low-confidence / unverified guess to the bring. A wrong "unknown→ask the user"
+  is cheap; a wrong silent ID is not. (readOppTeam not built yet — this is its build spec.)
+- **Backfill:** the ~47 legacy refs (bootstrapped before crop-saving) have no crop yet →
+  not reviewable → treat as UNVERIFIED. Re-capture their crops during ongoing harvest (or a
+  dedicated pass) so the whole table can be reviewed before readOppTeam is trusted.
+
 ## Coverage tracking
 `sprite-coverage` report: for each meta species (from Pikalytics usage / the dossier),
 which variants have refs (base / shiny / ♀). Drives which VOD to harvest next, and tells
