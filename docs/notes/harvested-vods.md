@@ -21,8 +21,12 @@ whenever a VOD is processed. See [`sprite-refs-plan.md`](sprite-refs-plan.md) fo
 | `YH5bi7H4c9k` | Wolfey — Reach #1 ladder (14 games) | no new sprites; FOUND the `sneasler` ref = mislabelled Kingambit (deleted) |
 | `JJhMx9ErPEs` | Cybertron — Toxapex ladder (6 games) | no new sprites (all [NEED] flags were mismatches: Gallade/Lopunny/Farigiraf) |
 
-## STILL OPEN after ~17 VODs (they are NOT appearing as opponents → likely rarer in the LIVE meta than Pikalytics says)
-- Meta gaps (no ref): Annihilape, Corviknight, Froslass, Glimmora, **Sneasler** (never actually seen — every "sneasler" was a Kingambit), Tsareena, Vivillon.
+## RESOLVED by user (2026-07-05)
+- The recurring **"gray cat"** (gray bipedal cat, long curling tail, Fighting/Poison) = **Sneasler** — captured. It was in nearly every VOD; I couldn't ID it because I had Sneasler's look wrong (the old `sneasler` ref was a mislabelled Kingambit). So Sneasler is COMMON (Pikalytics #1 confirmed), not absent.
+- The recurring **"dark witch-hat"** (dark caped flourishing mon, Fairy) = **Floette** (mega-likely). Captured (blurry crop — re-capture from a settled frame later).
+
+## STILL OPEN
+- Meta gaps (no ref): Annihilape, Corviknight, Froslass, Glimmora, Tsareena, Vivillon.
 - Crop-less refs (have ref, no crop): Arcanine, Azumarill, Florges, Gholdengo, Meowscarada, Zoroark-Hisui.
 
 ## REJECTED — do NOT re-pull (not usable)
