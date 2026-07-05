@@ -78,6 +78,44 @@ export function colorHistogram(
   return n ? h.map((v) => v / n) : h;
 }
 
+/** 2×2 SPATIAL colour histogram: a bins³ histogram per quadrant, concatenated (length
+ *  4·bins³, each quadrant normalised to sum 1). The global histogram is palette-only, so
+ *  two same-palette / different-shape mons collide (measured: a Kingambit sprite matched
+ *  the red/black/gold `sneasler` ref at 0.19). The quadrant histogram encodes WHERE the
+ *  colours sit, which separates them. It IS alignment-sensitive (a shift moves colour
+ *  across a quadrant boundary), so it is used ONLY as a TIE-BREAK behind the global score
+ *  — never as the primary — to preserve the global hist's jitter-invariance. */
+export function quadrantHistogram(
+  pixels: Uint8ClampedArray | number[] | Buffer,
+  width: number,
+  height: number,
+  opts: ColorHistOptions = {},
+): number[] {
+  const bins = opts.bins ?? 4;
+  const bg = opts.bgColor, bg2 = opts.bgColor2;
+  const bgT = opts.bgThreshold ?? 75, darkT = opts.darkThreshold ?? 55;
+  const q = (v: number) => Math.min(bins - 1, (v * bins) >> 8);
+  const mx = width >> 1, my = height >> 1;
+  const cells: [number, number, number, number][] = [
+    [0, 0, mx, my], [mx, 0, width - mx, my], [0, my, mx, height - my], [mx, my, width - mx, height - my],
+  ];
+  const out: number[] = [];
+  for (const [x0, y0, cw, ch] of cells) {
+    const h = new Array(bins ** 3).fill(0);
+    let n = 0;
+    for (let y = y0; y < y0 + ch; y++) for (let x = x0; x < x0 + cw; x++) {
+      const i = (y * width + x) * 4, r = pixels[i]!, g = pixels[i + 1]!, b = pixels[i + 2]!;
+      if (pixels[i + 3]! < 16) continue;
+      if (r + g + b < darkT) continue;
+      if (bg && dist3(r, g, b, bg) < bgT) continue;
+      if (bg2 && dist3(r, g, b, bg2) < bgT) continue;
+      h[(q(r) * bins + q(g)) * bins + q(b)]++; n++;
+    }
+    for (let k = 0; k < h.length; k++) out.push(n ? h[k] / n : 0);
+  }
+  return out;
+}
+
 /** L1 distance between two normalised histograms (0 = identical, 2 = disjoint). */
 export function histDistance(a: readonly number[], b: readonly number[]): number {
   let s = 0;
@@ -85,23 +123,45 @@ export function histDistance(a: readonly number[], b: readonly number[]): number
   return s;
 }
 
-export interface ColorHistRef { id: string; name: string; hist: number[]; }
-export interface ColorHistMatch { id: string; name: string; distance: number; score: number; }
+export interface ColorHistRef { id: string; name: string; hist: number[]; quad?: number[]; verified?: boolean; }
+export interface ColorHistMatch { id: string; name: string; distance: number; score: number; tiebroke?: boolean; }
+
+// Tie-break tuning. The quadrant histogram is alignment/pose-sensitive, so it must ONLY
+// arbitrate genuine near-ties — otherwise cross-frame quad noise flips a correct-but-weak
+// global lead (measured: at margin 0.35 a laser-degraded Sinistcha at 0.46 got flipped to
+// Arcanine at 0.76). So: only consider it when the leader is a plausible match
+// (d < QUAD_GATE) AND only refs within a TIGHT QUAD_MARGIN of the leader are candidates —
+// the real collision it fixes was a 0.03 gap (Kingambit 0.22 vs `sneasler` 0.19). A
+// candidate lacking a quad histogram is charged QUAD_NOQUAD so a strong quad match can
+// still overturn a crop-less leader.
+const QUAD_GATE = 0.55;
+const QUAD_MARGIN = 0.15;
+const QUAD_WEIGHT = 0.6;
+const QUAD_NOQUAD = 1.0;
 
 /** Nearest-reference matcher over precomputed colour histograms. */
 export class HistogramMatcher {
   constructor(private readonly refs: readonly ColorHistRef[], private readonly opts: ColorHistOptions = {}) {}
-  /** Best species match for a cropped sprite (RGBA). score = 1 − distance/2 (0..1). */
+  /** Best species match for a cropped sprite (RGBA). score = 1 − distance/2 (0..1).
+   *  Global histogram ranks; a 2×2 quadrant histogram breaks palette collisions. */
   match(pixels: Uint8ClampedArray | number[] | Buffer, width: number, height: number): ColorHistMatch | null {
     if (!this.refs.length) return null;
     const q = colorHistogram(pixels, width, height, this.opts);
-    let best: ColorHistRef | null = null, bestD = Infinity, second = Infinity;
-    for (const r of this.refs) {
-      const d = histDistance(q, r.hist);
-      if (d < bestD) { second = bestD; bestD = d; best = r; }
-      else if (d < second) second = d;
+    const scored = this.refs.map((r) => ({ r, d: histDistance(q, r.hist) })).sort((a, b) => a.d - b.d);
+    const leader = scored[0]!;
+    const collision = scored.filter((s) => s.d <= leader.d + QUAD_MARGIN);
+    let chosen = leader.r, chosenD = leader.d, tiebroke = false;
+    if (leader.d < QUAD_GATE && collision.length > 1 && collision.some((s) => s.r.quad)) {
+      const qq = quadrantHistogram(pixels, width, height, this.opts);
+      let bestScore = Infinity;
+      for (const s of collision) {
+        const quadD = s.r.quad ? histDistance(qq, s.r.quad) : QUAD_NOQUAD;
+        const score = s.d + QUAD_WEIGHT * quadD;
+        if (score < bestScore) { bestScore = score; chosen = s.r; chosenD = s.d; }
+      }
+      tiebroke = chosen !== leader.r;
     }
-    return best ? { id: best.id, name: best.name, distance: bestD, score: 1 - bestD / 2 } : null;
+    return { id: chosen.id, name: chosen.name, distance: chosenD, score: 1 - chosenD / 2, tiebroke };
   }
 }
 

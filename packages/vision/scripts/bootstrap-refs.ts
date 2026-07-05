@@ -18,7 +18,7 @@ import { Jimp } from 'jimp';
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDirPath, getSpecies, isLegalSpecies } from '@pokechamps/core/domain/data.js';
-import { colorHistogram, type ColorHistRef } from '../src/colorHist.js';
+import { colorHistogram, quadrantHistogram, type ColorHistRef } from '../src/colorHist.js';
 import { opponentSpriteBoxes, playerSpriteBoxes, CHAMPIONS_OPP_PANEL_BG, CHAMPIONS_PLAYER_CARD_BG, CHAMPIONS_PLAYER_HIGHLIGHT_BG } from '../src/regions.js';
 
 const BINS = 4;
@@ -48,9 +48,10 @@ ids.slice(0, boxes.length).forEach((id, i) => {
   if (!id || id === '-') return;   // skipped slot (covered / unidentifiable)
   const b = boxes[i]!;
   const c = img.clone().crop({ x: b.x, y: b.y, w: b.w, h: b.h });
-  const hist = colorHistogram(new Uint8ClampedArray(c.bitmap.data), b.w, b.h,
-    { bins: BINS, bgColor: bg, bgColor2: player ? CHAMPIONS_PLAYER_HIGHLIGHT_BG : undefined, darkThreshold: player ? 65 : 55 })
-    .map((v) => +v.toFixed(5));
+  const histOpts = { bins: BINS, bgColor: bg, bgColor2: player ? CHAMPIONS_PLAYER_HIGHLIGHT_BG : undefined, darkThreshold: player ? 65 : 55 };
+  const px = new Uint8ClampedArray(c.bitmap.data);
+  const hist = colorHistogram(px, b.w, b.h, histOpts).map((v) => +v.toFixed(5));
+  const quad = quadrantHistogram(px, b.w, b.h, histOpts).map((v) => +v.toFixed(5));
   // Strip the variant suffix (-shiny / -f / -m / -f-shiny) to the base species for the
   // canonical name; the full variant id stays the ref key so variants coexist.
   const baseId = id.replace(/-shiny$/, '').replace(/-(f|m)$/, '');
@@ -61,7 +62,7 @@ ids.slice(0, boxes.length).forEach((id, i) => {
     return;
   }
   const name = (getSpecies(baseId) as { name?: string } | undefined)?.name ?? baseId;
-  pending.push({ ref: { id, name, hist, verified: false }, crop: c });
+  pending.push({ ref: { id, name, hist, quad, verified: false }, crop: c });
 });
 // Save each crop as provenance (named by ref id) so the human can audit the allocation.
 for (const { ref, crop } of pending) await crop.write(join(cropDir, `${ref.id}.png`) as `${string}.png`);
