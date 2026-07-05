@@ -51,8 +51,22 @@ all video (the streamer's team) — auto-labelled but low-diversity, a bonus not
    ≈ one ladder VOD's opponent diversity — so it's the accelerator, not the engine.
 3. **Targeted gap-fill** for meta species/variants still missing (coverage report drives).
 
-**Efficiency unlock = a type-icon reader** (18 fixed UI icons → the type combo). Small,
-reliable build; turns opponent ID from "eyeball 200 sprites" into "confirm 1 of 1–5."
+**Type-icon reader = ADVISORY harvest hint only** (2026-07-04). It was meant as an
+efficiency unlock, but it's UNRELIABLE (tiny 48px icons; near-grey Dark/Steel/Rock/Normal
+collide under colour-hist; box-a mis-registered → primary type misreads, e.g. Dark→Grass).
+That's tolerated because it never reaches the product: identity comes from the SPRITE
+matcher, and types then come from the DOSSIER keyed by species (correct + free); regionals
+are disambiguated by their DISTINCT sprites, not icons. Keep it only as a manual
+search-narrowing hint. See the header of `scripts/type-icons.ts`.
+
+**Palette-collision tie-break (SHIPPED 2026-07-04).** Global colour-hist is palette-only,
+so same-palette/different-shape mons collide (a Kingambit sprite matched the red/black/gold
+`sneasler` ref at 0.19). `colorHist.ts` now adds a 2×2 SPATIAL histogram (`quadrantHistogram`)
+as a CONSERVATIVE tie-break behind the global score — engages only when the leader is a
+plausible match (d<0.55) and a rival is within a tight 0.15 margin. `bootstrap-refs` stores
+`quad`; `backfill-quad.ts` recomputes it from saved crops. Validated 46/46 self-match, no
+regressions. (First cut at 0.35 margin over-triggered — flipped a laser-degraded Sinistcha
+to Arcanine — hence the tight gate.)
 
 ## Laser handling (settled)
 The preview's red beams are largely *static*, so temporal median can't remove them.

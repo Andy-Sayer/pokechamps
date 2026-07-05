@@ -1,10 +1,19 @@
-// Read the opponent type-icons at team preview → the type combo → (caller) a dossier
-// species shortlist, turning opponent ID from "eyeball 200 sprites" into "confirm 1 of
-// 1-5". Type icons are a FIXED 18-icon set (no shiny/gender/regional variation), so their
-// colour-histograms are stable refs. Bootstrap them from mons whose types you know.
+// Read the opponent type-icons at team preview → a coarse type combo → (caller) a dossier
+// species shortlist. HARVEST HELPER ONLY, ADVISORY — do NOT use as a type oracle.
 //   bootstrap: type-icons.ts bootstrap <frame.png> <slot:Type1/Type2> ...
-//     e.g. ... bootstrap f.png 0:Water/Ghost 1:Dragon/Ground 3:Fighting/Poison
 //   read:      type-icons.ts read <frame.png>   → each slot's two types
+//
+// RELIABILITY (measured 2026-07-04): this reader is UNRELIABLE. The icons are tiny (48px)
+// and several types are near-grey (Dark/Steel/Rock/Normal), which colour-histograms can't
+// separate; the box-a (primary-type) crop is also mis-registered on the icon edge — so it
+// systematically misreads the primary type (e.g. Grimmsnarl's DARK read as GRASS). This is
+// TOLERATED because it never reaches the product: species identity comes from the SPRITE
+// matcher (colorHist.ts), and once the species is known its types come from the DOSSIER —
+// correct and free. Regional formes are disambiguated by their DISTINCT sprites (Alolan
+// Ninetales is white/blue vs base gold), not by these icons. So the reader is only a
+// search-narrowing hint during manual harvest; a wrong read just widens the shortlist. If
+// a proper type oracle is ever needed, template-match the fixed icon symbols (not colour
+// hist) and re-register box-a — but prefer the dossier-by-species path.
 import { Jimp } from 'jimp';
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
