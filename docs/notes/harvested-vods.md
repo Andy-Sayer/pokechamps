@@ -19,6 +19,11 @@ whenever a VOD is processed. See [`sprite-refs-plan.md`](sprite-refs-plan.md) fo
 | `wIM2wV9_MUM` | Jeans — Bulk-Up Ceruledge | Ceruledge, Lucario, Hydreigon, Starmie, Kangaskhan, Sableye |
 | `FEVwyQyRJzk` | Wolfey — Mega Scovillain | Scovillain |
 | `YH5bi7H4c9k` | Wolfey — Reach #1 ladder (14 games) | no new sprites; FOUND the `sneasler` ref = mislabelled Kingambit (deleted) |
+| `JJhMx9ErPEs` | Cybertron — Toxapex ladder (6 games) | no new sprites (all [NEED] flags were mismatches: Gallade/Lopunny/Farigiraf) |
+
+## STILL OPEN after ~17 VODs (they are NOT appearing as opponents → likely rarer in the LIVE meta than Pikalytics says)
+- Meta gaps (no ref): Annihilape, Corviknight, Froslass, Glimmora, **Sneasler** (never actually seen — every "sneasler" was a Kingambit), Tsareena, Vivillon.
+- Crop-less refs (have ref, no crop): Arcanine, Azumarill, Florges, Gholdengo, Meowscarada, Zoroark-Hisui.
 
 ## REJECTED — do NOT re-pull (not usable)
 | VOD id | Creator / title | Why |
