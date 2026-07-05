@@ -18,6 +18,7 @@ whenever a VOD is processed. See [`sprite-refs-plan.md`](sprite-refs-plan.md) fo
 | `t13jL3LoI5A` | Jeans — Mega Gardevoir | Gardevoir |
 | `wIM2wV9_MUM` | Jeans — Bulk-Up Ceruledge | Ceruledge, Lucario, Hydreigon, Starmie, Kangaskhan, Sableye |
 | `FEVwyQyRJzk` | Wolfey — Mega Scovillain | Scovillain |
+| `YH5bi7H4c9k` | Wolfey — Reach #1 ladder (14 games) | no new sprites; FOUND the `sneasler` ref = mislabelled Kingambit (deleted) |
 
 ## REJECTED — do NOT re-pull (not usable)
 | VOD id | Creator / title | Why |
