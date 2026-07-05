@@ -20,6 +20,7 @@ whenever a VOD is processed. See [`sprite-refs-plan.md`](sprite-refs-plan.md) fo
 | `FEVwyQyRJzk` | Wolfey — Mega Scovillain | Scovillain |
 | `YH5bi7H4c9k` | Wolfey — Reach #1 ladder (14 games) | no new sprites; FOUND the `sneasler` ref = mislabelled Kingambit (deleted) |
 | `JJhMx9ErPEs` | Cybertron — Toxapex ladder (6 games) | no new sprites (all [NEED] flags were mismatches: Gallade/Lopunny/Farigiraf) |
+| `w4iJovuvZS8` | Cybertron — Draft League (uploaded 2026-07-05, newest) | SCANNING… |
 
 ## RESOLVED by user (2026-07-05)
 - The recurring **"gray cat"** (gray bipedal cat, long curling tail, Fighting/Poison) = **Sneasler** — captured. It was in nearly every VOD; I couldn't ID it because I had Sneasler's look wrong (the old `sneasler` ref was a mislabelled Kingambit). So Sneasler is COMMON (Pikalytics #1 confirmed), not absent.
