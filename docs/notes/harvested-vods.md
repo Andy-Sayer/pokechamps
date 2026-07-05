@@ -23,7 +23,7 @@ whenever a VOD is processed. See [`sprite-refs-plan.md`](sprite-refs-plan.md) fo
 
 ## RESOLVED by user (2026-07-05)
 - The recurring **"gray cat"** (gray bipedal cat, long curling tail, Fighting/Poison) = **Sneasler** — captured. It was in nearly every VOD; I couldn't ID it because I had Sneasler's look wrong (the old `sneasler` ref was a mislabelled Kingambit). So Sneasler is COMMON (Pikalytics #1 confirmed), not absent.
-- The recurring **"dark witch-hat"** (dark caped flourishing mon, Fairy) = **Floette** (mega-likely). Captured (blurry crop — re-capture from a settled frame later).
+- The recurring **"dark witch-hat"** (dark caped flourishing mon, Fairy) = **Floette**, specifically the **Legends-Z-A / Eternal-Flower BLACK colour variant** — only appears WITH the Floettite. NB: Champions shows this mega/Eternal forme in the PREVIEW (not base pixie Floette). Sprite never settles (constant flourish) so the crop is blurry; re-capture if a cleaner frame turns up.
 
 ## STILL OPEN
 - Meta gaps (no ref): Annihilape, Corviknight, Froslass, Glimmora, Tsareena, Vivillon.
