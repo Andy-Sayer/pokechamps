@@ -17,7 +17,7 @@
 import { Jimp } from 'jimp';
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { dataDirPath, getSpecies } from '@pokechamps/core/domain/data.js';
+import { dataDirPath, getSpecies, isLegalSpecies } from '@pokechamps/core/domain/data.js';
 import { colorHistogram, type ColorHistRef } from '../src/colorHist.js';
 import { opponentSpriteBoxes, playerSpriteBoxes, CHAMPIONS_OPP_PANEL_BG, CHAMPIONS_PLAYER_CARD_BG, CHAMPIONS_PLAYER_HIGHLIGHT_BG } from '../src/regions.js';
 
@@ -47,6 +47,13 @@ const fresh: ColorHistRef[] = ids.slice(0, boxes.length).flatMap((id, i) => {
   // Strip the variant suffix (-shiny / -f / -m / -f-shiny) to the base species for the
   // canonical name; the full variant id stays the ref key so variants coexist.
   const baseId = id.replace(/-shiny$/, '').replace(/-(f|m)$/, '');
+  // Legality guard: refuse to label a slot with a species not in the format allow-list.
+  // A preview slot is ALWAYS a legal opponent, so an illegal label = a misidentification
+  // (this is exactly how a shiny Grimmsnarl got mislabelled "Mewtwo"). Skip, don't poison.
+  if (!isLegalSpecies(baseId)) {
+    console.error(`  ⚠ slot ${i}: "${id}" -> base "${baseId}" is NOT format-legal — skipping (misID?).`);
+    return [];
+  }
   const name = (getSpecies(baseId) as { name?: string } | undefined)?.name ?? baseId;
   return [{ id, name, hist }];
 });
