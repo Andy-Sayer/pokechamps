@@ -1,5 +1,6 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { render, Box, Text, useApp } from 'ink';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { render, Box, Text, useApp, useInput } from 'ink';
+import { startWatch as startWatcher, stopWatch as stopWatcher, isWatching as watcherIsWatching, onWatchingChange } from './ui/watcher.js';
 import type { PokemonSet, OpponentEntry, Match } from '@pokechamps/core/domain/types.js';
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
 import { createFileStores, createHttpStores, type Stores } from '@pokechamps/core/storage/index.js';
@@ -68,6 +69,18 @@ function App() {
     setConfig(next);
   };
 
+  // Global watcher toggle (Ctrl+W) — start the live turn-watcher from ANY screen, so it can be
+  // running/warmed up BEFORE the opponent screen (it catches the lead send-out + Intimidate).
+  // The watcher is a shared singleton; the opponent screen (Ctrl+R) and battle also drive it.
+  const [watching, setWatching] = useState(watcherIsWatching());
+  useEffect(() => onWatchingChange(setWatching), []);
+  useInput((input, key) => {
+    if (key.ctrl && (input === 'w' || input === '\x17')) {
+      if (watcherIsWatching()) stopWatcher(); else startWatcher({ full: true });
+    }
+  });
+
+  const screen = ((): React.ReactElement => {
   if (route.kind === 'menu') {
     const badge: { text: string; color: 'green' | 'yellow' | 'red' } | undefined = config.serverUrl
       ? config.token
@@ -225,6 +238,12 @@ function App() {
     return <SpectatorScreen stores={stores} target={route.target} onExit={() => setRoute({ kind: 'menu' })} />;
   }
   return <Text>Unknown route</Text>;
+  })();
+
+  // Global watch badge — shown on every screen EXCEPT battle (which draws its own, and whose
+  // sixel rows we must not shift). Confirms the watcher is running before the choose screen.
+  const showBadge = watching && route.kind !== 'battle';
+  return <>{showBadge && <Box><Text color="green">● watching live feed — Ctrl+W to stop</Text></Box>}{screen}</>;
 }
 
 // Ask the terminal whether it renders sixels (Primary Device Attributes)

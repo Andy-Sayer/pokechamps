@@ -8,6 +8,7 @@ export interface ProposalLike {
   lines: string[];
   confidence?: number;
   notes?: string[];
+  partial?: boolean;   // in-progress turn (live preview) — shown as "reading…", not yet final
 }
 
 export interface VisionProposalPanelProps {
@@ -44,11 +45,12 @@ export function VisionProposalPanel({ proposal, turnNumber, gloss, onAccept, onR
 
   const conf = Math.round((proposal.confidence ?? 0) * 100);
   const confColor = conf >= 80 ? 'green' : conf >= 50 ? 'yellow' : 'red';
+  const partial = !!proposal.partial;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={partial ? 'yellow' : 'cyan'} paddingX={1}>
       <Box justifyContent="space-between">
-        <Text color="cyan">⌁ Vision proposal{turnNumber != null ? ` — turn ${turnNumber}` : ''}</Text>
+        <Text color={partial ? 'yellow' : 'cyan'}>{partial ? '⏳ Reading turn… (live — don\'t type)' : '⌁ Vision proposal'}{turnNumber != null ? ` — turn ${turnNumber}` : ''}</Text>
         <Text color={confColor}>conf {conf}%</Text>
       </Box>
 
@@ -86,7 +88,9 @@ export function VisionProposalPanel({ proposal, turnNumber, gloss, onAccept, onR
       )}
 
       <Box marginTop={1}>
-        <Text dimColor>{editing ? 'enter done · type to edit the line' : '↑↓ line · enter accept · e edit · r reject'}</Text>
+        <Text dimColor>{editing ? 'enter done · type to edit the line'
+          : partial ? 'reading… the turn will finalize when it completes — no need to type · enter accepts as-is · r reject'
+          : '↑↓ line · enter accept · e edit · r reject'}</Text>
       </Box>
     </Box>
   );

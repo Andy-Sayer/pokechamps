@@ -1,7 +1,4 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { createInterface } from 'node:readline';
-import { fileURLToPath } from 'node:url';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
@@ -21,7 +18,7 @@ import { isAvailable as aiAvailable } from '@pokechamps/core/ai/client.js';
 import type { Stores } from '@pokechamps/core/storage/index.js';
 import { getSpecies, getMove, getAbility, getItem, toId, isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, isSpreadMove, isTrappingMove, moveFlinchChance } from '@pokechamps/core/domain/data.js';
 import { defaultOpponentSet } from '@pokechamps/core/domain/bring.js';
-import { parseTurnLine, canonicalizeRefs, previewTurnLine, resolveMoveToken, parseActor, type ParseContext, type StateUpdate, type HazardUpdate } from '@pokechamps/core/domain/turnparser.js';
+import { parseTurnLine, canonicalizeRefs, previewTurnLine, resolveMoveToken, parseActor, type ParseContext, type StateUpdate, type HazardUpdate, type WeatherUpdate } from '@pokechamps/core/domain/turnparser.js';
 import { applyHazardVerb, applyHazardsToSwitchIn, absorbsToxicSpikes, hazardGlyphs, hazardClearEffect, applyHazardClear } from '@pokechamps/core/domain/hazards.js';
 import { fieldMoveEffect, applyFieldMove } from '@pokechamps/core/domain/fieldMoves.js';
 import { EFFECT_DURATIONS } from '@pokechamps/core/domain/durations.js';
@@ -47,6 +44,7 @@ import { formatShowdownTeamSP } from '@pokechamps/core/domain/showdown.js';
 import { loadPrefs, savePrefs } from '@pokechamps/core/storage/prefs.js';
 import { BATTLE_COMMANDS, parseCommand, type BattleCommandId } from './slashCommands.js';
 import { VisionProposalPanel, type ProposalLike } from './VisionProposalPanel.js';
+import { startWatch as startWatcher, stopWatch as stopWatcher, isWatching as watcherIsWatching, onProposal as onWatchProposal, onWatchingChange } from './watcher.js';
 import { deriveActiveIdx, snapshotTurn } from '@pokechamps/core/match/engine.js';
 import { applyMegaAction } from '@pokechamps/core/domain/megaResolve.js';
 import { getMegaOptions } from '@pokechamps/core/domain/gimmicks/mega.js';
@@ -615,13 +613,15 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // /vision (and, once HDMI capture is wired, by the runVision loop); cleared on
   // accept/reject. While set, it owns input focus.
   const [visionProposal, setVisionProposal] = useState<ProposalLike | null>(null);
-  // `/watch` — spawn the live read pipeline (read-live.ts) over serve's capture
-  // tap; each completed turn it emits arrives as a ratifiable proposal. The OCR
-  // engine runs in the child process, never in this Ink render.
-  const [watching, setWatching] = useState(false);
-  const watchProc = useRef<ChildProcess | null>(null);
-  // Kill the watch reader if the battle screen unmounts (don't leak the child).
-  useEffect(() => () => { try { watchProc.current?.kill(); } catch { /* gone */ } }, []);
+  // The live turn-watcher (read-live child) is owned by the shared `watcher` module so it
+  // spans team-select → battle (started at either). Here we just subscribe: proposals →
+  // the ratify panel, and the watching flag → the badge. Stop the child when we leave battle.
+  const [watching, setWatching] = useState(watcherIsWatching());
+  useEffect(() => {
+    const offP = onWatchProposal(p => setVisionProposal({ lines: p.lines, confidence: p.confidence ?? 0.9, notes: [], partial: p.partial }));
+    const offS = onWatchingChange(setWatching);
+    return () => { offP(); offS(); stopWatcher(); };   // stop the reader when the battle screen unmounts (match over)
+  }, []);
   const [draftActions, setDraftActions] = useState<MoveAction[]>([]);
   // Boost lines logged DURING a turn join the turn's ordered timeline (instead of
   // applying immediately), so they take effect at their input position — a defense
@@ -2032,6 +2032,14 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     setMessage(`Hazard updated.`);
   };
 
+  const applyWeatherUpdate = (update: WeatherUpdate) => {
+    const nextField = { ...(match.field ?? NEUTRAL_FIELD), weather: update.weather, weatherTurns: update.weather ? EFFECT_DURATIONS.weather : undefined };
+    const next: Match = { ...match, field: nextField };
+    setMatch(next);
+    saveMatchAsync(stores, next, setMessage);
+    setMessage(update.weather ? `Weather → ${update.weather}.` : 'Weather cleared.');
+  };
+
   // ---------------- state update (immediate) ----------------
 
   const applyStateUpdate = (update: StateUpdate) => {
@@ -2541,6 +2549,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     if (!r.ok) return `"${trimmed}" — ${r.error}`;
     if (r.kind === 'action') { setDraftActions(prev => [...prev, ...r.actions]); return null; }
     if (r.kind === 'hazard') { applyHazardUpdate(r.update); return null; }
+    if (r.kind === 'weather') { applyWeatherUpdate(r.update); return null; }
     if (r.kind === 'states') { for (const u of r.updates) applyStateUpdate(u); noteBoostLogged(r.updates); return null; }
     if (r.update.boosts && draftActions.length > 0) {
       setDraftBoostEvents(prev => [...prev, { order: nextTurnOrder(), update: r.update, raw: trimmed }]);
@@ -2559,51 +2568,33 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       : `Vision: applied ${lines.length} line(s). Review the draft, then /next to finalize.`);
   };
 
-  const stopWatch = () => {
-    const p = watchProc.current;
-    watchProc.current = null;
-    if (p) { try { p.kill(); } catch { /* already gone */ } }
-    setWatching(false);
-  };
+  const stopWatch = () => { stopWatcher(); setMessage('Watch off.'); };
 
   const startWatch = (full: boolean) => {
-    // Seed the reader with the active mons per slot so its tracker resolves
-    // m1/m2/o1/o2 from the first turn.
+    if (watcherIsWatching()) { setMessage('Already watching (started earlier).'); return; }
+    // Seed the reader with the active mons per slot so its tracker resolves m1/m2/o1/o2 from
+    // the first turn. (If it was started at team-select with no leads, it rebuilds the roster
+    // from the send-out banners — this only fills leads when the battle starts it fresh.)
     const a = activeIdx, mt = match.myTeam, ot = match.opponentTeam;
     const leads: string[] = [];
     if (a.mine[0] != null && mt[a.mine[0]]) leads.push(`m1=${mt[a.mine[0]]!.species}`);
     if (a.mine[1] != null && mt[a.mine[1]]) leads.push(`m2=${mt[a.mine[1]]!.species}`);
     if (a.theirs[0] != null && ot[a.theirs[0]]) leads.push(`o1=${ot[a.theirs[0]]!.species}`);
     if (a.theirs[1] != null && ot[a.theirs[1]]) leads.push(`o2=${ot[a.theirs[1]]!.species}`);
-    let proc: ChildProcess;
-    try {
-      // read-live.ts lives in the vision package; resolved relative to this file
-      // (dev/tsx). A bundled TUI won't have it → spawn 'error' handles that.
-      const readLive = fileURLToPath(new URL('../../../vision/scripts/read-live.ts', import.meta.url));
-      const flags = [readLive, '--leads', leads.join(',')];
-      if (full) flags.push('--full');
-      proc = spawn(process.execPath, ['--import', 'tsx', ...flags], { stdio: ['ignore', 'pipe', 'pipe'] });
-    } catch (e) {
-      setMessage(`Watch: couldn't launch the reader — ${(e as Error).message}`);
-      return;
-    }
-    watchProc.current = proc;
-    proc.on('error', () => { setMessage('Watch: reader failed to spawn (needs tsx + the vision package — dev run only).'); stopWatch(); });
-    proc.on('exit', () => { if (watchProc.current === proc) { watchProc.current = null; setWatching(false); } });
-    // The child prints one JSON proposal per completed turn on stdout; surface it
-    // in the ratify panel. (stderr carries human logs we ignore.)
-    const rl = createInterface({ input: proc.stdout! });
-    rl.on('line', (line) => {
-      const s = line.trim();
-      if (s[0] !== '{') return;
-      try {
-        const p = JSON.parse(s) as { lines?: string[]; confidence?: number };
-        if (Array.isArray(p.lines) && p.lines.length) setVisionProposal({ lines: p.lines, confidence: p.confidence ?? 0.9, notes: [] });
-      } catch { /* partial/garbled line — ignore */ }
-    });
-    setWatching(true);
-    setMessage(`Watch ON${full ? ' (full frame)' : ' (GameShare inset)'} — reading the live feed. Start the capture server first (npm run -w @pokechamps/vision serve). Read turns pop up to ratify; /watch again to stop.`);
+    const status = startWatcher({ leads, full });
+    setMessage(`Watch ON${full ? ' (full frame)' : ''} — ${status}. Start the capture server first (npm run -w @pokechamps/vision serve). Read turns pop up to ratify; Ctrl+R again to stop.`);
   };
+
+  // Auto-start the watcher when the battle opens so it captures from TURN 1 (the leads'
+  // first actions) with no manual toggle — the user asked for capture-from-the-start.
+  // Ctrl+R still stops/restarts it, and this yields complete --debug traces from the
+  // opening for diagnosing the turn reader. Full-frame (direct capture); guard so it
+  // only fires once, and never for a spectator or an already-finished match.
+  const autoWatched = useRef(false);
+  useEffect(() => {
+    if (!spectator && !match.outcome && !autoWatched.current) { autoWatched.current = true; startWatch(true); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const runBattleCommand = (id: BattleCommandId, args = ''): boolean => {
     switch (id) {
@@ -2868,6 +2859,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (key.escape) setExportPanelText(null);
       return;
     }
+    // Watching is toggled by the GLOBAL Ctrl+W (cli.tsx) so it's consistent across every
+    // screen (and can start before the choose screen). BattleScreen just auto-starts on mount
+    // + syncs the badge via the watcher subscription; `/watch` stays for a GameShare inset.
     if (key.escape) onEnd();
     if (suggestions.length > 0) {
       if (key.upArrow) setHighlight(h => Math.max(0, h - 1));
@@ -3664,6 +3658,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
                 setInput('');
                 return;
               }
+              if (r.kind === 'weather') {
+                applyWeatherUpdate(r.update);
+                setInput('');
+                return;
+              }
               if (r.kind === 'states') {
                 // Bulk HP update — apply each in turn. applyStateUpdate is
                 // pure-ish (uses React's batched setState), so the final
@@ -3759,6 +3758,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
           <Text>{aiReview}</Text>
         </Box>
       )}
+      {watching && <Box marginTop={1}><Text color="green">● watching live feed — read turns pop up to ratify · Ctrl+R to stop</Text></Box>}
       {message && <Box marginTop={1}><Text color="yellow">{message}</Text></Box>}
       {/* SIXEL sprite strip — MUST stay the last element of the frame:
           SixelImage positions itself by walking up its own reservation from
