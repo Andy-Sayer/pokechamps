@@ -48,18 +48,25 @@ export class BattleTracker {
   private asm: BattleAssembler;
   private sawAction = false;
   private sawEot = false;
+  // Settled HP as the just-closed turn STARTED (= previous turn's post-HP). The delta
+  // vs the closing HP drives target inference for un-named (neutral) hits.
+  private hpBefore: HpBySlot = {};
 
   constructor(leads: Partial<Roster> = {}) { this.asm = new BattleAssembler(leads); }
 
   /** Current active roster snapshot. */
   getRoster(): Roster { return this.asm.getRoster(); }
 
+  /** In-progress lines for the current (unclosed) turn — a live preview. */
+  preview(): string[] { return this.asm.preview(); }
+
   /** Feed one event; returns the PREVIOUS turn's lines if this event opened a new turn.
    *  `hp` (post-turn remaining HP% per slot) is attached to that closed turn's moves. */
-  feed(e: BattleMessage, hp: HpBySlot = {}): string[] | null {
+  feed(e: BattleMessage, hp: HpBySlot = {}, touched?: Set<SlotRef>): string[] | null {
     let done: string[] | null = null;
     if (isActionStart(e) && this.sawAction && this.sawEot) {
-      done = this.asm.endTurnLines(hp);
+      done = this.asm.endTurnLines(hp, this.hpBefore, touched);
+      this.hpBefore = { ...hp };                 // this turn's post-HP = next turn's pre-HP
       this.sawAction = false; this.sawEot = false;
     }
     this.asm.feed(e);
@@ -69,10 +76,12 @@ export class BattleTracker {
   }
 
   /** Close the current turn ONLY if it has an action yet (for the frame-gap boundary —
-   *  a no-residual turn ends at the move-select gap, not on an event). Else null. */
-  flushPending(hp: HpBySlot = {}): string[] | null {
+   *  a no-residual turn ends at the move-select gap, not on an event). Else null. `touched`
+   *  = slots whose nameplate appeared this turn (affected mons) → the target signal. */
+  flushPending(hp: HpBySlot = {}, touched?: Set<SlotRef>): string[] | null {
     if (!this.sawAction) return null;
-    const lines = this.asm.endTurnLines(hp);
+    const lines = this.asm.endTurnLines(hp, this.hpBefore, touched);
+    this.hpBefore = { ...hp };
     this.sawAction = false; this.sawEot = false;
     return lines;
   }

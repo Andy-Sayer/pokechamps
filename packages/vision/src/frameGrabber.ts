@@ -9,6 +9,8 @@ export interface FrameGrabber {
 }
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
+  Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`loadFrame timed out after ${ms}ms`)), ms).unref?.())]);
 
 /** Polls serve.ts's single continuously-overwritten PNG tap (`latest.png`) and
  *  yields each NEW frame (dedup by mtime). It only READS the file, so it runs
@@ -20,7 +22,7 @@ export class LatestTapGrabber implements FrameGrabber {
   private stopped = false;
   constructor(
     private readonly path: string,
-    private readonly opts: { pollMs?: number; stop?: () => boolean } = {},
+    private readonly opts: { pollMs?: number; stop?: () => boolean; loadTimeoutMs?: number } = {},
   ) {}
   async next(): Promise<Frame | null> {
     const pollMs = this.opts.pollMs ?? 200;
@@ -29,10 +31,12 @@ export class LatestTapGrabber implements FrameGrabber {
       try { mt = statSync(this.path).mtimeMs; } catch { /* tap not written yet */ }
       if (mt && mt !== this.lastMtime) {
         try {
-          const frame = await loadFrame(this.path);
+          // Timeout guards a decode that HANGS on a heavy/torn frame — without it a single bad
+          // frame freezes the whole watch loop (this was the "doesn't keep rolling" stall).
+          const frame = await withTimeout(loadFrame(this.path), this.opts.loadTimeoutMs ?? 4000);
           this.lastMtime = mt;
           return frame;
-        } catch { /* torn mid-write — retry on the next poll */ }
+        } catch { /* torn mid-write OR slow/hung decode — skip, retry the next (newer) frame */ }
       }
       await sleep(pollMs);
     }

@@ -32,7 +32,7 @@ export type BattleMessage =
   | { kind: 'switchIn'; side: Side; label: string; species: string | null; nickname: string | null; trainer?: string }
   | { kind: 'flinch'; side: Side; label: string; species: string | null }
   | { kind: 'weather'; side: Side; label: string; species: string | null; weather: string }
-  | { kind: 'statChange'; side: Side; label: string; species: string | null; stats: string[]; dir: 'rose' | 'fell' }
+  | { kind: 'statChange'; side: Side; label: string; species: string | null; stats: string[]; dir: 'rose' | 'fell'; magnitude: number }
   | { kind: 'effectiveness'; level: 'super' | 'notVery' | 'extremely' | 'immune'; side: Side; label: string; species: string | null }
   | { kind: 'heal'; side: Side; label: string; species: string | null; source: string }
   | { kind: 'ability'; side: Side; label: string; species: string | null; ability: string }
@@ -107,11 +107,13 @@ export function parseBanner(raw: string): BattleMessage {
   if (/reflect made your side stronger/i.test(lc)) return { kind: 'screen', screen: 'Reflect' };
 
   // --- field: weather start / end (no single mon) ---
-  if (/the effects of the weather (?:disappeared|wore off)/i.test(lc)) return { kind: 'weatherEnd' };
-  if (/(?:it |)(?:started to rain|began to rain)|it'?s raining/i.test(lc)) return { kind: 'weatherStart', weather: 'rain' };
-  if (/a sandstorm kicked up|sandstorm is raging/i.test(lc)) return { kind: 'weatherStart', weather: 'sandstorm' };
-  if (/sunlight turned (?:harsh|extremely harsh)|sunlight is strong/i.test(lc)) return { kind: 'weatherStart', weather: 'sun' };
-  if (/it started to (?:hail|snow)|snow began to fall|it'?s snowing/i.test(lc)) return { kind: 'weatherStart', weather: 'snow' };
+  // END covers the real per-weather banners ("The rain stopped." etc.), not just the generic one.
+  if (/the (?:rain|snow|hail) stopped|the sunlight faded|the sandstorm subsided|effects of the weather (?:disappeared|wore off)/i.test(lc)) return { kind: 'weatherEnd' };
+  // START covers move-set ("It started to rain!") AND ability-set ("…'s Drizzle made it rain!").
+  if (/started to rain|began to rain|it'?s raining|made it rain/i.test(lc)) return { kind: 'weatherStart', weather: 'rain' };
+  if (/a sandstorm kicked up|sandstorm is raging|whipped up a sandstorm/i.test(lc)) return { kind: 'weatherStart', weather: 'sandstorm' };
+  if (/sunlight turned (?:harsh|extremely harsh)|sunlight is strong|intensified the sun/i.test(lc)) return { kind: 'weatherStart', weather: 'sun' };
+  if (/started to (?:hail|snow)|snow began to fall|it'?s snowing|made it snow/i.test(lc)) return { kind: 'weatherStart', weather: 'snow' };
 
   // --- effectiveness ("It's {super|not very|extremely} effective on [the opposing] X!") ---
   if ((m = /^it'?s (super|not very|extremely) effective on (.+)$/i.exec(text))) {
@@ -158,8 +160,13 @@ export function parseBanner(raw: string): BattleMessage {
     return { kind: 'flinch', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()) };
   if ((m = /^(.+?) is buffeted by the (\w+)/i.exec(rest)))
     return { kind: 'weather', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()), weather: m[2]!.toLowerCase() };
-  if ((m = /^(.+?)'s (.+?) (rose|fell)(?: sharply| drastically)?$/i.exec(rest)))
-    return { kind: 'statChange', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()), stats: parseStats(m[2]!), dir: /rose/i.test(m[3]!) ? 'rose' : 'fell' };
+  // Adverb can sit BEFORE or AFTER the verb ("Attack rose sharply" / "Attack harshly fell").
+  // sharply(+2 rise)/harshly(-2 fall) → 2 · drastically/severely → 3 · none → 1.
+  if ((m = /^(.+?)'s (.+?) (?:(sharply|harshly|drastically|severely) )?(rose|fell)(?: (sharply|harshly|drastically|severely))?$/i.exec(rest))) {
+    const adv = (m[3] || m[5] || '').toLowerCase();
+    const magnitude = /drastically|severely/.test(adv) ? 3 : /sharply|harshly/.test(adv) ? 2 : 1;
+    return { kind: 'statChange', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()), stats: parseStats(m[2]!), dir: /rose/i.test(m[4]!) ? 'rose' : 'fell', magnitude };
+  }
   if ((m = /^(.+?) drank down all the matcha that (.+?) made/i.exec(rest)))
     return { kind: 'heal', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()), source: m[2]!.trim() };
   if ((m = /^(.+?) is exerting its (\w+)$/i.exec(rest)))

@@ -78,6 +78,8 @@ export interface TurnAction {
 export interface TurnObservation {
   actions: TurnAction[];
   faints: SlotRef[];
+  megas?: SlotRef[];    // mons that Mega-Evolved but whose MOVE wasn't captured (→ standalone mega line)
+  stateLines?: string[]; // state updates (stat boosts — Intimidate, Nasty Plot, …) as turn-log lines
   confidence: number;   // min over the reads that fed it
   notes: string[];      // human-readable caveats ("HP bar mid-animation", …)
 }
@@ -88,6 +90,8 @@ export interface TurnProposal {
   confidence: number;
   notes: string[];
   frameTs: number;
+  partial?: boolean;    // an in-progress (not-yet-closed) turn — a LIVE PREVIEW so the user
+                        // sees the reader capturing and knows not to type; not yet ratifiable.
 }
 
 /** The team-preview ("Select 4") screen: YOUR six on the left as TEXT (name +

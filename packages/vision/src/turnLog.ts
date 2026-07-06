@@ -23,9 +23,13 @@ export function emitAction(a: TurnAction): string {
   return `${actorWithMods(a)} > ${a.move} > ${a.target}${hp}`;
 }
 
-/** A settled turn → all its turn-log lines (actions, then faint state lines). */
+/** A settled turn → all its turn-log lines (actions, standalone megas, then faint lines). */
 export function emitTurnLog(obs: TurnObservation): string[] {
   const lines = obs.actions.map(emitAction);
+  // Standalone mega declarations for mons that mega'd but whose move wasn't captured.
+  for (const ref of obs.megas ?? []) lines.push(`${ref} mega`);
+  // Stat-boost state lines (Intimidate on switch-in, Nasty Plot, …).
+  for (const sl of obs.stateLines ?? []) lines.push(sl);
   for (const f of obs.faints) lines.push(`${f} ko`);
   return lines;
 }

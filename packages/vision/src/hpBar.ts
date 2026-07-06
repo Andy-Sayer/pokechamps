@@ -45,6 +45,40 @@ export function readHpFraction(
   return (lastFilled + 1) / width;
 }
 
+/** HP-bar FILL hue: bright, saturated, and NOT blue-dominant — the green/yellow/red
+ *  gradient. Blue/purple/cyan (the neon arena that a nameplate-less crop lands on) fails
+ *  this, so an empty-of-nameplate frame can't masquerade as a full bar. */
+export function isHpFill(r: number, g: number, b: number): boolean {
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  if (max / 255 <= 0.4 || (max === 0 ? 0 : (max - min) / max) <= 0.35) return false;
+  return b <= Math.max(r, g) - 20;                 // blue not dominant
+}
+const isDarkTrack = (r: number, g: number, b: number) => Math.max(r, g, b) / 255 < 0.35;
+
+/** Like readHpFraction but returns NULL when the crop doesn't look like an HP bar at all
+ *  (i.e. it's the cinematic arena, not a nameplate). A real bar is (almost) entirely
+ *  HP-fill ∪ dark-track; the arena is neither. This is the fix for the "no nameplate →
+ *  reads 100%" poisoning that wrecked damage + target inference. */
+export function readHpFractionGated(
+  pixels: Uint8ClampedArray | number[], width: number, height: number, opts: HpBarOpts = {},
+): number | null {
+  if (width <= 0 || height <= 0) return null;
+  const rows = Math.max(1, Math.min(opts.sampleRows ?? 3, height));
+  const midY = Math.floor(height / 2);
+  let barLike = 0, tot = 0;
+  for (let x = 0; x < width; x++) {
+    for (let r = 0; r < rows; r++) {
+      const y = Math.min(height - 1, Math.max(0, midY - (rows >> 1) + r));
+      const i = (y * width + x) * 4;
+      const R = pixels[i]!, G = pixels[i + 1]!, B = pixels[i + 2]!;
+      tot++;
+      if (isHpFill(R, G, B) || isDarkTrack(R, G, B)) barLike++;
+    }
+  }
+  if (tot === 0 || barLike / tot < 0.8) return null;      // not an HP bar
+  return readHpFraction(pixels, width, height, { ...opts, isFilled: isHpFill });
+}
+
 /** Convenience: fill fraction → integer HP percent 0..100 (the engine's unit). */
 export function hpPercentFromFraction(frac: number): number {
   return Math.max(0, Math.min(100, Math.round(frac * 100)));

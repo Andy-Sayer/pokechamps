@@ -40,6 +40,8 @@ export class BattleStateMachine {
   private lastBanner = '';
   private noBannerRun = 0;
   private lastHp: Partial<Record<SlotRef, number>> = {};
+  private touched = new Set<SlotRef>();   // slots whose nameplate appeared this turn (affected mons)
+  private lastPreview = '';                // last in-progress preview emitted (dedupe partials)
   private gapFrames: number;
   private clearFrames: number;
   private conf: number;
@@ -54,7 +56,7 @@ export class BattleStateMachine {
   /** Feed one frame's read; returns a TurnProposal when a turn completes, else null. */
   feed(read: FrameRead): TurnProposal | null {
     for (const s of read.slots) {
-      if (s.hpFraction != null) this.lastHp[refOf(s)] = Math.max(0, Math.min(100, Math.round(s.hpFraction * 100)));
+      if (s.hpFraction != null) { const ref = refOf(s); this.lastHp[ref] = Math.max(0, Math.min(100, Math.round(s.hpFraction * 100))); this.touched.add(ref); }
     }
     const text = (read.battleText ?? '').trim();
 
@@ -62,23 +64,39 @@ export class BattleStateMachine {
       this.noBannerRun = 0;
       if (norm(text) === norm(this.lastBanner)) return null;        // same banner, still showing
       this.lastBanner = text;
-      const lines = this.tracker.feed(parseBanner(text), this.lastHp);
-      return lines ? this.propose(lines, read.ts) : null;
+      const msg = parseBanner(text);
+      const lines = this.tracker.feed(msg, this.lastHp, this.touched);
+      if (lines) { this.touched = new Set(); this.lastPreview = ''; return this.propose(lines, read.ts); }
+      // Game over (forfeit/win/loss) → there's no NEXT turn to close the current one, and
+      // the reader keeps running (no finish()). Flush the final turn now so it emits.
+      if (msg.kind === 'end') {
+        const flushed = this.tracker.flushPending(this.lastHp, this.touched);
+        if (flushed) { this.touched = new Set(); this.lastPreview = ''; return this.propose(flushed, read.ts); }
+      }
+      // LIVE PREVIEW: emit the in-progress turn's lines as a PARTIAL when they change, so
+      // the ratify panel shows the turn building and the user knows the reader has it.
+      const preview = this.tracker.preview();
+      const key = preview.join('|');
+      if (preview.length && key !== this.lastPreview) {
+        this.lastPreview = key;
+        return { lines: preview, confidence: this.conf, notes: [], frameTs: read.ts, partial: true };
+      }
+      return null;
     }
 
     // no banner this frame — count toward the move-select gap
     this.noBannerRun++;
     if (this.noBannerRun >= this.clearFrames) this.lastBanner = '';
     if (this.noBannerRun === this.gapFrames) {
-      const lines = this.tracker.flushPending(this.lastHp);
-      if (lines) return this.propose(lines, read.ts);
+      const lines = this.tracker.flushPending(this.lastHp, this.touched);
+      if (lines) { this.touched = new Set(); this.lastPreview = ''; return this.propose(lines, read.ts); }
     }
     return null;
   }
 
   /** Close the final in-progress turn (call at match end). */
   finish(): TurnProposal | null {
-    const lines = this.tracker.flushPending(this.lastHp);
+    const lines = this.tracker.flushPending(this.lastHp, this.touched);
     return lines ? this.propose(lines, 0) : null;
   }
 

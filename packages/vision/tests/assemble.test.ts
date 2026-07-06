@@ -5,6 +5,35 @@ import { BattleAssembler } from '../src/assemble.js';
 // Feed real banner lines end-to-end (parse → assemble) and check the turn-log lines.
 const feed = (a: BattleAssembler, lines: string[]) => { for (const l of lines) a.feed(parseBanner(l)); };
 
+describe('BattleAssembler — weather', () => {
+  test('a weather banner (Drizzle/rain) emits a `weather rain` state line', () => {
+    const a = new BattleAssembler({ m1: 'Talonflame', m2: 'Kingambit', o1: 'Pelipper', o2: 'Archaludon' });
+    feed(a, [
+      'The opposing Pelipper used Hurricane!',   // a move so the turn has content
+      "It started to rain!",                      // weatherStart(rain)
+    ]);
+    expect(a.endTurnLines()).toContain('weather rain');
+  });
+
+  test('the REAL weather-end banner ("The rain stopped.") clears weather', () => {
+    const a = new BattleAssembler({ m1: 'Talonflame', m2: 'Kingambit', o1: 'Pelipper', o2: 'Archaludon' });
+    feed(a, ['The opposing Pelipper used Hurricane!', 'The rain stopped.']);
+    expect(a.endTurnLines()).toContain('weather clear');
+  });
+
+  test('Tailwind + Trick Room (field moves) emit as targetless self actions', () => {
+    const a = new BattleAssembler({ m1: 'Talonflame', m2: 'Kingambit', o1: 'Pelipper', o2: 'Hatterene' });
+    feed(a, ['The opposing Pelipper used Tailwind!', 'The opposing Hatterene used Trick Room!']);
+    expect(a.endTurnLines()).toEqual(['o1 > Tailwind > self', 'o2 > Trick Room > self']);
+  });
+
+  test('a nicknamed opponent resolves its move via the roster label (species-resolve gap)', () => {
+    const a = new BattleAssembler({});
+    feed(a, ['Vell sent out Fluffy!', 'The opposing Fluffy used Trick Room!']);
+    expect(a.endTurnLines()).toEqual(['o1 > switch > Fluffy', 'o1 > Trick Room > self']);
+  });
+});
+
 describe('BattleAssembler — opening turn (real Oni capture)', () => {
   test('resolves slots, attaches targets from follow-ups, emits turn-log lines', () => {
     const a = new BattleAssembler({ m1: 'Staraptor', m2: 'Grimmsnarl', o1: 'Raichu', o2: 'Sylveon' });
@@ -45,7 +74,7 @@ describe('BattleAssembler — slot resolution & roster', () => {
   test('picks the correct same-side slot by species', () => {
     const a = new BattleAssembler({ m1: 'Staraptor', m2: 'Grimmsnarl', o1: 'Raichu', o2: 'Sylveon' });
     feed(a, ['The opposing Sylveon used Hyper Voice!']);
-    expect(a.endTurnLines()).toEqual(['o2 > Hyper Voice > self']);   // o2, not o1
+    expect(a.endTurnLines()).toEqual(['o2 > Hyper Voice > m1']);   // o2 actor; offensive, no naming banner → defaults to a foe
   });
 
   test('a switch updates the roster and emits a switch line', () => {
@@ -58,7 +87,7 @@ describe('BattleAssembler — slot resolution & roster', () => {
   test('mega flag attaches to the actor that megas, then moves', () => {
     const a = new BattleAssembler({ m1: 'Staraptor', m2: 'Whimsicott', o1: 'Aerodactyl', o2: 'Sylveon' });
     feed(a, ['Staraptor has Mega Evolved into Mega Staraptor!', 'Staraptor used Close Combat!']);
-    expect(a.endTurnLines()).toEqual(['m1+mega > Close Combat > self']);
+    expect(a.endTurnLines()).toEqual(['m1+mega > Close Combat > o1']);   // offensive → foe (mega flag preserved)
   });
 
   test('an unresolved species is noted, not crashed', () => {

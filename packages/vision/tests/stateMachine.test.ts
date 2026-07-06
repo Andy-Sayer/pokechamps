@@ -21,7 +21,7 @@ function read(text: string, hp: Partial<Record<SlotRef, number>> = {}): FrameRea
 function run(sm: BattleStateMachine, items: [string, number][], hp: Partial<Record<SlotRef, number>>): TurnProposal[] {
   const out: TurnProposal[] = [];
   for (const [text, repeat] of items)
-    for (let r = 0; r < repeat; r++) { const p = sm.feed(read(text, hp)); if (p) out.push(p); }
+    for (let r = 0; r < repeat; r++) { const p = sm.feed(read(text, hp)); if (p && !p.partial) out.push(p); }   // final turns only (skip live-preview partials)
   return out;
 }
 
@@ -70,6 +70,6 @@ describe('BattleStateMachine', () => {
     ], hp);
     expect(proposals).toHaveLength(0);                      // still one open turn
     const final = sm.finish()!;
-    expect(final.lines).toEqual(['m2 > Light Screen > self', 'm1 > Close Combat > self']);
+    expect(final.lines).toEqual(['m2 > Light Screen > self', 'm1 > Close Combat > o1 > 100']);   // status stays self; offensive → foe + HP now attaches
   });
 });

@@ -44,9 +44,11 @@ export const CHAMPIONS_PLAYER_HIGHLIGHT_BG: readonly [number, number, number] = 
  *  x≈495px, box ≈105×100px, card centres 120px apart (y_top = 0.167 + i·0.111 verified
  *  against Grimmsnarl row1 + Eelektross row4). Facecam covers only x<0.16, so all six
  *  right-column sprites are clear. */
-export function playerSpriteBoxes(width: number, height: number) {
-  return Array.from({ length: 6 }, (_, i) =>
-    toPixels({ x: 0.258, y: 0.167 + i * 0.111, w: 0.055, h: 0.093 }, width, height));
+export function playerSpriteBoxes(width: number, height: number, ins?: ScreenInset) {
+  return Array.from({ length: 6 }, (_, i) => {
+    const r = { x: 0.258, y: 0.167 + i * 0.111, w: 0.055, h: 0.093 };
+    return toPixels(ins ? insetRect(r, ins) : r, width, height);
+  });
 }
 
 /** The centre "Select 4 Pokémon / to send into battle." text — present ONLY on the
@@ -54,20 +56,27 @@ export function playerSpriteBoxes(width: number, height: number) {
  *  so harvest doesn't hunt them by timestamp. Generous box tolerates per-source shift. */
 export const TEAM_PREVIEW_TEXT: Rect = { x: 0.33, y: 0.18, w: 0.25, h: 0.14 };
 
-/** Opponent sprite crop boxes (integer px) for a frame of the given size. */
-export function opponentSpriteBoxes(width: number, height: number) {
-  return CHAMPIONS_TEAM_PREVIEW.oppTeam.map((s) => toPixels(s.sprite, width, height));
+/** Opponent sprite crop boxes (integer px) for a frame of the given size. Pass `ins`
+ *  (e.g. GAMESHARE_INSET) to read a screen-shared preview where the game is inset. */
+export function opponentSpriteBoxes(width: number, height: number, ins?: ScreenInset) {
+  return CHAMPIONS_TEAM_PREVIEW.oppTeam.map((s) => toPixels(ins ? insetRect(s.sprite, ins) : s.sprite, width, height));
 }
 
 /** The two type-icon boxes for each opponent card (top-right of the card, measured on
  *  a 1080p frame). Colour-hist match these vs a fixed 18-icon ref set to get the type
  *  combo → dossier species shortlist. [slot][0|1] top→bottom. */
-export function typeIconBoxes(width: number, height: number): { a: ReturnType<typeof toPixels>; b: ReturnType<typeof toPixels> }[] {
+// RECALIBRATED 2026-07-05 (scripts/_typebox-calib.ts on a live preview): the type icons
+// are RIGHT-ALIGNED on the card — the primary/single type square sits at x≈1796–1844
+// (box `b`), the SECOND type (dual only) at x≈1753–1795 (box `a`). Rows start y≈168,
+// spacing ≈124px, square ≈46px. The old boxes (1784/1834) straddled between + right of
+// the real squares → caught red card bg → read Electric as "Fire". Tight on the squares now.
+export function typeIconBoxes(width: number, height: number, ins?: ScreenInset): { a: ReturnType<typeof toPixels>; b: ReturnType<typeof toPixels> }[] {
+  const box = (r: Rect) => toPixels(ins ? insetRect(r, ins) : r, width, height);
   return Array.from({ length: 6 }, (_, i) => {
-    const y = 158 / 1080 + i * 0.1167;
+    const y = 168 / 1080 + i * (124 / 1080);
     return {
-      a: toPixels({ x: 1784 / 1920, y, w: 48 / 1920, h: 48 / 1080 }, width, height),
-      b: toPixels({ x: 1834 / 1920, y, w: 48 / 1920, h: 48 / 1080 }, width, height),
+      a: box({ x: 1755 / 1920, y, w: 40 / 1920, h: 46 / 1080 }),   // 2nd type (dual only; empty=magenta for single)
+      b: box({ x: 1798 / 1920, y, w: 46 / 1920, h: 46 / 1080 }),   // primary type (present for single AND dual)
     };
   });
 }
@@ -86,7 +95,10 @@ export interface ScreenInset { x: number; y: number; scale: number }
  *  capture — a 1600×900 region with symmetric 160px L/R + 90px T/B borders. */
 export const GAMESHARE_INSET: ScreenInset = { x: 160 / 1920, y: 90 / 1080, scale: 5 / 6 };
 
-const insetRect = (r: Rect, ins: ScreenInset): Rect => ({
+/** Scale + offset a normalized Rect into a screen inset (GameShare). Exported so the
+ *  PREVIEW readers (sprite match, type icons) can go inset-aware too — not just the
+ *  battle RegionMap via insetRegionMap. */
+export const insetRect = (r: Rect, ins: ScreenInset): Rect => ({
   x: ins.x + r.x * ins.scale, y: ins.y + r.y * ins.scale, w: r.w * ins.scale, h: r.h * ins.scale,
 });
 
