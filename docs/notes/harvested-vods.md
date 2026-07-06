@@ -41,6 +41,10 @@ whenever a VOD is processed. See [`sprite-refs-plan.md`](sprite-refs-plan.md) fo
 | `o26KGpqj-fk` | KantoClark — Corviknight | edited showcase, no preview screens |
 | `1qo8uAxpihc` | James Baek — Tsareena | download failed (retry candidate) |
 
+## LIVE-HARVEST LESSON (2026-07-05)
+- To harvest new mons off a LIVE preview, **snapshot `fixtures/live/latest.png` in the SAME step you read it** — the preview→send-out window (~15-30s) overwrites the 4fps tap fast. Missed Glalie/Oranguru/Dragapult/Kingambit from BoubbaFett's team because the `cp` came seconds after the read. Battle send-out frames (3D models) are useless for the panel-based colour-hist refs.
+- Confirmed live: my type-icon eyeball IDs are unreliable (called Kingambit→Houndoom, Dragapult→Basculegion, Oranguru→a bird). The user's corrections + the nameplate OCR are the ground truth. Still-uncovered meta refs seen live: **Glalie, Dragapult (old ref was deleted), Oranguru** — pull from VODs.
+
 ## LESSONS (see sprite-refs-plan.md)
 - Only **RAW ladder VODs** (Cybertron/Wolfey/Jeans) reliably show team-preview screens.
   Showcase/analysis edits jump-cut past them → `find-previews` returns 0.
