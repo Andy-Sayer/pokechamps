@@ -36,9 +36,12 @@ export function cellKey(my4: PokemonSet[], their4: PokemonSet[], oppMode: string
   return createHash('sha1').update(`${a}__${b}__${oppMode}${suffix}`).digest('hex').slice(0, 16);
 }
 
-interface CellRec { wr: number; games: number }
+// Store integer WIN COUNTS, not a float win-rate: supplementing more games is then exact
+// integer addition (wins += newWins, games += newGames) with zero rounding drift; the rate is
+// wins/games, computed only on read.
+interface CellRec { wins: number; games: number }
 
-/** Persistent map cellKey → {wr, games}. One file per format. */
+/** Persistent map cellKey → {wins, games}. One file per format. */
 export class CellCache {
   private map = new Map<string, CellRec>();
   private hits = 0;
@@ -47,20 +50,34 @@ export class CellCache {
   constructor(fmt: string) {
     this.path = join(dataDirPath(), `cell-cache.${fmt}.json`);
     if (existsSync(this.path)) {
-      try { this.map = new Map(Object.entries(JSON.parse(readFileSync(this.path, 'utf8')) as Record<string, CellRec>)); } catch { /* corrupt → start empty */ }
+      try {
+        const raw = JSON.parse(readFileSync(this.path, 'utf8')) as Record<string, { wins?: number; games: number; wr?: number }>;
+        for (const [k, v] of Object.entries(raw)) {
+          // Migrate the old {wr, games} format → win counts. round(wr·games) is exact because
+          // the old wr was itself wins/games (a float a hair off the integer).
+          const wins = v.wins ?? Math.round((v.wr ?? 0) * v.games);
+          this.map.set(k, { wins, games: v.games });
+        }
+      } catch { /* corrupt → start empty */ }
     }
   }
+  private rate(r: CellRec): number { return r.games ? r.wins / r.games : 0; }
   /** Cached win-rate if present AND computed with at least `minGames` samples. */
   get(key: string, minGames: number): number | undefined {
     const r = this.map.get(key);
-    if (r && r.games >= minGames) { this.hits++; return r.wr; }
+    if (r && r.games >= minGames) { this.hits++; return this.rate(r); }
     this.misses++;
     return undefined;
   }
-  put(key: string, wr: number, games: number): void {
+  /** Raw {wins, games} record (no stat side effects) — for the supplement path that reads the
+   *  existing sample count + wins to add the shortfall exactly. */
+  getRec(key: string): CellRec | undefined { return this.map.get(key); }
+  noteHit(): void { this.hits++; }
+  noteMiss(): void { this.misses++; }
+  put(key: string, wins: number, games: number): void {
     const prev = this.map.get(key);
-    // Keep the higher-sample estimate if we recompute the same cell.
-    if (!prev || games >= prev.games) this.map.set(key, { wr, games });
+    // Keep the higher-sample record if we re-touch the same cell.
+    if (!prev || games >= prev.games) this.map.set(key, { wins, games });
   }
   stats(): { hits: number; misses: number; size: number } { return { hits: this.hits, misses: this.misses, size: this.map.size }; }
   save(): void { writeFileSync(this.path, JSON.stringify(Object.fromEntries(this.map)) + '\n', 'utf8'); }

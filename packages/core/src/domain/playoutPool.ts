@@ -47,7 +47,9 @@ export class PlayoutPool {
   private deathsSinceProgress = 0;
   private static readonly MAX_TRIES = 3;
 
-  constructor(private size: number = Math.max(1, Math.min(cpus().length - 1, 30))) {}
+  // Default: cpus-1, capped at 30. PLAYOUT_POOL_SIZE env overrides (still capped at 30) so a
+  // long unattended gauntlet can leave headroom for other work (capture/serve) without editing.
+  constructor(private size: number = Math.max(1, Math.min(Number(process.env.PLAYOUT_POOL_SIZE) || (cpus().length - 1), 30))) {}
 
   private spawnWorker(): void {
     try {
@@ -166,11 +168,16 @@ export class PlayoutPool {
 export async function bringWinRate(
   pool: PlayoutPool, myBring: PokemonSet[], oppBring: PokemonSet[], games: number, depth = 2, pilotP2 = false,
   opts: { budgetMs?: number; breadth?: SearchBreadth; nodeBudget?: number } = {},
+  startK = 0,   // seed offset: play games startK..startK+games-1 so SUPPLEMENTAL games are NEW,
+                // independent samples continuing the deterministic sequence (not repeats of 0..N).
 ): Promise<{ wins: number; losses: number; ties: number; winRate: number; results: GameResult[] }> {
-  const tasks: PlayoutTask[] = Array.from({ length: games }, (_, k) => ({
-    p1: myBring, p2: oppBring, seed: [k + 1, 2 * k + 5, 3 * k + 7, 5 * k + 11], depth, pilotOpp: pilotP2,
-    budgetMs: opts.budgetMs, breadth: opts.breadth, nodeBudget: opts.nodeBudget,
-  }));
+  const tasks: PlayoutTask[] = Array.from({ length: games }, (_, i) => {
+    const k = startK + i;
+    return {
+      p1: myBring, p2: oppBring, seed: [k + 1, 2 * k + 5, 3 * k + 7, 5 * k + 11], depth, pilotOpp: pilotP2,
+      budgetMs: opts.budgetMs, breadth: opts.breadth, nodeBudget: opts.nodeBudget,
+    };
+  });
   const results = await pool.run(tasks);
   const wins = results.filter(r => r.winner === 'p1').length;
   const ties = results.filter(r => r.winner === 'tie').length;
@@ -195,9 +202,17 @@ export async function cachedBringWinRate(
   if (sk !== undefined) mode += `-sk${sk}`;
   if (b) mode += `-b${b}`;
   const key = cellKey(my4, their4, mode);
-  const hit = cache.get(key, games);
-  if (hit !== undefined) return hit;
-  const wr = (await bringWinRate(pool, my4, their4, games, depth, pilotP2, opts)).winRate;
-  cache.put(key, wr, games);
-  return wr;
+  const rec = cache.getRec(key);
+  const have = rec?.games ?? 0;
+  if (have >= games) { cache.noteHit(); return rec!.wins / rec!.games; }
+  cache.noteMiss();
+  // BREADTH-FIRST + SUPPLEMENTAL: only play the SHORTFALL (games - have) as NEW samples (seed
+  // offset = have), then ADD the win counts — exact integer accumulation, no rounding. So a
+  // later run at a higher `games` deepens the sample instead of recomputing from scratch.
+  const delta = games - have;
+  const r = await bringWinRate(pool, my4, their4, delta, depth, pilotP2, opts, have);
+  const wins = (rec?.wins ?? 0) + r.wins;
+  const total = have + delta;
+  cache.put(key, wins, total);
+  return wins / total;
 }
