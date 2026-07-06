@@ -21,6 +21,20 @@ const ctx: ParseContext = {
   theirActiveTeamIndex: [0, 1],
 };
 
+describe('parseTurnLine: field weather', () => {
+  test('weather <x> sets the field weather; clear → null', () => {
+    for (const [line, expected] of [['weather rain', 'Rain'], ['weather sun', 'Sun'], ['weather sand', 'Sand'], ['weather snow', 'Snow']] as const) {
+      const r = parseTurnLine(line, ctx, 1);
+      expect(r.ok).toBe(true);
+      if (!r.ok || r.kind !== 'weather') throw new Error(`expected weather kind for "${line}"`);
+      expect(r.update.weather).toBe(expected);
+    }
+    const c = parseTurnLine('weather clear', ctx, 1);
+    if (!c.ok || c.kind !== 'weather') throw new Error('expected weather kind');
+    expect(c.update.weather).toBe(null);
+  });
+});
+
 describe('parseTurnLine: my/op team-index state refs', () => {
   // Leads are active in slots 0/1. A benched mon sitting at team index 0/1
   // can't be reached by m1/o1 (those are the active slots) — that's the whole

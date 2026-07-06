@@ -1,4 +1,4 @@
-import type { MoveAction, FieldSide, FieldSlot, PokemonSet, OpponentEntry } from './types.js';
+import type { MoveAction, FieldSide, FieldSlot, PokemonSet, OpponentEntry, FieldState } from './types.js';
 import { toId } from './data.js';
 import { pikalyticsMoves } from './predictions.js';
 
@@ -297,6 +297,12 @@ export interface HazardUpdate {
   arg: 'on' | 'off' | number;
 }
 
+/** Field weather set/clear — no mon ref (Drizzle / Rain Dance set it; `clear` = it wore off).
+ *  Feeds the damage calc's weather modifier (Rain ↑Water/↓Fire, etc.). */
+export interface WeatherUpdate {
+  weather: NonNullable<FieldState['weather']> | null;
+}
+
 export interface StateUpdate {
   side: FieldSide;
   teamIndex: number;
@@ -351,6 +357,7 @@ export type ParseResult =
   | { ok: true; kind: 'state'; update: StateUpdate }
   | { ok: true; kind: 'states'; updates: StateUpdate[] }
   | { ok: true; kind: 'hazard'; update: HazardUpdate }
+  | { ok: true; kind: 'weather'; update: WeatherUpdate }
   | { ok: false; error: string };
 
 // Actor token: side + slot + zero or more `+<modifier>` suffixes.
@@ -521,6 +528,18 @@ function tryParseState(line: string, ctx: ParseContext): ParseResult | null {
     const argRaw = hazMatch[3]!.toLowerCase();
     const arg: 'on' | 'off' | number = argRaw === 'on' ? 'on' : argRaw === 'off' ? 'off' : parseInt(argRaw, 10);
     return { ok: true, kind: 'hazard', update: { side, verb, arg } };
+  }
+
+  // Field weather — no ref. "weather rain|sun|sand|snow|hail|clear". Drizzle/Rain Dance etc.
+  // set it (the vision reader emits it from the weather banner); "clear"/"none"/"off" = wore off.
+  const weatherMatch = trimmed.match(/^weather\s+(rain|sun|sunny|harsh-sun|sand|sandstorm|snow|hail|clear|none|off)$/i);
+  if (weatherMatch) {
+    const w = weatherMatch[1]!.toLowerCase();
+    const MAP: Record<string, NonNullable<FieldState['weather']>> = {
+      rain: 'Rain', sun: 'Sun', sunny: 'Sun', 'harsh-sun': 'Harsh Sunshine', sand: 'Sand', sandstorm: 'Sand', snow: 'Snow', hail: 'Hail',
+    };
+    const weather = (w === 'clear' || w === 'none' || w === 'off') ? null : MAP[w]!;
+    return { ok: true, kind: 'weather', update: { weather } };
   }
 
   // "o3 = 45" / "o3 = 45%" / "m1 = 145" / "m1 = 50%"

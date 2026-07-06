@@ -55,7 +55,7 @@ import { resistBerryForType } from '../domain/resistBerries.js';
 import { effectiveness, speciesTypes } from '../domain/typechart.js';
 import { EFFECT_DURATIONS } from '../domain/durations.js';
 import { isChargeMove, isPivotMove, isItemRemovingMove, isItemSwapMove, isTrappingMove, getSpecies, getMove, getAbility, getItem, toId } from '../domain/data.js';
-import type { StateUpdate, HazardUpdate } from '../domain/turnparser.js';
+import type { StateUpdate, HazardUpdate, WeatherUpdate } from '../domain/turnparser.js';
 
 export type ActiveIdx = {
   mine: [number | null, number | null];
@@ -1709,7 +1709,7 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
 
 export interface ApplyStateInput {
   match: Match;
-  update: StateUpdate | HazardUpdate;
+  update: StateUpdate | HazardUpdate | WeatherUpdate;
   activeIdx: ActiveIdx;
 }
 
@@ -1718,13 +1718,28 @@ export interface ApplyStateResult {
   activeIdx: ActiveIdx;
 }
 
-function isHazardUpdate(u: StateUpdate | HazardUpdate): u is HazardUpdate {
+function isHazardUpdate(u: StateUpdate | HazardUpdate | WeatherUpdate): u is HazardUpdate {
   return (u as HazardUpdate).verb !== undefined;
+}
+
+function isWeatherUpdate(u: StateUpdate | HazardUpdate | WeatherUpdate): u is WeatherUpdate {
+  return 'weather' in u && !('side' in u) && !('verb' in u);
+}
+
+function applyWeatherUpdateImpl(match: Match, update: WeatherUpdate, activeIdx: ActiveIdx): ApplyStateResult {
+  const nextField: FieldState = { ...(match.field ?? NEUTRAL_FIELD), weather: update.weather, weatherTurns: update.weather ? EFFECT_DURATIONS.weather : undefined };
+  return {
+    match: { ...match, field: nextField },
+    activeIdx: { mine: [activeIdx.mine[0], activeIdx.mine[1]], theirs: [activeIdx.theirs[0], activeIdx.theirs[1]] },
+  };
 }
 
 export function applyStateUpdate(input: ApplyStateInput): ApplyStateResult {
   if (isHazardUpdate(input.update)) {
     return applyHazardUpdateImpl(input.match, input.update, input.activeIdx);
+  }
+  if (isWeatherUpdate(input.update)) {
+    return applyWeatherUpdateImpl(input.match, input.update, input.activeIdx);
   }
   return applyStateUpdateImpl(input.match, input.update, input.activeIdx);
 }

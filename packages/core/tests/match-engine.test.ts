@@ -166,6 +166,14 @@ describe('match engine: finalizeTurn', () => {
     expect(r.match.opponentTeam[0]!.charging).toBeUndefined();
   });
 
+  test('applyStateUpdate weather sets the field (Drizzle → Rain), clear → null', () => {
+    const match = freshMatch();
+    const rain = applyStateUpdate({ match, update: { weather: 'Rain' }, activeIdx: startActive });
+    expect(rain.match.field?.weather).toBe('Rain');
+    const cleared = applyStateUpdate({ match: rain.match, update: { weather: null }, activeIdx: startActive });
+    expect(cleared.match.field?.weather).toBe(null);
+  });
+
   test('logged target status lands on the opponent (Scald burn)', () => {
     const match = freshMatch();
     const action: MoveAction = {
