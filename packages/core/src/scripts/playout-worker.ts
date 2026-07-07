@@ -8,7 +8,7 @@ import { playGame, makeSearchPolicy, makePilotPolicy, derivePilotPlan } from '..
 import type { SearchBreadth } from '../domain/endgameSearch.js';
 import type { PokemonSet } from '../domain/types.js';
 
-interface Task { id: number; p1: PokemonSet[]; p2: PokemonSet[]; seed: [number, number, number, number]; depth?: number; budgetMs?: number; pilotOpp?: boolean; breadth?: SearchBreadth; nodeBudget?: number }
+interface Task { id: number; p1: PokemonSet[]; p2: PokemonSet[]; seed: [number, number, number, number]; depth?: number; oppDepth?: number; budgetMs?: number; pilotOpp?: boolean; breadth?: SearchBreadth; nodeBudget?: number }
 
 const rl = createInterface({ input: process.stdin });
 rl.on('line', line => {
@@ -18,8 +18,19 @@ rl.on('line', line => {
   try { task = JSON.parse(t); } catch { return; }
   void (async () => {
     try {
-      const policy = makeSearchPolicy(task.p1, task.p2, task.depth ?? 2, task.budgetMs, task.breadth, task.nodeBudget);
-      const p2Policy = task.pilotOpp ? makePilotPolicy(task.p1, task.p2, task.depth ?? 2, derivePilotPlan(task.p2)) : undefined;
+      // ASYMMETRIC DEPTH: our side (p1, i===0) searches at `depth`; the opponent
+      // (p2, i===1) at `oppDepth` (defaults to `depth` = the symmetric case). playGame
+      // calls policy(_,0) and p2Policy(_,1) on SEPARATE closures, so each side gets its
+      // own depth. When oppDepth === depth in minimax mode we leave p2Policy undefined so
+      // playGame reuses the p1 closure — byte-identical to the old symmetric behaviour.
+      const myDepth = task.depth ?? 2;
+      const oppDepth = task.oppDepth ?? myDepth;
+      const policy = makeSearchPolicy(task.p1, task.p2, myDepth, task.budgetMs, task.breadth, task.nodeBudget);
+      const p2Policy = task.pilotOpp
+        ? makePilotPolicy(task.p1, task.p2, oppDepth, derivePilotPlan(task.p2))
+        : oppDepth !== myDepth
+          ? makeSearchPolicy(task.p1, task.p2, oppDepth, task.budgetMs, task.breadth, task.nodeBudget)
+          : undefined;
       const r = await playGame(task.p1, task.p2, { seed: task.seed, policy, p2Policy });
       process.stdout.write(JSON.stringify({ id: task.id, ok: true, result: r }) + '\n');
     } catch (err) {

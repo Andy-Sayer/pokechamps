@@ -40,9 +40,14 @@ const SAVE = argStr('--save', '');
 // max search depth. Non-defaults are folded into the cache key so they don't
 // collide with the depth-2 corpus.
 const DEPTH = argNum('--depth', 2);
+const OPPDEPTH = argNum('--oppdepth', DEPTH);      // opponent search depth; default = DEPTH (symmetric)
 const BUDGET = argNum('--budget', 0);              // 0 = no cap (existing behaviour)
 const SPL = argNum('--spl', -1);                   // -1 = default switchPlyLimit
-const SEARCH_OPTS = { budgetMs: BUDGET || undefined, breadth: SPL >= 0 ? { switchPlyLimit: SPL } : undefined };
+// ASYMMETRIC DEPTH: DEPTH is OUR side; --oppdepth caps the opponent shallower (e.g.
+// --depth 3 --oppdepth 2 = "can a deeper pilot of OUR team escape a losing matchup, holding
+// the opponent at the corpus's depth-2 strength?"). oppDepth is folded into the cache key +
+// the output slug so it never collides with the symmetric d2 corpus.
+const SEARCH_OPTS = { budgetMs: BUDGET || undefined, breadth: SPL >= 0 ? { switchPlyLimit: SPL } : undefined, oppDepth: OPPDEPTH !== DEPTH ? OPPDEPTH : undefined };
 // Opponent model per 4v4 cell: 'minimax' (both search — too shallow vs setup teams,
 // over-optimistic), 'pilot' (opponent forced to its game plan), or 'worst' (the
 // opponent plays its BETTER mode = min win-rate for us — the realistic, conservative
@@ -94,7 +99,10 @@ const cellWr = async (mb: PokemonSet[], tb: PokemonSet[]): Promise<number> => {
 // Namespace by MY team — matrices are (my-team × opponent), not opponent-only,
 // so different teams vs the same opponent must NOT collide/overwrite. This keeps
 // every team's 4v4 corpus distinct for cross-team comparison + the bring solve.
-const teamSlug = TEAM.replace(/\.json$/, '');
+// Non-default depth config → distinct output slug so the d2/d2 sheet + matrices are never
+// overwritten by an asymmetric probe (cache keys are already namespaced via the mode suffix).
+const cfgSuffix = (DEPTH !== 2 || OPPDEPTH !== DEPTH) ? `-d${DEPTH}od${OPPDEPTH}` : '';
+const teamSlug = TEAM.replace(/\.json$/, '') + cfgSuffix;
 const matricesDir = join(dataDirPath(), 'matrices', teamSlug);
 mkdirSync(matricesDir, { recursive: true });
 const sheetPath = join(dataDirPath(), `bring-sheet-nash.${teamSlug}.${CHAMPIONS_PIKA_FORMAT}.md`);
@@ -104,7 +112,7 @@ const single = opponents.length === 1;
 const writeSheet = () => {
   const rows = sheet.slice().sort((a, b) => a.nash - b.nash); // hardest first
   const md = [
-    `# Nash bring sheet — team ${TEAM} · opp model: ${OPP_MODE} · ${GAMES} games/cell`,
+    `# Nash bring sheet — team ${TEAM} · opp model: ${OPP_MODE} · ${GAMES} games/cell · depth ${DEPTH}${OPPDEPTH !== DEPTH ? `/opp ${OPPDEPTH}` : ''}`,
     `*Nash = true win-rate when neither side sees the other's bring. Sorted hardest-first. Bring the listed mix (vary across games).*`,
     ``, `| Nash | maximin | vs Opponent | Bring (Nash mix) |`, `|---:|---:|---|---|`,
     ...rows.map(r => `| ${pct(r.nash)} | ${pct(r.maximin)} | ${r.anchor} | ${r.mix.map(m => `${pct(m.p)} ${m.bring}`).join(' · ')} |`),
@@ -112,7 +120,7 @@ const writeSheet = () => {
   writeFileSync(sheetPath, md + '\n', 'utf8');
 };
 
-console.log(`4v4 Nash matrix · ${TEAM} · ${opponents.length} opponent(s) · ${myBrings.length} my-brings · ${GAMES} games/cell · opp=${OPP_MODE}`);
+console.log(`4v4 Nash matrix · ${TEAM} · ${opponents.length} opponent(s) · ${myBrings.length} my-brings · ${GAMES} games/cell · opp=${OPP_MODE} · depth ${DEPTH}${OPPDEPTH !== DEPTH ? `/opp ${OPPDEPTH}` : ''}`);
 console.log(`going against: ${opponents.map(o => o.anchor).join(', ')}\n`);
 for (const opp of opponents) {
   const theirBrings = combos4(opp.sets.length).map(c => c.map(i => opp.sets[i]!));

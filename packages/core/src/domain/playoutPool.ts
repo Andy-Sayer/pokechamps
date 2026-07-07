@@ -14,7 +14,7 @@ import type { SearchBreadth } from './endgameSearch.js';
 import { type CellCache, cellKey } from './cellCache.js';
 import type { PokemonSet } from './types.js';
 
-export interface PlayoutTask { p1: PokemonSet[]; p2: PokemonSet[]; seed: [number, number, number, number]; depth?: number; budgetMs?: number; pilotOpp?: boolean; breadth?: SearchBreadth; nodeBudget?: number }
+export interface PlayoutTask { p1: PokemonSet[]; p2: PokemonSet[]; seed: [number, number, number, number]; depth?: number; oppDepth?: number; budgetMs?: number; pilotOpp?: boolean; breadth?: SearchBreadth; nodeBudget?: number }
 
 const WORKER = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'playout-worker.ts');
 
@@ -167,14 +167,14 @@ export class PlayoutPool {
  *  results (each a labeled training row). */
 export async function bringWinRate(
   pool: PlayoutPool, myBring: PokemonSet[], oppBring: PokemonSet[], games: number, depth = 2, pilotP2 = false,
-  opts: { budgetMs?: number; breadth?: SearchBreadth; nodeBudget?: number } = {},
+  opts: { budgetMs?: number; breadth?: SearchBreadth; nodeBudget?: number; oppDepth?: number } = {},
   startK = 0,   // seed offset: play games startK..startK+games-1 so SUPPLEMENTAL games are NEW,
                 // independent samples continuing the deterministic sequence (not repeats of 0..N).
 ): Promise<{ wins: number; losses: number; ties: number; winRate: number; results: GameResult[] }> {
   const tasks: PlayoutTask[] = Array.from({ length: games }, (_, i) => {
     const k = startK + i;
     return {
-      p1: myBring, p2: oppBring, seed: [k + 1, 2 * k + 5, 3 * k + 7, 5 * k + 11], depth, pilotOpp: pilotP2,
+      p1: myBring, p2: oppBring, seed: [k + 1, 2 * k + 5, 3 * k + 7, 5 * k + 11], depth, oppDepth: opts.oppDepth, pilotOpp: pilotP2,
       budgetMs: opts.budgetMs, breadth: opts.breadth, nodeBudget: opts.nodeBudget,
     };
   });
@@ -191,13 +191,17 @@ export async function bringWinRate(
  *  need wins/games detail should use bringWinRate directly). */
 export async function cachedBringWinRate(
   cache: CellCache, pool: PlayoutPool, my4: PokemonSet[], their4: PokemonSet[],
-  games: number, depth = 2, pilotP2 = false, opts: { budgetMs?: number; breadth?: SearchBreadth } = {},
+  games: number, depth = 2, pilotP2 = false, opts: { budgetMs?: number; breadth?: SearchBreadth; oppDepth?: number } = {},
 ): Promise<number> {
   // Fold non-default settings into the cache mode so cells at different search
   // settings never collide — but keep the DEFAULT key byte-identical (no suffix)
   // so existing depth-2 cells stay reusable.
   const spl = opts.breadth?.switchPlyLimit, sk = opts.breadth?.spreadK, b = opts.budgetMs;
+  // ASYMMETRIC DEPTH: `depth` is OUR side; oppDepth (if it differs) tags the opponent's
+  // search depth into the key so an our-d3/opp-d2 probe never collides with the d2/d2 corpus.
+  const od = opts.oppDepth !== undefined && opts.oppDepth !== depth ? opts.oppDepth : undefined;
   let mode = `${pilotP2 ? 'pilot' : 'minimax'}-d${depth}`;
+  if (od !== undefined) mode += `-od${od}`;
   if (spl !== undefined) mode += `-spl${spl}`;
   if (sk !== undefined) mode += `-sk${sk}`;
   if (b) mode += `-b${b}`;
