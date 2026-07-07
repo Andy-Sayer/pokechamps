@@ -155,6 +155,15 @@ function readField(battle: Battle, i: number): FieldState {
 // Reconstruct a full-knowledge SearchInput from the live sim (self-play: both
 // teams are authored). Alive mons only; megaActive when the on-field forme was
 // renamed; boosts/status/field read back so the policy plays informed.
+/** Match a live sim mon to its team-sheet set species. Exact species name first —
+ *  forme species like Rotom-Wash have baseSpecies "Rotom", so a baseSpecies-only
+ *  match silently DROPS them from the search input (the mon becomes invisible to
+ *  both sides' policies). Fall back to baseSpecies so a mega'd mon (Charizard-Mega-Y)
+ *  still maps to its base set. Species clause = one mon per base species, so the
+ *  fallback can't grab a sibling forme. */
+export const matchesSet = (species: string, base: string, setSpecies: string): boolean =>
+  toId(species) === toId(setSpecies) || toId(base) === toId(setSpecies);
+
 function buildInput(battle: Battle, i: number, mineSets: PokemonSet[], oppSets: PokemonSet[]): SearchInput {
   const out = readOutcome(battle);
   const roster = readRoster(battle);
@@ -162,11 +171,11 @@ function buildInput(battle: Battle, i: number, mineSets: PokemonSet[], oppSets: 
   const oppRoster = i === 0 ? roster.p2 : roster.p1;
   const mineSlots = i === 0 ? out.p1 : out.p2;
   const oppSlots = i === 0 ? out.p2 : out.p1;
-  const boostOf = (slots: typeof mineSlots, sp: string) => slots.find(s => s && toId(s.baseSpecies) === toId(sp))?.boosts;
+  const boostOf = (slots: typeof mineSlots, sp: string) => slots.find(s => s && matchesSet(s.species, s.baseSpecies, sp))?.boosts;
   // "Protected last turn" from the sim's lastMove → seeds the search's consecutive-
   // protect ban, so the per-turn policy stops re-offering a Protect that would fail.
   const protectedLast = (sideIdx: number, sp: string): boolean => {
-    const p = (battle.sides[sideIdx] as any).active?.find((a: any) => a && toId(a.species?.baseSpecies ?? a.species?.name ?? '') === toId(sp));
+    const p = (battle.sides[sideIdx] as any).active?.find((a: any) => a && matchesSet(a.species?.name ?? '', a.species?.baseSpecies ?? a.species?.name ?? '', sp));
     const lm = p?.lastMove;
     const id = typeof lm === 'string' ? lm : lm?.id;
     return id ? PROTECT_MOVE_IDS.has(toId(id)) : false;
@@ -175,7 +184,7 @@ function buildInput(battle: Battle, i: number, mineSets: PokemonSet[], oppSets: 
   let myMegaSpent = false, oppMegaSpent = false;
   const mine: SearchMyMon[] = [];
   for (const set of mineSets) {
-    const r = mineRoster.find(m => toId(m.baseSpecies) === toId(set.species));
+    const r = mineRoster.find(m => matchesSet(m.species, m.baseSpecies, set.species));
     if (!r || r.fainted) continue;
     const mega = toId(r.species) !== toId(set.species);
     if (mega) myMegaSpent = true;
@@ -183,7 +192,7 @@ function buildInput(battle: Battle, i: number, mineSets: PokemonSet[], oppSets: 
   }
   const opp: SearchOppMon[] = [];
   for (const set of oppSets) {
-    const r = oppRoster.find(m => toId(m.baseSpecies) === toId(set.species));
+    const r = oppRoster.find(m => matchesSet(m.species, m.baseSpecies, set.species));
     if (!r || r.fainted) continue;
     const mega = toId(r.species) !== toId(set.species);
     if (mega) oppMegaSpent = true;
@@ -211,8 +220,9 @@ export function makeSearchPolicy(p1Sets: PokemonSet[], p2Sets: PokemonSet[], dep
     if (req.forceSwitch) return greedyPolicy(battle, i); // search doesn't pick forced replacements
     if (!req.active) return 'default';
     let result: SearchResult;
+    let input!: SearchInput;
     try {
-      const input = buildInput(battle, i, i === 0 ? p1Sets : p2Sets, i === 0 ? p2Sets : p1Sets);
+      input = buildInput(battle, i, i === 0 ? p1Sets : p2Sets, i === 0 ? p2Sets : p1Sets);
       // nodeBudget (env or arg) → DETERMINISTIC reproducible search (cut on nodes,
       // not wall-clock). ~40M ≈ the old b40s "deepest" on typical hardware.
       result = nodeBudget ? searchBudgeted(input, depth, 0, undefined, breadth, nodeBudget)
@@ -224,7 +234,7 @@ export function makeSearchPolicy(p1Sets: PokemonSet[], p2Sets: PokemonSet[], dep
     // instead of (side0Team, side1Team). That silently defaults the WHOLE side to
     // greedy (effectiveness-blind), which corrupts playouts. Warn once, loudly.
     if (result.plays.length === 0 && (req.active as any[]).some((s: any) => s && s.moves)) {
-      if (process.env.DBG_EMPTY) console.error(`[EMPTY-PLAYS side${i}] greedy fallback this turn`);
+      if (process.env.DBG_EMPTY) console.error(`[EMPTY-PLAYS side${i}] greedy fallback this turn :: ${JSON.stringify({ mine: input.mine.map(m => ({ sp: m.set.species, hp: m.hpPercent, active: m.active, status: m.status, boosts: m.boosts })), opp: input.opp.map(o => ({ sp: o.entry.species, hp: o.hpPercent, active: o.active })), field: input.field })}`);
       else if (!warnedEmptyPlays) { warnedEmptyPlays = true; console.warn(`[makeSearchPolicy] side ${i} got EMPTY plays → entire side falling back to GREEDY. Check policy arg order: makeSearchPolicy(side0Team, side1Team), NOT (myTeam, oppTeam).`); }
     }
     const out = readOutcome(battle);
@@ -236,10 +246,10 @@ export function makeSearchPolicy(p1Sets: PokemonSet[], p2Sets: PokemonSet[], dep
       if (!slot || !slot.moves) return 'pass';
       const onField = mySlots[s];
       if (!onField) return 'pass';
-      const play = result.plays.find(p => toId(p.mySpecies) === toId(onField.baseSpecies));
+      const play = result.plays.find(p => matchesSet(onField.species, onField.baseSpecies, p.mySpecies));
       if (!play) return slotMoveChoice(slot, lf, ft);
       if (play.switch) {
-        const n = (side.pokemon as any[]).findIndex(p => !p.isActive && !p.fainted && toId(p.species.baseSpecies || p.species.name) === toId(play.targetSpecies));
+        const n = (side.pokemon as any[]).findIndex(p => !p.isActive && !p.fainted && matchesSet(p.species.name, p.species.baseSpecies || p.species.name, play.targetSpecies));
         return n >= 0 ? `switch ${n + 1}` : slotMoveChoice(slot, lf, ft);
       }
       const idx = (slot.moves as any[]).findIndex(m => toId(m.id ?? m.move) === toId(play.move));
@@ -248,14 +258,14 @@ export function makeSearchPolicy(p1Sets: PokemonSet[], p2Sets: PokemonSet[], dep
       const tgt = (getMove(play.move) as { target?: string } | undefined)?.target;
       const needsTarget = tgt === 'normal' || tgt === 'any' || tgt === 'adjacentFoe';
       if (!play.self && !play.spread && needsTarget) {
-        const t = foeSlots.findIndex(fs => fs && !fs.fainted && toId(fs.baseSpecies) === toId(play.targetSpecies));
+        const t = foeSlots.findIndex(fs => fs && !fs.fainted && matchesSet(fs.species, fs.baseSpecies, play.targetSpecies));
         if (t >= 0) c += ` ${t + 1}`;
         else if (lf.length) c += ` ${lf[0]}`;
       } else if (tgt === 'adjacentAlly') {
-        const a = mySlots.findIndex((fs, si) => si !== s && fs && toId(fs.baseSpecies) === toId(play.targetSpecies));
+        const a = mySlots.findIndex((fs, si) => si !== s && fs && matchesSet(fs.species, fs.baseSpecies, play.targetSpecies));
         if (a >= 0) c += ` -${a + 1}`;
       }
-      if (result.megaMon && toId(result.megaMon) === toId(onField.baseSpecies)) c += ' mega';
+      if (result.megaMon && matchesSet(onField.species, onField.baseSpecies, result.megaMon)) c += ' mega';
       return c;
     }).join(', ');
   };
