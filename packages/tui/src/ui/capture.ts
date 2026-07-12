@@ -12,7 +12,7 @@
 // server binds even with no dongle attached, so a naive "server up" signal would lie — a stale tap
 // after warm-up is surfaced as `no-signal` (device busy, or no HDMI lock → color bars). serve auto-
 // recovers ffmpeg internally; this layer auto-respawns serve itself on an unexpected exit.
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, execSync, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -81,12 +81,13 @@ function stopPoll(): void { if (poll) { clearInterval(poll); poll = null; } }
 function startPoll(): void {
   stopPoll();
   poll = setInterval(() => {
-    if (!proc || !intended) return;
+    if ((!proc && !external) || !intended) return;
     let age = Infinity;
     try { age = Date.now() - statSync(TAP).mtimeMs; } catch { /* tap not written yet */ }
     if (age < FRESH_MS) setState('on');
     else if (Date.now() - startedAt > WARMUP_MS) setState('no-signal');
   }, POLL_MS);
+  poll.unref?.();   // don't let the status poller keep the TUI alive at exit
 }
 
 function launch(): ChildProcess | null {
@@ -94,6 +95,12 @@ function launch(): ChildProcess | null {
   try {
     p = spawn(process.execPath, ['--import', 'tsx', SERVE], { stdio: ['ignore', 'ignore', 'pipe'] });
   } catch { return null; }
+  // Don't let the capture child (or its stderr pipe) hold the TUI's event loop open — otherwise a
+  // clean quit / Ctrl+C would hang waiting on it. Unref'd, the loop drains on exit and the 'exit'
+  // handler tree-kills it. Listeners still fire while the loop is alive for the UI, so auto-respawn
+  // + the "OPEN http" sniff keep working during normal operation.
+  p.unref();
+  (p.stderr as { unref?: () => void } | null)?.unref?.();   // the pipe is a Socket at runtime (has unref); Readable's type doesn't declare it
   startedAt = Date.now();
   busyHint = false;
   // serve logs to stderr: "[serve] OPEN http://…" once the HTTP server is up (open the viewer then),
@@ -136,9 +143,11 @@ export function startCapture(): string {
   return 'turning on the screen…';
 }
 
-/** Stop the capture server and release the dongle. Tree-kills on Windows so the ffmpeg GRANDCHILD
- *  (spawned by serve) can't orphan and keep holding the exclusive device. An ADOPTED external
- *  capture is only detached (we didn't start it, so we don't kill it). */
+/** Stop the capture server and release the dongle. SYNCHRONOUS tree-kill so it's also safe to call
+ *  from a process-exit / signal handler, where an async spawn(taskkill) wouldn't finish; on Windows
+ *  the tree kill is required or the ffmpeg GRANDCHILD (spawned by serve) orphans and keeps holding
+ *  the exclusive device. An ADOPTED external capture is only DETACHED — we didn't launch it, so we
+ *  don't kill it (leaves the user's own `serve` terminal running). */
 export function stopCapture(): void {
   intended = false;
   stopPoll();
@@ -146,12 +155,16 @@ export function stopCapture(): void {
   const p = proc; proc = null;
   if (p?.pid) {
     try {
-      if (process.platform === 'win32') spawn('taskkill', ['/pid', String(p.pid), '/t', '/f'], { stdio: 'ignore' });
+      if (process.platform === 'win32') execSync(`taskkill /pid ${p.pid} /t /f`, { stdio: 'ignore' });
       else p.kill();
     } catch { /* already gone */ }
   }
   setState('off');
 }
 
-// Never leave an ffmpeg holding the dongle after the TUI exits.
-process.once('exit', () => { if (proc) stopCapture(); });
+// Release the dongle when the TUI exits — but ONLY a capture WE launched (never an adopted external
+// one). The serve child is unref'd (see launch), so it never keeps the process alive: a clean quit
+// or Ctrl+C drains the loop and fires 'exit', where this synchronous tree-kill runs to completion
+// before the process goes away. We deliberately DON'T add SIGINT handlers — Ink already owns Ctrl+C
+// (and restores the terminal), and a module-scope SIGINT listener would swallow it during startup.
+process.once('exit', stopCapture);
