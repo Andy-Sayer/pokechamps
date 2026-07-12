@@ -97,9 +97,12 @@ export function OpponentInput({ stores, onDone, onCancel }: OpponentInputProps) 
       // changing during the 15-30s pick window).
       const { snapshotLiveFrame } = await import('@pokechamps/vision/harvestRefs.js');
       framePathRef.current = snapshotLiveFrame();
-      const { readOppTeamFromFrame, saveChooserDebug } = await import('@pokechamps/vision/oppTeamRead.js');
+      const { readOppTeamFromFrame, saveChooserDebug, archiveOppSheet } = await import('@pokechamps/vision/oppTeamRead.js');
       const got: OppSlotRead[] = await readOppTeamFromFrame(framePathRef.current);
       saveChooserDebug(framePathRef.current, got);   // persist the exact frame + result for offline diagnosis
+      // Durably archive the sheet (timestamped, never clobbered) so its sprites can be harvested
+      // later. Auto-read reaches here once per detection; manual Ctrl+R saves on each press.
+      const archivedPath = archiveOppSheet(framePathRef.current, got);
       const isVerified = (g: OppSlotRead) => g.source === 'sprite+type' || g.source === 'type-only';
       setSpecies(got.map(g => g.name || ''));
       setScores(got.map(g => g.score));
@@ -110,7 +113,7 @@ export function OpponentInput({ stores, onDone, onCancel }: OpponentInputProps) 
       const verified = got.filter(isVerified).length;
       const first = got.findIndex(g => !isVerified(g));
       setActiveIdx(first >= 0 ? first : 0);
-      setVisionMsg(`read done — ${verified}/6 type-verified (trusted ✓). Pick the rest (↑/↓, type/Tab), Ctrl+D confirms.${watcherIsWatching() ? '' : ' · Ctrl+W to watch the whole battle.'}`);
+      setVisionMsg(`read done — ${verified}/6 type-verified (trusted ✓). Pick the rest (↑/↓, type/Tab), Ctrl+D confirms.${archivedPath ? ' · sheet saved ✓' : ''}${watcherIsWatching() ? '' : ' · Ctrl+W to watch the whole battle.'}`);
       return 'ok';
     } catch (e) {
       const m = (e as Error).message;

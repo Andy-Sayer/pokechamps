@@ -87,6 +87,27 @@ export function saveChooserDebug(framePath: string, result: OppSlotRead[] | { er
   } catch { /* best-effort — never break the read over diagnostics */ }
 }
 
+/** Directory where opponent team-sheet frames are durably archived. */
+export const OPP_SHEETS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../fixtures/opp-sheets');
+
+/** Durably archive an opponent team-sheet frame under a TIMESTAMPED name (never overwritten),
+ *  so its sprites can be harvested later. This is the keepable counterpart to snapshotLiveFrame /
+ *  saveChooserDebug, both of which write a single slot that every read clobbers. The filename
+ *  embeds the read species for at-a-glance identification, with a `<ts>.json` sidecar of the full
+ *  read. Best-effort: returns the saved png path, or null on failure (never breaks the read). */
+export function archiveOppSheet(framePath: string, result?: OppSlotRead[]): string | null {
+  try {
+    mkdirSync(OPP_SHEETS_DIR, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');           // fs-safe + sortable
+    const names = (result ?? []).map(r => r.name).filter(Boolean).join('-').replace(/[^A-Za-z0-9-]/g, '').slice(0, 80);
+    const base = names ? `${ts}__${names}` : ts;
+    const png = join(OPP_SHEETS_DIR, `${base}.png`);
+    copyFileSync(framePath, png);
+    if (result) writeFileSync(join(OPP_SHEETS_DIR, `${base}.json`), JSON.stringify(result, null, 2));
+    return png;
+  } catch { return null; }
+}
+
 /** Read the opponent's six. For each slot: read the type combo → candidate species, sprite-
  *  match, and reconcile. `name` is the sprite match when it's type-consistent, else the sole
  *  type candidate, else '' (use `candidates`). Auto-detects direct vs GameShare layout. */
