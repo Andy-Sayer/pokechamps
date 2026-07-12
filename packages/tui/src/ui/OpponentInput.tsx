@@ -47,6 +47,7 @@ export function OpponentInput({ stores, onDone, onCancel }: OpponentInputProps) 
   );
   useMemo(() => setHighlight(0), [value]);
   const framePathRef = useRef<string | null>(null);   // the frame we snapshotted + read (harvested on confirm)
+  const archivedSheetRef = useRef<string | null>(null); // durable timestamped copy of that frame (corrections saved beside it)
 
   // A slot is settled iff it's TYPE-VERIFIED (sprite+type agree, or types pin a single
   // legal species) or a human set it (`trusted`). A bare sprite guess is NOT trusted — the
@@ -73,14 +74,16 @@ export function OpponentInput({ stores, onDone, onCancel }: OpponentInputProps) 
 
   const finish = () => {
     if (species.every(s => s.trim())) {
-      // Self-improve: harvest a sprite ref from each TRUSTED pick (type-verified or user-set —
-      // never a bare sprite guess, which could be wrong) so future reads of these species match
-      // automatically. Fire-and-forget — never blocks confirming.
+      // Ground truth = each TRUSTED pick (type-verified or user-set — never a bare sprite guess,
+      // which could be wrong). null = skip that slot.
+      const ground = species.map((s, i) => (trusted[i] ? s : null));
+      // Self-improve: harvest a sprite ref per trusted slot so future reads match automatically.
       const path = framePathRef.current;
-      if (path) {
-        const ground = species.map((s, i) => (trusted[i] ? s : null));
-        void import('@pokechamps/vision/harvestRefs.js').then(m => m.harvestConfirmedRefs(path, ground)).catch(() => {});
-      }
+      if (path) void import('@pokechamps/vision/harvestRefs.js').then(m => m.harvestConfirmedRefs(path, ground)).catch(() => {});
+      // Record the CORRECTIONS beside the durable archive so `harvest-sheet` can reference the
+      // human-confirmed picks later (the raw read sidecar may be wrong). Fire-and-forget.
+      const archived = archivedSheetRef.current;
+      if (archived) void import('@pokechamps/vision/oppTeamRead.js').then(m => m.saveOppSheetTruth(archived, ground)).catch(() => {});
       onDone(species.map(s => ({ species: s, knownMoves: [] }))); return;
     }
     const empty = species.findIndex(s => !s.trim());
@@ -103,6 +106,7 @@ export function OpponentInput({ stores, onDone, onCancel }: OpponentInputProps) 
       // Durably archive the sheet (timestamped, never clobbered) so its sprites can be harvested
       // later. Auto-read reaches here once per detection; manual Ctrl+R saves on each press.
       const archivedPath = archiveOppSheet(framePathRef.current, got);
+      archivedSheetRef.current = archivedPath;
       const isVerified = (g: OppSlotRead) => g.source === 'sprite+type' || g.source === 'type-only';
       setSpecies(got.map(g => g.name || ''));
       setScores(got.map(g => g.score));

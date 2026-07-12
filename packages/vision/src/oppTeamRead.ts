@@ -16,7 +16,7 @@ import { speciesTypes } from '@pokechamps/core/domain/typechart.js';
 import { loadFormat, getSpecies, toId } from '@pokechamps/core/domain/data.js';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdirSync, copyFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, copyFileSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 
 export interface OppSlotRead {
   slot: number;          // 1-6
@@ -106,6 +106,39 @@ export function archiveOppSheet(framePath: string, result?: OppSlotRead[]): stri
     if (result) writeFileSync(join(OPP_SHEETS_DIR, `${base}.json`), JSON.stringify(result, null, 2));
     return png;
   } catch { return null; }
+}
+
+/** Sidecar path holding the CORRECTED ground truth for an archived sheet — the user's confirmed
+ *  picks, which may differ from the raw read in `<base>.json`. */
+export function oppSheetTruthPath(pngPath: string): string {
+  return pngPath.replace(/\.png$/i, '.truth.json');
+}
+
+/** Record the user's confirmed species per slot (null = unverified/skipped) alongside an archived
+ *  sheet, so the frame becomes referenceable ground truth for `harvest-sheet` — the raw read may be
+ *  wrong; these are the human-corrected picks. Best-effort. */
+export function saveOppSheetTruth(pngPath: string, truth: (string | null)[]): void {
+  try { writeFileSync(oppSheetTruthPath(pngPath), JSON.stringify({ truth }, null, 2)); } catch { /* best-effort */ }
+}
+
+/** Resolve the harvest ground truth for an archived sheet: the corrected `.truth.json` when present
+ *  (authoritative), else the VERIFIED slots of the raw `.json` read (sprite+type / type-only — never
+ *  a bare sprite guess, which could be wrong). Returns species per slot (null = skip), or null if no
+ *  sidecar exists. */
+export function loadOppSheetGroundTruth(pngPath: string): { truth: (string | null)[]; source: 'corrected' | 'read-verified' } | null {
+  const truthP = oppSheetTruthPath(pngPath);
+  if (existsSync(truthP)) {
+    try { const j = JSON.parse(readFileSync(truthP, 'utf8')) as { truth: (string | null)[] }; return { truth: j.truth, source: 'corrected' }; } catch { /* fall through to raw */ }
+  }
+  const rawP = pngPath.replace(/\.png$/i, '.json');
+  if (existsSync(rawP)) {
+    try {
+      const read = JSON.parse(readFileSync(rawP, 'utf8')) as OppSlotRead[];
+      const truth = read.map(r => (r.source === 'sprite+type' || r.source === 'type-only') ? (r.name || null) : null);
+      return { truth, source: 'read-verified' };
+    } catch { /* fall through */ }
+  }
+  return null;
 }
 
 /** Read the opponent's six. For each slot: read the type combo → candidate species, sprite-
