@@ -200,9 +200,25 @@ export function previewTurnLine(raw: string, ctx: ParseContext): string | null {
       const lead = line.match(/^\s*(\S+)\s*([\s\S]*)$/);
       if (!lead) return null;
       const g = refToSpecies(lead[1]!, ctx);
-      if (!g) return null;
-      const rest = lead[2]!.trim();
-      return rest ? `${g.label} · ${rest}` : g.label;
+      if (g) {
+        const rest = lead[2]!.trim();
+        return rest ? `${g.label} · ${rest}` : g.label;
+      }
+      // No leading mon ref → a field/bulk keyword line (weather, hazards, bulk hp).
+      // These are real, parseable inputs — Sand Stream on send-out emits "weather
+      // sand" — so gloss parseTurnLine's structured result instead of flagging them
+      // "does not parse". (The engine already applied them fine; only the preview lied.)
+      const parsed = parseTurnLine(trimmed, ctx, 0);
+      if (!parsed.ok) return null;
+      if (parsed.kind === 'weather')
+        return parsed.update.weather ? `weather → ${parsed.update.weather}` : 'weather cleared';
+      if (parsed.kind === 'hazard') {
+        const H: Record<HazardUpdate['verb'], string> = { rocks: 'Stealth Rock', spikes: 'Spikes', tspikes: 'Toxic Spikes', web: 'Sticky Web' };
+        const side = parsed.update.side === 'mine' ? 'my side' : 'their side';
+        const a = parsed.update.arg;
+        return `${H[parsed.update.verb]} ${a === 'off' ? 'cleared' : a === 'on' ? 'set' : `→ ${a}`} · ${side}`;
+      }
+      return null;   // bulk-hp etc.: parses & applies fine, just no bespoke gloss line
     }
     const segs = line.split('>').map(s => s.trim());
     const actorTok = segs[0]!;

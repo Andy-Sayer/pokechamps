@@ -33,6 +33,16 @@ describe('parseTurnLine: field weather', () => {
     if (!c.ok || c.kind !== 'weather') throw new Error('expected weather kind');
     expect(c.update.weather).toBe(null);
   });
+
+  test('previewTurnLine glosses keyword-led field lines (weather/hazard) instead of flagging them', () => {
+    // Regression: the vision live-read emits "weather sand" when Sand Stream fires
+    // on send-out; the gloss used to try refToSpecies("weather") → null → the panel
+    // showed "⚠ does not parse" even though the engine applied it fine.
+    expect(previewTurnLine('weather sand', ctx)).toBe('weather → Sand');
+    expect(previewTurnLine('weather clear', ctx)).toBe('weather cleared');
+    expect(previewTurnLine('o rocks on', ctx)).toBe('Stealth Rock set · their side');
+    expect(previewTurnLine('garbagexyz', ctx)).toBe(null);   // real junk still flagged
+  });
 });
 
 describe('parseTurnLine: my/op team-index state refs', () => {
