@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { render, Box, Text, useApp, useInput } from 'ink';
 import { startWatch as startWatcher, stopWatch as stopWatcher, isWatching as watcherIsWatching, onWatchingChange } from './ui/watcher.js';
+import { startCapture, stopCapture, captureState as getCaptureState, isCapturing, onCaptureChange, captureStatusText } from './ui/capture.js';
 import type { PokemonSet, OpponentEntry, Match } from '@pokechamps/core/domain/types.js';
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
 import { createFileStores, createHttpStores, type Stores } from '@pokechamps/core/storage/index.js';
@@ -80,6 +81,11 @@ function App() {
     }
   });
 
+  // HDMI capture ("turn on screen") — the ffmpeg device owner that feeds latest.png. Toggled from
+  // the main menu; state drives the menu label + a header badge so the user knows the feed is live.
+  const [capState, setCapState] = useState(getCaptureState());
+  useEffect(() => onCaptureChange(setCapState), []);
+
   const screen = ((): React.ReactElement => {
   if (route.kind === 'menu') {
     const badge: { text: string; color: 'green' | 'yellow' | 'red' } | undefined = config.serverUrl
@@ -87,13 +93,14 @@ function App() {
         ? { text: `● remote: ${config.serverUrl}${config.email ? ` (${config.email})` : ''}`, color: 'green' }
         : { text: `● remote: ${config.serverUrl} — not signed in`, color: 'red' }
       : { text: '● local file mode', color: 'yellow' };
-    return <MainMenu connectionBadge={badge} onSelect={k => {
-      if (k === 'quit') exit();
+    return <MainMenu connectionBadge={badge} captureState={capState} onSelect={k => {
+      if (k === 'quit') { stopCapture(); exit(); }
       else if (k === 'team-management') setRoute({ kind: 'team-management' });
       else if (k === 'history') setRoute({ kind: 'history' });
       else if (k === 'server') setRoute({ kind: 'server' });
       else if (k === 'new-match') setRoute({ kind: 'pick-team' });
       else if (k === 'spectate') setRoute({ kind: 'spectate-connect' });
+      else if (k === 'toggle-capture') { if (isCapturing()) stopCapture(); else startCapture(); }
     }} />;
   }
   if (route.kind === 'team-management') {
@@ -240,10 +247,17 @@ function App() {
   return <Text>Unknown route</Text>;
   })();
 
-  // Global watch badge — shown on every screen EXCEPT battle (which draws its own, and whose
-  // sixel rows we must not shift). Confirms the watcher is running before the choose screen.
-  const showBadge = watching && route.kind !== 'battle';
-  return <>{showBadge && <Box><Text color="green">● watching live feed — Ctrl+W to stop</Text></Box>}{screen}</>;
+  // Global badges — shown on every screen EXCEPT battle (which draws its own, and whose sixel rows
+  // we must not shift). Confirm the capture feed + watcher are live before the choose screen.
+  const notBattle = route.kind !== 'battle';
+  const capText = notBattle ? captureStatusText() : null;
+  const capColor = capState === 'on' ? 'green' : capState === 'no-signal' ? 'yellow' : 'gray';
+  const showWatch = watching && notBattle;
+  return <>
+    {capText && <Box><Text color={capColor}>{capText}</Text></Box>}
+    {showWatch && <Box><Text color="green">● watching live feed — Ctrl+W to stop</Text></Box>}
+    {screen}
+  </>;
 }
 
 // Ask the terminal whether it renders sixels (Primary Device Attributes)
