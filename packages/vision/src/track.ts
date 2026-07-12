@@ -57,6 +57,10 @@ export class BattleTracker {
   /** Current active roster snapshot. */
   getRoster(): Roster { return this.asm.getRoster(); }
 
+  /** Seed an unknown active slot from a confident per-frame species OCR (see
+   *  BattleAssembler.seedActiveIfUnknown) — recovers the roster when the reader joined mid-battle. */
+  seedActive(ref: SlotRef, species: string): void { this.asm.seedActiveIfUnknown(ref, species); }
+
   /** In-progress lines for the current (unclosed) turn — a live preview. */
   preview(): string[] { return this.asm.preview(); }
 

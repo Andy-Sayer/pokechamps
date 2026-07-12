@@ -72,4 +72,32 @@ describe('BattleStateMachine', () => {
     const final = sm.finish()!;
     expect(final.lines).toEqual(['m2 > Light Screen > self', 'm1 > Close Combat > o1 > 100']);   // status stays self; offensive → foe + HP now attaches
   });
+
+  // A reader that JOINS mid-battle has NO leads and missed the send-out banners, so the roster is
+  // all-null and every "X used Y" was dropped as unresolved → empty turns → nothing keyed in. The
+  // per-frame species OCR must seed the roster so moves resolve. Reconstructs a live capture:
+  // opp Garchomp/Mawile vs my Talonflame/Dragonite, no leads passed.
+  test('mid-battle join: seeds the roster from slot OCR so move banners resolve', () => {
+    TS = 0;
+    const sp = { m1: 'Talonflame', m2: 'Dragonite', o1: 'Garchomp', o2: 'Mawile' } as const;
+    const readSp = (text: string, hp: Partial<Record<SlotRef, number>>): FrameRead => {
+      const slot = (side: 'mine' | 'opp', index: 0 | 1, ref: SlotRef): SlotRead => ({
+        side, index, species: sp[ref], speciesRaw: sp[ref], speciesConfidence: 1,
+        hpFraction: hp[ref] ?? null, status: null,
+      });
+      return { ts: TS++, battleText: text, slots: [slot('mine', 0, 'm1'), slot('mine', 1, 'm2'), slot('opp', 0, 'o1'), slot('opp', 1, 'o2')] };
+    };
+    const sm = new BattleStateMachine({}, { gapFrames: 4, clearFrames: 2 });   // NO leads — joined mid-game
+    const hp = { m1: 1, m2: 0.09, o1: 1, o2: 1 };                              // Dragonite chunked by Play Rough
+    const out: TurnProposal[] = [];
+    for (const [text, repeat] of [
+      ['The opposing Mawile used Play Rough!', 2],
+      ["It's super effective on Dragonite!", 2],           // pins the target to m2
+      ['', 4],                                              // gap → flush
+    ] as [string, number][])
+      for (let r = 0; r < repeat; r++) { const p = sm.feed(readSp(text, hp)); if (p && !p.partial) out.push(p); }
+
+    expect(out).toHaveLength(1);
+    expect(out[0]!.lines).toEqual(['o2 > Play Rough > m2 > 9']);   // resolved o2=Mawile, target m2=Dragonite — was DROPPED before the fix
+  });
 });

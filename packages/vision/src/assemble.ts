@@ -52,6 +52,16 @@ export class BattleAssembler {
   /** Current active roster (slot → species), read-only snapshot. */
   getRoster(): Roster { return { ...this.roster }; }
 
+  /** Fill an UNKNOWN active slot from a confident per-frame species OCR. This is what lets a reader
+   *  that JOINED the battle mid-stream — started after send-out, with no `--leads` — resolve
+   *  "X used Y" banners to a slot. Without it the roster stays null, every move is dropped as
+   *  unresolved, and turns emit empty (nothing gets keyed in). Purely additive: a slot already
+   *  tracked (via a lead, a send-out banner, or a prior seed) is left alone, so OCR flicker during
+   *  a switch/faint animation can't clobber a known mon. */
+  seedActiveIfUnknown(ref: SlotRef, species: string): void {
+    if (this.roster[ref] == null) this.roster[ref] = species;
+  }
+
   /** In-progress lines for the CURRENT (unclosed) turn — a live preview for the ratify
    *  panel so the user sees the reader capturing (final targets resolve at endTurn). */
   preview(): string[] { return emitTurnLog({ actions: this.actions, faints: [], megas: [...this.megaPending], stateLines: this.stateLines.length ? [...this.stateLines] : undefined, confidence: 1, notes: [] }); }

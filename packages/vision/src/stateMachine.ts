@@ -56,7 +56,12 @@ export class BattleStateMachine {
   /** Feed one frame's read; returns a TurnProposal when a turn completes, else null. */
   feed(read: FrameRead): TurnProposal | null {
     for (const s of read.slots) {
-      if (s.hpFraction != null) { const ref = refOf(s); this.lastHp[ref] = Math.max(0, Math.min(100, Math.round(s.hpFraction * 100))); this.touched.add(ref); }
+      const ref = refOf(s);
+      if (s.hpFraction != null) { this.lastHp[ref] = Math.max(0, Math.min(100, Math.round(s.hpFraction * 100))); this.touched.add(ref); }
+      // Seed the roster from the per-frame species OCR so a reader that JOINED mid-battle (no
+      // send-out banner / no --leads) can still resolve move banners to a slot. Only fills UNKNOWN
+      // slots (seedActive is a no-op otherwise), so banner-tracked switches stay authoritative.
+      if (s.species && s.speciesConfidence >= 0.75) this.tracker.seedActive(ref, s.species);
     }
     const text = (read.battleText ?? '').trim();
 
