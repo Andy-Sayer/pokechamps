@@ -87,10 +87,14 @@ as `SPECIES_PATCHES`). The engine reads `move.self.boosts` for the self-debuff
 display/inference, not maximin (accuracy isn't priced). Test:
 `champions-move-data.test.ts`.
 
-**3. Move-MECHANIC changes — NOT yet applied.** *Rage Fist* now resets its power
-when Annihilape switches out (M-B nerf). Engine work — the search + live engine
-model Rage Fist as +1×/hit-taken-this-turn; a switch-out reset would refine it.
-Low priority.
+**3. Move-MECHANIC changes — ✅ APPLIED (2026-07-16).** *Rage Fist* resets its
+power when the user switches out (M-B nerf). The live engine now TRACKS the hit
+counter (`OpponentEntry.timesHit` / `Match.myTimesHit`, incremented per logged
+damaging hit, sub-absorbed hits excluded) and resets it at every switch-out site
+in both finalizeTurn mirrors; `damageRange` prices it via a basePower override
+(`min(350, 50×(1+hits))`). Tests: `rage-fist-reset.test.ts`. Caveat: the `/exact`
+sim oracle (real @pkmn/sim) still implements the mainline persist-across-switch
+rule internally — watch for a sim-diff tail on Annihilape switch lines.
 
 ## Caveats / accepted simplifications
 
