@@ -214,6 +214,25 @@ describe('BattleAssembler — Protect blocks the damage observation', () => {
     expect(a.endTurnLines({ m1: 100 })).toEqual(['o1 > Solar Beam > m1']);
   });
 
+  test('zero-drop guard: an unexplained no-damage hit is suppressed once a baseline exists', () => {
+    // Miss banner not OCR'd: the target's HP never moved across the whole turn. With a
+    // known pre-turn baseline that's a 0-damage observation — suppress. (hpBefore is
+    // the 2nd arg to endTurnLines — a previous turn closed knowing m1's HP.)
+    const a = new BattleAssembler({ m1: 'Talonflame', m2: 'Kingambit', o1: 'Charizard', o2: 'Garchomp' });
+    a.recordHp('m1', 100, true);
+    feed(a, ['The opposing Charizard used Solar Beam!', "It's super effective on Talonflame!"]);
+    a.recordHp('m1', 100, true);
+    expect(a.endTurnLines({ m1: 100 }, { m1: 100 })).toEqual(['o1 > Solar Beam > m1']);
+  });
+
+  test('zero-drop guard does NOT fire without a baseline (mid-battle join state sync)', () => {
+    const a = new BattleAssembler({ m1: 'Talonflame', m2: 'Kingambit', o1: 'Charizard', o2: 'Garchomp' });
+    a.recordHp('m1', 9, true);            // reader joined late — 9 is all it ever saw
+    feed(a, ['The opposing Charizard used Solar Beam!', "It's super effective on Talonflame!"]);
+    a.recordHp('m1', 9, true);
+    expect(a.endTurnLines({ m1: 9 })).toEqual(['o1 > Solar Beam > m1 > 9%']);   // state sync kept
+  });
+
   test('a spread hit drops the Protected ref and keeps the real ones', () => {
     const a = new BattleAssembler({ m1: 'Pelipper', m2: 'Dragonite', o1: 'Charizard', o2: 'Garchomp' });
     for (const r of ['o1', 'o2'] as const) a.recordHp(r, 100, true);

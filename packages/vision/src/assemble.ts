@@ -408,7 +408,18 @@ export class BattleAssembler {
         if (this.protectedThisTurn.has(a.target) || this.missedTargets.has(`${i}:${a.target}`)) return;
         const smp = this.lastSample(a.target, i + 1, cutFor(i, a.target));
         const pct = smp?.pct ?? hpBySlot[a.target];
-        if (pct != null) a.hpRemainingPercent = pct;
+        if (pct == null) return;
+        // ZERO-DROP GUARD: an offensive move whose target shows NO HP drop at all is a
+        // miss / unseen Protect / immunity / sub — whatever the cause, a 0-damage
+        // observation is never useful and always poison. (The miss banner isn't always
+        // OCR'd — a dodged Solar Beam still emitted `> 100%` on one replay run.) Only
+        // when a prior turn closed with this slot's HP known (hpBefore) — a reader that
+        // just JOINED has no baseline, and its first remaining-HP read is the state sync.
+        if (isOffensive(a.move) && hpBefore[a.target] != null && pct >= this.baselineBefore(a.target, i, hpBefore)) {
+          this.notes.push(`no damage observed (${a.move}→${a.target}: miss/Protect/immune?) — damage slot suppressed`);
+          return;
+        }
+        a.hpRemainingPercent = pct;
         if (smp?.raw != null) a.hpRemainingRaw = smp.raw;
       }
     });
