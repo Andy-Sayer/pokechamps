@@ -17,6 +17,13 @@ describe('emitAction — canonical turn-log grammar', () => {
     expect(emitAction({ actor: 'm1', kind: 'move', move: 'Heat Wave', spread: [{ ref: 'o1', hpRemainingPercent: 40 }, { ref: 'o2', hpRemainingPercent: 35 }] }))
       .toBe('m1 > Heat Wave > spread > o1:40, o2:35');
   });
+  test('mine-side remaining HP carries an explicit % (parser reads a bare m-side number as RAW HP)', () => {
+    expect(emitAction({ actor: 'o1', kind: 'move', move: 'Sucker Punch', target: 'm1', hpRemainingPercent: 60 }))
+      .toBe('o1 > Sucker Punch > m1 > 60%');
+    // allAdjacent spread (Earthquake) includes the ally — its entry gets the % too
+    expect(emitAction({ actor: 'o1', kind: 'move', move: 'Earthquake', spread: [{ ref: 'm1', hpRemainingPercent: 55 }, { ref: 'm2', hpRemainingPercent: 70 }, { ref: 'o2', hpRemainingPercent: 80 }] }))
+      .toBe('o1 > Earthquake > spread > m1:55%, m2:70%, o2:80');
+  });
   test('status / no-target move uses > self', () => {
     expect(emitAction({ actor: 'm1', kind: 'move', move: 'Protect' })).toBe('m1 > Protect > self');
   });
@@ -38,7 +45,7 @@ describe('emitTurnLog', () => {
     };
     expect(emitTurnLog(obs)).toEqual([
       'm1 > Close Combat > o1 > 0',
-      'o2 > Sucker Punch > m1 > 60',
+      'o2 > Sucker Punch > m1 > 60%',
       'o1 ko',
     ]);
   });

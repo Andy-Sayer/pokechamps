@@ -36,6 +36,12 @@ const slotsFor = (side: Side): [SlotRef, SlotRef] => (side === 'mine' ? ['m1', '
 const sideOf = (ref: SlotRef): Side => (ref[0] === 'm' ? 'mine' : 'opp');
 const norm = (s: string | null): string => (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
+/** One HP read on the per-ACTION timeline. `tag` = how many actions had been fed when
+ *  the read arrived, so tag t sits BETWEEN action t-1's banner and action t's banner —
+ *  the window where action t-1's damage animation lands. `stable` = the value repeated
+ *  across consecutive frames (settled, not mid-drain). */
+interface HpSample { tag: number; pct: number; stable: boolean; }
+
 export class BattleAssembler {
   private roster: Roster;
   private actions: TurnAction[] = [];
@@ -43,6 +49,7 @@ export class BattleAssembler {
   private notes: string[] = [];
   private stateLines: string[] = [];    // stat-boost lines (Intimidate, Nasty Plot, …) this turn
   private megaPending = new Set<SlotRef>();
+  private hpSamples: Partial<Record<SlotRef, HpSample[]>> = {};
 
   /** Seed the two leads per side (from the team-preview / nameplate appearance read). */
   constructor(leads: Partial<Roster> = {}) {
@@ -65,6 +72,38 @@ export class BattleAssembler {
   /** In-progress lines for the CURRENT (unclosed) turn — a live preview for the ratify
    *  panel so the user sees the reader capturing (final targets resolve at endTurn). */
   preview(): string[] { return emitTurnLog({ actions: this.actions, faints: [], megas: [...this.megaPending], stateLines: this.stateLines.length ? [...this.stateLines] : undefined, confidence: 1, notes: [] }); }
+
+  /** Record one per-frame HP read (percent) on the per-action timeline. This is what
+   *  lets endTurn give each hit its OWN damage value when a target is hit more than
+   *  once in a turn — the settled read between banner N and banner N+1 is move N's
+   *  post-hit HP. Call on every frame; consecutive duplicates are collapsed. */
+  recordHp(ref: SlotRef, pct: number, stable = false): void {
+    const arr = (this.hpSamples[ref] ??= []);
+    const tag = this.actions.length;
+    const last = arr[arr.length - 1];
+    if (last && last.tag === tag && last.pct === pct && last.stable === stable) return;
+    arr.push({ tag, pct, stable });
+  }
+
+  /** Last sample of `ref` with tag in [fromTag, toTag] — a settled (stable) read wins
+   *  over a raw one because raw reads can be mid-drain-animation frames. */
+  private lastSample(ref: SlotRef, fromTag: number, toTag: number): number | null {
+    let stableV: number | null = null, rawV: number | null = null;
+    for (const s of this.hpSamples[ref] ?? []) {
+      if (s.tag < fromTag || s.tag > toTag) continue;
+      if (s.stable) stableV = s.pct;
+      rawV = s.pct;
+    }
+    return stableV ?? rawV;
+  }
+
+  /** The slot's HP just before action `i`'s banner (last sample with tag ≤ i), falling
+   *  back to the turn-start HP. Samples are pushed in tag order, so scan-and-keep-last. */
+  private baselineBefore(ref: SlotRef, i: number, hpBefore: Partial<Record<SlotRef, number>>): number {
+    let v: number | null = null;
+    for (const s of this.hpSamples[ref] ?? []) { if (s.tag > i) break; v = s.pct; }
+    return v ?? hpBefore[ref] ?? 100;
+  }
 
   private resolveSlot(side: Side, species: string | null): SlotRef | null {
     if (!species) return null;
@@ -175,41 +214,94 @@ export class BattleAssembler {
   /** Close the current turn → its TurnObservation, and reset for the next. Pass the
    *  post-turn remaining HP% per slot (from the HP read, opp nameplate %, mine
    *  abs/max) to fill each damaging move's `hpRemainingPercent` — that's the damage
-   *  signal the inference solver back-solves spreads from. One read/slot per turn
-   *  assumes one hit/target/turn (the common case); refine with mid-turn reads. */
+   *  signal the inference solver back-solves spreads from. When per-frame reads were
+   *  recorded (recordHp), each move gets the settled HP from ITS OWN window of the
+   *  turn, so two hits into the same target each carry their own damage; without
+   *  samples this degrades to one turn-final read per slot. */
   endTurn(hpBySlot: Partial<Record<SlotRef, number>> = {}, hpBefore: Partial<Record<SlotRef, number>> = {}, touched?: Set<SlotRef>): TurnObservation {
-    // TARGET INFERENCE for moves the banner didn't name (neutral single hits emit no
-    // "effective on X" line). Priority, per the HUD's behaviour:
-    //   1. the foe whose NAMEPLATE APPEARED this turn — only affected mons show a plate, so
-    //      a foe plate = the mon that was hit (the strongest signal).
-    //   2. else the foe whose settled HP fell most.
-    //   3. else, for an OFFENSIVE move, the first live foe (never "self").
+    // What fell off `ref` in action i's IMMEDIATE window — between its banner and the
+    // next one (or turn end). The sharpest per-action damage signal we have.
+    const immDrop = (ref: SlotRef, i: number): number => {
+      const to = i + 1 < this.actions.length ? i + 1 : Number.MAX_SAFE_INTEGER;
+      const post = this.lastSample(ref, i + 1, to);
+      if (post == null) return 0;
+      return Math.max(0, this.baselineBefore(ref, i, hpBefore) - post);
+    };
+
+    // PASS 1 — SPREAD DETECTION. A dex spread move (allAdjacentFoes / allAdjacent)
+    // whose window shows BOTH foes dropping is a spread hit → per-target damage list
+    // (`> spread > o1:40, o2:35`). Values fill in pass 3. Requires per-frame samples;
+    // without them this never fires and the move resolves single-target as before.
+    this.actions.forEach((a, i) => {
+      if (a.kind !== 'move' || a.target != null || a.spread || !isOffensive(a.move)) return;
+      const dexTarget = (getMove(toId(a.move ?? '')) as { target?: string } | undefined)?.target;
+      if (dexTarget !== 'allAdjacentFoes' && dexTarget !== 'allAdjacent') return;
+      const [f1, f2] = slotsFor(sideOf(a.actor) === 'mine' ? 'opp' : 'mine');
+      const [s1, s2] = slotsFor(sideOf(a.actor));
+      const ally = s1 === a.actor ? s2 : s1;
+      const cands = dexTarget === 'allAdjacent' ? [f1, f2, ally] : [f1, f2];
+      const hit = cands.filter(r => this.roster[r] && immDrop(r, i) >= 1);
+      if (hit.filter(r => r !== ally).length >= 2)
+        a.spread = hit.map(ref => ({ ref, hpRemainingPercent: 0 }));
+    });
+
+    // PASS 2 — TARGET INFERENCE for moves the banner didn't name (neutral single hits
+    // emit no "effective on X" line). Priority, per the HUD's behaviour:
+    //   1. the foe whose HP fell in THIS action's window — scoped per action, so a
+    //      second hit into an already-claimed foe still resolves correctly.
+    //   2. the foe whose NAMEPLATE APPEARED this turn — only affected mons show a plate.
+    //   3. else the foe whose settled HP fell most over the whole turn.
+    //   4. else, for an OFFENSIVE move, the first live foe (never "self").
+    // 2-4 are turn-scoped signals, so `claimed` guards them against double-assignment;
+    // the window signal (1) is per-action and may legitimately re-pick a claimed foe.
     // Status/self moves touch no foe + drop no foe HP → stay untargeted (correctly "self").
     const claimed = new Set<SlotRef>();
     const dropOf = (ref: SlotRef): number => { const after = hpBySlot[ref]; return after == null ? 0 : Math.max(0, (hpBefore[ref] ?? 100) - after); };
-    for (const a of this.actions) {
-      // Only OFFENSIVE moves get a foe target inferred — a status/self move (Light Screen,
-      // Tailwind, Protect, Swords Dance) touches no foe, so it stays "self" even if a foe's
-      // plate appeared this turn from a DIFFERENT move.
-      if (a.kind !== 'move' || a.target != null || !isOffensive(a.move)) continue;
+    this.actions.forEach((a, i) => {
+      if (a.kind !== 'move' || a.target != null || a.spread || !isOffensive(a.move)) return;
       const [f1, f2] = slotsFor(sideOf(a.actor) === 'mine' ? 'opp' : 'mine');
-      const foes = [f1, f2].filter(r => !claimed.has(r));
-      let pick = foes.find(r => touched?.has(r) && this.roster[r]);                          // 1. plate appeared
-      if (!pick) pick = foes.filter(r => dropOf(r) >= 3).sort((x, y) => dropOf(y) - dropOf(x))[0]; // 2. HP fell
-      if (!pick) {                                                                            // 3. default to a live foe
-        pick = foes.find(r => this.roster[r]) ?? f1;
-        this.notes.push(`target defaulted (offensive, no plate/HP signal): ${a.move}→${pick}`);
+      let pick = [f1, f2].filter(r => this.roster[r] && immDrop(r, i) >= 3)                  // 1. window drop
+        .sort((x, y) => immDrop(y, i) - immDrop(x, i))[0];
+      if (!pick) {
+        const foes = [f1, f2].filter(r => !claimed.has(r));
+        pick = foes.find(r => touched?.has(r) && this.roster[r]);                            // 2. plate appeared
+        if (!pick) pick = foes.filter(r => dropOf(r) >= 3).sort((x, y) => dropOf(y) - dropOf(x))[0]; // 3. HP fell (turn)
+        if (!pick) {                                                                          // 4. default to a live foe
+          pick = foes.find(r => this.roster[r]) ?? f1;
+          this.notes.push(`target defaulted (offensive, no plate/HP signal): ${a.move}→${pick}`);
+        }
       }
       if (pick) { a.target = pick; claimed.add(pick); }
-    }
-    for (const a of this.actions) {
-      if (a.kind === 'move' && a.target != null && hpBySlot[a.target] != null) a.hpRemainingPercent = hpBySlot[a.target];
-    }
+    });
+
+    // PASS 3 — PER-ACTION HP ATTRIBUTION. A move's post-hit HP is the last settled
+    // sample of its target BEFORE the next action that hits (or replaces) that slot —
+    // that window is exclusively this move's outcome, animation lag included. No
+    // sample in the window (no recordHp feed, or plates never settled) → fall back to
+    // the turn-final read, which is exact whenever the slot was only hit once.
+    const cutFor = (i: number, ref: SlotRef): number => {
+      for (let k = i + 1; k < this.actions.length; k++) {
+        const b = this.actions[k]!;
+        if (b.kind === 'switch' && b.actor === ref) return k;
+        if (b.kind === 'move' && (b.target === ref || b.spread?.some(s => s.ref === ref))) return k;
+      }
+      return Number.MAX_SAFE_INTEGER;
+    };
+    this.actions.forEach((a, i) => {
+      if (a.kind !== 'move') return;
+      if (a.spread) {
+        for (const s of a.spread)
+          s.hpRemainingPercent = this.lastSample(s.ref, i + 1, cutFor(i, s.ref)) ?? hpBySlot[s.ref] ?? this.baselineBefore(s.ref, i, hpBefore);
+      } else if (a.target != null) {
+        const v = this.lastSample(a.target, i + 1, cutFor(i, a.target)) ?? hpBySlot[a.target];
+        if (v != null) a.hpRemainingPercent = v;
+      }
+    });
     // Megas whose MOVE was never captured (missed banner) still happened → emit them as
     // standalone mega lines so the forme change isn't lost.
     const megas = [...this.megaPending];
     const obs: TurnObservation = { actions: this.actions, faints: this.faints, megas: megas.length ? megas : undefined, stateLines: this.stateLines.length ? [...this.stateLines] : undefined, confidence: 1, notes: this.notes };
-    this.actions = []; this.faints = []; this.notes = []; this.stateLines = []; this.megaPending.clear();
+    this.actions = []; this.faints = []; this.notes = []; this.stateLines = []; this.megaPending.clear(); this.hpSamples = {};
     return obs;
   }
 

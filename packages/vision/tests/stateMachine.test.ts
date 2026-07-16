@@ -40,7 +40,7 @@ describe('BattleStateMachine', () => {
     ], hp);
     expect(proposals).toHaveLength(1);
     expect(proposals[0]!.lines).toEqual([
-      'o1+mega > Fake Out > m1 > 82',
+      'o1+mega > Fake Out > m1 > 82%',
       'm2 > Light Screen > self',
     ]);
   });
@@ -56,7 +56,7 @@ describe('BattleStateMachine', () => {
       ['Staraptor used Close Combat!', 1],                        // next action → emits turn 1
     ], hp);
     expect(proposals).toHaveLength(1);
-    expect(proposals[0]!.lines).toEqual(['o1 > Fake Out > m1 > 82']);
+    expect(proposals[0]!.lines).toEqual(['o1 > Fake Out > m1 > 82%']);
   });
 
   test('a mid-turn animation lull (< gapFrames) does NOT split the turn', () => {
@@ -71,6 +71,48 @@ describe('BattleStateMachine', () => {
     expect(proposals).toHaveLength(0);                      // still one open turn
     const final = sm.finish()!;
     expect(final.lines).toEqual(['m2 > Light Screen > self', 'm1 > Close Combat > o1 > 100']);   // status stays self; offensive → foe + HP now attaches
+  });
+
+  // FINE-GRAINED HP TRACKING: two hits into the SAME target in one turn. The turn-final
+  // read only gives the merged total — the settled reads BETWEEN move banners are what
+  // give each hit its own damage (the per-move inference observation).
+  test('two hits into the same target get per-hit HP from settled reads between banners', () => {
+    TS = 0;
+    const sm = new BattleStateMachine(LEADS, { gapFrames: 4, clearFrames: 2, settleFrames: 2 });
+    const out: TurnProposal[] = [];
+    const seq: [string, Partial<Record<SlotRef, number>>, number][] = [
+      ['Staraptor used Close Combat!', { m1: 1, m2: 1, o1: 1, o2: 1 }, 2],      // banner up, pre-hit HP
+      ['Staraptor used Close Combat!', { o1: 0.8 }, 1],                          // mid-drain (never settles)
+      ['Staraptor used Close Combat!', { o1: 0.6 }, 2],                          // settled post-hit-1: 60
+      ['Grimmsnarl used Spirit Break!', { o1: 0.6 }, 2],                         // second hit, same target
+      ['Grimmsnarl used Spirit Break!', { o1: 0.45 }, 1],                        // mid-drain
+      ['Grimmsnarl used Spirit Break!', { o1: 0.35 }, 2],                        // settled post-hit-2: 35
+      ['', { o1: 0.35 }, 4],                                                     // move-select gap → flush
+    ];
+    for (const [text, hp, repeat] of seq)
+      for (let r = 0; r < repeat; r++) { const p = sm.feed(read(text, hp)); if (p && !p.partial) out.push(p); }
+    expect(out).toHaveLength(1);
+    expect(out[0]!.lines).toEqual([
+      'm1 > Close Combat > o1 > 60',      // NOT the merged 35 — its own window's settled read
+      'm2 > Spirit Break > o1 > 35',      // second hit resolves to the already-claimed foe via its window drop
+    ]);
+  });
+
+  // SPREAD DETECTION: a dex spread move whose window shows BOTH foes dropping emits the
+  // per-target spread list instead of a single inferred target.
+  test('a spread move that chunks both foes emits per-target spread damage', () => {
+    TS = 0;
+    const sm = new BattleStateMachine(LEADS, { gapFrames: 4, clearFrames: 2, settleFrames: 2 });
+    const out: TurnProposal[] = [];
+    const seq: [string, Partial<Record<SlotRef, number>>, number][] = [
+      ['Staraptor used Heat Wave!', { m1: 1, m2: 1, o1: 1, o2: 1 }, 2],
+      ['Staraptor used Heat Wave!', { o1: 0.7, o2: 0.65 }, 2],                   // settled post-hit reads
+      ['', { o1: 0.7, o2: 0.65 }, 4],                                            // gap → flush
+    ];
+    for (const [text, hp, repeat] of seq)
+      for (let r = 0; r < repeat; r++) { const p = sm.feed(read(text, hp)); if (p && !p.partial) out.push(p); }
+    expect(out).toHaveLength(1);
+    expect(out[0]!.lines).toEqual(['m1 > Heat Wave > spread > o1:70, o2:65']);
   });
 
   // A reader that JOINS mid-battle has NO leads and missed the send-out banners, so the roster is
@@ -98,6 +140,6 @@ describe('BattleStateMachine', () => {
       for (let r = 0; r < repeat; r++) { const p = sm.feed(readSp(text, hp)); if (p && !p.partial) out.push(p); }
 
     expect(out).toHaveLength(1);
-    expect(out[0]!.lines).toEqual(['o2 > Play Rough > m2 > 9']);   // resolved o2=Mawile, target m2=Dragonite — was DROPPED before the fix
+    expect(out[0]!.lines).toEqual(['o2 > Play Rough > m2 > 9%']);   // resolved o2=Mawile, target m2=Dragonite — was DROPPED before the fix
   });
 });

@@ -66,10 +66,23 @@ to `readOpponentHpPercents` and read `myHpText` cur/max → fraction via the kno
 The code note already flags this ("wire that in here once `deps.ocr` can OCR a
 preprocessed pixel buffer") — P1 unblocks it.
 
-**P3 — Settle-gating + multi-frame consensus.** The HUD animates; HP reads jitter on
-unsettled frames (`177↔117`, blanks). Gate HP reads on a stable frame and take the
-consensus value across the banner's persistence window. Tune `stateMachine` `gapFrames`
-/ `clearFrames` on a live stream.
+**P3 — Settle-gating + multi-frame consensus.** ✅ DONE (2026-07-16) as the
+**per-action HP timeline**: every frame's HP read is recorded on a timeline tagged by
+how many actions the turn has seen (`BattleAssembler.recordHp`), and a value counts as
+SETTLED once it repeats `settleFrames` (default 2) consecutive frames — that filters
+mid-drain animation frames and lone OCR blips. At `endTurn`, each move takes the last
+settled read of its target from ITS OWN window (banner→next-banner, cut at the next
+action that hits/replaces the slot), so **two hits into the same target each carry
+their own damage** — previously both got the merged turn-final value (first hit
+overstated, second read as 0). The same windows drive target inference (a window drop
+beats the turn-scoped plate/drop heuristics and may re-pick an already-claimed foe)
+and **spread detection**: a dex spread move (`allAdjacentFoes`/`allAdjacent`) whose
+window shows both foes dropping emits `> spread > o1:x, o2:y` per-target damage.
+No samples (short window, plates never settled) → falls back to the turn-final read,
+which stays exact for once-hit targets. Also fixed: vision emits PERCENTS, but the
+parser reads a bare number on a mine-side target as RAW HP — `emitAction` now writes
+`m1 > … > 60%` (explicit `%`) for m-side single + spread entries. Tune `gapFrames` /
+`clearFrames` / `settleFrames` on a live stream.
 
 **P4 — Self-damage reconciler.** `hpLoss` and `confusionHit` are self-inflicted HP
 loss; subtract them from a slot's turn delta so opponent-dealt damage isn't overstated

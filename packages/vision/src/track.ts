@@ -61,6 +61,11 @@ export class BattleTracker {
    *  BattleAssembler.seedActiveIfUnknown) — recovers the roster when the reader joined mid-battle. */
   seedActive(ref: SlotRef, species: string): void { this.asm.seedActiveIfUnknown(ref, species); }
 
+  /** Forward one per-frame HP read onto the assembler's per-action timeline (see
+   *  BattleAssembler.recordHp) — the fine-grained signal that gives each hit its own
+   *  damage value when a target is hit more than once in a turn. */
+  recordHp(ref: SlotRef, pct: number, stable = false): void { this.asm.recordHp(ref, pct, stable); }
+
   /** In-progress lines for the current (unclosed) turn — a live preview. */
   preview(): string[] { return this.asm.preview(); }
 

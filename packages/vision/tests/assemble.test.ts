@@ -63,10 +63,51 @@ describe('BattleAssembler — opening turn (real Oni capture)', () => {
     ]);
     // post-turn remaining HP%: Staraptor at 82, Raichu at 0 (fainted)
     expect(a.endTurnLines({ m1: 82, o1: 0 })).toEqual([
-      'o1 > Fake Out > m1 > 82',
+      'o1 > Fake Out > m1 > 82%',
       'm1 > Close Combat > o1 > 0',
       'o1 ko',
     ]);
+  });
+});
+
+describe('BattleAssembler — fine-grained HP timeline (recordHp)', () => {
+  test('per-action samples give each hit into the same target its own damage', () => {
+    const a = new BattleAssembler({ m1: 'Staraptor', m2: 'Grimmsnarl', o1: 'Raichu', o2: 'Sylveon' });
+    a.recordHp('o1', 100, true);
+    feed(a, ['Staraptor used Close Combat!']);
+    a.recordHp('o1', 60, true);                       // settled between the two banners
+    feed(a, ['Grimmsnarl used Spirit Break!']);
+    a.recordHp('o1', 35, true);
+    // turn-final read alone would stamp 35 on BOTH moves (first hit merged, second 0 damage)
+    expect(a.endTurnLines({ m1: 100, m2: 100, o1: 35, o2: 100 })).toEqual([
+      'm1 > Close Combat > o1 > 60',
+      'm2 > Spirit Break > o1 > 35',
+    ]);
+  });
+
+  test('a settled read beats a later lone raw blip in the same window', () => {
+    const a = new BattleAssembler({ m1: 'Staraptor', m2: 'Grimmsnarl', o1: 'Raichu', o2: 'Sylveon' });
+    a.recordHp('o1', 100, true);
+    feed(a, ['Staraptor used Close Combat!']);
+    a.recordHp('o1', 60, true);                       // settled
+    a.recordHp('o1', 55, false);                      // one-frame OCR blip — must not win
+    expect(a.endTurnLines({ o1: 55 })).toEqual(['m1 > Close Combat > o1 > 60']);
+  });
+
+  test('allAdjacent spread (Earthquake) hits both foes + ally, % on the mine-side entry', () => {
+    const a = new BattleAssembler({ m1: 'Garchomp', m2: 'Kingambit', o1: 'Raichu', o2: 'Sylveon' });
+    for (const r of ['m1', 'm2', 'o1', 'o2'] as const) a.recordHp(r, 100, true);
+    feed(a, ['Garchomp used Earthquake!']);
+    a.recordHp('o1', 70, true); a.recordHp('o2', 75, true); a.recordHp('m2', 80, true);
+    expect(a.endTurnLines()).toEqual(['m1 > Earthquake > spread > o1:70, o2:75, m2:80%']);
+  });
+
+  test('spread move that only one foe survives visible falls back to single-target', () => {
+    const a = new BattleAssembler({ m1: 'Staraptor', m2: 'Grimmsnarl', o1: 'Raichu', o2: 'Sylveon' });
+    for (const r of ['o1', 'o2'] as const) a.recordHp(r, 100, true);
+    feed(a, ['Staraptor used Heat Wave!']);
+    a.recordHp('o1', 70, true);                       // o2 Protected / no drop observed
+    expect(a.endTurnLines({ o1: 70, o2: 100 })).toEqual(['m1 > Heat Wave > o1 > 70']);
   });
 });
 

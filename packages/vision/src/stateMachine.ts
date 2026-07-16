@@ -9,8 +9,10 @@
 // Two boundary signals, both handled: a residual→action transition inside the tracker
 // (turns WITH weather/Leftovers), and the move-select GAP — a run of no-banner frames
 // — which flushes a turn that had no residual. HP comes from the slot reads (opp % via
-// the nameplate OCR upstream); the latest settled value before a boundary is the
-// post-turn remaining HP%.
+// the nameplate OCR upstream): every read is recorded on a per-ACTION timeline (stable
+// once it repeats settleFrames in a row), so each move gets the settled HP from its own
+// slice of the turn — two hits into one target each carry their own damage — with the
+// latest value before a boundary as the turn-final fallback.
 //
 // `gapFrames` is the one capture-timing knob: long enough to clear a mid-turn
 // animation lull, short enough to catch the real move-select pause. Tune on a live
@@ -32,6 +34,9 @@ export interface StateMachineOpts {
   /** No-banner frames after which the banner is considered cleared (so a later repeat
    *  re-fires). Default 2 — tolerates a 1-frame flicker. */
   clearFrames?: number;
+  /** Consecutive identical HP reads for a value to count as SETTLED (not mid-drain
+   *  animation / an OCR blip) on the per-action timeline. Default 2. */
+  settleFrames?: number;
   confidence?: number;
 }
 
@@ -41,15 +46,18 @@ export class BattleStateMachine {
   private noBannerRun = 0;
   private lastHp: Partial<Record<SlotRef, number>> = {};
   private touched = new Set<SlotRef>();   // slots whose nameplate appeared this turn (affected mons)
+  private settleRuns: Partial<Record<SlotRef, { val: number; run: number }>> = {};  // consecutive-read counter per slot
   private lastPreview = '';                // last in-progress preview emitted (dedupe partials)
   private gapFrames: number;
   private clearFrames: number;
+  private settleFrames: number;
   private conf: number;
 
   constructor(leads: Partial<Roster> = {}, opts: StateMachineOpts = {}) {
     this.tracker = new BattleTracker(leads);
     this.gapFrames = opts.gapFrames ?? 8;
     this.clearFrames = opts.clearFrames ?? 2;
+    this.settleFrames = opts.settleFrames ?? 2;
     this.conf = opts.confidence ?? 0.9;
   }
 
@@ -57,7 +65,19 @@ export class BattleStateMachine {
   feed(read: FrameRead): TurnProposal | null {
     for (const s of read.slots) {
       const ref = refOf(s);
-      if (s.hpFraction != null) { this.lastHp[ref] = Math.max(0, Math.min(100, Math.round(s.hpFraction * 100))); this.touched.add(ref); }
+      if (s.hpFraction != null) {
+        const pct = Math.max(0, Math.min(100, Math.round(s.hpFraction * 100)));
+        this.lastHp[ref] = pct; this.touched.add(ref);
+        // Per-action HP timeline: record EVERY read (before the banner below is processed,
+        // so the sample lands in the current action's window), marking it stable once the
+        // same value repeats settleFrames in a row — that filters mid-drain animation
+        // frames and one-off OCR blips, and is what lets two hits into the same target
+        // each get their own damage instead of one merged turn-final delta.
+        const run = this.settleRuns[ref];
+        if (run && run.val === pct) run.run++;
+        else this.settleRuns[ref] = { val: pct, run: 1 };
+        this.tracker.recordHp(ref, pct, this.settleRuns[ref]!.run >= this.settleFrames);
+      }
       // Seed the roster from the per-frame species OCR so a reader that JOINED mid-battle (no
       // send-out banner / no --leads) can still resolve move banners to a slot. Only fills UNKNOWN
       // slots (seedActive is a no-op otherwise), so banner-tracked switches stay authoritative.
