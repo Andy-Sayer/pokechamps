@@ -1,7 +1,7 @@
 import { Generations, calculate, Pokemon as CalcPokemon, Move as CalcMove, Field, Side } from '@smogon/calc';
 import type { PokemonSet, FieldState, DamageObservation } from './types.js';
 import { activeGimmick } from './gimmicks/index.js';
-import { getMove } from './data.js';
+import { getMove, toId } from './data.js';
 // Side-effect import: registers the format loader with the gimmick registry
 // so activeGimmick() resolves the configured gimmick (e.g. mega) rather than
 // silently falling back to noneGimmick. Without this, damage calcs that go
@@ -46,6 +46,12 @@ function toCalcPokemon(set: PokemonSet, opts: {
   /** Protosynthesis / Quark Drive active on this stat (×1.3) — again a
    *  replay-harness input; the calc applies it via its boostedStat option. */
   boostedStat?: string;
+  /** Damaging-move hits this mon has taken while on the field — Rage Fist's
+   *  +50-BP-per-hit counter. Not consumed by the Pokemon constructor (the calc
+   *  has no attacker hit-count input); damageRange reads it off attackerOpts
+   *  and overrides Rage Fist's base power. Champions rule: the engine resets
+   *  the tracked counter on switch-out (mainline Gen 9 keeps it). */
+  timesHit?: number;
 } = {}): CalcPokemon {
   const calcOpts: Record<string, unknown> = {
     level: set.level,
@@ -197,6 +203,19 @@ export function damageRange(args: {
     && moveData?.type === 'Fire' && moveData?.category !== 'Status') {
     const boostedBp = Math.round((((move as unknown as { bp?: number }).bp) ?? 0) * 1.5);
     move = new CalcMove(GEN, args.move, { ...moveOpts, overrides: { basePower: boostedBp } } as any);
+  }
+  // Rage Fist: base 50 BP, +50 per damaging hit the ATTACKER has taken while
+  // on the field, capped at 350 (6 hits). @smogon/calc has no attacker
+  // hit-count input, so override the base power directly from the tracked
+  // counter (Match.myTimesHit / OpponentEntry.timesHit). Champions rule
+  // (differs from mainline Gen 9): the counter RESETS on switch-out — the
+  // engine clears it at every switch-out site, so the value passed here is
+  // already hits-since-last-entry and a freshly switched-in user is back to
+  // 50 BP.
+  const timesHit = args.attackerOpts?.timesHit ?? 0;
+  if (timesHit > 0 && toId(args.move) === 'ragefist') {
+    const bp = Math.min(350, 50 * (1 + timesHit));
+    move = new CalcMove(GEN, args.move, { ...moveOpts, overrides: { basePower: bp } } as any);
   }
   const field = toCalcField(effField, args.attackerSide, args.helpingHand);
   const result = calculate(GEN, atk, def, move, field);

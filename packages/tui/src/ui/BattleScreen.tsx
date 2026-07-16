@@ -921,6 +921,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       myEncoreTurns: { ...(match.myEncoreTurns ?? {}) },
       myLeechSeeded: { ...(match.myLeechSeeded ?? {}) },
       myDisableTurns: { ...(match.myDisableTurns ?? {}) },
+      myTimesHit: { ...(match.myTimesHit ?? {}) },
     };
 
     // Walk damaging actions in order, deriving each action's damageHpPercent
@@ -933,6 +934,10 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     const oppSubHpSoFar = new Map<number, number>();
     const mySubHpSoFar = new Map<number, number>();
     const hitSub = new Set<import('@pokechamps/core/domain/types.js').MoveAction>();
+    // Rage Fist hit-counter increments this turn (opp side committed after the
+    // HP commit below, once opponentTeam has been re-mapped to fresh objects).
+    // Mirror of engine.ts.
+    const oppTimesHitInc = new Map<number, number>();
     const sortedActions = [...draftActions].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     for (const a of sortedActions) {
       if (a.kind === 'switch' || a.kind === 'mega') continue;
@@ -1001,6 +1006,15 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       // the post-Sitrus residual.
       a.damageHpPercent = Math.max(0, prevPct - newPct);
 
+      // Rage Fist hit counter: a damaging move that connected with the REAL
+      // mon (sub-absorbed hits skipped above) bumps the target's timesHit.
+      // Champions rule: resets on switch-out — see the switch-persist pass
+      // below. Mirror of engine.ts.
+      if (a.damageHpPercent > 0) {
+        if (tSide === 'theirs') oppTimesHitInc.set(tIdx, (oppTimesHitInc.get(tIdx) ?? 0) + 1);
+        else next.myTimesHit![tIdx] = (next.myTimesHit![tIdx] ?? 0) + 1;
+      }
+
       // HP-threshold item auto-trigger (Sitrus, pinch berries). My-side only:
       // opp items are usually unknown and auto-firing a guess would silently
       // corrupt downstream inference. Mirror of the engine.ts path.
@@ -1055,6 +1069,14 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     for (const [idx, hp] of myHpSoFar) {
       next.myCurrentHp![idx] = hp;
       if (hp === 0 && !next.myFainted!.includes(idx)) next.myFainted!.push(idx);
+    }
+
+    // Commit Rage Fist hit-counter increments (opp side). Any incremented
+    // index also has an HP entry, so the map above already produced a fresh
+    // array + fresh objects for those indices. Mirror of engine.ts.
+    for (const [idx, inc] of oppTimesHitInc) {
+      const o = next.opponentTeam[idx];
+      if (o) next.opponentTeam[idx] = { ...o, timesHit: (o.timesHit ?? 0) + inc };
     }
 
     // Commit sub HP changes; clear broken subs.
@@ -1900,6 +1922,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
           // carry it — re-log `perish N` after a pass). Move-trap dies too.
           if (next.myPerishCount) { next.myPerishCount = { ...next.myPerishCount }; delete next.myPerishCount[outgoing]; }
           if (next.myTrappedBy) { next.myTrappedBy = { ...next.myTrappedBy }; delete next.myTrappedBy[outgoing]; }
+          // Rage Fist counter resets on switch-out (Champions rule — mainline
+          // Gen 9 keeps it). Mirror of engine.ts.
+          delete next.myTimesHit![outgoing];
         }
         nextActive.mine[a.attackerSlot] = a.targetTeamIndex;
       } else {
@@ -1907,7 +1932,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         if (outgoing != null && next.opponentTeam[outgoing]) {
           const regen = next.opponentTeam[outgoing]!.ability && toId(next.opponentTeam[outgoing]!.ability!) === 'regenerator';
           const regenHp = regen ? Math.min(100, (next.opponentTeam[outgoing]!.currentHpPercent ?? 100) + 100 / 3) : undefined;
-          next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {}, taunted: undefined, encoreMove: undefined, disabledMove: undefined, tauntTurns: undefined, encoreTurns: undefined, disableTurns: undefined, leechSeeded: undefined, cursed: undefined, partialTrap: undefined, nightmare: undefined, substitute: undefined, perishCount: undefined, trappedBy: undefined, ...(regenHp != null ? { currentHpPercent: regenHp } : {}) };
+          // (timesHit: Rage Fist counter — resets on switch-out, Champions rule.)
+          next.opponentTeam[outgoing] = { ...next.opponentTeam[outgoing], currentBoosts: {}, taunted: undefined, encoreMove: undefined, disabledMove: undefined, tauntTurns: undefined, encoreTurns: undefined, disableTurns: undefined, leechSeeded: undefined, cursed: undefined, partialTrap: undefined, nightmare: undefined, substitute: undefined, perishCount: undefined, trappedBy: undefined, timesHit: undefined, ...(regenHp != null ? { currentHpPercent: regenHp } : {}) };
         }
         nextActive.theirs[a.attackerSlot] = a.targetTeamIndex;
       }
@@ -2059,6 +2085,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       myTauntTurns: { ...(match.myTauntTurns ?? {}) },
       myEncoreTurns: { ...(match.myEncoreTurns ?? {}) },
       myDisableTurns: { ...(match.myDisableTurns ?? {}) },
+      myTimesHit: { ...(match.myTimesHit ?? {}) },
     };
     const nextActive = {
       mine: [activeIdx.mine[0], activeIdx.mine[1]] as [number | null, number | null],
@@ -2387,6 +2414,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             next.myCurrentHp[outgoing] = Math.min(100, (next.myCurrentHp[outgoing] ?? 100) + 100 / 3);
           }
           delete next.myBoosts![outgoing]; next.myTaunted = (next.myTaunted ?? []).filter(i => i !== outgoing); if (next.myEncoreMove) delete next.myEncoreMove[outgoing]; if (next.myDisabledMove) delete next.myDisabledMove[outgoing]; if (next.myTauntTurns) delete next.myTauntTurns[outgoing]; if (next.myEncoreTurns) delete next.myEncoreTurns[outgoing]; if (next.myDisableTurns) delete next.myDisableTurns[outgoing]; if (next.myLeechSeeded) delete next.myLeechSeeded[outgoing]; if (next.myCursed) delete next.myCursed[outgoing]; if (next.myPartialTrap) delete next.myPartialTrap[outgoing]; if (next.myNightmare) delete next.myNightmare[outgoing];
+          // Rage Fist counter resets on switch-out (Champions rule).
+          delete next.myTimesHit![outgoing];
         }
         nextActive.mine[update.bringIntoSlot] = teamIndex;
       } else {
@@ -2398,6 +2427,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
               o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + 100 / 3);
             }
             o.currentBoosts = {}; o.taunted = undefined; o.encoreMove = undefined; o.disabledMove = undefined; o.tauntTurns = undefined; o.encoreTurns = undefined; o.disableTurns = undefined; o.leechSeeded = undefined; o.cursed = undefined; o.partialTrap = undefined; o.nightmare = undefined; o.substitute = undefined;
+            // Rage Fist counter resets on switch-out (Champions rule).
+            o.timesHit = undefined;
           }
         }
         nextActive.theirs[update.bringIntoSlot] = teamIndex;
@@ -2955,6 +2986,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       attackerStatus: myStatus,
       defenderStatus: undefined as string | undefined,
       attackerFirstTurnOut: myFresh,
+      // Rage Fist counter (hits taken since last entry — Champions resets it
+      // on switch-out). Scales my Rage Fist's BP in the offense cells.
+      attackerTimesHit: match.myTimesHit?.[myIdx],
     };
     return {
       mySet,
@@ -2980,6 +3014,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
           attackerStatus: opp.status,
           defenderStatus: myStatus,
           attackerFirstTurnOut: oppFresh,
+          attackerTimesHit: opp.timesHit,
         });
         // Spread collateral: when the opp's worst move vs ME is a spread move,
         // it ALSO hits my other active. Recompute that same move against the
@@ -2995,6 +3030,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
                 attackerStatus: opp.status,
                 defenderStatus: otherStatus,
                 attackerFirstTurnOut: oppFresh,
+                attackerTimesHit: opp.timesHit,
               });
               return t ? { species: otherSet!.species, min: t.minPercent, max: t.maxPercent } : null;
             })()
@@ -3083,6 +3119,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
               attackerStatus: opp.status,
               defenderStatus: myStatus,
               attackerFirstTurnOut: oppFresh,
+              attackerTimesHit: opp.timesHit,
             });
           })(),
           speed: speedVerdict({ mySet, opp, field, myFormeOverride: myMegaActive ? match.myMegaForme?.[myIdx] : undefined }),

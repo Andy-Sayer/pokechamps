@@ -2115,9 +2115,13 @@ function isRechargeMove(move: string | null | undefined): boolean {
 function isDragonDarts(move: string | null | undefined): boolean { return toId(move ?? '') === 'dragondarts'; }
 // Rage Fist: +50 BP per damaging hit the user has TAKEN (base 50, cap 350) —
 // damage scales linearly with BP, so multiply by (1 + hits, ≤7). We count THIS
-// turn's hits only; lifetime hit counts from the live match aren't carried
-// (documented approximation). Sim diff-harness finding (under-damage when the
-// user is hit before it acts).
+// turn's hits only; hit counts from earlier turns aren't carried (documented
+// approximation). Champions rule: the counter RESETS on switch-out (mainline
+// Gen 9 keeps it), so the live counter is hits-since-last-entry — the engine
+// tracks it (Match.myTimesHit / OpponentEntry.timesHit, cleared at every
+// switch-out site) and the per-turn zeroing here never has to model a
+// cross-switch carry. Sim diff-harness finding (under-damage when the user is
+// hit before it acts).
 function isRageFist(move: string | null | undefined): boolean { return toId(move ?? '') === 'ragefist'; }
 function rageScale(move: string, hitsTaken: number): number { return isRageFist(move) ? 1 + Math.min(hitsTaken, 6) : 1; }
 
