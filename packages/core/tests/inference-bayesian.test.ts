@@ -164,7 +164,7 @@ describe('scoreOffensiveSpread — extreme hit promotes the offensive nature', (
   });
   const myIncin = mk({ species: 'Incineroar', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 4 } });
 
-  test('a hit no neutral nature can produce commits to +Atk (Adamant)', async () => {
+  test('a hit no neutral nature can produce commits to the +Atk CLASS (Adamant AND Brave)', async () => {
     const { scoreOffensiveSpread } = await import('../src/domain/inference.js');
     const { damageRange } = await import('../src/domain/damage.js');
     // Top roll of a max-Atk Adamant Earthquake — unreachable by a neutral nature.
@@ -182,7 +182,11 @@ describe('scoreOffensiveSpread — extreme hit promotes the offensive nature', (
       },
     });
     expect(scored.length).toBeGreaterThan(0);
-    expect(scored.every(s => s.candidate.nature === 'Adamant')).toBe(true);
+    // The hit proves +Atk but can't tell Adamant (-SpA) from Brave (-Spe) — both
+    // variants must survive so speed reads can discriminate later. Committing to
+    // one flag-bearer would silently assert a minus stat nothing observed.
+    const natures = new Set(scored.map(s => s.candidate.nature));
+    expect([...natures].sort()).toEqual(['Adamant', 'Brave']);
   });
 });
 

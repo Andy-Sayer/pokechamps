@@ -579,12 +579,17 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     const curSubHp = tSide === 'theirs'
       ? (oppSubHpSoFar.has(tIdx) ? oppSubHpSoFar.get(tIdx)! : next.opponentTeam[tIdx]?.substitute)
       : (mySubHpSoFar.has(tIdx) ? mySubHpSoFar.get(tIdx)! : next.myCurrentSub?.[tIdx]);
-    if (curSubHp != null) {
-      const mvFlags = getMove(a.move) as { flags?: Record<string, number> } | undefined;
-      if (!mvFlags?.flags?.sound) {
+    if (curSubHp != null && curSubHp > 0) {   // 0 = broke earlier THIS turn → later hits are real
+      const mvDex = getMove(a.move) as { flags?: Record<string, number>; category?: string } | undefined;
+      if (!mvDex?.flags?.sound) {
         hitSub.add(a);
-        if (a.damageHpPercent != null) {
-          const subAfter = Math.max(0, curSubHp - a.damageHpPercent);
+        // A DAMAGING hit: a sub (25% HP) breaks to one real doubles hit in practice,
+        // and the normal remaining-HP input carries NO sub-damage number to say
+        // otherwise — assume broken on the first absorbed hit. Explicit damage input
+        // (rare) still does the real arithmetic. A STATUS move is blocked by the sub
+        // and must leave it intact.
+        if (mvDex?.category === 'Physical' || mvDex?.category === 'Special') {
+          const subAfter = a.damageHpPercent != null ? Math.max(0, curSubHp - a.damageHpPercent) : 0;
           if (tSide === 'theirs') oppSubHpSoFar.set(tIdx, subAfter);
           else mySubHpSoFar.set(tIdx, subAfter);
         }

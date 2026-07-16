@@ -950,12 +950,15 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       const curSubHp = tSide === 'theirs'
         ? (oppSubHpSoFar.has(tIdx) ? oppSubHpSoFar.get(tIdx)! : next.opponentTeam[tIdx]?.substitute)
         : (mySubHpSoFar.has(tIdx) ? mySubHpSoFar.get(tIdx)! : next.myCurrentSub?.[tIdx]);
-      if (curSubHp != null) {
-        const mvFlags2 = getMove(a.move) as { flags?: Record<string, number> } | undefined;
-        if (!mvFlags2?.flags?.sound) {
+      if (curSubHp != null && curSubHp > 0) {   // 0 = broke earlier THIS turn → later hits are real
+        const mvDex2 = getMove(a.move) as { flags?: Record<string, number>; category?: string } | undefined;
+        if (!mvDex2?.flags?.sound) {
           hitSub.add(a);
-          if (a.damageHpPercent != null) {
-            const subAfter = Math.max(0, curSubHp - a.damageHpPercent);
+          // Mirror of engine.ts: a DAMAGING hit breaks the sub on the first absorbed
+          // hit unless an explicit damage number says otherwise (remaining-HP input
+          // has no sub info); a STATUS move is blocked and leaves the sub intact.
+          if (mvDex2?.category === 'Physical' || mvDex2?.category === 'Special') {
+            const subAfter = a.damageHpPercent != null ? Math.max(0, curSubHp - a.damageHpPercent) : 0;
             if (tSide === 'theirs') oppSubHpSoFar.set(tIdx, subAfter);
             else mySubHpSoFar.set(tIdx, subAfter);
           }

@@ -25,12 +25,23 @@ const NATURES_TO_TRY = [
   'Calm',     // +SpD, -Atk
   'Sassy',    // +SpD, -Spe
   'Relaxed',  // +Def, -Spe
-  'Modest',
-  'Timid',
-  'Adamant',
-  'Jolly',
+  'Modest',   // +SpA, -Atk
+  'Timid',    // +Spe, -Atk
+  'Adamant',  // +Atk, -SpA
+  'Jolly',    // +Spe, -SpA
+  'Brave',    // +Atk, -Spe — Trick Room physical attackers
+  'Quiet',    // +SpA, -Spe — Trick Room special attackers
   'Hardy',    // neutral
 ];
+
+// The +Atk / +SpA nature CLASSES for the extreme-hit promotion: a huge observed hit
+// proves the 1.1× on the attacking stat but says NOTHING about which stat the nature
+// docks — Adamant(-SpA) and Brave(-Spe) deal identical damage. Promote to the class
+// (the two variants that exist in practice) and let speed reads / later observations
+// discriminate. What downstream actually consumes is the implied STATS, so an
+// unresolved minus-stat stays honestly wide instead of collapsing to one guess.
+const PLUS_ATK_NATURES = ['Adamant', 'Brave'];
+const PLUS_SPA_NATURES = ['Modest', 'Quiet'];
 
 const COMMON_DEFENSIVE_ITEMS: (string | undefined)[] = [
   undefined,
@@ -473,11 +484,13 @@ export function scoreOffensiveSpread(input: {
   let result = dedupe(solve(input.startingCandidates));
   if (!result.length) {
     // Confidence trigger: no current-nature spread can explain the hit even at
-    // max investment → it's an extreme hit that forces the boosting nature. Only
-    // here do we override the inherited nature (Adamant for physical, Modest for
-    // special) — natures otherwise stay loose.
-    const boost = stat === 'atk' ? 'Adamant' : 'Modest';
-    const promoted = input.startingCandidates.filter(c => c.nature !== boost).map(c => ({ ...c, nature: boost }));
+    // max investment → it's an extreme hit that forces A boosting nature. Promote
+    // to the whole +stat CLASS (Adamant/Brave or Modest/Quiet — damage-identical;
+    // the minus stat is discriminated by speed reads and later observations), not
+    // one flag-bearer — natures otherwise stay loose.
+    const boosts = stat === 'atk' ? PLUS_ATK_NATURES : PLUS_SPA_NATURES;
+    const promoted = input.startingCandidates.flatMap(c =>
+      boosts.filter(b => b !== c.nature).map(b => ({ ...c, nature: b })));
     if (promoted.length) result = dedupe(solve(promoted));
   }
   return result.length ? result : passthrough(); // still nothing → keep prior belief

@@ -114,6 +114,43 @@ describe('Substitute — damage absorption', () => {
     expect(r.match.myCurrentSub![0]).toBe(5); // sub took the hit
   });
 
+  test('normal remaining-HP input (no explicit damage) breaks the sub on the first hit', () => {
+    // The screen shows the REAL mon's HP, which a sub-absorbed hit doesn't move — so
+    // normal input carries no sub-damage number. Subs break to one real doubles hit
+    // in practice: assume broken rather than leaving a phantom sub up.
+    const m = baseMatch();
+    m.opponentTeam[0]!.substitute = 25;
+    const action: MoveAction = {
+      kind: 'move', side: 'mine', move: 'Moonblast',
+      attackerSlot: 0, attackerTeamIndex: 0,
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 100,           // what a human keys in: HP unchanged
+    };
+    const r = finalizeTurn({ match: m, turn: { actions: [action], field: NEUTRAL_FIELD }, activeIdx: active });
+    expect(r.match.opponentTeam[0]!.currentHpPercent).toBe(100); // real HP untouched
+    expect(r.match.opponentTeam[0]!.substitute).toBeUndefined(); // sub assumed broken
+  });
+
+  test('after the sub breaks mid-turn, a second hit lands on the real mon', () => {
+    const m = baseMatch();
+    m.opponentTeam[0]!.substitute = 25;
+    const first: MoveAction = {
+      kind: 'move', side: 'mine', move: 'Moonblast',
+      attackerSlot: 0, attackerTeamIndex: 0,
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 100, order: 1,
+    };
+    const second: MoveAction = {
+      kind: 'move', side: 'mine', move: 'Moonblast',
+      attackerSlot: 0, attackerTeamIndex: 0,
+      target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0,
+      targetRemainingHpPercent: 60, order: 2,
+    };
+    const r = finalizeTurn({ match: m, turn: { actions: [first, second], field: NEUTRAL_FIELD }, activeIdx: active });
+    expect(r.match.opponentTeam[0]!.substitute).toBeUndefined();
+    expect(r.match.opponentTeam[0]!.currentHpPercent).toBe(60);  // second hit was real
+  });
+
   test('sound move bypasses sub and hits real mon', () => {
     const m = baseMatch();
     m.opponentTeam[0]!.substitute = 25;
