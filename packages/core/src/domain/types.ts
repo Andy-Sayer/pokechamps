@@ -134,6 +134,11 @@ export interface OpponentEntry {
   // the flinched mon simply has no action in the turn. Fake Out auto-flinches on
   // first turn out; secondary flinch moves (Iron Head etc.) are user-logged.
   flinched?: boolean;
+  // Damaging-move hits this mon has taken while on the field (Rage Fist's
+  // +50-BP-per-hit counter; sub-absorbed hits don't count). Champions rule
+  // (differs from mainline Gen 9): the counter RESETS on switch-out, so it's
+  // cleared at every switch-out site rather than persisting for the match.
+  timesHit?: number;
 }
 
 export interface HazardState {
@@ -384,6 +389,10 @@ export interface Match {
   // One-turn flinch volatile (cleared at EOT). Informational — logged when user
   // observes a Fake Out or secondary flinch proc ("o1 flinch").
   myFlinched?: Record<number, boolean>;
+  // myTeam index → damaging-move hits taken while on the field (Rage Fist
+  // counter; parallel to OpponentEntry.timesHit). Champions rule: RESETS on
+  // switch-out (mainline Gen 9 keeps it across switches).
+  myTimesHit?: Record<number, number>;
   // myTeam index → charging-move state. Parallel to OpponentEntry.charging.
   // Set when a mine-side charge move logged with no damage; cleared when
   // the same mon's next damaging action lands.

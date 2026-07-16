@@ -73,6 +73,7 @@ function bestMoveAgainst(
     attackerStatus?: string;
     defenderStatus?: string;
     critical?: boolean;
+    attackerTimesHit?: number;
   } = {},
 ): { move: string; min: number; max: number; koChance: string } | null {
   let best: { move: string; min: number; max: number; koChance: string } | null = null;
@@ -84,7 +85,7 @@ function bestMoveAgainst(
         move,
         field,
         attackerSide,
-        attackerOpts: { gimmickActive: opts.attackerGimmickActive, boosts: opts.attackerBoosts, status: opts.attackerStatus },
+        attackerOpts: { gimmickActive: opts.attackerGimmickActive, boosts: opts.attackerBoosts, status: opts.attackerStatus, timesHit: opts.attackerTimesHit },
         defenderOpts: { gimmickActive: opts.defenderGimmickActive, boosts: opts.defenderBoosts, status: opts.defenderStatus },
         critical: opts.critical,
       });
@@ -142,6 +143,9 @@ export function predictOffense(args: {
   defenderBoosts?: Partial<Record<string, number>>;
   attackerStatus?: string;
   defenderStatus?: string;
+  /** Attacker's Rage Fist hit counter (damaging hits taken since last entry —
+   *  Champions resets it on switch-out). Feeds damageRange's BP override. */
+  attackerTimesHit?: number;
   critical?: boolean;
   // False → the attacker is past its first turn out, so Fake Out / First
   // Impression / Mat Block can't be used and are dropped from consideration.
@@ -166,6 +170,7 @@ export function predictOffense(args: {
       attackerStatus: args.attackerStatus,
       defenderStatus: args.defenderStatus,
       critical: args.critical,
+      attackerTimesHit: args.attackerTimesHit,
     }),
   );
   const votes = new Map<string, { count: number; sumMax: number }>();
@@ -196,7 +201,7 @@ export function predictOffense(args: {
         field: args.field,
         attackerSide: 'mine',
         critical: args.critical,
-        attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+        attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus, timesHit: args.attackerTimesHit },
         defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
       });
       if (r.minPercent < minPercent) minPercent = r.minPercent;
@@ -214,7 +219,7 @@ export function predictOffense(args: {
   const likely = likelyRange(args.opponent, cands, chosenMove, c => damageRange({
     attacker: args.attacker, defender: c, move: chosenMove, field: args.field, attackerSide: 'mine',
     critical: args.critical,
-    attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+    attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus, timesHit: args.attackerTimesHit },
     defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
   }));
   return {
@@ -268,6 +273,9 @@ export function predictOffenseAll(args: {
   defenderBoosts?: Partial<Record<string, number>>;
   attackerStatus?: string;
   defenderStatus?: string;
+  /** Attacker's Rage Fist hit counter (damaging hits taken since last entry —
+   *  Champions resets it on switch-out). Feeds damageRange's BP override. */
+  attackerTimesHit?: number;
   critical?: boolean;
   attackerFirstTurnOut?: boolean;
 }): MatchupCell[] {
@@ -290,7 +298,7 @@ export function predictOffenseAll(args: {
           move,
           field: args.field,
           attackerSide: 'mine',
-          attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+          attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus, timesHit: args.attackerTimesHit },
           defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
           critical: args.critical,
         });
@@ -308,7 +316,7 @@ export function predictOffenseAll(args: {
       : koChance;
     const likely = likelyRange(args.opponent, cands, move, c => damageRange({
       attacker: args.attacker, defender: c, move, field: args.field, attackerSide: 'mine',
-      attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+      attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus, timesHit: args.attackerTimesHit },
       defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
       critical: args.critical,
     }));
@@ -341,6 +349,9 @@ export function predictThreat(args: {
   defenderBoosts?: Partial<Record<string, number>>;
   attackerStatus?: string;
   defenderStatus?: string;
+  /** Attacker's Rage Fist hit counter (damaging hits taken since last entry —
+   *  Champions resets it on switch-out). Feeds damageRange's BP override. */
+  attackerTimesHit?: number;
   critical?: boolean;
   // False → this opp is past its first turn out: drop Fake Out / First
   // Impression / Mat Block from its threat pool (they can't fire).
@@ -367,6 +378,7 @@ export function predictThreat(args: {
       attackerStatus: args.attackerStatus,
       defenderStatus: args.defenderStatus,
       critical: args.critical,
+      attackerTimesHit: args.attackerTimesHit,
     });
     if (r && (!best || r.max > best.max)) best = r;
   }
@@ -388,7 +400,7 @@ export function predictThreat(args: {
         field: args.field,
         attackerSide: 'theirs',
         critical: args.critical,
-        attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+        attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus, timesHit: args.attackerTimesHit },
         defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
       });
       if (r.minPercent < minPercent) minPercent = r.minPercent;
@@ -407,7 +419,7 @@ export function predictThreat(args: {
   const likely = likelyRange(args.opponent, cands, chosenMove, c => damageRange({
     attacker: c, defender: args.defender, move: chosenMove, field: args.field, attackerSide: 'theirs',
     critical: args.critical,
-    attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+    attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus, timesHit: args.attackerTimesHit },
     defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
   }));
   return {
@@ -439,6 +451,9 @@ export function predictThreatAll(args: {
   defenderBoosts?: Partial<Record<string, number>>;
   attackerStatus?: string;
   defenderStatus?: string;
+  /** Attacker's Rage Fist hit counter (damaging hits taken since last entry —
+   *  Champions resets it on switch-out). Feeds damageRange's BP override. */
+  attackerTimesHit?: number;
   critical?: boolean;
   attackerFirstTurnOut?: boolean;
 }): MatchupCell[] {
@@ -462,7 +477,7 @@ export function predictThreatAll(args: {
       try {
         const r = damageRange({
           attacker: c, defender: args.defender, move, field: args.field, attackerSide: 'theirs',
-          attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+          attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus, timesHit: args.attackerTimesHit },
           defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
           critical: args.critical,
         });
@@ -477,7 +492,7 @@ export function predictThreatAll(args: {
       : koChance;
     const likely = likelyRange(args.opponent, cands, move, c => damageRange({
       attacker: c, defender: args.defender, move, field: args.field, attackerSide: 'theirs',
-      attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+      attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus, timesHit: args.attackerTimesHit },
       defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
       critical: args.critical,
     }));
@@ -522,6 +537,9 @@ export function predictOffenseCells(args: {
   defenderBoosts?: Partial<Record<string, number>>;
   attackerStatus?: string;
   defenderStatus?: string;
+  /** Attacker's Rage Fist hit counter (damaging hits taken since last entry —
+   *  Champions resets it on switch-out). Feeds damageRange's BP override. */
+  attackerTimesHit?: number;
   attackerFirstTurnOut?: boolean;
 }): PerMoveCells {
   const cands = defenderCandidates(args.opponent, args.attacker.level);
@@ -542,7 +560,7 @@ export function predictOffenseCells(args: {
       try {
         const r = damageRange({
           attacker: args.attacker, defender: c, move, field: args.field, attackerSide: 'mine',
-          attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+          attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus, timesHit: args.attackerTimesHit },
           defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
         });
         let a = agg.get(move);
@@ -573,7 +591,7 @@ export function predictOffenseCells(args: {
       : a.koChance;
     const likely = likelyRange(args.opponent, cands, move, c => damageRange({
       attacker: args.attacker, defender: c, move, field: args.field, attackerSide: 'mine',
-      attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+      attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus, timesHit: args.attackerTimesHit },
       defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
     }));
     all.push({
@@ -603,6 +621,9 @@ export function predictThreatCells(args: {
   defenderBoosts?: Partial<Record<string, number>>;
   attackerStatus?: string;
   defenderStatus?: string;
+  /** Attacker's Rage Fist hit counter (damaging hits taken since last entry —
+   *  Champions resets it on switch-out). Feeds damageRange's BP override. */
+  attackerTimesHit?: number;
   attackerFirstTurnOut?: boolean;
 }): PerMoveCells {
   // Move pool + selection copied verbatim from predictThreat: knownMoves else
@@ -627,7 +648,7 @@ export function predictThreatCells(args: {
       try {
         const r = damageRange({
           attacker: c, defender: args.defender, move, field: args.field, attackerSide: 'theirs',
-          attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+          attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus, timesHit: args.attackerTimesHit },
           defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
         });
         let a = agg.get(move);
@@ -650,7 +671,7 @@ export function predictThreatCells(args: {
       : a.koChance;
     const likely = likelyRange(args.opponent, cands, move, c => damageRange({
       attacker: c, defender: args.defender, move, field: args.field, attackerSide: 'theirs',
-      attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus },
+      attackerOpts: { gimmickActive: args.attackerGimmickActive, boosts: args.attackerBoosts, status: args.attackerStatus, timesHit: args.attackerTimesHit },
       defenderOpts: { gimmickActive: args.defenderGimmickActive, boosts: args.defenderBoosts, status: args.defenderStatus },
     }));
     all.push({

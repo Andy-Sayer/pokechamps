@@ -551,6 +551,7 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     myCursed: { ...(match.myCursed ?? {}) },
     myPartialTrap: { ...(match.myPartialTrap ?? {}) },
     myNightmare: { ...(match.myNightmare ?? {}) },
+    myTimesHit: { ...(match.myTimesHit ?? {}) },
   };
 
   // Walk damaging actions in order, deriving each action's damageHpPercent
@@ -562,6 +563,9 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
   const mySubHpSoFar = new Map<number, number>();
   // Actions that were absorbed by a substitute (skip from inference + real-HP update).
   const hitSub = new Set<MoveAction>();
+  // Rage Fist hit-counter increments this turn (opp side committed after the
+  // HP commit below, once opponentTeam has been re-mapped to fresh objects).
+  const oppTimesHitInc = new Map<number, number>();
   const sortedActions = [...draftActions].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   for (const a of sortedActions) {
     if (a.kind === 'switch' || a.kind === 'mega') continue;
@@ -629,6 +633,15 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     // sees the actual move output, not the post-Sitrus residual.
     a.damageHpPercent = Math.max(0, prevPct - newPct);
 
+    // Rage Fist hit counter: a damaging move that connected with the REAL mon
+    // (sub-absorbed hits skipped above; status moves never reach here) bumps
+    // the target's timesHit. Champions rule: the counter resets on switch-out
+    // — see the switch-persist pass below. Mirror in BattleScreen.tsx.
+    if (a.damageHpPercent > 0) {
+      if (tSide === 'theirs') oppTimesHitInc.set(tIdx, (oppTimesHitInc.get(tIdx) ?? 0) + 1);
+      else next.myTimesHit![tIdx] = (next.myTimesHit![tIdx] ?? 0) + 1;
+    }
+
     // HP-threshold item auto-trigger (Sitrus, pinch berries). My-side only:
     // opp items are usually unknown and auto-firing a guess would silently
     // corrupt downstream inference. Held item is the set's item unless
@@ -686,6 +699,14 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
   for (const [idx, hp] of myHpSoFar) {
     next.myCurrentHp![idx] = hp;
     if (hp === 0 && !next.myFainted!.includes(idx)) next.myFainted!.push(idx);
+  }
+
+  // Commit Rage Fist hit-counter increments (opp side). Safe to assign into
+  // the array here: any incremented index also has an HP entry, so the map
+  // above already produced a fresh array + fresh objects for those indices.
+  for (const [idx, inc] of oppTimesHitInc) {
+    const o = next.opponentTeam[idx];
+    if (o) next.opponentTeam[idx] = { ...o, timesHit: (o.timesHit ?? 0) + inc };
   }
 
   // Commit substitute HP changes; clear broken subs.
@@ -1614,6 +1635,10 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
           next.myCurrentHp[outgoing] = Math.min(100, (next.myCurrentHp[outgoing] ?? 100) + 100 / 3);
         }
         delete next.myBoosts[outgoing]; clearMyVolatiles(next, outgoing);
+        // Rage Fist counter resets on switch-out (Champions rule — mainline
+        // Gen 9 keeps it). NOT in clearMyVolatiles: that also runs on `cure`,
+        // which must not touch the counter.
+        delete next.myTimesHit![outgoing];
       }
       nextActive.mine[a.attackerSlot] = a.targetTeamIndex;
     } else {
@@ -1624,6 +1649,9 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
           o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + 100 / 3);
         }
         clearOppVolatiles(o);
+        // Rage Fist counter resets on switch-out (Champions rule); kept out of
+        // clearOppVolatiles because that also runs on `cure`.
+        o.timesHit = undefined;
         next.opponentTeam[outgoing] = o;
       }
       nextActive.theirs[a.attackerSlot] = a.targetTeamIndex;
@@ -1791,6 +1819,7 @@ function applyStateUpdateImpl(
     myPartialTrap: { ...(match.myPartialTrap ?? {}) },
     myNightmare: { ...(match.myNightmare ?? {}) },
     myFlinched: { ...(match.myFlinched ?? {}) },
+    myTimesHit: { ...(match.myTimesHit ?? {}) },
   };
   const nextActive: ActiveIdx = {
     mine: [activeIdx.mine[0], activeIdx.mine[1]],
@@ -2096,6 +2125,8 @@ function applyStateUpdateImpl(
           next.myCurrentHp[outgoing] = Math.min(100, (next.myCurrentHp[outgoing] ?? 100) + 100 / 3);
         }
         delete next.myBoosts![outgoing]; clearMyVolatiles(next, outgoing);
+        // Rage Fist counter resets on switch-out (Champions rule).
+        delete next.myTimesHit![outgoing];
       }
       nextActive.mine[update.bringIntoSlot] = teamIndex;
     } else {
@@ -2107,6 +2138,8 @@ function applyStateUpdateImpl(
             o.currentHpPercent = Math.min(100, (o.currentHpPercent ?? 100) + 100 / 3);
           }
           o.currentBoosts = {}; clearOppVolatiles(o);
+          // Rage Fist counter resets on switch-out (Champions rule).
+          o.timesHit = undefined;
         }
       }
       nextActive.theirs[update.bringIntoSlot] = teamIndex;
