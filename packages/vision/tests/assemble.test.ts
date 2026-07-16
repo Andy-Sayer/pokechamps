@@ -109,6 +109,33 @@ describe('BattleAssembler — fine-grained HP timeline (recordHp)', () => {
     a.recordHp('o1', 70, true);                       // o2 Protected / no drop observed
     expect(a.endTurnLines({ o1: 70, o2: 100 })).toEqual(['m1 > Heat Wave > o1 > 70']);
   });
+
+  test('a second effectiveness line converts a pinned spread move to per-target spread', () => {
+    const a = new BattleAssembler({ m1: 'Garchomp', m2: 'Dragonite', o1: 'Ninetales', o2: 'Politoed' });
+    feed(a, [
+      'The opposing Ninetales used Blizzard!',
+      "It's super effective on Garchomp!",            // pins m1
+      "It's super effective on Dragonite!",           // second name → convert to spread
+    ]);
+    expect(a.endTurnLines({ m1: 40, m2: 55 })).toEqual(['o1 > Blizzard > spread > m1:40%, m2:55%']);
+  });
+
+  test('flinch-pinned Rock Slide still captures the other foe via its window drop', () => {
+    const a = new BattleAssembler({ m1: 'Garchomp', m2: 'Kingambit', o1: 'Raichu', o2: 'Sylveon' });
+    for (const r of ['o1', 'o2'] as const) a.recordHp(r, 100, true);
+    feed(a, ['Garchomp used Rock Slide!', "The opposing Raichu flinched and couldn't move!"]);
+    a.recordHp('o1', 70, true); a.recordHp('o2', 60, true);
+    expect(a.endTurnLines({ o1: 70, o2: 60 })).toEqual(['m1 > Rock Slide > spread > o1:70, o2:60']);
+  });
+
+  test('a Protected foe with a residual chip is NOT swept into a spread hit', () => {
+    const a = new BattleAssembler({ m1: 'Staraptor', m2: 'Grimmsnarl', o1: 'Raichu', o2: 'Sylveon' });
+    for (const r of ['o1', 'o2'] as const) a.recordHp(r, 100, true);
+    feed(a, ['The opposing Sylveon protected itself!', 'Staraptor used Heat Wave!']);
+    a.recordHp('o1', 70, true);
+    a.recordHp('o2', 94, true);                       // sandstorm chip on the Protect user
+    expect(a.endTurnLines({ o1: 70, o2: 94 })).toEqual(['m1 > Heat Wave > o1 > 70']);
+  });
 });
 
 describe('BattleAssembler — slot resolution & roster', () => {

@@ -50,6 +50,7 @@ export class BattleAssembler {
   private stateLines: string[] = [];    // stat-boost lines (Intimidate, Nasty Plot, …) this turn
   private megaPending = new Set<SlotRef>();
   private hpSamples: Partial<Record<SlotRef, HpSample[]>> = {};
+  private protectedThisTurn = new Set<SlotRef>();   // Protect users — no damage inferred onto them
 
   /** Seed the two leads per side (from the team-preview / nameplate appearance read). */
   constructor(leads: Partial<Roster> = {}) {
@@ -118,16 +119,30 @@ export class BattleAssembler {
   private lastMoveInto(side: Side): TurnAction | undefined {
     for (let i = this.actions.length - 1; i >= 0; i--) {
       const a = this.actions[i]!;
-      if (a.kind === 'move' && a.target == null && sideOf(a.actor) !== side) return a;
+      if (a.kind === 'move' && a.target == null && !a.spread && sideOf(a.actor) !== side) return a;
     }
     return undefined;
   }
 
-  /** A follow-up line (flinch/effectiveness/faint) names who a move hit → pin target. */
+  /** A follow-up line (flinch/effectiveness/faint) names who a move hit → pin target.
+   *  A SECOND named mon on a dex spread move (two "super effective on X!" lines, or a
+   *  faint after an effectiveness pin) means the move hit both → convert the single
+   *  pin to a spread list; per-target damage fills in at endTurn. */
   private attachTarget(side: Side, ref: SlotRef | null): void {
     if (!ref) return;
     const a = this.lastMoveInto(side);
-    if (a) a.target = ref;
+    if (a) { a.target = ref; return; }
+    for (let i = this.actions.length - 1; i >= 0; i--) {
+      const b = this.actions[i]!;
+      if (b.kind !== 'move' || sideOf(b.actor) === side) continue;
+      const dexTarget = (getMove(toId(b.move ?? '')) as { target?: string } | undefined)?.target;
+      if (dexTarget !== 'allAdjacentFoes' && dexTarget !== 'allAdjacent') return;
+      const refs = [...(b.spread?.map(s => s.ref) ?? []), ...(b.target ? [b.target] : [])];
+      if (refs.includes(ref)) return;              // duplicate banner — already known
+      b.spread = [...refs, ref].map(r => ({ ref: r, hpRemainingPercent: 0 }));
+      b.target = undefined;
+      return;
+    }
   }
 
   /** Feed one parsed banner event; updates roster + the current turn's actions. */
@@ -184,6 +199,14 @@ export class BattleAssembler {
       case 'effectiveness':
         this.attachTarget(msg.side, this.resolveSlot(msg.side, msg.species ?? msg.label));
         break;
+      case 'protect': {
+        // "X protected itself!" — X took no move damage this turn, so an HP dip on it
+        // (residual chip) must NOT be read as a hit: exclude it from window-drop target
+        // inference and spread detection. (Its own Protect action line is separate.)
+        const ref = this.resolveSlot(msg.side, msg.species ?? msg.label);
+        if (ref) this.protectedThisTurn.add(ref);
+        break;
+      }
       case 'statChange': {
         // Stat boosts (Intimidate on switch-in, Nasty Plot, etc.) → a turn-log state line
         // `o1 -1 atk`. This is why the initial Intimidate was vanishing — it was dropped here.
@@ -230,19 +253,23 @@ export class BattleAssembler {
 
     // PASS 1 — SPREAD DETECTION. A dex spread move (allAdjacentFoes / allAdjacent)
     // whose window shows BOTH foes dropping is a spread hit → per-target damage list
-    // (`> spread > o1:40, o2:35`). Values fill in pass 3. Requires per-frame samples;
-    // without them this never fires and the move resolves single-target as before.
+    // (`> spread > o1:40, o2:35`). Values fill in pass 3. A banner-pinned target
+    // (flinch/effectiveness named one mon) counts as hit without needing a sample, so
+    // Rock Slide pinned by its flinch still captures the OTHER foe's chunk. Requires
+    // per-frame samples; without them a pinned/unresolved move stays single-target.
     this.actions.forEach((a, i) => {
-      if (a.kind !== 'move' || a.target != null || a.spread || !isOffensive(a.move)) return;
+      if (a.kind !== 'move' || a.spread || !isOffensive(a.move)) return;
       const dexTarget = (getMove(toId(a.move ?? '')) as { target?: string } | undefined)?.target;
       if (dexTarget !== 'allAdjacentFoes' && dexTarget !== 'allAdjacent') return;
       const [f1, f2] = slotsFor(sideOf(a.actor) === 'mine' ? 'opp' : 'mine');
       const [s1, s2] = slotsFor(sideOf(a.actor));
       const ally = s1 === a.actor ? s2 : s1;
-      const cands = dexTarget === 'allAdjacent' ? [f1, f2, ally] : [f1, f2];
-      const hit = cands.filter(r => this.roster[r] && immDrop(r, i) >= 1);
-      if (hit.filter(r => r !== ally).length >= 2)
+      const cands = (dexTarget === 'allAdjacent' ? [f1, f2, ally] : [f1, f2]).filter(r => !this.protectedThisTurn.has(r));
+      const hit = cands.filter(r => this.roster[r] && (r === a.target || immDrop(r, i) >= 1));
+      if (hit.filter(r => r !== ally).length >= 2) {
         a.spread = hit.map(ref => ({ ref, hpRemainingPercent: 0 }));
+        a.target = undefined;
+      }
     });
 
     // PASS 2 — TARGET INFERENCE for moves the banner didn't name (neutral single hits
@@ -260,7 +287,7 @@ export class BattleAssembler {
     this.actions.forEach((a, i) => {
       if (a.kind !== 'move' || a.target != null || a.spread || !isOffensive(a.move)) return;
       const [f1, f2] = slotsFor(sideOf(a.actor) === 'mine' ? 'opp' : 'mine');
-      let pick = [f1, f2].filter(r => this.roster[r] && immDrop(r, i) >= 3)                  // 1. window drop
+      let pick = [f1, f2].filter(r => this.roster[r] && !this.protectedThisTurn.has(r) && immDrop(r, i) >= 3)  // 1. window drop
         .sort((x, y) => immDrop(y, i) - immDrop(x, i))[0];
       if (!pick) {
         const foes = [f1, f2].filter(r => !claimed.has(r));
@@ -301,7 +328,7 @@ export class BattleAssembler {
     // standalone mega lines so the forme change isn't lost.
     const megas = [...this.megaPending];
     const obs: TurnObservation = { actions: this.actions, faints: this.faints, megas: megas.length ? megas : undefined, stateLines: this.stateLines.length ? [...this.stateLines] : undefined, confidence: 1, notes: this.notes };
-    this.actions = []; this.faints = []; this.notes = []; this.stateLines = []; this.megaPending.clear(); this.hpSamples = {};
+    this.actions = []; this.faints = []; this.notes = []; this.stateLines = []; this.megaPending.clear(); this.hpSamples = {}; this.protectedThisTurn.clear();
     return obs;
   }
 
