@@ -52,6 +52,7 @@ export class BattleAssembler {
   private megaPending = new Set<SlotRef>();
   private hpSamples: Partial<Record<SlotRef, HpSample[]>> = {};
   private protectedThisTurn = new Set<SlotRef>();   // Protect users — no damage inferred onto them
+  private missedTargets = new Set<string>();        // "actionIdx:ref" pairs where the move missed
 
   /** Seed the two leads per side (from the team-preview / nameplate appearance read). */
   constructor(leads: Partial<Roster> = {}) {
@@ -170,12 +171,11 @@ export class BattleAssembler {
       }
       case 'switchIn': {
         const [a, b] = slotsFor(msg.side);
-        // Re-fired send-out banner: the named mon is already active on that side →
-        // a re-read, not a second switch (species clause: no duplicate species).
-        {
-          const sp = norm(msg.species ?? msg.label);
-          if (sp && (norm(this.roster[a]) === sp || norm(this.roster[b]) === sp)) break;
-        }
+        // Re-fired send-out banner: dedupe on a switch ACTION already recorded this
+        // turn — NOT on the roster, which the per-frame slot-OCR seeding may have
+        // filled BEFORE the banner parsed (that race made real send-outs vanish).
+        const spIn = norm(msg.species ?? msg.label);
+        if (spIn && this.actions.some(x => x.kind === 'switch' && norm(x.switchTo ?? null) === spIn)) break;
         // Opening DOUBLE send-out: "X sent out A and B!" / "Go! A and B!" names both leads in
         // one banner. Split when BOTH halves resolve to real species (guards a nickname that
         // happens to contain "and") — resolveSpecies token-matches the pair to just one, so
@@ -190,7 +190,12 @@ export class BattleAssembler {
             break;
           }
         }
-        const target: SlotRef = this.roster[a] == null ? a : this.roster[b] == null ? b : a;
+        // Prefer the slot the per-frame OCR already seeded with this species (the
+        // plate index is ground truth), then the first empty slot.
+        const target: SlotRef =
+          spIn && norm(this.roster[a]) === spIn ? a :
+          spIn && norm(this.roster[b]) === spIn ? b :
+          this.roster[a] == null ? a : this.roster[b] == null ? b : a;
         const species = msg.species ?? msg.label;          // null species → keep the label (nickname) as a tag
         this.roster[target] = species;
         this.actions.push({ actor: target, kind: 'switch', switchTo: species });
@@ -220,6 +225,22 @@ export class BattleAssembler {
         // inference and spread detection. (Its own Protect action line is separate.)
         const ref = this.resolveSlot(msg.side, msg.species ?? msg.label);
         if (ref) this.protectedThisTurn.add(ref);
+        break;
+      }
+      case 'miss': {
+        // "X avoided the attack!" — the most recent move into X missed: pin the target
+        // (the aim is real data) but flag it so no damage slot is emitted; an
+        // "unchanged HP" value would read as a 0-damage observation. (Seen live:
+        // `o1 > Solar Beam > m1 > 100%` off a dodged Solar Beam.)
+        const ref = this.resolveSlot(msg.side, msg.species ?? msg.label);
+        if (!ref) break;
+        let act: TurnAction | undefined;
+        for (let i = this.actions.length - 1; i >= 0 && !act; i--) {
+          const x = this.actions[i]!;
+          if (x.kind !== 'move' || sideOf(x.actor) === msg.side) continue;
+          if (x.target === ref || (x.target == null && !x.spread)) act = x;
+        }
+        if (act) { if (act.target == null) act.target = ref; this.missedTargets.add(`${this.actions.indexOf(act)}:${ref}`); }
         break;
       }
       case 'crit': {
@@ -381,10 +402,10 @@ export class BattleAssembler {
           if (smp?.raw != null) s.hpRemainingRaw = smp.raw;
         }
       } else if (a.target != null) {
-        // Target Protected → keep the target (the move WAS aimed there — reveals the
+        // Target Protected or the move MISSED → keep the target (the aim reveals the
         // move, feeds Choice-lock logic) but emit NO damage slot: an "unchanged HP"
         // value would read as a 0-damage observation and poison the spread inference.
-        if (this.protectedThisTurn.has(a.target)) return;
+        if (this.protectedThisTurn.has(a.target) || this.missedTargets.has(`${i}:${a.target}`)) return;
         const smp = this.lastSample(a.target, i + 1, cutFor(i, a.target));
         const pct = smp?.pct ?? hpBySlot[a.target];
         if (pct != null) a.hpRemainingPercent = pct;
@@ -395,7 +416,7 @@ export class BattleAssembler {
     // standalone mega lines so the forme change isn't lost.
     const megas = [...this.megaPending];
     const obs: TurnObservation = { actions: this.actions, faints: this.faints, megas: megas.length ? megas : undefined, stateLines: this.stateLines.length ? [...this.stateLines] : undefined, confidence: 1, notes: this.notes };
-    this.actions = []; this.faints = []; this.notes = []; this.stateLines = []; this.megaPending.clear(); this.hpSamples = {}; this.protectedThisTurn.clear();
+    this.actions = []; this.faints = []; this.notes = []; this.stateLines = []; this.megaPending.clear(); this.hpSamples = {}; this.protectedThisTurn.clear(); this.missedTargets.clear();
     return obs;
   }
 

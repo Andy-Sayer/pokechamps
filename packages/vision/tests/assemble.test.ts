@@ -164,6 +164,16 @@ describe('BattleAssembler — banner re-fire dedupe (live replay bugs)', () => {
     expect(a.endTurnLines().filter(l => l.includes('switch'))).toEqual(['m1 > switch > Dragonite']);
   });
 
+  test('slot-OCR seeding racing the send-out banner does NOT eat the switch line', () => {
+    // The per-frame species OCR can fill the roster BEFORE the send-out banner
+    // parses; that must still emit the switch (deduping on roster made real
+    // send-outs vanish in the 2026-06-20 replay).
+    const a = new BattleAssembler({});
+    a.seedActiveIfUnknown('m1', 'Kingambit');
+    feed(a, ['Go! Kingambit!', 'Go! Kingambit!']);          // banner + a re-fire
+    expect(a.endTurnLines().filter(l => l.includes('switch'))).toEqual(['m1 > switch > Kingambit']);
+  });
+
   test('a re-fired faint banner does not double the ko (even after a roster re-seed)', () => {
     const a = new BattleAssembler(LEADS);
     feed(a, ['The opposing Garchomp used Dragon Claw!', 'Kingambit fainted!']);
@@ -194,6 +204,14 @@ describe('BattleAssembler — Protect blocks the damage observation', () => {
     ]);
     // `> o1 > 100` would be a 0-damage observation — poison for the spread solver.
     expect(a.endTurnLines({ o1: 100 })).toEqual(['m2 > Hurricane > o1']);
+  });
+
+  test('a missed move keeps its target but emits NO damage slot', () => {
+    // Seen live: a dodged Solar Beam emitted `o1 > Solar Beam > m1 > 100%` — a
+    // 0-damage observation the spread solver would choke on.
+    const a = new BattleAssembler({ m1: 'Talonflame', m2: 'Kingambit', o1: 'Charizard', o2: 'Garchomp' });
+    feed(a, ['The opposing Charizard used Solar Beam!', 'Talonflame avoided the attack!']);
+    expect(a.endTurnLines({ m1: 100 })).toEqual(['o1 > Solar Beam > m1']);
   });
 
   test('a spread hit drops the Protected ref and keeps the real ones', () => {
