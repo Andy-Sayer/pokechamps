@@ -158,6 +158,11 @@ export class BattleAssembler {
       case 'move': {
         const ref = this.resolveSlot(msg.side, msg.species ?? msg.label);
         if (!ref) { this.notes.push(`move: unresolved ${msg.side} "${msg.label}" (${msg.move})`); break; }
+        // BANNER RE-FIRE dedupe: OCR drops a persisting banner for a couple of frames
+        // mid-animation, the clear window expires, and the same banner parses again.
+        // A mon acts once per turn, so an identical actor+move this turn is a re-read.
+        // (Seen live: doubled Acrobatics / Solar Beam attributed to two targets.)
+        if (this.actions.some(a => a.kind === 'move' && a.actor === ref && norm(a.move ?? '') === norm(msg.move))) break;
         const action: TurnAction = { actor: ref, kind: 'move', move: msg.move };
         if (this.megaPending.delete(ref)) action.mega = true;
         this.actions.push(action);
@@ -165,6 +170,12 @@ export class BattleAssembler {
       }
       case 'switchIn': {
         const [a, b] = slotsFor(msg.side);
+        // Re-fired send-out banner: the named mon is already active on that side →
+        // a re-read, not a second switch (species clause: no duplicate species).
+        {
+          const sp = norm(msg.species ?? msg.label);
+          if (sp && (norm(this.roster[a]) === sp || norm(this.roster[b]) === sp)) break;
+        }
         // Opening DOUBLE send-out: "X sent out A and B!" / "Go! A and B!" names both leads in
         // one banner. Split when BOTH halves resolve to real species (guards a nickname that
         // happens to contain "and") — resolveSpecies token-matches the pair to just one, so
@@ -192,7 +203,10 @@ export class BattleAssembler {
       }
       case 'faint': {
         const ref = this.resolveSlot(msg.side, msg.species ?? msg.label);
-        if (ref) { this.attachTarget(msg.side, ref); this.faints.push(ref); this.roster[ref] = null; }
+        if (ref) {
+          if (this.faints.includes(ref)) break;            // re-fired faint banner
+          this.attachTarget(msg.side, ref); this.faints.push(ref); this.roster[ref] = null;
+        }
         else this.notes.push(`faint: unresolved ${msg.side} "${msg.label}"`);
         break;
       }
@@ -248,7 +262,11 @@ export class BattleAssembler {
         const sign = msg.dir === 'rose' ? '+' : '-';
         const MAP: Record<string, string> = { attack: 'atk', defense: 'def', 'sp. atk': 'spa', 'sp. def': 'spd', speed: 'spe', accuracy: 'acc', evasiveness: 'eva' };
         const parts = msg.stats.map(s => MAP[s.toLowerCase()]).filter(Boolean).map(st => `${sign}${msg.magnitude} ${st}`);
-        if (parts.length) this.stateLines.push(`${ref} ${parts.join(' ')}`);
+        const line = `${ref} ${parts.join(' ')}`;
+        // Re-fired banner dedupe (a repeated Intimidate/self-drop banner re-read). A
+        // REAL second identical boost in one turn (two Intimidates from a double
+        // switch-in) is also collapsed — rare, and the re-read is far more common.
+        if (parts.length && !this.stateLines.includes(line)) this.stateLines.push(line);
         break;
       }
       case 'weatherStart': {
@@ -256,11 +274,11 @@ export class BattleAssembler {
         // gives 'rain'|'sandstorm'|'sun'|'snow'; the turn-log wants rain|sand|sun|snow.
         const MAP: Record<string, string> = { rain: 'rain', sandstorm: 'sand', sun: 'sun', snow: 'snow' };
         const w = MAP[msg.weather];
-        if (w) this.stateLines.push(`weather ${w}`);
+        if (w && !this.stateLines.includes(`weather ${w}`)) this.stateLines.push(`weather ${w}`);
         break;
       }
       case 'weatherEnd':
-        this.stateLines.push('weather clear');
+        if (!this.stateLines.includes('weather clear')) this.stateLines.push('weather clear');
         break;
       // heal / screen / megaReact / end → no turn-log action (yet)
       default: break;
@@ -350,12 +368,23 @@ export class BattleAssembler {
     this.actions.forEach((a, i) => {
       if (a.kind !== 'move') return;
       if (a.spread) {
+        // A Protected ref took no damage — drop it from the spread list (its "hit"
+        // would be a 0-damage observation). One survivor → plain single-target line.
+        a.spread = a.spread.filter(s => !this.protectedThisTurn.has(s.ref));
+        if (a.spread.length === 1) { a.target = a.spread[0]!.ref; a.spread = undefined; }
+        else if (!a.spread.length) { a.spread = undefined; return; }
+      }
+      if (a.spread) {
         for (const s of a.spread) {
           const smp = this.lastSample(s.ref, i + 1, cutFor(i, s.ref));
           s.hpRemainingPercent = smp?.pct ?? hpBySlot[s.ref] ?? this.baselineBefore(s.ref, i, hpBefore);
           if (smp?.raw != null) s.hpRemainingRaw = smp.raw;
         }
       } else if (a.target != null) {
+        // Target Protected → keep the target (the move WAS aimed there — reveals the
+        // move, feeds Choice-lock logic) but emit NO damage slot: an "unchanged HP"
+        // value would read as a 0-damage observation and poison the spread inference.
+        if (this.protectedThisTurn.has(a.target)) return;
         const smp = this.lastSample(a.target, i + 1, cutFor(i, a.target));
         const pct = smp?.pct ?? hpBySlot[a.target];
         if (pct != null) a.hpRemainingPercent = pct;

@@ -146,6 +146,65 @@ describe('BattleAssembler — fine-grained HP timeline (recordHp)', () => {
   });
 });
 
+// Banner RE-FIRES (OCR drops a persisting banner for 2 frames, the clear window
+// expires, the same banner parses again) doubled real events in the 2026-06-20
+// replay: switch pairs ×4, Acrobatics ×2, `m2 ko` ×2, `-2 spa` ×3.
+describe('BattleAssembler — banner re-fire dedupe (live replay bugs)', () => {
+  const LEADS = { m1: 'Talonflame', m2: 'Kingambit', o1: 'Garchomp', o2: 'Sinistcha' };
+
+  test('a re-fired move banner does not double the action', () => {
+    const a = new BattleAssembler(LEADS);
+    feed(a, ['Talonflame used Acrobatics!', 'Talonflame used Acrobatics!']);
+    expect(a.endTurnLines({ o1: 58 }).filter(l => l.includes('Acrobatics'))).toHaveLength(1);
+  });
+
+  test('a re-fired send-out banner does not double the switch', () => {
+    const a = new BattleAssembler({ ...LEADS, m1: null as unknown as string });
+    feed(a, ['Go! Dragonite!', 'Go! Dragonite!']);
+    expect(a.endTurnLines().filter(l => l.includes('switch'))).toEqual(['m1 > switch > Dragonite']);
+  });
+
+  test('a re-fired faint banner does not double the ko (even after a roster re-seed)', () => {
+    const a = new BattleAssembler(LEADS);
+    feed(a, ['The opposing Garchomp used Dragon Claw!', 'Kingambit fainted!']);
+    a.seedActiveIfUnknown('m2', 'Kingambit');           // plate lingers → slot OCR re-seeds
+    feed(a, ['Kingambit fainted!']);
+    expect(a.endTurnLines().filter(l => l === 'm2 ko')).toHaveLength(1);
+  });
+
+  test('a re-fired stat-change banner does not triple the state line', () => {
+    const a = new BattleAssembler(LEADS);
+    feed(a, [
+      'Kingambit used Kowtow Cleave!',
+      "Kingambit's Sp. Atk harshly fell!",
+      "Kingambit's Sp. Atk harshly fell!",
+      "Kingambit's Sp. Atk harshly fell!",
+    ]);
+    expect(a.endTurnLines({ o1: 49 }).filter(l => l === 'm2 -2 spa')).toHaveLength(1);
+  });
+});
+
+describe('BattleAssembler — Protect blocks the damage observation', () => {
+  test('a move into a Protected target keeps the target but emits NO damage slot', () => {
+    const a = new BattleAssembler({ m1: 'Pelipper', m2: 'Dragonite', o1: 'Charizard', o2: 'Garchomp' });
+    feed(a, [
+      'The opposing Charizard protected itself!',
+      'Dragonite used Hurricane!',
+      "It's super effective on Charizard!",           // named → pinned to the Protect user
+    ]);
+    // `> o1 > 100` would be a 0-damage observation — poison for the spread solver.
+    expect(a.endTurnLines({ o1: 100 })).toEqual(['m2 > Hurricane > o1']);
+  });
+
+  test('a spread hit drops the Protected ref and keeps the real ones', () => {
+    const a = new BattleAssembler({ m1: 'Pelipper', m2: 'Dragonite', o1: 'Charizard', o2: 'Garchomp' });
+    for (const r of ['o1', 'o2'] as const) a.recordHp(r, 100, true);
+    feed(a, ['The opposing Charizard protected itself!', 'Pelipper used Hurricane!']);
+    a.recordHp('o2', 60, true);                        // only the unprotected foe dropped
+    expect(a.endTurnLines({ o1: 100, o2: 60 })).toEqual(['m1 > Hurricane > o2 > 60']);
+  });
+});
+
 describe('BattleAssembler — crits & status', () => {
   test('a named crit banner tags the move AND pins the target', () => {
     const a = new BattleAssembler({ m1: 'Staraptor', m2: 'Grimmsnarl', o1: 'Raichu', o2: 'Sylveon' });
