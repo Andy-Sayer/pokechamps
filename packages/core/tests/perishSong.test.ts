@@ -8,6 +8,7 @@ import { describe, test, expect } from 'vitest';
 import { parseTurnLine, type ParseContext } from '../src/domain/turnparser.js';
 import { endOfTurn } from '../src/domain/endOfTurn.js';
 import { finalizeTurn } from '../src/match/engine.js';
+import { searchInputFromMatch } from '../src/domain/endgameSearch.js';
 import type { Match, MoveAction, PokemonSet, OpponentEntry } from '../src/domain/types.js';
 import { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } from '../src/domain/types.js';
 
@@ -175,6 +176,30 @@ describe('Perish Song engine bookkeeping', () => {
     const r = finalizeTurn({ match: m, turn: { actions: [], field: NEUTRAL_FIELD }, activeIdx: ACTIVE });
     expect(r.match.myFainted).toContain(1);
   });
+
+  test('Soundproof (my side) never hears the song; the ally still does', () => {
+    const m = fullMatch();
+    m.myTeam[1] = mon({ species: 'Kommo-o', ability: 'Soundproof', moves: ['Drain Punch'] });
+    const r = finalizeTurn({
+      match: m,
+      turn: { actions: [act({ side: 'mine', move: 'Perish Song', attackerTeamIndex: 0 })], field: NEUTRAL_FIELD },
+      activeIdx: ACTIVE,
+    });
+    expect(r.match.myPerishCount?.[0]).toBe(3);          // singer hears its own song
+    expect(r.match.myPerishCount?.[1]).toBeUndefined();  // Soundproof: immune
+  });
+
+  test('Soundproof (opp side, revealed ability) is immune; the other foe is clocked', () => {
+    const m = fullMatch();
+    m.opponentTeam[1] = { species: 'Kommo-o', ability: 'Soundproof', knownMoves: [], currentHpPercent: 100 };
+    const r = finalizeTurn({
+      match: m,
+      turn: { actions: [act({ side: 'mine', move: 'Perish Song', attackerTeamIndex: 0 })], field: NEUTRAL_FIELD },
+      activeIdx: ACTIVE,
+    });
+    expect(r.match.opponentTeam[0]!.perishCount).toBe(3);
+    expect(r.match.opponentTeam[1]!.perishCount).toBeUndefined();
+  });
 });
 
 describe('trapping move volatile', () => {
@@ -212,6 +237,44 @@ describe('trapping move volatile', () => {
       activeIdx: ACTIVE,
     });
     expect(r.match.opponentTeam[0]!.trappedBy).toBeUndefined();
+  });
+});
+
+// The trap record is validated LAZILY: it binds only while the caster is still
+// active + alive. searchInputFromMatch is the read boundary the live search
+// uses — a stale record must not thread through it.
+describe('trap lifts when the caster leaves (lazy validation at the search boundary)', () => {
+  test('caster active + alive: the trap threads into the search input', () => {
+    const m = fullMatch({ myTrappedBy: { 0: 1 } });      // m1 pinned by o2 (Annihilape)
+    const input = searchInputFromMatch(m, ACTIVE);
+    const mine0 = input.mine.find(x => x.set.species === 'Politoed');
+    expect(mine0?.trappedByFoe).toBe(1);                 // opp search index of the trapper
+  });
+
+  test('caster switched out: the stale record does NOT bind', () => {
+    const m = fullMatch({ myTrappedBy: { 0: 1 } });
+    // Trapper (opp team idx 1) is no longer on the field.
+    const input = searchInputFromMatch(m, { mine: [0, 1], theirs: [0, 2] });
+    const mine0 = input.mine.find(x => x.set.species === 'Politoed');
+    expect(mine0?.trappedByFoe).toBeUndefined();
+  });
+
+  test('caster fainted: the stale record does NOT bind', () => {
+    const m = fullMatch({ myTrappedBy: { 0: 1 } });
+    m.opponentTeam[1]!.fainted = true;
+    m.opponentTeam[1]!.currentHpPercent = 0;
+    const input = searchInputFromMatch(m, { mine: [0, 1], theirs: [0, null] });
+    const mine0 = input.mine.find(x => x.set.species === 'Politoed');
+    expect(mine0?.trappedByFoe).toBeUndefined();
+  });
+
+  test('opp-side pin: my caster leaving lifts it too', () => {
+    const m = fullMatch();
+    m.opponentTeam[0]!.trappedBy = 1;                    // o1 pinned by m2 (Steelix)
+    const bound = searchInputFromMatch(m, ACTIVE);
+    expect(bound.opp.find(x => x.entry.species === 'Garchomp')?.trappedByFoe).toBe(1);
+    const lifted = searchInputFromMatch(m, { mine: [0, 2], theirs: [0, 1] });
+    expect(lifted.opp.find(x => x.entry.species === 'Garchomp')?.trappedByFoe).toBeUndefined();
   });
 });
 
