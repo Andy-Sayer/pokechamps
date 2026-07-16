@@ -39,8 +39,9 @@ const norm = (s: string | null): string => (s ?? '').toLowerCase().replace(/[^a-
 /** One HP read on the per-ACTION timeline. `tag` = how many actions had been fed when
  *  the read arrived, so tag t sits BETWEEN action t-1's banner and action t's banner —
  *  the window where action t-1's damage animation lands. `stable` = the value repeated
- *  across consecutive frames (settled, not mid-drain). */
-interface HpSample { tag: number; pct: number; stable: boolean; }
+ *  across consecutive frames (settled, not mid-drain). `raw` = mine-side exact
+ *  on-screen HP ("117/175" → 117) — what the turn-log must carry for m-slots. */
+interface HpSample { tag: number; pct: number; stable: boolean; raw?: number; }
 
 export class BattleAssembler {
   private roster: Roster;
@@ -78,24 +79,24 @@ export class BattleAssembler {
    *  lets endTurn give each hit its OWN damage value when a target is hit more than
    *  once in a turn — the settled read between banner N and banner N+1 is move N's
    *  post-hit HP. Call on every frame; consecutive duplicates are collapsed. */
-  recordHp(ref: SlotRef, pct: number, stable = false): void {
+  recordHp(ref: SlotRef, pct: number, stable = false, raw?: number): void {
     const arr = (this.hpSamples[ref] ??= []);
     const tag = this.actions.length;
     const last = arr[arr.length - 1];
-    if (last && last.tag === tag && last.pct === pct && last.stable === stable) return;
-    arr.push({ tag, pct, stable });
+    if (last && last.tag === tag && last.pct === pct && last.stable === stable && last.raw === raw) return;
+    arr.push({ tag, pct, stable, raw });
   }
 
   /** Last sample of `ref` with tag in [fromTag, toTag] — a settled (stable) read wins
-   *  over a raw one because raw reads can be mid-drain-animation frames. */
-  private lastSample(ref: SlotRef, fromTag: number, toTag: number): number | null {
-    let stableV: number | null = null, rawV: number | null = null;
+   *  over an unsettled one because those can be mid-drain-animation frames. */
+  private lastSample(ref: SlotRef, fromTag: number, toTag: number): HpSample | null {
+    let stableS: HpSample | null = null, anyS: HpSample | null = null;
     for (const s of this.hpSamples[ref] ?? []) {
       if (s.tag < fromTag || s.tag > toTag) continue;
-      if (s.stable) stableV = s.pct;
-      rawV = s.pct;
+      if (s.stable) stableS = s;
+      anyS = s;
     }
-    return stableV ?? rawV;
+    return stableS ?? anyS;
   }
 
   /** The slot's HP just before action `i`'s banner (last sample with tag ≤ i), falling
@@ -248,7 +249,7 @@ export class BattleAssembler {
       const to = i + 1 < this.actions.length ? i + 1 : Number.MAX_SAFE_INTEGER;
       const post = this.lastSample(ref, i + 1, to);
       if (post == null) return 0;
-      return Math.max(0, this.baselineBefore(ref, i, hpBefore) - post);
+      return Math.max(0, this.baselineBefore(ref, i, hpBefore) - post.pct);
     };
 
     // PASS 1 — SPREAD DETECTION. A dex spread move (allAdjacentFoes / allAdjacent)
@@ -317,11 +318,16 @@ export class BattleAssembler {
     this.actions.forEach((a, i) => {
       if (a.kind !== 'move') return;
       if (a.spread) {
-        for (const s of a.spread)
-          s.hpRemainingPercent = this.lastSample(s.ref, i + 1, cutFor(i, s.ref)) ?? hpBySlot[s.ref] ?? this.baselineBefore(s.ref, i, hpBefore);
+        for (const s of a.spread) {
+          const smp = this.lastSample(s.ref, i + 1, cutFor(i, s.ref));
+          s.hpRemainingPercent = smp?.pct ?? hpBySlot[s.ref] ?? this.baselineBefore(s.ref, i, hpBefore);
+          if (smp?.raw != null) s.hpRemainingRaw = smp.raw;
+        }
       } else if (a.target != null) {
-        const v = this.lastSample(a.target, i + 1, cutFor(i, a.target)) ?? hpBySlot[a.target];
-        if (v != null) a.hpRemainingPercent = v;
+        const smp = this.lastSample(a.target, i + 1, cutFor(i, a.target));
+        const pct = smp?.pct ?? hpBySlot[a.target];
+        if (pct != null) a.hpRemainingPercent = pct;
+        if (smp?.raw != null) a.hpRemainingRaw = smp.raw;
       }
     });
     // Megas whose MOVE was never captured (missed banner) still happened → emit them as

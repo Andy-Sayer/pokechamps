@@ -128,6 +128,14 @@ describe('BattleAssembler — fine-grained HP timeline (recordHp)', () => {
     expect(a.endTurnLines({ o1: 70, o2: 60 })).toEqual(['m1 > Rock Slide > spread > o1:70, o2:60']);
   });
 
+  test('mine-side raw samples flow through to raw emission', () => {
+    const a = new BattleAssembler({ m1: 'Staraptor', m2: 'Grimmsnarl', o1: 'Raichu', o2: 'Sylveon' });
+    a.recordHp('m1', 100, true, 175);
+    feed(a, ['The opposing Raichu used Fake Out!', "Staraptor flinched and couldn't move!"]);
+    a.recordHp('m1', 82, true, 144);
+    expect(a.endTurnLines({ m1: 82 })).toEqual(['o1 > Fake Out > m1 > 144']);
+  });
+
   test('a Protected foe with a residual chip is NOT swept into a spread hit', () => {
     const a = new BattleAssembler({ m1: 'Staraptor', m2: 'Grimmsnarl', o1: 'Raichu', o2: 'Sylveon' });
     for (const r of ['o1', 'o2'] as const) a.recordHp(r, 100, true);

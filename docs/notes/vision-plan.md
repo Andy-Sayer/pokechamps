@@ -79,10 +79,13 @@ beats the turn-scoped plate/drop heuristics and may re-pick an already-claimed f
 and **spread detection**: a dex spread move (`allAdjacentFoes`/`allAdjacent`) whose
 window shows both foes dropping emits `> spread > o1:x, o2:y` per-target damage.
 No samples (short window, plates never settled) → falls back to the turn-final read,
-which stays exact for once-hit targets. Also fixed: vision emits PERCENTS, but the
-parser reads a bare number on a mine-side target as RAW HP — `emitAction` now writes
-`m1 > … > 60%` (explicit `%`) for m-side single + spread entries. Tune `gapFrames` /
-`clearFrames` / `settleFrames` on a live stream.
+which stays exact for once-hit targets. **Units mirror the screen, as a human keys
+them in**: mine-side targets emit the RAW on-screen HP (`m1 > … > 117`, from the
+"117/175" nameplate digits, carried through `SlotRead.hpRaw` → the sample timeline →
+`hpRemainingRaw`) — the parser's bare m-side number IS raw; opp-side emits the bare
+percent. Only when my digits never resolved (bar-fraction-only read) does the emitter
+fall back to an explicit `60%` so the percent can't be mis-parsed as raw. Tune
+`gapFrames` / `clearFrames` / `settleFrames` on a live stream.
 
 **P4 — Self-damage reconciler.** `hpLoss` and `confusionHit` are self-inflicted HP
 loss; subtract them from a slot's turn delta so opponent-dealt damage isn't overstated

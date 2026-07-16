@@ -17,12 +17,18 @@ describe('emitAction — canonical turn-log grammar', () => {
     expect(emitAction({ actor: 'm1', kind: 'move', move: 'Heat Wave', spread: [{ ref: 'o1', hpRemainingPercent: 40 }, { ref: 'o2', hpRemainingPercent: 35 }] }))
       .toBe('m1 > Heat Wave > spread > o1:40, o2:35');
   });
-  test('mine-side remaining HP carries an explicit % (parser reads a bare m-side number as RAW HP)', () => {
+  test('mine-side remaining HP is the RAW on-screen value (what a human keys in)', () => {
+    expect(emitAction({ actor: 'o1', kind: 'move', move: 'Sucker Punch', target: 'm1', hpRemainingPercent: 60, hpRemainingRaw: 117 }))
+      .toBe('o1 > Sucker Punch > m1 > 117');
+    // allAdjacent spread (Earthquake) — mine-side entries carry raw too
+    expect(emitAction({ actor: 'o1', kind: 'move', move: 'Earthquake', spread: [{ ref: 'm1', hpRemainingPercent: 55, hpRemainingRaw: 103 }, { ref: 'm2', hpRemainingPercent: 70, hpRemainingRaw: 129 }, { ref: 'o2', hpRemainingPercent: 80 }] }))
+      .toBe('o1 > Earthquake > spread > m1:103, m2:129, o2:80');
+  });
+  test('mine-side WITHOUT a raw read (bar-only) falls back to an explicit % — a bare m-side number would mis-parse as raw HP', () => {
     expect(emitAction({ actor: 'o1', kind: 'move', move: 'Sucker Punch', target: 'm1', hpRemainingPercent: 60 }))
       .toBe('o1 > Sucker Punch > m1 > 60%');
-    // allAdjacent spread (Earthquake) includes the ally — its entry gets the % too
-    expect(emitAction({ actor: 'o1', kind: 'move', move: 'Earthquake', spread: [{ ref: 'm1', hpRemainingPercent: 55 }, { ref: 'm2', hpRemainingPercent: 70 }, { ref: 'o2', hpRemainingPercent: 80 }] }))
-      .toBe('o1 > Earthquake > spread > m1:55%, m2:70%, o2:80');
+    expect(emitAction({ actor: 'o1', kind: 'move', move: 'Earthquake', spread: [{ ref: 'm1', hpRemainingPercent: 55 }, { ref: 'o2', hpRemainingPercent: 80 }] }))
+      .toBe('o1 > Earthquake > spread > m1:55%, o2:80');
   });
   test('status / no-target move uses > self', () => {
     expect(emitAction({ actor: 'm1', kind: 'move', move: 'Protect' })).toBe('m1 > Protect > self');

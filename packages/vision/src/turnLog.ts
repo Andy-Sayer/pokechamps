@@ -11,20 +11,23 @@ function actorWithMods(a: TurnAction): string {
   return s;
 }
 
-// A MINE-side remaining HP needs an explicit `%`: the parser reads a bare number on an
-// m-slot as RAW remaining HP (the natural hand-typed unit — my exact HP is on screen),
-// but vision reads a percent. Opp-side bare numbers already mean percent.
-const fmtHp = (ref: string, pct: number): string => (ref.startsWith('m') ? `${pct}%` : `${pct}`);
+// Damage-slot units mirror the screen, exactly as a human would key them in:
+//   mine-side target → the RAW on-screen HP ("117" from "117/175"), bare number
+//   opp-side target  → the on-screen percent, bare number
+// A mine-side read that only got the bar fraction (digits unreadable) falls back to an
+// EXPLICIT `%` — a bare m-side number would be mis-parsed as raw HP.
+const fmtHp = (ref: string, pct: number, raw?: number): string =>
+  ref.startsWith('m') ? (raw != null ? `${raw}` : `${pct}%`) : `${pct}`;
 
 /** One action → one turn-log line. */
 export function emitAction(a: TurnAction): string {
   if (a.kind === 'switch') return `${a.actor} > switch > ${a.switchTo}`;
   if (a.spread && a.spread.length) {
-    const parts = a.spread.map(t => `${t.ref}:${fmtHp(t.ref, t.hpRemainingPercent)}`).join(', ');
+    const parts = a.spread.map(t => `${t.ref}:${fmtHp(t.ref, t.hpRemainingPercent, t.hpRemainingRaw)}`).join(', ');
     return `${actorWithMods(a)} > ${a.move} > spread > ${parts}`;
   }
   if (a.target == null) return `${actorWithMods(a)} > ${a.move} > self`;   // status / no-damage
-  const hp = a.hpRemainingPercent != null ? ` > ${fmtHp(a.target, a.hpRemainingPercent)}` : '';
+  const hp = a.hpRemainingPercent != null ? ` > ${fmtHp(a.target, a.hpRemainingPercent, a.hpRemainingRaw)}` : '';
   return `${actorWithMods(a)} > ${a.move} > ${a.target}${hp}`;
 }
 

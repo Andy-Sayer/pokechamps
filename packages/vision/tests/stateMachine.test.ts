@@ -4,12 +4,12 @@ import type { FrameRead, SlotRead, SlotRef, TurnProposal } from '../src/types.js
 
 const LEADS = { m1: 'Staraptor', m2: 'Grimmsnarl', o1: 'Raichu', o2: 'Sylveon' };
 
-/** Build a FrameRead: battleText + per-slot HP fractions. */
+/** Build a FrameRead: battleText + per-slot HP fractions (+ optional mine-side raw HP). */
 let TS = 0;
-function read(text: string, hp: Partial<Record<SlotRef, number>> = {}): FrameRead {
+function read(text: string, hp: Partial<Record<SlotRef, number>> = {}, raw: Partial<Record<SlotRef, number>> = {}): FrameRead {
   const slot = (side: 'mine' | 'opp', index: 0 | 1, ref: SlotRef): SlotRead => ({
     side, index, species: null, speciesRaw: '', speciesConfidence: 0,
-    hpFraction: hp[ref] ?? null, status: null,
+    hpFraction: hp[ref] ?? null, hpRaw: raw[ref] ?? null, status: null,
   });
   return {
     ts: TS++, battleText: text,
@@ -96,6 +96,23 @@ describe('BattleStateMachine', () => {
       'm1 > Close Combat > o1 > 60',      // NOT the merged 35 — its own window's settled read
       'm2 > Spirit Break > o1 > 35',      // second hit resolves to the already-claimed foe via its window drop
     ]);
+  });
+
+  // MINE-SIDE UNIT: the turn-log carries my RAW on-screen HP ("117" from "117/175"),
+  // exactly as a human would key it in — never a computed percent.
+  test('a mine-side target emits the RAW on-screen HP when the digits resolved', () => {
+    TS = 0;
+    const sm = new BattleStateMachine(LEADS, { gapFrames: 4, clearFrames: 2, settleFrames: 2 });
+    const out: TurnProposal[] = [];
+    const seq: [string, Partial<Record<SlotRef, number>>, Partial<Record<SlotRef, number>>, number][] = [
+      ['The opposing Sylveon used Hyper Voice!', { m1: 1 }, { m1: 175 }, 2],       // pre-hit: 175/175
+      ['The opposing Sylveon used Hyper Voice!', { m1: 0.67 }, { m1: 117 }, 2],    // settled post-hit: 117/175
+      ['', { m1: 0.67 }, { m1: 117 }, 4],                                          // gap → flush
+    ];
+    for (const [text, hp, raw, repeat] of seq)
+      for (let r = 0; r < repeat; r++) { const p = sm.feed(read(text, hp, raw)); if (p && !p.partial) out.push(p); }
+    expect(out).toHaveLength(1);
+    expect(out[0]!.lines).toEqual(['o2 > Hyper Voice > m1 > 117']);   // raw, bare — the parser's m-side unit
   });
 
   // SPREAD DETECTION: a dex spread move whose window shows BOTH foes dropping emits the

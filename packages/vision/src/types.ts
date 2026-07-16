@@ -51,6 +51,10 @@ export interface SlotRead {
   speciesRaw: string;           // raw OCR text
   speciesConfidence: number;    // 0..1
   hpFraction: number | null;    // 0..1 from the bar, or null if unreadable
+  /** Mine-side ONLY: the exact current HP as written on the nameplate ("117/175" → 117).
+   *  This is what the turn-log must carry for m-slots — a human keys in the on-screen
+   *  raw value, never a percent. Null when the digits didn't resolve (bar-only read). */
+  hpRaw?: number | null;
   status: string | null;        // 'brn' | 'par' | … | null
 }
 
@@ -68,7 +72,8 @@ export interface TurnAction {
   move?: string;
   target?: SlotRef;                                   // single-target move
   hpRemainingPercent?: number;                        // target HP% after the hit
-  spread?: { ref: SlotRef; hpRemainingPercent: number }[]; // spread move
+  hpRemainingRaw?: number;                            // mine-side target: exact on-screen HP (emit takes precedence)
+  spread?: { ref: SlotRef; hpRemainingPercent: number; hpRemainingRaw?: number }[]; // spread move
   switchTo?: string;                                  // species (switch)
   mega?: boolean;
   crit?: boolean;

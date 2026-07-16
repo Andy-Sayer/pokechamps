@@ -67,16 +67,19 @@ export class BattleStateMachine {
       const ref = refOf(s);
       if (s.hpFraction != null) {
         const pct = Math.max(0, Math.min(100, Math.round(s.hpFraction * 100)));
+        const raw = s.hpRaw ?? undefined;              // mine-side exact on-screen HP, when the digits resolved
         this.lastHp[ref] = pct; this.touched.add(ref);
         // Per-action HP timeline: record EVERY read (before the banner below is processed,
         // so the sample lands in the current action's window), marking it stable once the
         // same value repeats settleFrames in a row — that filters mid-drain animation
         // frames and one-off OCR blips, and is what lets two hits into the same target
-        // each get their own damage instead of one merged turn-final delta.
+        // each get their own damage instead of one merged turn-final delta. The raw value
+        // (finer than the rounded %) is the settle key when present.
+        const key = raw ?? pct;
         const run = this.settleRuns[ref];
-        if (run && run.val === pct) run.run++;
-        else this.settleRuns[ref] = { val: pct, run: 1 };
-        this.tracker.recordHp(ref, pct, this.settleRuns[ref]!.run >= this.settleFrames);
+        if (run && run.val === key) run.run++;
+        else this.settleRuns[ref] = { val: key, run: 1 };
+        this.tracker.recordHp(ref, pct, this.settleRuns[ref]!.run >= this.settleFrames, raw);
       }
       // Seed the roster from the per-frame species OCR so a reader that JOINED mid-battle (no
       // send-out banner / no --leads) can still resolve move banners to a slot. Only fills UNKNOWN

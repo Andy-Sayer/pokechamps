@@ -63,8 +63,9 @@ export class BattleTracker {
 
   /** Forward one per-frame HP read onto the assembler's per-action timeline (see
    *  BattleAssembler.recordHp) — the fine-grained signal that gives each hit its own
-   *  damage value when a target is hit more than once in a turn. */
-  recordHp(ref: SlotRef, pct: number, stable = false): void { this.asm.recordHp(ref, pct, stable); }
+   *  damage value when a target is hit more than once in a turn. `raw` = mine-side
+   *  exact on-screen HP, carried through so the turn-log emits what the screen shows. */
+  recordHp(ref: SlotRef, pct: number, stable = false, raw?: number): void { this.asm.recordHp(ref, pct, stable, raw); }
 
   /** In-progress lines for the current (unclosed) turn — a live preview. */
   preview(): string[] { return this.asm.preview(); }

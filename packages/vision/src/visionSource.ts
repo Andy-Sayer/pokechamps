@@ -54,13 +54,17 @@ export async function readFrame(frame: Frame, deps: VisionDeps): Promise<FrameRe
     const barFraction = readHpFractionGated(bar.data, bar.width, bar.height);
 
     // Nameplate number: opp = percent (PSM 8, single word); mine = cur/max (PSM 7, line).
+    // Mine-side keeps the exact RAW cur too — the turn-log carries what's on screen
+    // ("117" from "117/175"), never a computed percent; the fraction is only for the
+    // internal drop/target heuristics.
     let numFraction: number | null = null;
+    let hpRaw: number | null = null;
     if (sr.side === 'opp' && regions.oppHpText) {
       const pct = parseHpNumber(await deps.ocr.read(frame, regions.oppHpText[sr.index], { mode: 'digits', psm: 8 }));
       if (pct != null) numFraction = Math.max(0, Math.min(100, pct)) / 100;
     } else if (sr.side === 'mine' && regions.myHpText) {
       const abs = await readAbsHpRobust(deps.ocr, frame, regions.myHpText[sr.index]);
-      if (abs) numFraction = Math.max(0, Math.min(1, abs.cur / abs.max));
+      if (abs) { numFraction = Math.max(0, Math.min(1, abs.cur / abs.max)); hpRaw = abs.cur; }
     }
 
     const speciesRaw = (await deps.ocr.read(frame, sr.name)).trim();
@@ -74,7 +78,8 @@ export async function readFrame(frame: Frame, deps: VisionDeps): Promise<FrameRe
       side: sr.side, index: sr.index,
       species: m && m.score >= 0.6 ? m.value : null,
       speciesRaw, speciesConfidence: m?.score ?? 0,
-      hpFraction: plate ? (numFraction ?? barFraction) : null, status: null,
+      hpFraction: plate ? (numFraction ?? barFraction) : null,
+      hpRaw: plate ? hpRaw : null, status: null,
     };
   }));
   const battleText = (await deps.ocr.read(frame, regions.battleText)).trim();
