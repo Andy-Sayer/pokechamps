@@ -146,6 +146,42 @@ describe('BattleAssembler — fine-grained HP timeline (recordHp)', () => {
   });
 });
 
+describe('BattleAssembler — crits & status', () => {
+  test('a named crit banner tags the move AND pins the target', () => {
+    const a = new BattleAssembler({ m1: 'Staraptor', m2: 'Grimmsnarl', o1: 'Raichu', o2: 'Sylveon' });
+    feed(a, ['Staraptor used Close Combat!', 'A critical hit on the opposing Raichu!']);
+    expect(a.endTurnLines({ o1: 40 })).toEqual(['m1+crit > Close Combat > o1 > 40']);
+  });
+
+  test('the bare crit banner tags the most recent DAMAGING move', () => {
+    const a = new BattleAssembler({ m1: 'Staraptor', m2: 'Grimmsnarl', o1: 'Raichu', o2: 'Sylveon' });
+    feed(a, ['Staraptor used Close Combat!', 'Grimmsnarl used Light Screen!', 'A critical hit!']);
+    expect(a.endTurnLines({ o1: 40 })).toEqual([
+      'm1+crit > Close Combat > o1 > 40',       // Light Screen (status) skipped — crits only come off damaging moves
+      'm2 > Light Screen > self',
+    ]);
+  });
+
+  test('status banners emit the canonical state lines', () => {
+    const a = new BattleAssembler({ m1: 'Staraptor', m2: 'Grimmsnarl', o1: 'Raichu', o2: 'Sylveon' });
+    feed(a, [
+      'The opposing Raichu used Will-O-Wisp!',
+      'Staraptor was burned!',
+      'The opposing Sylveon used Toxic!',
+      'Grimmsnarl was badly poisoned!',
+    ]);
+    const lines = a.endTurnLines();
+    expect(lines).toContain('m1 brn');
+    expect(lines).toContain('m2 tox');
+  });
+
+  test('paralysis from a secondary (Nuzzle-style) lands as a state line too', () => {
+    const a = new BattleAssembler({ m1: 'Staraptor', m2: 'Grimmsnarl', o1: 'Raichu', o2: 'Sylveon' });
+    feed(a, ['The opposing Raichu used Thunder Wave!', 'Staraptor is paralyzed!']);
+    expect(a.endTurnLines()).toContain('m1 par');
+  });
+});
+
 describe('BattleAssembler — slot resolution & roster', () => {
   test('picks the correct same-side slot by species', () => {
     const a = new BattleAssembler({ m1: 'Staraptor', m2: 'Grimmsnarl', o1: 'Raichu', o2: 'Sylveon' });

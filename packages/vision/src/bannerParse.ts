@@ -38,6 +38,9 @@ export type BattleMessage =
   | { kind: 'ability'; side: Side; label: string; species: string | null; ability: string }
   | { kind: 'residual'; side: Side; label: string; species: string | null; source: string }
   | { kind: 'status'; side: Side; label: string; species: string | null; status: string }
+  // crit: side/label name the TARGET when the doubles form ("A critical hit on X!") is
+  // used; the bare singles form ("A critical hit!") has side=null → tag the last move.
+  | { kind: 'crit'; side: Side | null; label: string | null; species: string | null }
   | { kind: 'protect'; side: Side; label: string; species: string | null }
   | { kind: 'miss'; side: Side; label: string; species: string | null }
   | { kind: 'hpLoss'; side: Side; label: string; species: string | null }
@@ -114,6 +117,17 @@ export function parseBanner(raw: string): BattleMessage {
   if (/a sandstorm kicked up|sandstorm is raging|whipped up a sandstorm/i.test(lc)) return { kind: 'weatherStart', weather: 'sandstorm' };
   if (/sunlight turned (?:harsh|extremely harsh)|sunlight is strong|intensified the sun/i.test(lc)) return { kind: 'weatherStart', weather: 'sun' };
   if (/started to (?:hail|snow)|snow began to fall|it'?s snowing|made it snow/i.test(lc)) return { kind: 'weatherStart', weather: 'snow' };
+
+  // --- critical hit ("A critical hit!" / "A critical hit on [the opposing] X!"). Tags
+  //     the damage observation so the calc runs 1.5× — an untagged crit would read as a
+  //     fake super-high roll and poison the EV/nature inference. ---
+  if ((m = /^a critical hit(?: on (.+))?$/i.exec(text))) {
+    if (m[1]) {
+      const { side, label } = splitSide(m[1]);
+      return { kind: 'crit', side, label, species: resolveSpecies(label) };
+    }
+    return { kind: 'crit', side: null, label: null, species: null };
+  }
 
   // --- effectiveness ("It's {super|not very|extremely} effective on [the opposing] X!") ---
   if ((m = /^it'?s (super|not very|extremely) effective on (.+)$/i.exec(text))) {

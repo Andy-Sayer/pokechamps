@@ -208,6 +208,38 @@ export class BattleAssembler {
         if (ref) this.protectedThisTurn.add(ref);
         break;
       }
+      case 'crit': {
+        // "A critical hit!" tags the move whose damage just resolved — without the tag
+        // its 1.5× observation reads as a fake super-high roll and poisons inference.
+        // The doubles form names the TARGET ("A critical hit on X!") → also pins it.
+        const ref = msg.side != null ? this.resolveSlot(msg.side, msg.species ?? msg.label ?? '') : null;
+        let act: TurnAction | undefined;
+        for (let i = this.actions.length - 1; i >= 0 && !act; i--) {
+          const a = this.actions[i]!;
+          if (a.kind !== 'move' || !isOffensive(a.move)) continue;
+          if (ref) {
+            if (sideOf(a.actor) === sideOf(ref)) continue;   // crit target is hit by the OTHER side
+            if (a.target === ref || a.spread?.some(s => s.ref === ref) || (a.target == null && !a.spread)) act = a;
+          } else act = a;                                     // unnamed form → the last damaging move
+        }
+        if (!act) { this.notes.push('crit banner with no damaging move to attach'); break; }
+        if (ref && act.target == null && !act.spread) act.target = ref;
+        act.crit = true;
+        if (act.spread) this.notes.push(`crit on a spread move (${act.move}) — grammar tags the whole action, not the one target`);
+        break;
+      }
+      case 'status': {
+        // Non-volatile status ("X was burned!" …) → the `o1 brn` state line. Without
+        // this the engine never learns the burn: a burned physical attacker's halved
+        // hits mislead the Atk inference, and the EOT chip has no attributed source.
+        const ref = this.resolveSlot(msg.side, msg.species ?? msg.label);
+        if (!ref) { this.notes.push(`status unresolved ${msg.side} "${msg.label}"`); break; }
+        const MAP: Record<string, string> = { burn: 'brn', paralysis: 'par', poison: 'psn', toxic: 'tox', sleep: 'slp', freeze: 'frz' };
+        const st = MAP[msg.status];
+        if (st) this.stateLines.push(`${ref} ${st}`);
+        else this.notes.push(`${ref} ${msg.status} observed (volatile — no state-line grammar, not keyed)`);
+        break;
+      }
       case 'statChange': {
         // Stat boosts (Intimidate on switch-in, Nasty Plot, etc.) → a turn-log state line
         // `o1 -1 atk`. This is why the initial Intimidate was vanishing — it was dropped here.

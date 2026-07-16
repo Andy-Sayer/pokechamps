@@ -1,4 +1,14 @@
 import { describe, test, expect } from 'vitest';
+
+describe('parseBanner — critical hits', () => {
+  test('bare singles form has no named target', () => {
+    expect(parseBanner('A critical hit!')).toEqual({ kind: 'crit', side: null, label: null, species: null });
+  });
+  test('doubles form names the target, side-aware', () => {
+    expect(parseBanner('A critical hit on the opposing Raichu!')).toMatchObject({ kind: 'crit', side: 'opp', species: 'Raichu' });
+    expect(parseBanner('A critical hit on Dragonite!')).toMatchObject({ kind: 'crit', side: 'mine', species: 'Dragonite' });
+  });
+});
 import { parseBanner, repairOcr, type BattleMessage } from '../src/bannerParse.js';
 
 // Every line below is a REAL OCR'd banner from the captured Oni match (some carry
