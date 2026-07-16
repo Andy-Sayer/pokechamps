@@ -73,6 +73,49 @@ describe('perish clock in search', () => {
     expect(play!.switch).not.toBe(true);
   });
 
+  test('move-trapped (Mean Look) by a LIVE active caster: no escape switch generated', () => {
+    // trappedByFoe = 0 → pinned by the opp at SEARCH index 0 (Garchomp, active
+    // + alive). With perish 1 the only good play is switching — the search must
+    // not offer it.
+    const input: SearchInput = {
+      mine: [
+        { set: incin, hpPercent: 100, active: true, perishCount: 1, trappedByFoe: 0 },
+        { set: amoonguss, hpPercent: 100, active: false },
+      ],
+      opp: [{ entry: oppOf(garchomp), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD },
+    };
+    const r = searchToDepth(input, 2);
+    const play = r.plays.find(p => p.mySpecies === 'Incineroar');
+    expect(play).toBeTruthy();
+    expect(play!.switch).not.toBe(true);
+  });
+
+  test('trap lifts when the caster leaves the field: the escape switch IS generated', () => {
+    // Same pin record, but the trapper is on the bench — moveTrapHolds must
+    // treat the volatile as released (Gen 8+: Mean Look ends when its user
+    // leaves), so the perish-1 mon escapes.
+    const pelipper = mon({
+      species: 'Pelipper', ability: 'Drizzle', nature: 'Modest',
+      evs: { hp: 4, atk: 0, def: 0, spa: 252, spd: 0, spe: 252 }, moves: ['Hydro Pump', 'Protect'],
+    });
+    const input: SearchInput = {
+      mine: [
+        { set: incin, hpPercent: 100, active: true, perishCount: 1, trappedByFoe: 0 },
+        { set: amoonguss, hpPercent: 100, active: false },
+      ],
+      opp: [
+        { entry: oppOf(garchomp), hpPercent: 100, active: false },   // the trapper, benched
+        { entry: oppOf(pelipper), hpPercent: 100, active: true },
+      ],
+      field: { ...NEUTRAL_FIELD },
+    };
+    const r = searchToDepth(input, 2);
+    const play = r.plays.find(p => p.mySpecies === 'Incineroar');
+    expect(play).toBeTruthy();
+    expect(play!.switch).toBe(true);
+  });
+
   test('ghosts ignore trapping: the escape switch IS available', () => {
     const tagger = mon({ species: 'Gengar', ability: 'Shadow Tag', moves: ['Shadow Ball', 'Protect'] });
     const ghost = mon({

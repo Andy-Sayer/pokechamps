@@ -97,7 +97,24 @@ o1 taunt   / o1 taunt 2          ← Taunt (default 3 turns; trailing N override
 o1 encore Fake Out / ... 2       ← Encore: locks opp into a move (default 3t) → drives threat pool
 o1 disable Flare Blitz / ... 1   ← Disable: removes a move from the opp threat pool (default 4t)
 o1 cure                          ← clears status AND taunt/encore/disable (also clear on switch-out)
+o1 salt-cure / m1 aqua-ring      ← residual volatiles (EOT chip/heal); also: ingrain, curse, nightmare
+o2 trapped 4                     ← partial-trap (Bind/Whirlpool style): −1/8 each EOT, N turns left
+o1 perish / o1 perish 2          ← manually set a Perish count (default 3); ticks down each EOT, KO at 0.
+                                   Usually NOT needed — see auto-tracking below. A manual `perish N`
+                                   overrides and skips that turn's auto-tick (the logged value IS the
+                                   end-of-turn display). Re-log after a Baton Pass (auto-tracking
+                                   can't see the count transfer).
 ```
+
+**Perish Song auto-tracking**: a normally logged cast (`o1 > Perish Song > self`) starts the
+clock on **all four actives on both sides** — except a (confirmed) **Soundproof** holder — shown
+as ☠Perish 3 at that turn's end. It counts down each end-of-turn; at 0 the mon faints. Switching
+out clears the count (real rules — this is why trapping turns the song into a kill).
+
+**Trapping moves** (Mean Look / Block / Jaw Lock / Anchor Shot / Spirit Shackle / …): a normally
+logged cast against a foe pins the target (⛓) — the search stops generating its escape switch.
+**Ghost-types are immune** (Gen 6+). The pin binds only while the caster stays active + alive:
+it lifts when the caster switches out or faints (validated lazily at every read).
 
 Encore/Taunt/Disable are move-restricting volatiles (Bulbapedia: Taunt 3t / Encore 3t / Disable 4t). They now **count down** each end-of-turn and auto-clear at 0 (also cleared by `cure` / switch-out). A trailing number overrides the seeded count. They work on either side (`my2 taunt`). Encore locks the opp's predicted threat to that move; Disable removes it. **Weather and Trick Room also count down** (default 5t, seeded when set by an ability/move); the grid's "Field —" line shows the remaining turns, and all counts are editable in `/override` (Weather turns / Trick Room turns rows).
 
