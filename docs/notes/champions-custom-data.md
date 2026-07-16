@@ -79,10 +79,13 @@ a one-line edit if any entry is wrong):
 Test: `champions-move-removals.test.ts` (removed gone, real moves kept,
 per-species scoping verified).
 
-**2. Move-DATA changes — NOT yet applied.** *Make It Rain*: accuracy 100→95,
-self SpA drop −1→−2. A `moves.json` data patch (analogous to `SPECIES_PATCHES`)
-+ the −2 secondary in the self-debuff path; affects display/inference, not
-maximin (accuracy isn't priced).
+**2. Move-DATA changes — ✅ PATCHED.** *Make It Rain*: accuracy 100→95,
+self SpA drop −1→−2. Applied directly in `data/moves.json` and re-applied on
+every refresh via `MOVE_PATCHES` in `refresh-data.ts` (same survival contract
+as `SPECIES_PATCHES`). The engine reads `move.self.boosts` for the self-debuff
+(both finalizeTurn mirrors + `endgameSearch`) so the −2 flows through; affects
+display/inference, not maximin (accuracy isn't priced). Test:
+`champions-move-data.test.ts`.
 
 **3. Move-MECHANIC changes — NOT yet applied.** *Rage Fist* now resets its power
 when Annihilape switches out (M-B nerf). Engine work — the search + live engine
