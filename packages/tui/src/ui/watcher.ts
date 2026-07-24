@@ -83,7 +83,9 @@ function launch(opts: WatchOpts): ChildProcess | null {
       // between-turn signal); drop only genuinely empty messages.
       if (Array.isArray(parsed.lines) && (parsed.lines.length || parsed.occupancy)) {
         appendFile(PROPOSAL_LOG, JSON.stringify({ ts: Date.now(), ...parsed }) + '\n', () => { /* best-effort */ });
-        for (const cb of propCbs) cb(parsed);
+        // Per-subscriber isolation: one subscriber throwing (a render error in the
+        // sync flush) must not silently starve the rest of this proposal.
+        for (const cb of propCbs) { try { cb(parsed); } catch { /* subscriber's problem */ } }
       }
     }
     catch { /* partial/garbled line */ }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 
@@ -37,10 +37,13 @@ export function VisionProposalPanel({ proposal, turnNumber, gloss, onAccept, onR
   // RE-SYNC on prop change: the panel stays mounted across proposal updates (live
   // partials growing, a final replacing the preview, the ratify queue advancing), and
   // useState only reads the FIRST proposal — the panel froze on it while every later
-  // update streamed by invisibly (the live "stuck panel"). Never clobber an in-flight
-  // manual edit; a fresh proposal lands after it's submitted.
+  // update streamed by invisibly (the live "stuck panel"). Sync ONLY when the
+  // proposal's lines array is actually a NEW one (reference compare): re-running on
+  // the edit-mode exit alone silently reverted the user's just-submitted edit.
+  const lastSynced = useRef(proposal.lines);
   useEffect(() => {
-    if (editing) return;
+    if (editing || lastSynced.current === proposal.lines) return;
+    lastSynced.current = proposal.lines;
     setLines(proposal.lines);
     setCursor(c => Math.min(c, Math.max(0, proposal.lines.length - 1)));
   }, [proposal.lines, editing]);

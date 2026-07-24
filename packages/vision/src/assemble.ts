@@ -54,6 +54,7 @@ export class BattleAssembler {
   private protectedThisTurn = new Set<SlotRef>();   // Protect users — no damage inferred onto them
   private missedTargets = new Set<string>();        // "actionIdx:ref" pairs where the move missed
   private vacatedByFaint = new Set<SlotRef>();      // slots emptied by a faint — the next switch-in there is a REPLACEMENT (persists across turns: the send-in often lands in the next proposal)
+  private vacatedSpecies: Partial<Record<SlotRef, string>> = {};  // who fainted there — the dead mon's plate lingers a few frames and must not re-seed its own vacated slot
   private turnsClosed = 0;                          // turns emitted so far — guards the pair-order swap to pre-first-emission
   // NICKNAME ALIASES: a nicknamed mon's banners carry the nickname, never the species.
   // A Latin nickname OCRs stably, so binding label→slot once (from the send-out pair,
@@ -80,6 +81,7 @@ export class BattleAssembler {
     this.actions = []; this.faints = []; this.notes = []; this.stateLines = [];
     this.megaPending.clear(); this.hpSamples = {}; this.protectedThisTurn.clear();
     this.missedTargets.clear(); this.vacatedByFaint.clear(); this.nickAlias = {};
+    this.vacatedSpecies = {};
     this.turnsClosed = 0;
   }
 
@@ -117,11 +119,16 @@ export class BattleAssembler {
     const swapRef = (r: SlotRef): SlotRef => (r === a ? b : r === b ? a : r);
     [this.roster[a], this.roster[b]] = [this.roster[b], this.roster[a]];
     [this.nickAlias[a], this.nickAlias[b]] = [this.nickAlias[b], this.nickAlias[a]];
-    [this.hpSamples[a], this.hpSamples[b]] = [this.hpSamples[b], this.hpSamples[a]];
+    [this.vacatedSpecies[a], this.vacatedSpecies[b]] = [this.vacatedSpecies[b], this.vacatedSpecies[a]];
+    // hpSamples deliberately NOT swapped: they're recorded from PHYSICAL plate refs
+    // (already true-plate space — the space the swap converts everything else INTO).
+    // Swapping them crossed correct samples onto the wrong slot and tripped the
+    // zero-drop guard on real hits.
     for (const act of this.actions) {
       act.actor = swapRef(act.actor);
       if (act.target) act.target = swapRef(act.target);
       if (act.spread) for (const s of act.spread) s.ref = swapRef(s.ref);
+      if (act.kind === 'state' && act.stateLine) act.stateLine = act.stateLine.replace(new RegExp(`^(${a}|${b})\\b`), m0 => (m0 === a ? b : a));
     }
     this.faints = this.faints.map(swapRef);
     this.megaPending = new Set([...this.megaPending].map(swapRef));
@@ -141,7 +148,13 @@ export class BattleAssembler {
    *  tracked (via a lead, a send-out banner, or a prior seed) is left alone, so OCR flicker during
    *  a switch/faint animation can't clobber a known mon. */
   seedActiveIfUnknown(ref: SlotRef, species: string, confidence = 0): void {
-    if (this.roster[ref] == null) { this.roster[ref] = species; return; }
+    if (this.roster[ref] == null) {
+      // The just-fainted mon's nameplate lingers a few frames — re-seeding it into
+      // its own vacated slot stole the REPLACEMENT's slot (the send-in then landed
+      // in the wrong slot and clobbered its neighbour).
+      if (this.vacatedSpecies[ref] && norm(this.vacatedSpecies[ref]!) === norm(species)) return;
+      this.roster[ref] = species; return;
+    }
     // PLATE OVERRIDE: a slot occupied by a GARBLED label (a banner OCR that never
     // resolves to a legal species — seen live with a Japanese-nicknamed opponent)
     // yields to a high-confidence canonical plate read; the plate index is ground
@@ -244,6 +257,26 @@ export class BattleAssembler {
         && (!offensiveOnly || isOffensive(a.move))) return a;
     }
     return undefined;
+  }
+
+  /** Pin the most recent move into `ref` as AIMED at it but dealing NO damage (a miss
+   *  or an immunity) — the target is real data, a damage slot would be poison. */
+  private markNoDamage(side: Side, ref: SlotRef | null): void {
+    if (!ref) return;
+    let act: TurnAction | undefined;
+    for (let i = this.actions.length - 1; i >= 0 && !act; i--) {
+      const x = this.actions[i]!;
+      if (x.kind !== 'move' || sideOf(x.actor) === side) continue;
+      if (x.target === ref || (x.target == null && !x.spread)) act = x;
+    }
+    if (!act) return;
+    // Pin the aim on a SINGLE-target move (real data). A dex-SPREAD move must stay
+    // unpinned: freezing its target on the immune/dodging foe hid the other, real
+    // victim from target inference (EQ next to a Flying-type lost the survivor chip).
+    const dexT = (getMove(toId(act.move ?? '')) as { target?: string } | undefined)?.target;
+    const spreadMove = dexT === 'allAdjacentFoes' || dexT === 'allAdjacent';
+    if (act.target == null && !spreadMove) act.target = ref;
+    this.missedTargets.add(`${this.actions.indexOf(act)}:${ref}`);
   }
 
   /** A follow-up line (flinch/effectiveness/faint) names who a move hit → pin target.
@@ -374,8 +407,12 @@ export class BattleAssembler {
         // A send-in filling a faint-vacated slot is a REPLACEMENT (→ `in` line), not a
         // chosen switch. Only when the species resolved — the `in` grammar needs a
         // species ref the parser can canonicalise; a nickname stays a switch line.
-        const replacement = this.vacatedByFaint.has(target) && msg.species != null;
+        // Replacement even when the label is garbled — if pass-0 later repairs the
+        // species (plate override), the `in` grammar applies; if not, the line is
+        // suppressed anyway, so a chosen-switch mislabel can't leak.
+        const replacement = this.vacatedByFaint.has(target);
         this.vacatedByFaint.delete(target);
+        delete this.vacatedSpecies[target];
         delete this.nickAlias[target];   // new occupant — the old nickname binding is stale
         this.actions.push({ actor: target, kind: 'switch', switchTo: species, replacement: replacement || undefined });
         break;
@@ -389,7 +426,9 @@ export class BattleAssembler {
         const ref = this.resolveSlot(msg.side, msg.species ?? msg.label);
         if (ref) {
           if (this.faints.includes(ref)) break;            // re-fired faint banner
-          this.attachTarget(msg.side, ref); this.faints.push(ref); this.roster[ref] = null;
+          this.attachTarget(msg.side, ref); this.faints.push(ref);
+          this.vacatedSpecies[ref] = this.roster[ref] ?? undefined;
+          this.roster[ref] = null;
           delete this.nickAlias[ref];
           // The ko goes INTO the action timeline: emitted trailing, it would land after
           // the replacement's `in` line and faint the wrong (new) occupant of the slot.
@@ -400,9 +439,18 @@ export class BattleAssembler {
         break;
       }
       case 'flinch':
-      case 'effectiveness':
         this.attachTarget(msg.side, this.resolveSlot(msg.side, msg.species ?? msg.label));
         break;
+      case 'effectiveness': {
+        const ref = this.resolveSlot(msg.side, msg.species ?? msg.label);
+        // "It doesn't affect X…" pins the AIM but is a guaranteed ZERO — treat it like
+        // a miss (target kept, no damage slot, never a spread hit). Pinning it as a
+        // plain hit emitted a 0-damage spread entry on the immune foe (EQ next to a
+        // Flying-type), which is exactly the inference poison the guards exist for.
+        if (msg.level === 'immune') { this.markNoDamage(msg.side, ref); break; }
+        this.attachTarget(msg.side, ref);
+        break;
+      }
       // "X grew drowsy!" names Yawn's target — the only target signal a STATUS move
       // gets (no effectiveness/damage follow-ups), else Yawn emits as `> self`.
       case 'drowsy':
@@ -435,22 +483,13 @@ export class BattleAssembler {
         if (ref) this.protectedThisTurn.add(ref);
         break;
       }
-      case 'miss': {
+      case 'miss':
         // "X avoided the attack!" — the most recent move into X missed: pin the target
         // (the aim is real data) but flag it so no damage slot is emitted; an
         // "unchanged HP" value would read as a 0-damage observation. (Seen live:
         // `o1 > Solar Beam > m1 > 100%` off a dodged Solar Beam.)
-        const ref = this.resolveSlot(msg.side, msg.species ?? msg.label);
-        if (!ref) break;
-        let act: TurnAction | undefined;
-        for (let i = this.actions.length - 1; i >= 0 && !act; i--) {
-          const x = this.actions[i]!;
-          if (x.kind !== 'move' || sideOf(x.actor) === msg.side) continue;
-          if (x.target === ref || (x.target == null && !x.spread)) act = x;
-        }
-        if (act) { if (act.target == null) act.target = ref; this.missedTargets.add(`${this.actions.indexOf(act)}:${ref}`); }
+        this.markNoDamage(msg.side, this.resolveSlot(msg.side, msg.species ?? msg.label));
         break;
-      }
       case 'crit': {
         // "A critical hit!" tags the move whose damage just resolved — without the tag
         // its 1.5× observation reads as a fake super-high roll and poisons inference.
@@ -562,7 +601,11 @@ export class BattleAssembler {
       // A banner-pinned target does NOT count as hit when the pin came from a MISS
       // banner ("Garchomp avoided the attack!" pins the aim, not a hit) — counting it
       // fabricated a spread entry with the dodger's unrelated later HP.
-      const hit = cands.filter(r => this.roster[r] && !this.missedTargets.has(`${i}:${r}`) && (r === a.target || immDrop(r, i) >= 1));
+      // "Occupied at hit time" includes a foe this turn's faint has since nulled out
+      // of the roster — a spread that KO'd one foe still chipped the other, and gating
+      // on roster alone silently dropped the survivor's damage observation.
+      const occupiedAtHit = (r: SlotRef) => this.roster[r] != null || this.faints.includes(r);
+      const hit = cands.filter(r => occupiedAtHit(r) && !this.missedTargets.has(`${i}:${r}`) && (r === a.target || immDrop(r, i) >= 1));
       if (hit.filter(r => r !== ally).length >= 2) {
         a.spread = hit.map(ref => ({ ref, hpRemainingPercent: 0 }));
         a.target = undefined;
@@ -584,10 +627,10 @@ export class BattleAssembler {
     this.actions.forEach((a, i) => {
       if (a.kind !== 'move' || a.target != null || a.spread || !isOffensive(a.move)) return;
       const [f1, f2] = slotsFor(sideOf(a.actor) === 'mine' ? 'opp' : 'mine');
-      let pick = [f1, f2].filter(r => this.roster[r] && !this.protectedThisTurn.has(r) && immDrop(r, i) >= 3)  // 1. window drop
+      let pick = [f1, f2].filter(r => (this.roster[r] != null || this.faints.includes(r)) && !this.protectedThisTurn.has(r) && !this.missedTargets.has(`${i}:${r}`) && immDrop(r, i) >= 3)  // 1. window drop (a since-fainted foe still counts; never a missed/immune ref)
         .sort((x, y) => immDrop(y, i) - immDrop(x, i))[0];
       if (!pick) {
-        const foes = [f1, f2].filter(r => !claimed.has(r));
+        const foes = [f1, f2].filter(r => !claimed.has(r) && !this.missedTargets.has(`${i}:${r}`));
         pick = foes.find(r => touched?.has(r) && this.roster[r]);                            // 2. plate appeared
         if (!pick) pick = foes.filter(r => dropOf(r) >= 3).sort((x, y) => dropOf(y) - dropOf(x))[0]; // 3. HP fell (turn)
         if (!pick) {                                                                          // 4. default to a live foe

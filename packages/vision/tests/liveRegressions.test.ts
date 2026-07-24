@@ -183,6 +183,43 @@ describe('panelBrightnessRatio — dim team-sheet regression (2026-07-24, all-Ic
   });
 });
 
+describe('review findings — spread KO, dead-plate reseed, immunity', () => {
+  const RLEADS = { m1: 'Garchomp', m2: 'Kingambit', o1: 'Raichu', o2: 'Sylveon' };
+
+  test('a spread that KOs one foe still carries the survivor chip (faint nulled the roster)', () => {
+    const t = new BattleTracker(RLEADS);
+    t.feed(parseBanner('Garchomp used Earthquake!'));
+    t.recordHp('o1', 0, true);
+    t.recordHp('o2', 70, true);
+    t.feed(parseBanner('The opposing Raichu fainted!'));
+    const lines = t.flushPending({ o1: 0, o2: 70 }, new Set())!;
+    expect(lines.some(l => l.includes('spread') && l.includes('o2:70'))).toBe(true);   // survivor chip kept
+    expect(lines).toContain('o1 ko');
+  });
+
+  test('the dead mon lingering plate cannot re-seed its vacated slot', () => {
+    const t = new BattleTracker(RLEADS);
+    t.feed(parseBanner('Kingambit fainted!'));
+    t.seedActive('m2', 'Kingambit', 0.95);                 // plate lingers a few frames
+    expect(t.getRoster().m2).toBeNull();
+    t.feed(parseBanner('Go! Meowscarada!'));
+    const lines = t.flushPending({}, new Set())!;
+    expect(lines).toContain('m2 ko');
+    expect(lines).toContain('mMeowscarada in m2');         // replacement lands in the RIGHT slot
+    expect(t.getRoster().m1).toBe('Garchomp');             // neighbour untouched
+  });
+
+  test('an immunity banner is a guaranteed zero — no damage entry, never a spread hit', () => {
+    const t = new BattleTracker({ m1: 'Garchomp', m2: 'Kingambit', o1: 'Talonflame', o2: 'Sylveon' });
+    t.feed(parseBanner('Garchomp used Earthquake!'));
+    t.feed(parseBanner("It doesn't affect the opposing Talonflame..."));
+    t.recordHp('o2', 70, true);
+    const lines = t.flushPending({ o2: 70 }, new Set())!;
+    expect(lines.some(l => l.startsWith('m1 > Earthquake > o2'))).toBe(true);   // real hit only
+    expect(lines.some(l => l.includes('o1:'))).toBe(false);                      // no 0-damage poison
+  });
+});
+
 describe('occupancy assertions + per-match reset', () => {
   const mkRead = (text: string, species: Partial<Record<SlotRef, string>>, TSb: { v: number }): FrameRead => {
     const slot = (side: 'mine' | 'opp', index: 0 | 1, ref: SlotRef): SlotRead => ({

@@ -618,6 +618,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   const [visionFinals, setVisionFinals] = useState<ProposalLike[]>([]);
   const [visionPreview, setVisionPreview] = useState<ProposalLike | null>(null);
   const visionProposal = visionFinals[0] ?? visionPreview;
+  const acceptedPartialRef = useRef(false);   // an early (partial) accept — skip that turn's final once
+  const suppressPreviewRef = useRef(false);   // a rejected preview stays closed until the turn settles
   // The live turn-watcher (read-live child) is owned by the shared `watcher` module so it
   // spans team-select → battle (started at either). Here we just subscribe: proposals →
   // the ratify panel, and the watching flag → the badge. Stop the child when we leave battle.
@@ -679,8 +681,25 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         }
       }
       const prop: ProposalLike = { lines, confidence: p.confidence ?? 0.9, notes: [], partial: p.partial };
-      if (p.partial) setVisionPreview(prop);
-      else { setVisionFinals(q => [...q, prop]); setVisionPreview(null); }
+      if (p.partial) {
+        // A rejected preview stays rejected until the turn settles — without this,
+        // the very next partial re-opened the panel right after every `r`.
+        if (suppressPreviewRef.current) return;
+        setVisionPreview(prop);
+      } else {
+        // The user accepted this turn EARLY (partial accept) — its final would
+        // re-apply the overlapping lines into the draft. Skip it once.
+        if (acceptedPartialRef.current) {
+          acceptedPartialRef.current = false;
+          suppressPreviewRef.current = false;
+          setVisionPreview(null);
+          setMessage('⌁ finalized read of the early-accepted turn skipped — review the draft, then /next.');
+          return;
+        }
+        suppressPreviewRef.current = false;
+        setVisionFinals(q => [...q, prop]);
+        setVisionPreview(null);
+      }
     });
     const offS = onWatchingChange(setWatching);
     return () => { offP(); offS(); stopWatcher(); };   // stop the reader when the battle screen unmounts (match over)
@@ -2118,7 +2137,11 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   };
 
   // ---------------- hazard update (immediate, no turn entry) ----------------
+  // NB: the three immediate appliers read/write through visionStateRef, not the
+  // render-closure `match` — a batched vision accept (`["o1 ko","o2 ko"]`) applies
+  // several lines in ONE closure, and closure state would lose all but the last.
   const applyHazardUpdate = (update: HazardUpdate) => {
+    const match = visionStateRef.current.match;
     const nextField = { ...(match.field ?? NEUTRAL_FIELD) };
     if (update.side === 'mine') {
       nextField.myHazards = applyHazardVerb(nextField.myHazards, update.verb, update.arg);
@@ -2126,14 +2149,17 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       nextField.theirHazards = applyHazardVerb(nextField.theirHazards, update.verb, update.arg);
     }
     const next: Match = { ...match, field: nextField };
+    visionStateRef.current = { ...visionStateRef.current, match: next };
     setMatch(next);
     saveMatchAsync(stores, next, setMessage);
     setMessage(`Hazard updated.`);
   };
 
   const applyWeatherUpdate = (update: WeatherUpdate) => {
+    const match = visionStateRef.current.match;
     const nextField = { ...(match.field ?? NEUTRAL_FIELD), weather: update.weather, weatherTurns: update.weather ? EFFECT_DURATIONS.weather : undefined };
     const next: Match = { ...match, field: nextField };
+    visionStateRef.current = { ...visionStateRef.current, match: next };
     setMatch(next);
     saveMatchAsync(stores, next, setMessage);
     setMessage(update.weather ? `Weather → ${update.weather}.` : 'Weather cleared.');
@@ -2142,6 +2168,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // ---------------- state update (immediate) ----------------
 
   const applyStateUpdate = (update: StateUpdate) => {
+    const match = visionStateRef.current.match;
+    const activeIdx = visionStateRef.current.activeIdx;
     const next: Match = {
       ...match,
       opponentTeam: match.opponentTeam.map(o => ({ ...o, currentBoosts: { ...(o.currentBoosts ?? {}) } })),
@@ -2520,6 +2548,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     applyItemClauseExclusion(next.opponentTeam);
 
     next.outcome = detectOutcome(next);
+    visionStateRef.current = { match: next, activeIdx: nextActive };
     setMatch(next);
     setActiveIdx(nextActive);
     saveMatchAsync(stores, next, setMessage);
@@ -2675,8 +2704,12 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     const wasFinal = visionFinals.length > 0;
     const moreQueued = visionFinals.length > 1;
     if (wasFinal) setVisionFinals(q => q.slice(1));
-    else setVisionPreview(null);
-    if (wasFinal && errors.length === 0 && !finalizing) {
+    else { setVisionPreview(null); acceptedPartialRef.current = true; }   // early accept — skip this turn's final
+    // Only ACTION lines (`a > b …`) open a draft worth finalizing; a faint/state-only
+    // final (the match-ending KO) applies immediately and must not trip the empty-draft
+    // guard, whose message stomped the real one.
+    const hasActionLines = lines.some(l => l.includes(' > '));
+    if (wasFinal && hasActionLines && errors.length === 0 && !finalizing) {
       setFinalizing(true);
       setTimeout(() => { try { finalizeTurnRef.current(); } finally { setFinalizing(false); } }, 0);
       setMessage(`Vision: turn applied + finalized.${moreQueued ? ` ${visionFinals.length - 1} more queued turn(s) to ratify.` : ''}`);
@@ -2684,7 +2717,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     }
     setMessage(errors.length
       ? `Vision: applied with ${errors.length} issue(s) — first: ${errors[0]} — fix the draft, then /next.`
-      : `Vision: applied ${lines.length} line(s). Review the draft, then /next to finalize.`);
+      : wasFinal && !hasActionLines
+        ? `Vision: state applied (no turn actions — nothing to finalize).`
+        : `Vision: applied ${lines.length} line(s). Review the draft, then /next to finalize.`);
   };
 
   const stopWatch = () => { stopWatcher(); setMessage('Watch off.'); };
@@ -3497,8 +3532,10 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       )}
 
       {/* Vision proposal — ratify a vision-built turn before it commits. Owns its
-          own input while open (main useInput + TextInput gated off via visionProposal). */}
-      {visionProposal && (
+          own input while open (main useInput + TextInput gated off via visionProposal).
+          HIDDEN while the replacement picker or /override own the keys — its useInput
+          is unconditional, and two live inputs double-dispatched every Enter/arrow. */}
+      {visionProposal && !pendingReplacement && !overrideOpen && (
         <Box marginTop={1}>
           <VisionProposalPanel
             proposal={visionFinals.length > 1
@@ -3509,7 +3546,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             onAccept={acceptVisionProposal}
             onReject={() => {
               if (visionFinals.length > 0) setVisionFinals(q => q.slice(1));
-              else setVisionPreview(null);
+              else { setVisionPreview(null); suppressPreviewRef.current = true; }   // stay closed until this turn settles
               setMessage('Vision proposal dismissed.');
             }}
           />

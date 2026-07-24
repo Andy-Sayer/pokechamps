@@ -209,7 +209,10 @@ export class BattleStateMachine {
   /** Close the final in-progress turn (call at match end). */
   finish(): TurnProposal | null {
     const lines = this.tracker.flushPending(this.lastHp, this.touched);
-    return lines ? this.propose(lines, 0) : null;
+    if (!lines) return null;
+    const p = this.propose(lines, 0);
+    p.occupancy = { ...this.occupancy };   // every emission carries occupancy — incl. the last
+    return p;
   }
 
   private propose(lines: string[], ts: number): TurnProposal {
