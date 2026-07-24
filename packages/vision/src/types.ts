@@ -65,16 +65,23 @@ export interface FrameRead {
   battleText: string;   // OCR of the log box
 }
 
-/** One assembled action within a turn (mirrors the turn-log verbs). */
+/** One assembled action within a turn (mirrors the turn-log verbs). `ko` is a faint
+ *  IN the action timeline — chronological order matters because a post-faint
+ *  replacement re-occupies the slot, so a trailing `m1 ko` would faint the WRONG mon. */
 export interface TurnAction {
   actor: SlotRef;
-  kind: 'move' | 'switch';
+  kind: 'move' | 'switch' | 'ko' | 'state';
+  /** kind 'state' only: a ready-made state line that must keep its CHRONOLOGICAL slot
+   *  (e.g. an item reveal — trailing it after a same-turn replacement would attribute
+   *  the item to the slot's NEW occupant). */
+  stateLine?: string;
   move?: string;
   target?: SlotRef;                                   // single-target move
   hpRemainingPercent?: number;                        // target HP% after the hit
   hpRemainingRaw?: number;                            // mine-side target: exact on-screen HP (emit takes precedence)
   spread?: { ref: SlotRef; hpRemainingPercent: number; hpRemainingRaw?: number }[]; // spread move
   switchTo?: string;                                  // species (switch)
+  replacement?: boolean;                              // post-faint send-in (→ `oSnorlax in o1`), not a chosen switch
   mega?: boolean;
   crit?: boolean;
 }

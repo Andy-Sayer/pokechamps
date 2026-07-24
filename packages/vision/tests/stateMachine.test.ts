@@ -4,11 +4,13 @@ import type { FrameRead, SlotRead, SlotRef, TurnProposal } from '../src/types.js
 
 const LEADS = { m1: 'Staraptor', m2: 'Grimmsnarl', o1: 'Raichu', o2: 'Sylveon' };
 
-/** Build a FrameRead: battleText + per-slot HP fractions (+ optional mine-side raw HP). */
+/** Build a FrameRead: battleText + per-slot HP fractions (+ optional mine-side raw HP).
+ *  speciesRaw carries plate text — the move-select gap only counts frames where every
+ *  live plate is visible (the plate gate), which matches real select-screen frames. */
 let TS = 0;
 function read(text: string, hp: Partial<Record<SlotRef, number>> = {}, raw: Partial<Record<SlotRef, number>> = {}): FrameRead {
   const slot = (side: 'mine' | 'opp', index: 0 | 1, ref: SlotRef): SlotRead => ({
-    side, index, species: null, speciesRaw: '', speciesConfidence: 0,
+    side, index, species: null, speciesRaw: LEADS[ref], speciesConfidence: 0,
     hpFraction: hp[ref] ?? null, hpRaw: raw[ref] ?? null, status: null,
   });
   return {

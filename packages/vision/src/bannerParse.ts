@@ -42,6 +42,7 @@ export type BattleMessage =
   // used; the bare singles form ("A critical hit!") has side=null → tag the last move.
   | { kind: 'crit'; side: Side | null; label: string | null; species: string | null }
   | { kind: 'protect'; side: Side; label: string; species: string | null }
+  | { kind: 'drowsy'; side: Side; label: string; species: string | null }
   | { kind: 'miss'; side: Side; label: string; species: string | null }
   | { kind: 'hpLoss'; side: Side; label: string; species: string | null }
   | { kind: 'confusionHit' }
@@ -111,7 +112,7 @@ export function parseBanner(raw: string): BattleMessage {
 
   // --- field: weather start / end (no single mon) ---
   // END covers the real per-weather banners ("The rain stopped." etc.), not just the generic one.
-  if (/the (?:rain|snow|hail) stopped|the sunlight faded|the sandstorm subsided|effects of the weather (?:disappeared|wore off)/i.test(lc)) return { kind: 'weatherEnd' };
+  if (/the (?:rain|snow|hail) stopped|the (?:harsh |extremely harsh )?sunlight faded|the sandstorm subsided|effects of the weather (?:disappeared|wore off)/i.test(lc)) return { kind: 'weatherEnd' };
   // START covers move-set ("It started to rain!") AND ability-set ("…'s Drizzle made it rain!").
   if (/started to rain|began to rain|it'?s raining|made it rain/i.test(lc)) return { kind: 'weatherStart', weather: 'rain' };
   if (/a sandstorm kicked up|sandstorm is raging|whipped up a sandstorm/i.test(lc)) return { kind: 'weatherStart', weather: 'sandstorm' };
@@ -195,6 +196,10 @@ export function parseBanner(raw: string): BattleMessage {
     return { kind: 'miss', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()) };
   if ((m = /^(.+?) protected itself$/i.exec(rest)))
     return { kind: 'protect', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()) };
+  // "X grew drowsy!" — Yawn's landing banner. Names the TARGET of the (status) move,
+  // which the move banner itself never does — without this, Yawn emits as `> self`.
+  if ((m = /^(.+?) grew drowsy$/i.exec(rest)))
+    return { kind: 'drowsy', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()) };
   // --- status conditions. "badly poisoned" before "poisoned"; confusion seen in the
   //     wild ("The opposing Incineroar is confused!"), the rest follow standard wording. ---
   {

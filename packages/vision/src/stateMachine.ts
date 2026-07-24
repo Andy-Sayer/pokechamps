@@ -29,8 +29,19 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/
 const isBannerText = (t: string) => t.length > 5 && /[a-z]{3}/i.test(t);
 
 export interface StateMachineOpts {
-  /** No-banner frames that mark the move-select gap (turn boundary). Default 8. */
+  /** Consecutive no-banner frames WITH every live nameplate visible that mark the
+   *  move-select gap (turn boundary). Default 24 (~10s at 2.5 reads/sec). Mid-turn
+   *  animation lulls (mega cinematic, a slow move) blank the banner for up to ~15
+   *  frames — the old default of 8 chopped turns mid-action (late KOs, lost damage
+   *  values, mis-targeted moves; see live-test 2026-07-23). Real move-select pauses
+   *  ran ≥48 frames in that match, so 24 splits the two populations with ~2× margin
+   *  on each side. The plate gate adds robustness: cinematics hide the plates, the
+   *  select screen shows them all. */
   gapFrames?: number;
+  /** Hard boundary: no-banner frames after which the turn flushes REGARDLESS of plate
+   *  visibility (a select variant that hides plates must not stall the reader forever).
+   *  Default 3 × gapFrames. */
+  longGapFrames?: number;
   /** No-banner frames after which the banner is considered cleared (so a later repeat
    *  re-fires). Default 2 — tolerates a 1-frame flicker. */
   clearFrames?: number;
@@ -48,14 +59,18 @@ export class BattleStateMachine {
   private touched = new Set<SlotRef>();   // slots whose nameplate appeared this turn (affected mons)
   private settleRuns: Partial<Record<SlotRef, { val: number; run: number }>> = {};  // consecutive-read counter per slot
   private lastPreview = '';                // last in-progress preview emitted (dedupe partials)
+  private plateGapRun = 0;                 // no-banner frames with ALL live plates visible (move-select signature)
+  private pairContra = { mine: 0, opp: 0 };  // consecutive frames where a side's plates read exactly SWAPPED vs roster
   private gapFrames: number;
+  private longGapFrames: number;
   private clearFrames: number;
   private settleFrames: number;
   private conf: number;
 
   constructor(leads: Partial<Roster> = {}, opts: StateMachineOpts = {}) {
     this.tracker = new BattleTracker(leads);
-    this.gapFrames = opts.gapFrames ?? 8;
+    this.gapFrames = opts.gapFrames ?? 24;
+    this.longGapFrames = opts.longGapFrames ?? this.gapFrames * 3;
     this.clearFrames = opts.clearFrames ?? 2;
     this.settleFrames = opts.settleFrames ?? 2;
     this.conf = opts.confidence ?? 0.9;
@@ -86,10 +101,33 @@ export class BattleStateMachine {
       // slots (seedActive is a no-op otherwise), so banner-tracked switches stay authoritative.
       if (s.species && s.speciesConfidence >= 0.75) this.tracker.seedActive(ref, s.species);
     }
+    // PAIR-ORDER RECONCILE: the opening double send-out banner ("sent out A and B!")
+    // lists the pair in an arbitrary order, but the nameplate INDEX is ground truth.
+    // If both of a side's plates read confidently and show exactly the roster pair
+    // SWAPPED, for 2 consecutive frames, swap the roster (+ recorded refs) — only
+    // before anything was emitted; after that the engine already believes the old
+    // mapping and a silent swap would desync it. (Seen live: every opp HP read crossed
+    // for a whole match.)
+    for (const side of ['mine', 'opp'] as const) {
+      const pair = read.slots.filter(s => s.side === side).sort((a, b) => a.index - b.index);
+      const roster = this.tracker.getRoster();
+      const [rA, rB] = side === 'mine' ? [roster.m1, roster.m2] : [roster.o1, roster.o2];
+      const confident = pair.length === 2 && pair.every(s => s.species && s.speciesConfidence >= 0.8);
+      const swapped = confident && rA != null && rB != null &&
+        norm(pair[0]!.species!) === norm(rB) && norm(pair[1]!.species!) === norm(rA) && norm(rA) !== norm(rB);
+      this.pairContra[side] = swapped ? this.pairContra[side] + 1 : 0;
+      if (this.pairContra[side] >= 2 && this.tracker.turnsClosed() === 0) {
+        this.tracker.swapPair(side);
+        this.pairContra[side] = 0;
+        // The HP/touched maps are keyed by TRUE plate refs and stay valid; only the
+        // roster's species↔slot mapping was wrong.
+      }
+    }
     const text = (read.battleText ?? '').trim();
 
     if (isBannerText(text)) {
       this.noBannerRun = 0;
+      this.plateGapRun = 0;
       if (norm(text) === norm(this.lastBanner)) return null;        // same banner, still showing
       this.lastBanner = text;
       const msg = parseBanner(text);
@@ -112,10 +150,18 @@ export class BattleStateMachine {
       return null;
     }
 
-    // no banner this frame — count toward the move-select gap
+    // No banner this frame — count toward the move-select gap. The PLATE GATE: only
+    // frames where every live slot's nameplate is visible count toward the (short) gap.
+    // Mid-turn animation lulls hide the plates (cinematic camera), the move-select
+    // screen shows them all — that's the discriminator that stops a slow animation
+    // from chopping the turn mid-action. longGapFrames is the plate-blind hard stop.
     this.noBannerRun++;
     if (this.noBannerRun >= this.clearFrames) this.lastBanner = '';
-    if (this.noBannerRun === this.gapFrames) {
+    const roster = this.tracker.getRoster();
+    const live = read.slots.filter(s => roster[refOf(s)] != null);
+    const allPlates = live.length > 0 && live.every(s => s.speciesRaw.replace(/[^a-z]/gi, '').length >= 3);
+    this.plateGapRun = allPlates ? this.plateGapRun + 1 : 0;
+    if (this.plateGapRun === this.gapFrames || this.noBannerRun === this.longGapFrames) {
       const lines = this.tracker.flushPending(this.lastHp, this.touched);
       if (lines) { this.touched = new Set(); this.lastPreview = ''; return this.propose(lines, read.ts); }
     }

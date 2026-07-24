@@ -21,7 +21,16 @@ const fmtHp = (ref: string, pct: number, raw?: number): string =>
 
 /** One action → one turn-log line. */
 export function emitAction(a: TurnAction): string {
-  if (a.kind === 'switch') return `${a.actor} > switch > ${a.switchTo}`;
+  if (a.kind === 'ko') return `${a.actor} ko`;
+  if (a.kind === 'state') return a.stateLine ?? '';
+  if (a.kind === 'switch') {
+    // Post-faint replacement → the `in` state line (`oSnorlax in o1`), NOT a switch
+    // action: a switch implies a chosen switch (+6 speed bracket) and would poison
+    // speed inference. The species ref (side letter + letters-only name) canonicalises
+    // to the numeric team ref in the parser.
+    if (a.replacement && a.switchTo) return `${a.actor[0]}${a.switchTo.replace(/[^a-zA-Z]/g, '')} in ${a.actor}`;
+    return `${a.actor} > switch > ${a.switchTo}`;
+  }
   if (a.spread && a.spread.length) {
     const parts = a.spread.map(t => `${t.ref}:${fmtHp(t.ref, t.hpRemainingPercent, t.hpRemainingRaw)}`).join(', ');
     return `${actorWithMods(a)} > ${a.move} > spread > ${parts}`;
@@ -38,6 +47,11 @@ export function emitTurnLog(obs: TurnObservation): string[] {
   for (const ref of obs.megas ?? []) lines.push(`${ref} mega`);
   // Stat-boost state lines (Intimidate on switch-in, Nasty Plot, …).
   for (const sl of obs.stateLines ?? []) lines.push(sl);
-  for (const f of obs.faints) lines.push(`${f} ko`);
+  // Faints already present as in-timeline `ko` actions were emitted at their true
+  // position above; only emit the trailing form for legacy callers that fill
+  // `faints` without ko actions.
+  for (const f of obs.faints) {
+    if (!obs.actions.some(a => a.kind === 'ko' && a.actor === f)) lines.push(`${f} ko`);
+  }
   return lines;
 }

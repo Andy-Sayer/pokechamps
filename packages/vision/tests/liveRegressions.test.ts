@@ -1,0 +1,124 @@
+// Regressions from the first full live ranked match (2026-07-23, vs SabaoEmPo).
+// Every case here reproduces a defect observed in that match's debug trace
+// (fixtures/live-debug/) — see memory live-test-2026-07-23-findings.
+import { describe, test, expect } from 'vitest';
+import { parseBanner } from '../src/bannerParse.js';
+import { BattleTracker } from '../src/track.js';
+import { BattleStateMachine } from '../src/stateMachine.js';
+import type { FrameRead, SlotRead, SlotRef, TurnProposal } from '../src/types.js';
+
+const LEADS = { m1: 'Talonflame', m2: 'Kingambit', o1: 'Charizard', o2: 'Hawlucha' };
+
+describe('banner patterns from the live match', () => {
+  test('"The harsh sunlight faded." parses as weatherEnd (was unknown)', () => {
+    expect(parseBanner('The harsh sunlight faded.')).toEqual({ kind: 'weatherEnd' });
+  });
+
+  test('"X grew drowsy!" parses as drowsy naming the target', () => {
+    expect(parseBanner('Kingambit grew drowsy!')).toMatchObject({ kind: 'drowsy', side: 'mine', species: 'Kingambit' });
+  });
+});
+
+describe('BattleTracker — live-match regressions', () => {
+  test('a KO emits at its chronological position and the send-in becomes an `in` line', () => {
+    const t = new BattleTracker(LEADS);
+    t.feed(parseBanner('Talonflame used Brave Bird!'));
+    const turn1 = t.flushPending({}, new Set());
+    expect(turn1).toEqual(['m1 > Brave Bird > o1']);
+    // Faint lands with no following action — the old actions-only gate dropped it.
+    t.feed(parseBanner('The opposing Charizard fainted!'));
+    const turn2 = t.flushPending({}, new Set());
+    expect(turn2).toEqual(['o1 ko']);
+    // The replacement into the vacated slot is an `in` state line, NOT a chosen
+    // switch (a switch would poison the +6 speed bracket inference).
+    t.feed(parseBanner('SabaoEmPo sent out Snorlax!'));
+    const turn3 = t.flushPending({}, new Set());
+    expect(turn3).toEqual(['oSnorlax in o1']);
+  });
+
+  test('ko precedes a same-proposal replacement so the wrong mon is never fainted', () => {
+    const t = new BattleTracker(LEADS);
+    t.feed(parseBanner('The opposing Charizard used Heat Wave!'));
+    t.feed(parseBanner('Talonflame fainted!'));
+    t.feed(parseBanner('Go! Meowscarada!'));
+    const lines = t.flushPending({}, new Set())!;
+    expect(lines.indexOf('m1 ko')).toBeGreaterThanOrEqual(0);
+    expect(lines.indexOf('m1 ko')).toBeLessThan(lines.indexOf('mMeowscarada in m1'));
+  });
+
+  test('the same actor using a DIFFERENT move closes the missed turn boundary', () => {
+    const t = new BattleTracker(LEADS);
+    expect(t.feed(parseBanner('Talonflame used Brave Bird!'))).toBeNull();
+    const closed = t.feed(parseBanner('Talonflame used Tailwind!'));
+    expect(closed).toEqual(['m1 > Brave Bird > o1']);     // previous turn flushed
+    // …while a SAME-move repeat stays a banner re-fire (no split, no duplicate).
+    const t2 = new BattleTracker(LEADS);
+    expect(t2.feed(parseBanner('Talonflame used Brave Bird!'))).toBeNull();
+    expect(t2.feed(parseBanner('Talonflame used Brave Bird!'))).toBeNull();
+    expect(t2.flushPending({}, new Set())).toEqual(['m1 > Brave Bird > o1']);
+  });
+
+  test('Yawn resolves its target from the "grew drowsy" banner (was `> self`)', () => {
+    const t = new BattleTracker({ m1: 'Kingambit', m2: 'Dragonite', o1: 'Snorlax', o2: 'Noivern' });
+    t.feed(parseBanner('The opposing Snorlax used Yawn!'));
+    t.feed(parseBanner('Kingambit grew drowsy!'));
+    expect(t.flushPending({}, new Set())).toEqual(['o1 > Yawn > m1']);
+  });
+
+  test('"lost some of its HP" after its own attack reveals Life Orb; after a status self-cut it does not', () => {
+    const t = new BattleTracker(LEADS);
+    t.feed(parseBanner('The opposing Hawlucha used Rock Slide!'));
+    t.feed(parseBanner('The opposing Hawlucha lost some of its HP!'));
+    expect(t.flushPending({}, new Set())).toContain('o2 item Life Orb');
+
+    const t2 = new BattleTracker(LEADS);
+    t2.feed(parseBanner('The opposing Hawlucha used Substitute!'));
+    t2.feed(parseBanner('The opposing Hawlucha lost some of its HP!'));
+    expect(t2.flushPending({}, new Set()) ?? []).not.toContain('o2 item Life Orb');
+  });
+});
+
+describe('BattleStateMachine — live-match regressions', () => {
+  let TS = 0;
+  const mk = (text: string, plates: boolean, species: Partial<Record<SlotRef, string>> = {}): FrameRead => {
+    const slot = (side: 'mine' | 'opp', index: 0 | 1, ref: SlotRef): SlotRead => ({
+      side, index,
+      species: species[ref] ?? null,
+      speciesRaw: species[ref] ?? (plates ? LEADS[ref] : ''),
+      speciesConfidence: species[ref] ? 1 : 0,
+      hpFraction: plates ? 1 : null, status: null,
+    });
+    return { ts: TS++, battleText: text, slots: [slot('mine', 0, 'm1'), slot('mine', 1, 'm2'), slot('opp', 0, 'o1'), slot('opp', 1, 'o2')] };
+  };
+
+  test('a plate-less animation lull does NOT flush at gapFrames; the plate-visible select gap does', () => {
+    TS = 0;
+    const sm = new BattleStateMachine(LEADS, { gapFrames: 4, longGapFrames: 50, clearFrames: 2 });
+    const out: TurnProposal[] = [];
+    const feed = (fr: FrameRead) => { const p = sm.feed(fr); if (p && !p.partial) out.push(p); };
+    feed(mk('Talonflame used Tailwind!', false));
+    feed(mk('Talonflame used Tailwind!', false));
+    for (let i = 0; i < 10; i++) feed(mk('', false));      // cinematic: no banner, no plates — 10 > gapFrames
+    expect(out).toHaveLength(0);                            // old code chopped the turn here
+    for (let i = 0; i < 4; i++) feed(mk('', true));         // select screen: plates visible
+    expect(out).toHaveLength(1);
+    expect(out[0]!.lines).toEqual(['m1 > Tailwind > self']);
+  });
+
+  test('confident plates contradicting the send-out banner order swap the pair BEFORE first emission', () => {
+    TS = 0;
+    const sm = new BattleStateMachine(LEADS, { gapFrames: 4, longGapFrames: 50, clearFrames: 2 });
+    const out: TurnProposal[] = [];
+    const feed = (fr: FrameRead) => { const p = sm.feed(fr); if (p && !p.partial) out.push(p); };
+    // Plates read the OPPOSITE order of the banner-seeded roster (the live match's
+    // opening: "sent out Charizard and Hawlucha!" with Hawlucha on plate 0).
+    const swapped = { o1: 'Hawlucha', o2: 'Charizard' } as const;
+    feed(mk('', true, swapped));
+    feed(mk('', true, swapped));                            // 2 consecutive contradictions → swap
+    feed(mk('The opposing Charizard used Heat Wave!', false));
+    for (let i = 0; i < 4; i++) feed(mk('', true, swapped));
+    expect(out).toHaveLength(1);
+    // Charizard now resolves to o2 (its true plate slot) — every HP read stays aligned.
+    expect(out[0]!.lines[0]).toMatch(/^o2 > Heat Wave/);
+  });
+});

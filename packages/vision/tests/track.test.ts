@@ -52,8 +52,8 @@ describe('assembleMatch — full timeline → per-turn turn-log lines', () => {
       'm2 > Parting Shot > self',
       'm2 > switch > Sinistcha',
       'm1 > Close Combat > o1',
-      'o2 > Hyper Voice > m1',
-      'o1 ko',
+      'o1 ko',                    // chronological: the KO lands where it happened, BEFORE later actions —
+      'o2 > Hyper Voice > m1',    // a trailing ko would faint a replacement that re-occupied the slot
     ]);
   });
 

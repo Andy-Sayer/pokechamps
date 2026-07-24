@@ -53,6 +53,8 @@ export class BattleAssembler {
   private hpSamples: Partial<Record<SlotRef, HpSample[]>> = {};
   private protectedThisTurn = new Set<SlotRef>();   // Protect users — no damage inferred onto them
   private missedTargets = new Set<string>();        // "actionIdx:ref" pairs where the move missed
+  private vacatedByFaint = new Set<SlotRef>();      // slots emptied by a faint — the next switch-in there is a REPLACEMENT (persists across turns: the send-in often lands in the next proposal)
+  private turnsClosed = 0;                          // turns emitted so far — guards the pair-order swap to pre-first-emission
 
   /** Seed the two leads per side (from the team-preview / nameplate appearance read). */
   constructor(leads: Partial<Roster> = {}) {
@@ -61,6 +63,55 @@ export class BattleAssembler {
 
   /** Current active roster (slot → species), read-only snapshot. */
   getRoster(): Roster { return { ...this.roster }; }
+
+  /** Turns emitted so far (endTurn calls). */
+  getTurnsClosed(): number { return this.turnsClosed; }
+
+  /** Anything pending that would be lost if the stream ended now? (Not just actions —
+   *  a faint/state line with no following action must still flush, or the match-ending
+   *  KO vanishes: the gap-flush after the last damaging move clears the actions, and
+   *  the faint banner lands after it with nothing else to close the turn.) */
+  hasPending(): boolean {
+    return this.actions.length > 0 || this.faints.length > 0 || this.stateLines.length > 0 || this.megaPending.size > 0;
+  }
+
+  /** Would this move banner be a SECOND, DIFFERENT move by the same actor this turn?
+   *  A mon acts once per turn, so that's a missed turn boundary (the move-select gap
+   *  was shorter than the gap threshold) — the tracker closes the turn first. A SAME
+   *  move repeat stays a banner re-fire (handled by the feed dedupe), so a Choice-locked
+   *  mon can't trigger a false split. */
+  moveStartsNewTurn(side: Side, label: string, move: string): boolean {
+    const ref = this.resolveSlot(side, label);
+    if (!ref) return false;
+    return this.actions.some(a => a.kind === 'move' && a.actor === ref && norm(a.move ?? '') !== norm(move));
+  }
+
+  /** Swap the two slots of one side — roster, per-turn state, and every recorded ref.
+   *  Used when confident nameplate reads prove the opening send-out banner listed the
+   *  pair in the OPPOSITE order of the on-screen plates (seen live: "sent out Charizard
+   *  and Hawlucha!" with plates showing Hawlucha left / Charizard right — every opp HP
+   *  read was crossed for the rest of the match). Only safe before anything was emitted;
+   *  the caller guards on getTurnsClosed() === 0. */
+  swapPair(side: Side): void {
+    const [a, b] = slotsFor(side);
+    const swapRef = (r: SlotRef): SlotRef => (r === a ? b : r === b ? a : r);
+    [this.roster[a], this.roster[b]] = [this.roster[b], this.roster[a]];
+    [this.hpSamples[a], this.hpSamples[b]] = [this.hpSamples[b], this.hpSamples[a]];
+    for (const act of this.actions) {
+      act.actor = swapRef(act.actor);
+      if (act.target) act.target = swapRef(act.target);
+      if (act.spread) for (const s of act.spread) s.ref = swapRef(s.ref);
+    }
+    this.faints = this.faints.map(swapRef);
+    this.megaPending = new Set([...this.megaPending].map(swapRef));
+    this.protectedThisTurn = new Set([...this.protectedThisTurn].map(swapRef));
+    this.vacatedByFaint = new Set([...this.vacatedByFaint].map(swapRef));
+    this.missedTargets = new Set([...this.missedTargets].map(k => {
+      const [i, r] = k.split(':');
+      return `${i}:${swapRef(r as SlotRef)}`;
+    }));
+    this.stateLines = this.stateLines.map(l => l.replace(new RegExp(`^(${a}|${b})\\b`), m0 => (m0 === a ? b : a)));
+  }
 
   /** Fill an UNKNOWN active slot from a confident per-frame species OCR. This is what lets a reader
    *  that JOINED the battle mid-stream — started after send-out, with no `--leads` — resolve
@@ -198,7 +249,12 @@ export class BattleAssembler {
           this.roster[a] == null ? a : this.roster[b] == null ? b : a;
         const species = msg.species ?? msg.label;          // null species → keep the label (nickname) as a tag
         this.roster[target] = species;
-        this.actions.push({ actor: target, kind: 'switch', switchTo: species });
+        // A send-in filling a faint-vacated slot is a REPLACEMENT (→ `in` line), not a
+        // chosen switch. Only when the species resolved — the `in` grammar needs a
+        // species ref the parser can canonicalise; a nickname stays a switch line.
+        const replacement = this.vacatedByFaint.has(target) && msg.species != null;
+        this.vacatedByFaint.delete(target);
+        this.actions.push({ actor: target, kind: 'switch', switchTo: species, replacement: replacement || undefined });
         break;
       }
       case 'switchOut': {
@@ -211,14 +267,40 @@ export class BattleAssembler {
         if (ref) {
           if (this.faints.includes(ref)) break;            // re-fired faint banner
           this.attachTarget(msg.side, ref); this.faints.push(ref); this.roster[ref] = null;
+          // The ko goes INTO the action timeline: emitted trailing, it would land after
+          // the replacement's `in` line and faint the wrong (new) occupant of the slot.
+          this.actions.push({ actor: ref, kind: 'ko' });
+          this.vacatedByFaint.add(ref);
         }
         else this.notes.push(`faint: unresolved ${msg.side} "${msg.label}"`);
         break;
       }
       case 'flinch':
       case 'effectiveness':
+      // "X grew drowsy!" names Yawn's target — the only target signal a status move
+      // gets (no effectiveness/damage follow-ups), else Yawn emits as `> self`.
+      case 'drowsy':
         this.attachTarget(msg.side, this.resolveSlot(msg.side, msg.species ?? msg.label));
         break;
+      case 'hpLoss': {
+        // "X lost some of its HP!" right after X's own damaging move = the Life Orb
+        // tell → a free item reveal (`o2 item Life Orb`), which also fires the item-
+        // clause ripple across the other opp candidates. Gated on an offensive move by
+        // X this turn so Substitute/Belly Drum/Curse self-cuts don't false-positive,
+        // and on the move not being a self-cost move (Steel Beam etc.).
+        const ref = this.resolveSlot(msg.side, msg.species ?? msg.label);
+        if (!ref) break;
+        const SELF_COST = new Set(['steelbeam', 'mindblown', 'chloroblast']);
+        const acted = this.actions.some(a =>
+          a.kind === 'move' && a.actor === ref && isOffensive(a.move) && !SELF_COST.has(toId(a.move ?? '')));
+        const line = `${ref} item Life Orb`;
+        // IN the action timeline, not stateLines: trailing state lines emit after a
+        // same-turn replacement `in` — the reveal would attribute the item to the
+        // slot's NEW occupant (seen in the trace replay: Hawlucha's orb on Noivern).
+        if (acted && !this.actions.some(a => a.kind === 'state' && a.stateLine === line))
+          this.actions.push({ actor: ref, kind: 'state', stateLine: line });
+        break;
+      }
       case 'protect': {
         // "X protected itself!" — X took no move damage this turn, so an HP dip on it
         // (residual chip) must NOT be read as a hit: exclude it from window-drop target
@@ -337,7 +419,10 @@ export class BattleAssembler {
       const [s1, s2] = slotsFor(sideOf(a.actor));
       const ally = s1 === a.actor ? s2 : s1;
       const cands = (dexTarget === 'allAdjacent' ? [f1, f2, ally] : [f1, f2]).filter(r => !this.protectedThisTurn.has(r));
-      const hit = cands.filter(r => this.roster[r] && (r === a.target || immDrop(r, i) >= 1));
+      // A banner-pinned target does NOT count as hit when the pin came from a MISS
+      // banner ("Garchomp avoided the attack!" pins the aim, not a hit) — counting it
+      // fabricated a spread entry with the dodger's unrelated later HP.
+      const hit = cands.filter(r => this.roster[r] && !this.missedTargets.has(`${i}:${r}`) && (r === a.target || immDrop(r, i) >= 1));
       if (hit.filter(r => r !== ally).length >= 2) {
         a.spread = hit.map(ref => ({ ref, hpRemainingPercent: 0 }));
         a.target = undefined;
@@ -382,6 +467,7 @@ export class BattleAssembler {
       for (let k = i + 1; k < this.actions.length; k++) {
         const b = this.actions[k]!;
         if (b.kind === 'switch' && b.actor === ref) return k;
+        if (b.kind === 'ko' && b.actor === ref) return k;   // faint ends the slot's window (plate is gone)
         if (b.kind === 'move' && (b.target === ref || b.spread?.some(s => s.ref === ref))) return k;
       }
       return Number.MAX_SAFE_INTEGER;
@@ -390,8 +476,9 @@ export class BattleAssembler {
       if (a.kind !== 'move') return;
       if (a.spread) {
         // A Protected ref took no damage — drop it from the spread list (its "hit"
-        // would be a 0-damage observation). One survivor → plain single-target line.
-        a.spread = a.spread.filter(s => !this.protectedThisTurn.has(s.ref));
+        // would be a 0-damage observation). Same for a ref the miss banner named.
+        // One survivor → plain single-target line.
+        a.spread = a.spread.filter(s => !this.protectedThisTurn.has(s.ref) && !this.missedTargets.has(`${i}:${s.ref}`));
         if (a.spread.length === 1) { a.target = a.spread[0]!.ref; a.spread = undefined; }
         else if (!a.spread.length) { a.spread = undefined; return; }
       }
@@ -406,6 +493,9 @@ export class BattleAssembler {
         // move, feeds Choice-lock logic) but emit NO damage slot: an "unchanged HP"
         // value would read as a 0-damage observation and poison the spread inference.
         if (this.protectedThisTurn.has(a.target) || this.missedTargets.has(`${i}:${a.target}`)) return;
+        // A STATUS move deals no damage — never attach an HP slot to it. (A drowsy-
+        // pinned Yawn picked up the target's unrelated settled read: `> m1 > 27%`.)
+        if (!isOffensive(a.move)) return;
         const smp = this.lastSample(a.target, i + 1, cutFor(i, a.target));
         const pct = smp?.pct ?? hpBySlot[a.target];
         if (pct == null) return;
@@ -427,6 +517,9 @@ export class BattleAssembler {
     // standalone mega lines so the forme change isn't lost.
     const megas = [...this.megaPending];
     const obs: TurnObservation = { actions: this.actions, faints: this.faints, megas: megas.length ? megas : undefined, stateLines: this.stateLines.length ? [...this.stateLines] : undefined, confidence: 1, notes: this.notes };
+    this.turnsClosed++;
+    // vacatedByFaint deliberately survives the reset — the replacement send-in usually
+    // lands in the NEXT proposal (end-of-turn replacements cross the gap boundary).
     this.actions = []; this.faints = []; this.notes = []; this.stateLines = []; this.megaPending.clear(); this.hpSamples = {}; this.protectedThisTurn.clear(); this.missedTargets.clear();
     return obs;
   }

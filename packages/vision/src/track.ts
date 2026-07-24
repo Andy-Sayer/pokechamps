@@ -57,6 +57,13 @@ export class BattleTracker {
   /** Current active roster snapshot. */
   getRoster(): Roster { return this.asm.getRoster(); }
 
+  /** Turns emitted so far — guards the pair-order swap to pre-first-emission. */
+  turnsClosed(): number { return this.asm.getTurnsClosed(); }
+
+  /** Swap one side's two slots everywhere (roster + recorded refs) — see
+   *  BattleAssembler.swapPair. Caller must guard on turnsClosed() === 0. */
+  swapPair(side: 'mine' | 'opp'): void { this.asm.swapPair(side); }
+
   /** Seed an unknown active slot from a confident per-frame species OCR (see
    *  BattleAssembler.seedActiveIfUnknown) — recovers the roster when the reader joined mid-battle. */
   seedActive(ref: SlotRef, species: string): void { this.asm.seedActiveIfUnknown(ref, species); }
@@ -74,7 +81,11 @@ export class BattleTracker {
    *  `hp` (post-turn remaining HP% per slot) is attached to that closed turn's moves. */
   feed(e: BattleMessage, hp: HpBySlot = {}, touched?: Set<SlotRef>): string[] | null {
     let done: string[] | null = null;
-    if (isActionStart(e) && this.sawAction && this.sawEot) {
+    // A mon acting a SECOND time (different move) means the frame-level gap missed the
+    // move-select pause — this event belongs to a NEW turn, so close the old one first.
+    // (A same-move repeat is a banner re-fire and stays deduped in the assembler.)
+    const missedBoundary = e.kind === 'move' && this.asm.moveStartsNewTurn(e.side, e.species ?? e.label, e.move);
+    if ((isActionStart(e) && this.sawAction && this.sawEot) || missedBoundary) {
       done = this.asm.endTurnLines(hp, this.hpBefore, touched);
       this.hpBefore = { ...hp };                 // this turn's post-HP = next turn's pre-HP
       this.sawAction = false; this.sawEot = false;
@@ -89,7 +100,10 @@ export class BattleTracker {
    *  a no-residual turn ends at the move-select gap, not on an event). Else null. `touched`
    *  = slots whose nameplate appeared this turn (affected mons) → the target signal. */
   flushPending(hp: HpBySlot = {}, touched?: Set<SlotRef>): string[] | null {
-    if (!this.sawAction) return null;
+    // Flush on ANY pending content, not just actions: a faint (or state line) that
+    // landed after the last flush has no following action to close its turn — the
+    // match-ending KO was silently lost under the actions-only gate.
+    if (!this.sawAction && !this.asm.hasPending()) return null;
     const lines = this.asm.endTurnLines(hp, this.hpBefore, touched);
     this.hpBefore = { ...hp };
     this.sawAction = false; this.sawEot = false;
