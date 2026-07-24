@@ -69,6 +69,18 @@ describe('BattleTracker — live-match regressions', () => {
     expect(t2.flushPending({}, new Set())).toEqual(['m1 > Brave Bird > o1']);
   });
 
+  test('a faint pin lands on the last DAMAGING move, never on a status move', () => {
+    // Seen live: Roost (self-heal) was the newest untargeted opp move when the faint
+    // banner arrived → `o1 > Roost > m1`. The pin must skip past it to the attack.
+    const t = new BattleTracker({ m1: 'Garchomp', m2: 'Pelipper', o1: 'Staraptor', o2: 'Sylveon' });
+    t.feed(parseBanner('The opposing Staraptor used Roost!'));
+    t.feed(parseBanner('The opposing Sylveon used Hyper Voice!'));
+    t.feed(parseBanner('Garchomp fainted!'));
+    const lines = t.flushPending({}, new Set())!;
+    expect(lines).toContain('o1 > Roost > self');
+    expect(lines.some(l => l.startsWith('o2 > Hyper Voice > m1'))).toBe(true);
+  });
+
   test('Yawn resolves its target from the "grew drowsy" banner (was `> self`)', () => {
     const t = new BattleTracker({ m1: 'Kingambit', m2: 'Dragonite', o1: 'Snorlax', o2: 'Noivern' });
     t.feed(parseBanner('The opposing Snorlax used Yawn!'));

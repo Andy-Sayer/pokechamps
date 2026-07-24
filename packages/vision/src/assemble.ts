@@ -221,11 +221,16 @@ export class BattleAssembler {
     return null;
   }
 
-  /** The most recent move that hit `side` and hasn't had its target pinned yet. */
-  private lastMoveInto(side: Side): TurnAction | undefined {
+  /** The most recent move that hit `side` and hasn't had its target pinned yet.
+   *  `offensiveOnly` (the default) skips status moves — a faint/effectiveness banner
+   *  follows a DAMAGING move, and pinning past it landed a faint's target on the
+   *  opponent's Roost (seen live: `o1 > Roost > m1`). The drowsy pin passes false:
+   *  Yawn is a status move that legitimately takes the named target. */
+  private lastMoveInto(side: Side, offensiveOnly = true): TurnAction | undefined {
     for (let i = this.actions.length - 1; i >= 0; i--) {
       const a = this.actions[i]!;
-      if (a.kind === 'move' && a.target == null && !a.spread && sideOf(a.actor) !== side) return a;
+      if (a.kind === 'move' && a.target == null && !a.spread && sideOf(a.actor) !== side
+        && (!offensiveOnly || isOffensive(a.move))) return a;
     }
     return undefined;
   }
@@ -234,9 +239,9 @@ export class BattleAssembler {
    *  A SECOND named mon on a dex spread move (two "super effective on X!" lines, or a
    *  faint after an effectiveness pin) means the move hit both → convert the single
    *  pin to a spread list; per-target damage fills in at endTurn. */
-  private attachTarget(side: Side, ref: SlotRef | null): void {
+  private attachTarget(side: Side, ref: SlotRef | null, offensiveOnly = true): void {
     if (!ref) return;
-    const a = this.lastMoveInto(side);
+    const a = this.lastMoveInto(side, offensiveOnly);
     if (a) { a.target = ref; return; }
     for (let i = this.actions.length - 1; i >= 0; i--) {
       const b = this.actions[i]!;
@@ -385,10 +390,12 @@ export class BattleAssembler {
       }
       case 'flinch':
       case 'effectiveness':
-      // "X grew drowsy!" names Yawn's target — the only target signal a status move
+        this.attachTarget(msg.side, this.resolveSlot(msg.side, msg.species ?? msg.label));
+        break;
+      // "X grew drowsy!" names Yawn's target — the only target signal a STATUS move
       // gets (no effectiveness/damage follow-ups), else Yawn emits as `> self`.
       case 'drowsy':
-        this.attachTarget(msg.side, this.resolveSlot(msg.side, msg.species ?? msg.label));
+        this.attachTarget(msg.side, this.resolveSlot(msg.side, msg.species ?? msg.label), false);
         break;
       case 'hpLoss': {
         // "X lost some of its HP!" right after X's own damaging move = the Life Orb
