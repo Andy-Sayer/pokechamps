@@ -609,16 +609,24 @@ function synthOppEntry(set: PokemonSet): OpponentEntry {
 export function BattleScreen({ stores, match: initial, onEnd, spectator = false, spectatorLabel }: BattleScreenProps) {
   const [match, setMatch] = useState<Match>(initial);
   const [input, setInput] = useState('');
-  // A vision-built turn awaiting ratification (the VisionProposalPanel). Set by
-  // /vision (and, once HDMI capture is wired, by the runVision loop); cleared on
-  // accept/reject. While set, it owns input focus.
-  const [visionProposal, setVisionProposal] = useState<ProposalLike | null>(null);
+  // Vision proposals, two tiers: FINALIZED turns QUEUE for ratification (they are
+  // real captured data and must never be clobbered — a final silently overwritten
+  // by the next turn's live preview was lost, seen live), while the partial live
+  // preview only displays when nothing awaits ratification. The panel shows the
+  // oldest unratified final first; accept/reject pops it.
+  const [visionFinals, setVisionFinals] = useState<ProposalLike[]>([]);
+  const [visionPreview, setVisionPreview] = useState<ProposalLike | null>(null);
+  const visionProposal = visionFinals[0] ?? visionPreview;
   // The live turn-watcher (read-live child) is owned by the shared `watcher` module so it
   // spans team-select → battle (started at either). Here we just subscribe: proposals →
   // the ratify panel, and the watching flag → the badge. Stop the child when we leave battle.
   const [watching, setWatching] = useState(watcherIsWatching());
   useEffect(() => {
-    const offP = onWatchProposal(p => setVisionProposal({ lines: p.lines, confidence: p.confidence ?? 0.9, notes: [], partial: p.partial }));
+    const offP = onWatchProposal(p => {
+      const prop: ProposalLike = { lines: p.lines, confidence: p.confidence ?? 0.9, notes: [], partial: p.partial };
+      if (p.partial) setVisionPreview(prop);
+      else { setVisionFinals(q => [...q, prop]); setVisionPreview(null); }
+    });
     const offS = onWatchingChange(setWatching);
     return () => { offP(); offS(); stopWatcher(); };   // stop the reader when the battle screen unmounts (match over)
   }, []);
@@ -892,6 +900,12 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   }, [activeIdx, draftActions, match.myTeam, match.opponentTeam]);
 
   // ---------------- turn finalize ----------------
+
+  // Fresh-closure handle for the queued-ratification auto-finalize: the accept
+  // handler's own finalizeTurn closure would see the PRE-apply draft (the lines it
+  // just applied land in state a render later). The ref always points at the
+  // current render's finalizeTurn.
+  const finalizeTurnRef = useRef<() => void>(() => {});
 
   const finalizeTurn = () => {
     if (draftActions.length === 0) {
@@ -2592,11 +2606,25 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     return null;
   };
 
+  finalizeTurnRef.current = finalizeTurn;
+
   // Ratify a vision proposal: apply each line into the turn draft (you then /next to
-  // finalize, exactly as with typed input), and close the panel.
+  // finalize, exactly as with typed input), and pop it. When MORE finalized turns are
+  // queued behind it, this turn is complete by definition (the reader only finalizes
+  // turn N+1 after N ended) — auto-/next so the next one presents against a clean
+  // draft instead of deadlocking behind the panel's input gate.
   const acceptVisionProposal = (lines: string[]) => {
     const errors = lines.map(applyTurnLine).filter((e): e is string => e != null);
-    setVisionProposal(null);
+    const wasFinal = visionFinals.length > 0;
+    const moreQueued = visionFinals.length > 1;
+    if (wasFinal) setVisionFinals(q => q.slice(1));
+    else setVisionPreview(null);
+    if (wasFinal && moreQueued && errors.length === 0 && !finalizing) {
+      setFinalizing(true);
+      setTimeout(() => { try { finalizeTurnRef.current(); } finally { setFinalizing(false); } }, 0);
+      setMessage(`Vision: applied + finalized (${visionFinals.length - 1} more queued turn(s) to ratify).`);
+      return;
+    }
     setMessage(errors.length
       ? `Vision: applied with ${errors.length} issue(s) — first: ${errors[0]}`
       : `Vision: applied ${lines.length} line(s). Review the draft, then /next to finalize.`);
@@ -2644,7 +2672,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         // setVisionProposal directly with the same shape.
         const lines = args.split(/\s*;\s*|\n/).map(s => s.trim()).filter(Boolean);
         if (!lines.length) { setMessage('Usage: /vision m1 > Close Combat > o1 > 33; o1 ko  (semicolon-separated turn-log lines).'); return true; }
-        setVisionProposal({ lines, confidence: 0.9, notes: [] });
+        setVisionFinals(q => [...q, { lines, confidence: 0.9, notes: [] }]);
         setMessage('');
         return true;
       }
@@ -3416,11 +3444,17 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       {visionProposal && (
         <Box marginTop={1}>
           <VisionProposalPanel
-            proposal={visionProposal}
+            proposal={visionFinals.length > 1
+              ? { ...visionProposal, notes: [...(visionProposal.notes ?? []), `${visionFinals.length - 1} more finalized turn(s) queued — enter to ratify each`] }
+              : visionProposal}
             turnNumber={match.turns.length + 1}
             gloss={line => previewTurnLine(line, ctxWithDraft)}
             onAccept={acceptVisionProposal}
-            onReject={() => { setVisionProposal(null); setMessage('Vision proposal dismissed.'); }}
+            onReject={() => {
+              if (visionFinals.length > 0) setVisionFinals(q => q.slice(1));
+              else setVisionPreview(null);
+              setMessage('Vision proposal dismissed.');
+            }}
           />
         </Box>
       )}

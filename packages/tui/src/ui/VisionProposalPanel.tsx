@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 
@@ -33,6 +33,17 @@ export function VisionProposalPanel({ proposal, turnNumber, gloss, onAccept, onR
   const [lines, setLines] = useState<string[]>(proposal.lines);
   const [cursor, setCursor] = useState(0);
   const [editing, setEditing] = useState(false);
+
+  // RE-SYNC on prop change: the panel stays mounted across proposal updates (live
+  // partials growing, a final replacing the preview, the ratify queue advancing), and
+  // useState only reads the FIRST proposal — the panel froze on it while every later
+  // update streamed by invisibly (the live "stuck panel"). Never clobber an in-flight
+  // manual edit; a fresh proposal lands after it's submitted.
+  useEffect(() => {
+    if (editing) return;
+    setLines(proposal.lines);
+    setCursor(c => Math.min(c, Math.max(0, proposal.lines.length - 1)));
+  }, [proposal.lines, editing]);
 
   useInput((input, key) => {
     if (editing) return;                                  // TextInput owns the keys; onSubmit exits
@@ -69,7 +80,11 @@ export function VisionProposalPanel({ proposal, turnNumber, gloss, onAccept, onR
                     onSubmit={() => setEditing(false)}
                   />
                 ) : (
-                  <Text color={sel ? 'white' : 'gray'}>{forDisplay(line)}</Text>
+                  <Text color={sel ? 'white' : 'gray'}>
+                    {forDisplay(line)}
+                    {/* a damaging move's target resolves at finalize — mid-turn its line reads "self", which is not a claim */}
+                    {partial && / > self$/.test(line) ? <Text dimColor italic>  (target resolves at finalize)</Text> : null}
+                  </Text>
                 )}
               </Box>
               {!editing && (
