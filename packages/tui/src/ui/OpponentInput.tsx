@@ -97,9 +97,12 @@ export function OpponentInput({ stores, onDone, onCancel }: OpponentInputProps) 
     setReading(true); if (!quiet) setVisionMsg('reading opponent off the live screen…');
     try {
       // Freeze the frame we read so the SAME one is harvested on confirm (the 4fps tap keeps
-      // changing during the 15-30s pick window).
-      const { snapshotLiveFrame } = await import('@pokechamps/vision/harvestRefs.js');
-      framePathRef.current = snapshotLiveFrame();
+      // changing during the 15-30s pick window). Brightness-gated: the game fades the screen
+      // during preview transitions, and a mid-fade grab wrecks every colour classification
+      // (an all-Ice team read as all-Steel) — wait out the dim, warn if it never lifts.
+      const { snapshotBrightLiveFrame } = await import('@pokechamps/vision/harvestRefs.js');
+      const snap = await snapshotBrightLiveFrame();
+      framePathRef.current = snap.path;
       const { readOppTeamFromFrame, saveChooserDebug, archiveOppSheet } = await import('@pokechamps/vision/oppTeamRead.js');
       const got: OppSlotRead[] = await readOppTeamFromFrame(framePathRef.current);
       saveChooserDebug(framePathRef.current, got);   // persist the exact frame + result for offline diagnosis
@@ -117,7 +120,7 @@ export function OpponentInput({ stores, onDone, onCancel }: OpponentInputProps) 
       const verified = got.filter(isVerified).length;
       const first = got.findIndex(g => !isVerified(g));
       setActiveIdx(first >= 0 ? first : 0);
-      setVisionMsg(`read done — ${verified}/6 type-verified (trusted ✓). Pick the rest (↑/↓, type/Tab), Ctrl+D confirms.${archivedPath ? ' · sheet saved ✓' : ''}${watcherIsWatching() ? '' : ' · Ctrl+W to watch the whole battle.'}`);
+      setVisionMsg(`${snap.dim ? '▲ screen stayed DIM — colours unreliable, Ctrl+R to re-read once it brightens. ' : ''}read done — ${verified}/6 type-verified (trusted ✓). Pick the rest (↑/↓, type/Tab), Ctrl+D confirms.${archivedPath ? ' · sheet saved ✓' : ''}${watcherIsWatching() ? '' : ' · Ctrl+W to watch the whole battle.'}`);
       return 'ok';
     } catch (e) {
       const m = (e as Error).message;

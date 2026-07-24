@@ -76,6 +76,25 @@ export function detectPanel(frame: Frame): { present: boolean; ins?: ScreenInset
 /** Is the shared screen a GameShare inset? (Only meaningful when a panel is present.) */
 export function detectGameshareInset(frame: Frame): boolean { return detectPanel(frame).ins != null; }
 
+/** Measured opp-card background brightness vs the calibrated bright value (median R of
+ *  thin strips inside the six cards, left of the sprite, / CHAMPIONS_OPP_PANEL_BG.R).
+ *  ~1.0 = bright settled preview. A DIMMED frame (grabbed mid-transition while the game
+ *  fades the screen behind a dialog) reads ~0.65-0.75 — and every colour classification
+ *  on it is garbage: an all-Ice team read as all-Steel (2026-07-24 sheet, Zora). The
+ *  detectPanel magenta gate alone passes those (±45 tolerance), hence this ratio. */
+export function panelBrightnessRatio(frame: Frame, ins?: ScreenInset): number {
+  const rs: number[] = [];
+  for (const o of CHAMPIONS_TEAM_PREVIEW.oppTeam) {
+    const s = o.sprite as Rect;
+    const strip: Rect = { x: s.x - 0.018, y: s.y + 0.02, w: 0.014, h: s.h - 0.04 };
+    const c = cropRegion(frame, ins ? insetRect(strip, ins) : strip);
+    for (let p = 0; p < c.data.length; p += 8) rs.push(c.data[p]!);
+  }
+  if (!rs.length) return 0;
+  rs.sort((a, b) => a - b);
+  return rs[Math.floor(rs.length / 2)]! / CHAMPIONS_OPP_PANEL_BG[0];
+}
+
 /** Persist the last chooser read (frame + per-slot result, or the failure reason) so a read
  *  that misbehaved live can be diagnosed offline with the exact frame the user saw. Best-effort. */
 export function saveChooserDebug(framePath: string, result: OppSlotRead[] | { error: string }): void {

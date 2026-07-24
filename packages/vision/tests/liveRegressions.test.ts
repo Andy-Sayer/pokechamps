@@ -5,7 +5,9 @@ import { describe, test, expect } from 'vitest';
 import { parseBanner } from '../src/bannerParse.js';
 import { BattleTracker } from '../src/track.js';
 import { BattleStateMachine } from '../src/stateMachine.js';
-import type { FrameRead, SlotRead, SlotRef, TurnProposal } from '../src/types.js';
+import { panelBrightnessRatio } from '../src/oppTeamRead.js';
+import { CHAMPIONS_OPP_PANEL_BG } from '../src/regions.js';
+import type { Frame, FrameRead, SlotRead, SlotRef, TurnProposal } from '../src/types.js';
 
 const LEADS = { m1: 'Talonflame', m2: 'Kingambit', o1: 'Charizard', o2: 'Hawlucha' };
 
@@ -75,6 +77,23 @@ describe('BattleTracker — live-match regressions', () => {
     t2.feed(parseBanner('The opposing Hawlucha used Substitute!'));
     t2.feed(parseBanner('The opposing Hawlucha lost some of its HP!'));
     expect(t2.flushPending({}, new Set()) ?? []).not.toContain('o2 item Life Orb');
+  });
+});
+
+describe('panelBrightnessRatio — dim team-sheet regression (2026-07-24, all-Ice read as all-Steel)', () => {
+  const flat = (mul: number): Frame => {
+    const w = 480, h = 270;
+    const data = new Uint8ClampedArray(w * h * 4);
+    const [R, G, B] = CHAMPIONS_OPP_PANEL_BG;
+    for (let p = 0; p < w * h; p++) {
+      data[p * 4] = Math.round(R * mul); data[p * 4 + 1] = Math.round(G * mul);
+      data[p * 4 + 2] = Math.round(B * mul); data[p * 4 + 3] = 255;
+    }
+    return { width: w, height: h, data, ts: 0 };
+  };
+  test('a bright panel reads ~1.0, a mid-fade panel well under the 0.85 gate', () => {
+    expect(panelBrightnessRatio(flat(1))).toBeGreaterThan(0.95);
+    expect(panelBrightnessRatio(flat(0.68))).toBeLessThan(0.75);   // the live dim frame measured 0.687
   });
 });
 

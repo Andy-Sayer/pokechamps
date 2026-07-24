@@ -9,7 +9,7 @@ import { loadFrame } from './decode.js';
 import { cropRegion } from './visionSource.js';
 import { CHAMPIONS_TEAM_PREVIEW, CHAMPIONS_OPP_PANEL_BG, insetRect } from './regions.js';
 import { colorHistogram, quadrantHistogram, type ColorHistRef } from './colorHist.js';
-import { detectPanel, DEFAULT_LIVE_TAP } from './oppTeamRead.js';
+import { detectPanel, panelBrightnessRatio, DEFAULT_LIVE_TAP } from './oppTeamRead.js';
 import type { Rect } from './types.js';
 import { dataDirPath, toId, isLegalSpecies, getSpecies } from '@pokechamps/core/domain/data.js';
 
@@ -20,6 +20,33 @@ const SNAP = resolve(dirname(fileURLToPath(import.meta.url)), '../fixtures/live/
  *  (latest.png keeps changing). Returns the frozen path (falls back to the tap if copy fails). */
 export function snapshotLiveFrame(tap: string = DEFAULT_LIVE_TAP): string {
   try { copyFileSync(tap, SNAP); return SNAP; } catch { return tap; }
+}
+
+/** Like snapshotLiveFrame, but WAIT OUT a dimmed frame: the game fades the whole screen
+ *  during preview transitions/dialogs, and a frame grabbed mid-fade wrecks every colour
+ *  classification (type icons + sprite hists — an all-Ice team read as all-Steel). Polls
+ *  the 4fps tap until the opp-card background reads bright (panelBrightnessRatio ≥
+ *  minRatio) or timeoutMs passes; then returns the latest snapshot with `dim` flagged so
+ *  the caller can warn. A frame with NO panel at all is returned immediately (not our
+ *  job to wait for a preview to appear — the caller's no-preview handling owns that). */
+export async function snapshotBrightLiveFrame(
+  tap: string = DEFAULT_LIVE_TAP,
+  opts: { minRatio?: number; timeoutMs?: number; pollMs?: number } = {},
+): Promise<{ path: string; dim: boolean }> {
+  const minRatio = opts.minRatio ?? 0.85;
+  const deadline = Date.now() + (opts.timeoutMs ?? 5000);
+  const pollMs = opts.pollMs ?? 350;
+  for (;;) {
+    const path = snapshotLiveFrame(tap);
+    try {
+      const frame = await loadFrame(path);
+      const panel = detectPanel(frame);
+      if (!panel.present) return { path, dim: false };
+      if (panelBrightnessRatio(frame, panel.ins) >= minRatio) return { path, dim: false };
+    } catch { return { path, dim: false }; }   // unreadable snapshot — let the read path surface the real error
+    if (Date.now() >= deadline) return { path, dim: true };
+    await new Promise(r => setTimeout(r, pollMs));
+  }
 }
 
 /** Harvest a sprite ref for each confirmed (species-set) slot from a preview frame. Upserts a
