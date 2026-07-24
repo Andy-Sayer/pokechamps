@@ -39,7 +39,11 @@ function launch(opts: WatchOpts): ChildProcess | null {
     if (opts.leads?.length) flags.push('--leads', opts.leads.join(','));
     if (opts.full) flags.push('--full');
     if (opts.debug) flags.push('--debug');
-    p = spawn(process.execPath, ['--import', 'tsx', ...flags], { stdio: ['ignore', 'pipe', 'pipe'] });
+    // stderr MUST be 'ignore', not 'pipe': nobody reads it here, and read-live + Tesseract write
+    // constant diagnostics to stderr. A piped-but-undrained stderr fills its 64KB buffer in ~a
+    // minute of battle frames, then the child blocks mid-write and freezes at 0 CPU — a wedge the
+    // child's own watchdog can't catch because its whole event loop is stalled on the write.
+    p = spawn(process.execPath, ['--import', 'tsx', ...flags], { stdio: ['ignore', 'pipe', 'ignore'] });
   } catch { return null; }
   const startedAt = Date.now();
   const onGone = (): void => {
