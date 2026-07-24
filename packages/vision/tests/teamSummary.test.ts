@@ -61,10 +61,10 @@ describe('assembleTeamSummary — verification + repair', () => {
     expect(warnings.filter(w => w.includes('does not match'))).toHaveLength(0);
   });
 
-  test('an unreadable SP is solved back from the final stat', () => {
+  test('an unreadable SP is solved back from the final stat — silently when unique', () => {
     const { team, warnings } = assembleTeamSummary([garchompMoves], [garchompStats({ sp: [2, null, 0, 0, 0, 32] })]);
     expect(team[0]!.evs.atk).toBe(evFromSp(32));               // 200 Atk pins SP 32 uniquely
-    expect(warnings.some(w => w.includes('solved 32'))).toBe(true);
+    expect(warnings).toHaveLength(0);                          // a verified solve is not a warning
   });
 
   test('a misread SP is corrected when the final stat pins it', () => {

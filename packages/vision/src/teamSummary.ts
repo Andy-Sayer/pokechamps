@@ -228,7 +228,14 @@ export async function readSummaryStats(frame: Frame, ocr: OcrReader): Promise<Su
       // PSM 7 (single line), not 8: the digit run next to the SP bar reads reliably as
       // a line; single-word mode returned "" / clipped digits on the same crops.
       stats.push(digits(await ocr.read(frame, r.value, { mode: 'digits', psm: 7 })));
-      sp.push(digits(await ocr.read(frame, r.sp, { mode: 'digits', psm: 7 })));
+      // A zero-investment cell is a LONE "0" glyph — marginal for line mode (some cards
+      // read, some return empty). Fall back to single-character mode (psm 10; recovered
+      // 4 of 5 failures on the reference fixtures), then a bigger upscale as a last try.
+      // A cell that still fails falls to the stat-solver, which is exact when unique.
+      let spVal = digits(await ocr.read(frame, r.sp, { mode: 'digits', psm: 7 }));
+      spVal ??= digits(await ocr.read(frame, r.sp, { mode: 'digits', psm: 10 }));
+      spVal ??= digits(await ocr.read(frame, r.sp, { mode: 'digits', psm: 10, scale: 5 }));
+      sp.push(spVal);
       arrows.push(s === 0 ? null : detectArrow(cropRegion(frame, r.label)));   // HP never has an arrow
     }
     out.push({ species: spMatch && spMatch.score >= 0.55 ? spMatch.value : null, speciesRaw, stats, sp, arrows });
@@ -248,9 +255,14 @@ export function assembleTeamSummary(moves: SummaryMovesCard[], stats: SummarySta
   const team: PokemonSet[] = [];
   const level = loadFormat().level;
 
-  for (let i = 0; i < 6; i++) {
-    const mv = moves[i];
-    if (!mv?.species) { warnings.push(`card ${i + 1}: species unreadable ("${mv?.speciesRaw ?? ''}") — slot skipped`); continue; }
+  for (let i = 0; i < moves.length; i++) {
+    const mv = moves[i]!;
+    if (!mv.species) {
+      // Only warn when the card had TEXT that failed to match — a blank card is just
+      // an empty slot (teams can carry fewer than 6), not a read failure.
+      if (mv.speciesRaw.replace(/[^a-z]/gi, '').length >= 3) warnings.push(`card ${i + 1}: species unreadable ("${mv.speciesRaw}") — slot skipped`);
+      continue;
+    }
     const species = mv.species;
     // Pair by species first — a stats card in the same position whose name disagrees
     // usually means one page's name OCR failed, so fall back to the index.
@@ -293,11 +305,13 @@ export function assembleTeamSummary(moves: SummaryMovesCard[], stats: SummarySta
         const readStat = st!.stats[s], readSp = st!.sp[s];
         let spVal = readSp;
         if (spVal == null || spVal > 32) {
-          // SP unreadable → solve it from the final stat (unique in 0..32 when the stat read is good).
+          // SP unreadable → solve it from the final stat. A UNIQUE fit is verified by
+          // construction (the arithmetic pins it), so it's silent; only an ambiguous
+          // solve (adjacent SPs rounding to the same stat) warns about its 0-default.
           const fits = readStat == null ? [] :
             Array.from({ length: 33 }, (_, v) => v).filter(v => computeStat(k, base[k], 31, evFromSp(v), nature!, level) === readStat);
-          if (fits.length === 1) { spVal = fits[0]!; warnings.push(`${species} ${k}: SP unreadable — solved ${spVal} from stat ${readStat}`); }
-          else { spVal = 0; warnings.push(`${species} ${k}: SP unreadable (stat ${readStat ?? '?'}) — defaulted 0`); }
+          if (fits.length === 1) spVal = fits[0]!;
+          else { spVal = fits[0] ?? 0; warnings.push(`${species} ${k}: SP unreadable (stat ${readStat ?? '?'}) — took minimum ${spVal}`); }
         }
         evs[k] = evFromSp(spVal);
         if (readStat != null) {
