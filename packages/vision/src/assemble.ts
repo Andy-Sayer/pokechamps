@@ -72,6 +72,17 @@ export class BattleAssembler {
   /** Turns emitted so far (endTurn calls). */
   getTurnsClosed(): number { return this.turnsClosed; }
 
+  /** Reset ALL per-match state. A long-running reader (spanning matches) carried the
+   *  previous match's roster, nickname aliases, and faint-vacancy flags into the next
+   *  one — a voluntary switch then emitted as a REPLACEMENT off a stale vacancy. */
+  resetMatch(): void {
+    this.roster = { m1: null, m2: null, o1: null, o2: null };
+    this.actions = []; this.faints = []; this.notes = []; this.stateLines = [];
+    this.megaPending.clear(); this.hpSamples = {}; this.protectedThisTurn.clear();
+    this.missedTargets.clear(); this.vacatedByFaint.clear(); this.nickAlias = {};
+    this.turnsClosed = 0;
+  }
+
   /** Anything pending that would be lost if the stream ended now? (Not just actions —
    *  a faint/state line with no following action must still flush, or the match-ending
    *  KO vanishes: the gap-flush after the last damaging move clears the actions, and

@@ -45,6 +45,7 @@ import { loadPrefs, savePrefs } from '@pokechamps/core/storage/prefs.js';
 import { BATTLE_COMMANDS, parseCommand, type BattleCommandId } from './slashCommands.js';
 import { VisionProposalPanel, type ProposalLike } from './VisionProposalPanel.js';
 import { startWatch as startWatcher, stopWatch as stopWatcher, isWatching as watcherIsWatching, onProposal as onWatchProposal, onWatchingChange } from './watcher.js';
+import { reconcileOccupancy, freshReconcileState } from './occupancyReconcile.js';
 import { deriveActiveIdx, snapshotTurn } from '@pokechamps/core/match/engine.js';
 import { applyMegaAction } from '@pokechamps/core/domain/megaResolve.js';
 import { getMegaOptions } from '@pokechamps/core/domain/gimmicks/mega.js';
@@ -624,8 +625,37 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // Fresh state for the (deps-[]) proposal subscription — the closure would otherwise
   // see mount-time actives/turn-count forever.
   const visionStateRef = useRef({ match: initial, activeIdx: initialActiveIndices(initial) });
+  const reconcileRef = useRef(freshReconcileState());
   useEffect(() => {
     const offP = onWatchProposal(p => {
+      // OCCUPANCY RECONCILER: the reader's settled nameplate facts vs the engine's
+      // actives. A sustained clean SWAP auto-corrects (the recurring slot-confusion
+      // class always presents as a crossed pair); a murkier mismatch prompts /override.
+      if (p.occupancy) {
+        const st = visionStateRef.current;
+        const sp = (side: 'mine' | 'theirs', slot: 0 | 1) => {
+          const idx = side === 'mine' ? st.activeIdx.mine[slot] : st.activeIdx.theirs[slot];
+          const team: Array<{ species: string } | undefined> = side === 'mine' ? st.match.myTeam : st.match.opponentTeam;
+          return idx != null ? team[idx]?.species : undefined;
+        };
+        const decision = reconcileOccupancy(reconcileRef.current, p.occupancy, {
+          m1: sp('mine', 0), m2: sp('mine', 1), o1: sp('theirs', 0), o2: sp('theirs', 1),
+        });
+        if (decision.swap.length) {
+          setActiveIdx(prev => {
+            const next = { mine: [...prev.mine] as typeof prev.mine, theirs: [...prev.theirs] as typeof prev.theirs };
+            for (const side of decision.swap) {
+              if (side === 'mine') [next.mine[0], next.mine[1]] = [next.mine[1], next.mine[0]];
+              else [next.theirs[0], next.theirs[1]] = [next.theirs[1], next.theirs[0]];
+            }
+            return next;
+          });
+          setMessage(`⌁ occupancy: the screen shows ${decision.swap.join(' + ')} slots swapped vs the engine — corrected to match the nameplates.`);
+        } else if (decision.prompt.length) {
+          setMessage(`⚠ occupancy: nameplates disagree with the engine's ${decision.prompt.join(' + ')} actives (not a clean swap) — check /override.`);
+        }
+      }
+      if (!p.lines.length) return;   // occupancy-only update — nothing to preview/ratify
       // SEND-OUT REDUNDANCY FILTER: before any turn is logged, a `switch` line that
       // names the mon ALREADY active in that slot carries zero information (the user
       // picked the leads) — ratifying it would log a phantom turn of no-op switches

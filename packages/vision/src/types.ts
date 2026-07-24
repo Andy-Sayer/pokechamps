@@ -105,6 +105,12 @@ export interface TurnProposal {
   frameTs: number;
   partial?: boolean;    // an in-progress (not-yet-closed) turn — a LIVE PREVIEW so the user
                         // sees the reader capturing and knows not to type; not yet ratifiable.
+  /** OCCUPANCY ASSERTIONS: the species each physical nameplate has shown, settled
+   *  (high confidence, consecutive frames). Ground truth for the reconciler — the
+   *  TUI compares these against the engine's actives and corrects drift (the
+   *  recurring slot-confusion class). May ride a lines-empty proposal when the
+   *  settled occupancy changes between turns. */
+  occupancy?: Partial<Record<SlotRef, string>>;
 }
 
 /** The team-preview ("Select 4") screen: YOUR six on the left as TEXT (name +

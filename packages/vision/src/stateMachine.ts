@@ -61,6 +61,12 @@ export class BattleStateMachine {
   private lastPreview = '';                // last in-progress preview emitted (dedupe partials)
   private plateGapRun = 0;                 // no-banner frames with ALL live plates visible (move-select signature)
   private pairContra = { mine: 0, opp: 0 };  // consecutive frames where a side's plates read exactly SWAPPED vs roster
+  // OCCUPANCY ASSERTIONS: per physical slot, the species its nameplate has shown for
+  // settleFrames+ consecutive confident reads — the ground truth the TUI reconciles
+  // the engine against. Kept as last-settled until a new species settles.
+  private plateRuns: Partial<Record<SlotRef, { sp: string; run: number }>> = {};
+  private occupancy: Partial<Record<SlotRef, string>> = {};
+  private occupancyDirty = false;
   private gapFrames: number;
   private longGapFrames: number;
   private clearFrames: number;
@@ -76,8 +82,18 @@ export class BattleStateMachine {
     this.conf = opts.confidence ?? 0.9;
   }
 
-  /** Feed one frame's read; returns a TurnProposal when a turn completes, else null. */
+  /** Feed one frame's read; returns a TurnProposal when a turn completes, a live
+   *  preview when the in-progress turn changes, or a lines-empty occupancy update
+   *  when a plate fact settles between turns. Every emission carries `occupancy`. */
   feed(read: FrameRead): TurnProposal | null {
+    this.occupancyDirty = false;
+    const p = this.feedInner(read);
+    if (p) { p.occupancy = { ...this.occupancy }; return p; }
+    if (this.occupancyDirty) return { lines: [], confidence: this.conf, notes: [], frameTs: read.ts, partial: true, occupancy: { ...this.occupancy } };
+    return null;
+  }
+
+  private feedInner(read: FrameRead): TurnProposal | null {
     for (const s of read.slots) {
       const ref = refOf(s);
       if (s.hpFraction != null) {
@@ -100,6 +116,17 @@ export class BattleStateMachine {
       // send-out banner / no --leads) can still resolve move banners to a slot. Only fills UNKNOWN
       // slots (seedActive is a no-op otherwise), so banner-tracked switches stay authoritative.
       if (s.species && s.speciesConfidence >= 0.75) this.tracker.seedActive(ref, s.species, s.speciesConfidence);
+      // Occupancy: settle a plate fact after 3 consecutive confident reads of the
+      // same species. Last-settled persists through animations (plate hidden).
+      if (s.species && s.speciesConfidence >= 0.85) {
+        const run = this.plateRuns[ref];
+        if (run && run.sp === s.species) run.run++;
+        else this.plateRuns[ref] = { sp: s.species, run: 1 };
+        if (this.plateRuns[ref]!.run >= 3 && this.occupancy[ref] !== s.species) {
+          this.occupancy[ref] = s.species;
+          this.occupancyDirty = true;
+        }
+      }
     }
     // PAIR-ORDER RECONCILE: the opening double send-out banner ("sent out A and B!")
     // lists the pair in an arbitrary order, but the nameplate INDEX is ground truth.
@@ -116,7 +143,12 @@ export class BattleStateMachine {
       const swapped = confident && rA != null && rB != null &&
         norm(pair[0]!.species!) === norm(rB) && norm(pair[1]!.species!) === norm(rA) && norm(rA) !== norm(rB);
       this.pairContra[side] = swapped ? this.pairContra[side] + 1 : 0;
-      if (this.pairContra[side] >= 2 && this.tracker.turnsClosed() === 0) {
+      // Pre-first-flush: swap fast (2 frames) — nothing emitted yet. MID-MATCH the
+      // swap is also allowed (the engine now follows plate truth via the occupancy
+      // reconciler) but demands a longer sustained contradiction so a double-switch
+      // animation's lingering plates can't flip it transiently.
+      const need = this.tracker.turnsClosed() === 0 ? 2 : 6;
+      if (this.pairContra[side] >= need) {
         this.tracker.swapPair(side);
         this.pairContra[side] = 0;
         // The HP/touched maps are keyed by TRUE plate refs and stay valid; only the
@@ -134,10 +166,16 @@ export class BattleStateMachine {
       const lines = this.tracker.feed(msg, this.lastHp, this.touched);
       if (lines) { this.touched = new Set(); this.lastPreview = ''; return this.propose(lines, read.ts); }
       // Game over (forfeit/win/loss) → there's no NEXT turn to close the current one, and
-      // the reader keeps running (no finish()). Flush the final turn now so it emits.
+      // the reader keeps running (no finish()). Flush the final turn now so it emits,
+      // then RESET all per-match state — a long-running reader carried the previous
+      // match's roster/faint-vacancy flags into the next one (seen live:
+      // `mDragonite in m1` for a voluntary switch, keyed off a stale vacancy).
       if (msg.kind === 'end') {
         const flushed = this.tracker.flushPending(this.lastHp, this.touched);
-        if (flushed) { this.touched = new Set(); this.lastPreview = ''; return this.propose(flushed, read.ts); }
+        this.tracker.resetMatch();
+        this.lastHp = {}; this.touched = new Set(); this.settleRuns = {}; this.plateRuns = {};
+        this.occupancy = {}; this.pairContra = { mine: 0, opp: 0 }; this.lastPreview = '';
+        if (flushed) return this.propose(flushed, read.ts);
       }
       // LIVE PREVIEW: emit the in-progress turn's lines as a PARTIAL when they change, so
       // the ratify panel shows the turn building and the user knows the reader has it.

@@ -92,8 +92,8 @@ const onFrame = debug ? (fr: FrameRead, raw: Frame) => {
 } : undefined;
 
 await runVision({ grabber, ocr, regions }, (p) => {
-  process.stdout.write(JSON.stringify({ lines: p.lines, confidence: p.confidence, partial: p.partial }) + '\n');
-  console.error(`[read-live] ${p.partial ? 'preview' : 'TURN'} → ${p.lines.join('  |  ')}`);
+  process.stdout.write(JSON.stringify({ lines: p.lines, confidence: p.confidence, partial: p.partial, occupancy: p.occupancy }) + '\n');
+  if (p.lines.length) console.error(`[read-live] ${p.partial ? 'preview' : 'TURN'} → ${p.lines.join('  |  ')}`);
   if (debug && !p.partial) propStream?.write(JSON.stringify({ afterFrame: frameNo, lines: p.lines, confidence: p.confidence, notes: p.notes }) + '\n');
 }, {
   leads, onFrame,

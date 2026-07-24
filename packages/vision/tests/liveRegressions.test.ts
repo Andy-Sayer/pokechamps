@@ -183,6 +183,44 @@ describe('panelBrightnessRatio — dim team-sheet regression (2026-07-24, all-Ic
   });
 });
 
+describe('occupancy assertions + per-match reset', () => {
+  const mkRead = (text: string, species: Partial<Record<SlotRef, string>>, TSb: { v: number }): FrameRead => {
+    const slot = (side: 'mine' | 'opp', index: 0 | 1, ref: SlotRef): SlotRead => ({
+      side, index,
+      species: species[ref] ?? null,
+      speciesRaw: species[ref] ?? '',
+      speciesConfidence: species[ref] ? 1 : 0,
+      hpFraction: species[ref] ? 1 : null, status: null,
+    });
+    return { ts: TSb.v++, battleText: text, slots: [slot('mine', 0, 'm1'), slot('mine', 1, 'm2'), slot('opp', 0, 'o1'), slot('opp', 1, 'o2')] };
+  };
+
+  test('settled plates ride out as occupancy — including a lines-empty update', () => {
+    const ts = { v: 0 };
+    const sm = new BattleStateMachine({}, { gapFrames: 4, longGapFrames: 50, clearFrames: 2 });
+    const sp = { m1: 'Talonflame', m2: 'Kingambit', o1: 'Venusaur', o2: 'Charizard' } as const;
+    const out: TurnProposal[] = [];
+    for (let i = 0; i < 4; i++) { const p = sm.feed(mkRead('', sp, ts)); if (p) out.push(p); }
+    // 3rd confident frame settles all four plates → an occupancy-only update emits.
+    const occ = out.find(p => !p.lines.length && p.occupancy);
+    expect(occ?.occupancy).toMatchObject(sp);
+  });
+
+  test('the end banner resets per-match state — no stale roster into the next match', () => {
+    const t = new BattleTracker({ m1: 'Talonflame', m2: 'Kingambit', o1: 'Charizard', o2: 'Venusaur' });
+    t.feed(parseBanner('Talonflame used Brave Bird!'));
+    t.feed(parseBanner('The opposing Charizard fainted!'));
+    t.flushPending({}, new Set());
+    t.resetMatch();
+    const r = t.getRoster();
+    expect([r.m1, r.m2, r.o1, r.o2]).toEqual([null, null, null, null]);
+    // The stale faint-vacancy must not survive either: a next-match send-in is a
+    // fresh switch, not a replacement (`mDragonite in m1` off last match's ko).
+    t.feed(parseBanner('Go! Dragonite!'));
+    expect(t.flushPending({}, new Set())).toEqual(['m1 > switch > Dragonite']);
+  });
+});
+
 describe('BattleStateMachine — live-match regressions', () => {
   let TS = 0;
   const mk = (text: string, plates: boolean, species: Partial<Record<SlotRef, string>> = {}): FrameRead => {

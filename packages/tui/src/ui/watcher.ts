@@ -22,7 +22,14 @@ import { fileURLToPath } from 'node:url';
 // bugs need the receiving side's record to tell a reader stall from a UI stall.
 const PROPOSAL_LOG = fileURLToPath(new URL('../../../vision/fixtures/live/watcher-proposals.jsonl', import.meta.url));
 
-export interface WatchProposal { lines: string[]; confidence?: number; partial?: boolean }
+export interface WatchProposal {
+  lines: string[];
+  confidence?: number;
+  partial?: boolean;
+  /** Settled per-plate species assertions (ground truth) — drives the occupancy
+   *  reconciler. May arrive on a lines-empty message between turns. */
+  occupancy?: Partial<Record<'m1' | 'm2' | 'o1' | 'o2', string>>;
+}
 export interface WatchOpts { leads?: string[]; full?: boolean; debug?: boolean }
 
 let proc: ChildProcess | null = null;
@@ -72,7 +79,9 @@ function launch(opts: WatchOpts): ChildProcess | null {
     if (s[0] !== '{') return;
     try {
       const parsed = JSON.parse(s) as WatchProposal;
-      if (Array.isArray(parsed.lines) && parsed.lines.length) {
+      // Forward turn content AND lines-empty occupancy updates (the reconciler's
+      // between-turn signal); drop only genuinely empty messages.
+      if (Array.isArray(parsed.lines) && (parsed.lines.length || parsed.occupancy)) {
         appendFile(PROPOSAL_LOG, JSON.stringify({ ts: Date.now(), ...parsed }) + '\n', () => { /* best-effort */ });
         for (const cb of propCbs) cb(parsed);
       }

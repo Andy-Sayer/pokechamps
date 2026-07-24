@@ -61,8 +61,15 @@ export class BattleTracker {
   turnsClosed(): number { return this.asm.getTurnsClosed(); }
 
   /** Swap one side's two slots everywhere (roster + recorded refs) — see
-   *  BattleAssembler.swapPair. Caller must guard on turnsClosed() === 0. */
+   *  BattleAssembler.swapPair. */
   swapPair(side: 'mine' | 'opp'): void { this.asm.swapPair(side); }
+
+  /** Reset ALL per-match state (roster, aliases, vacancy flags, turn counter) — call
+   *  at match end so a long-running reader starts the next match clean. */
+  resetMatch(): void {
+    this.asm.resetMatch();
+    this.sawAction = false; this.sawEot = false; this.hpBefore = {};
+  }
 
   /** Seed an unknown active slot from a confident per-frame species OCR (see
    *  BattleAssembler.seedActiveIfUnknown) — recovers the roster when the reader joined
