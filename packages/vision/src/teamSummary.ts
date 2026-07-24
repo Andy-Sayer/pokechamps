@@ -15,9 +15,15 @@
 // the SP from the final stat; what can't be reconciled becomes a warning, never a
 // silent guess.
 
+import { copyFileSync, statSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Frame, Rect } from './types.js';
 import type { OcrReader } from './ocr.js';
+import { TesseractOcrReader } from './ocr.js';
+import { loadFrame } from './decode.js';
 import { cropRegion } from './visionSource.js';
+import { DEFAULT_LIVE_TAP } from './oppTeamRead.js';
 import { matchSpecies, bestMatch } from './fuzzyMatch.js';
 import {
   getSpecies, getItem, getNature, getLearnset, listItems, isLegalItem, loadFormat, toId,
@@ -49,6 +55,56 @@ export const statRects = (i: number, s: number): { label: Rect; value: Rect; sp:
     ? { label: PX(cx + 425, y, 165, 38), value: PX(cx + 570, y, 100, 38), sp: PX(cx + 654, y, 92, 38) }
     : { label: PX(cx + 80, y, 155, 38), value: PX(cx + 200, y, 105, 38), sp: PX(cx + 286, y, 92, 38) };
 };
+
+// ---------- live-capture helpers (the TUI import flow) ----------
+
+/** The L/R page-tab pills. The ACTIVE tab is filled bright yellow-green; the
+ *  inactive one is light purple — that's the page detector AND a wrong-screen /
+ *  dim-frame guard in one (a dimmed or non-summary frame reads green on neither). */
+const TAB_MOVES: Rect = PX(640, 232, 260, 24);
+const TAB_STATS: Rect = PX(1010, 232, 260, 24);
+
+function greenFrac(frame: Frame, r: Rect): number {
+  const c = cropRegion(frame, r);
+  let n = 0;
+  const tot = c.data.length / 4;
+  for (let p = 0; p < c.data.length; p += 4) {
+    const rr = c.data[p]!, g = c.data[p + 1]!, b = c.data[p + 2]!;
+    if (g > 150 && g - b > 60 && g - rr > 30) n++;
+  }
+  return tot ? n / tot : 0;
+}
+
+/** Which summary page is showing — 'moves' | 'stats' | null (not a summary screen). */
+export function detectSummaryPage(frame: Frame): 'moves' | 'stats' | null {
+  const m = greenFrac(frame, TAB_MOVES), s = greenFrac(frame, TAB_STATS);
+  if (Math.max(m, s) < 0.25) return null;
+  return m > s ? 'moves' : 'stats';
+}
+
+/** Freeze the current live frame as the given summary page. Throws when the tap is
+ *  stale (capture off / dongle unplugged) so the caller gets a real message instead
+ *  of importing yesterday's frame. Returns the frozen path. */
+export function snapshotSummaryPage(page: 'moves' | 'stats', tap: string = DEFAULT_LIVE_TAP): string {
+  const age = Date.now() - statSync(tap).mtimeMs;
+  if (age > 4000) throw new Error(`capture frame is ${Math.round(age / 1000)}s old — is the screen on?`);
+  const out = resolve(dirname(fileURLToPath(import.meta.url)), `../fixtures/live/team-${page}.png`);
+  copyFileSync(tap, out);
+  return out;
+}
+
+/** One-call import: load both page frames, OCR them, assemble + verify. Owns the
+ *  OCR engine lifecycle so callers (the TUI) don't juggle workers. */
+export async function importTeamFromFrames(movesPath: string, statsPath: string): Promise<TeamSummaryResult> {
+  const ocr = new TesseractOcrReader();
+  try {
+    const movesCards = await readSummaryMoves(await loadFrame(movesPath), ocr);
+    const statsCards = await readSummaryStats(await loadFrame(statsPath), ocr);
+    return assembleTeamSummary(movesCards, statsCards);
+  } finally {
+    await ocr.close();
+  }
+}
 
 // ---------- nature arrows (red-up = boosted, blue-down = dropped) ----------
 

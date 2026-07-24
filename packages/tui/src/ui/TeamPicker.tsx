@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import SelectInput from 'ink-select-input';
 import TextInput from 'ink-text-input';
 import type { PokemonSet } from '@pokechamps/core/domain/types.js';
 import type { Stores, SavedTeam } from '@pokechamps/core/storage/index.js';
 import { formatShowdownTeamSP } from '@pokechamps/core/domain/showdown.js';
+// Type-only (erased at runtime); the vision module loads lazily on Ctrl+R.
+import type { TeamSummaryResult } from '@pokechamps/vision/teamSummary.js';
 import { ExportPanel } from './ExportPanel.js';
 
 // Mirrors saveTeam's filename sanitisation so the picker can predict the saved
@@ -49,9 +51,74 @@ export function TeamPicker({ stores, onPick, onCreateNew, onEdit, onClone, onCan
   const [exportFor, setExportFor] = useState<{ name: string; text: string } | null>(null);
   // Overlay mode for the destructive/edit-name actions; `error` surfaces a
   // collision message under the rename field.
-  const [mode, setMode] = useState<'rename' | 'delete' | null>(null);
+  const [mode, setMode] = useState<'rename' | 'delete' | 'import' | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Import-from-screen flow: capture the two summary pages with Ctrl+R, OCR + verify,
+  // then name + save. Paths live in a ref (no re-render needed); `importBusy` stops a
+  // held Ctrl+R double-firing a capture or overlapping the OCR pass.
+  const [importStep, setImportStep] = useState<'moves' | 'stats' | 'reading' | 'name'>('moves');
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<TeamSummaryResult | null>(null);
+  const [importName, setImportName] = useState('imported');
+  const importPaths = useRef<{ moves?: string }>({});
+  const importBusy = useRef(false);
+  const importGen = useRef(0);   // bumped on close/cancel — an in-flight OCR pass from a cancelled import must not resurrect the panel
+
+  const closeImport = () => {
+    importGen.current++;
+    setMode(null); setError(null); setImportMsg(null); setImportResult(null);
+    setImportStep('moves'); importPaths.current = {};
+  };
+
+  const captureImportPage = async () => {
+    if (importBusy.current) return;
+    importBusy.current = true;
+    const gen = importGen.current;
+    try {
+      const step = importStep as 'moves' | 'stats';
+      const vis = await import('@pokechamps/vision/teamSummary.js');
+      const { loadFrame } = await import('@pokechamps/vision/decode.js');
+      const path = vis.snapshotSummaryPage(step);
+      const page = vis.detectSummaryPage(await loadFrame(path));
+      if (gen !== importGen.current) return;   // import was cancelled while loading
+      if (page !== step) {
+        setImportMsg(page
+          ? `that's the ${page === 'moves' ? 'Moves & More' : 'Stats'} page — show the ${step === 'moves' ? 'Moves & More' : 'Stats'} page, then Ctrl+R`
+          : 'no team summary detected — open the team summary in-game, then Ctrl+R');
+        return;
+      }
+      if (step === 'moves') {
+        importPaths.current.moves = path;
+        setImportStep('stats');
+        setImportMsg(null);
+        return;
+      }
+      setImportStep('reading');
+      setImportMsg(null);
+      const res = await vis.importTeamFromFrames(importPaths.current.moves!, path);
+      if (gen !== importGen.current) return;   // cancelled mid-OCR — drop the result
+      setImportResult(res);
+      setImportName('imported');
+      setImportStep('name');
+    } catch (e) {
+      if (gen !== importGen.current) return;
+      setImportMsg(`capture failed: ${(e as Error).message}`);
+      setImportStep(s => (s === 'reading' ? 'stats' : s));   // a failed OCR pass returns to re-capture Stats
+    } finally {
+      importBusy.current = false;
+    }
+  };
+
+  const submitImport = async (raw: string) => {
+    if (!importResult) return;
+    const safe = sanitizeName(raw);
+    if (!safe) { setError('name is empty'); return; }
+    if (teams!.some(x => x.name === safe)) { setError(`"${safe}" already exists — pick another name`); return; }
+    await stores.teams.save(safe, importResult.team);
+    closeImport();
+    reload(safe);
+  };
 
   // Reload the list after a mutation; optionally focus a specific team.
   const reload = (selectName?: string) => {
@@ -96,16 +163,23 @@ export function TeamPicker({ stores, onPick, onCreateNew, onEdit, onClone, onCan
   };
 
   // `e` edit, `k` clone (k for kopy — c is taken by /custom-bring style
-  // commands), `x` show Showdown export, `r` rename, `d` delete.
+  // commands), `x` show Showdown export, `r` rename, `d` delete, `i` import
+  // from the live screen (Ctrl+R captures each summary page).
   useInput((input, key) => {
     if (key.escape) {
       if (exportFor) setExportFor(null);
+      else if (mode === 'import') closeImport();
       else if (mode) { setMode(null); setError(null); }
       return;
     }
     if (mode === 'delete') {
       if (input === 'y' || key.return) void confirmDelete();
       else if (input === 'n') setMode(null);
+      return;
+    }
+    if (mode === 'import') {
+      // moves/stats steps: Ctrl+R captures the page. name step: TextInput owns input.
+      if ((importStep === 'moves' || importStep === 'stats') && key.ctrl && (input === 'r' || input === 'R')) void captureImportPage();
       return;
     }
     if (exportFor || mode) return; // rename: TextInput owns input; export: read-only
@@ -117,6 +191,7 @@ export function TeamPicker({ stores, onPick, onCreateNew, onEdit, onClone, onCan
     else if (input === 'x') setExportFor({ name: t.name, text: formatShowdownTeamSP(t.team) });
     else if (input === 'r') { setRenameValue(t.name); setError(null); setMode('rename'); }
     else if (input === 'd') { setError(null); setMode('delete'); }
+    else if (input === 'i') { setError(null); closeImport(); setMode('import'); }
   });
 
   if (teams === null) {
@@ -143,7 +218,7 @@ export function TeamPicker({ stores, onPick, onCreateNew, onEdit, onClone, onCan
   return (
     <Box flexDirection="column" padding={1}>
       <Text bold color="cyan">Pick your team</Text>
-      <Text dimColor>Enter to pick · <Text color="white">e</Text> edit · <Text color="white">k</Text> clone · <Text color="white">r</Text> rename · <Text color="white">d</Text> delete · <Text color="white">x</Text> export · ESC to cancel</Text>
+      <Text dimColor>Enter to pick · <Text color="white">e</Text> edit · <Text color="white">k</Text> clone · <Text color="white">r</Text> rename · <Text color="white">d</Text> delete · <Text color="white">x</Text> export · <Text color="white">i</Text> import from screen · ESC to cancel</Text>
       <Box marginTop={1} flexDirection="row">
         <Box width={30} marginRight={2} flexDirection="column">
           <SelectInput
@@ -190,6 +265,35 @@ export function TeamPicker({ stores, onPick, onCreateNew, onEdit, onClone, onCan
       {mode === 'delete' && preview && (
         <Box marginTop={1} flexDirection="column" borderStyle="round" borderColor="red" paddingX={1}>
           <Text>Delete team <Text bold color="red">{preview}</Text>? <Text dimColor>(y / n)</Text></Text>
+        </Box>
+      )}
+      {mode === 'import' && (
+        <Box marginTop={1} flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1}>
+          <Text bold color="magenta">Import team from screen</Text>
+          <Text>
+            <Text color={importStep === 'moves' ? 'yellow' : 'green'}>{importStep === 'moves' ? '▸' : '✓'} Moves &amp; More page</Text>
+            {'   '}
+            <Text color={importStep === 'stats' ? 'yellow' : importStep === 'moves' ? 'gray' : 'green'}>{importStep === 'moves' ? '· ' : importStep === 'stats' ? '▸' : '✓'} Stats page</Text>
+          </Text>
+          {(importStep === 'moves' || importStep === 'stats') && (
+            <Text dimColor>Open the team summary in-game on the <Text color="white">{importStep === 'moves' ? 'Moves & More' : 'Stats'}</Text> page, then <Text bold>Ctrl+R</Text> to capture · Esc cancels</Text>
+          )}
+          {importStep === 'reading' && <Text color="yellow">reading both pages… (~20s, OCR + verification)</Text>}
+          {importStep === 'name' && importResult && (
+            <>
+              {importResult.team.map((m, i) => (
+                <Text key={i}>
+                  {i + 1}. {m.species} <Text dimColor>{m.item ? `@ ${m.item} ` : ''}· {m.nature} · {m.moves.join(', ')}</Text>
+                </Text>
+              ))}
+              {importResult.warnings.length > 0 && (
+                <Text color="yellow">⚠ {importResult.warnings.length} warning{importResult.warnings.length > 1 ? 's' : ''}: {importResult.warnings.slice(0, 3).join(' · ')}{importResult.warnings.length > 3 ? ' · …' : ''}</Text>
+              )}
+              <Text>Save as: <TextInput value={importName} onChange={setImportName} onSubmit={v => void submitImport(v)} /></Text>
+            </>
+          )}
+          {importMsg && <Text color="red">{importMsg}</Text>}
+          {error && importStep === 'name' && <Text color="red">{error}</Text>}
         </Box>
       )}
       {exportFor && (
