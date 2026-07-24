@@ -17,6 +17,7 @@
     "record": "tsx scripts/record.ts",
     "youtube": "tsx scripts/youtube.ts",
     "harvest-sheet": "tsx scripts/harvest-sheet.ts",
+    "harvest-all-sheets": "tsx scripts/harvest-all-sheets.ts",
     "read-team": "tsx scripts/read-team.ts"
   },
   "dependencies": {
