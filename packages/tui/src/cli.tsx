@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { render, Box, Text, useApp, useInput } from 'ink';
 import { startWatch as startWatcher, stopWatch as stopWatcher, isWatching as watcherIsWatching, onWatchingChange } from './ui/watcher.js';
 import { startCapture, stopCapture, captureState as getCaptureState, isCapturing, onCaptureChange, captureStatusText } from './ui/capture.js';
+import { startupSheetHarvest } from './ui/sheetHarvest.js';
 import type { PokemonSet, OpponentEntry, Match } from '@pokechamps/core/domain/types.js';
 import { NEUTRAL_FIELD } from '@pokechamps/core/domain/types.js';
 import { createFileStores, createHttpStores, type Stores } from '@pokechamps/core/storage/index.js';
@@ -86,6 +87,12 @@ function App() {
   const [capState, setCapState] = useState(getCaptureState());
   useEffect(() => onCaptureChange(setCapState), []);
 
+  // Startup sheet harvest (detached child, marker-gated): archived opponent sheets the
+  // user confirmed by hand become sprite refs automatically — the reader gets smarter
+  // with every session. Only speaks up when refs were actually added.
+  const [harvestNote, setHarvestNote] = useState<string | undefined>(undefined);
+  useEffect(() => { startupSheetHarvest(setHarvestNote); }, []);
+
   const screen = ((): React.ReactElement => {
   if (route.kind === 'menu') {
     const badge: { text: string; color: 'green' | 'yellow' | 'red' } | undefined = config.serverUrl
@@ -93,7 +100,7 @@ function App() {
         ? { text: `● remote: ${config.serverUrl}${config.email ? ` (${config.email})` : ''}`, color: 'green' }
         : { text: `● remote: ${config.serverUrl} — not signed in`, color: 'red' }
       : { text: '● local file mode', color: 'yellow' };
-    return <MainMenu connectionBadge={badge} captureState={capState} onSelect={k => {
+    return <MainMenu connectionBadge={badge} captureState={capState} note={harvestNote} onSelect={k => {
       if (k === 'quit') { stopCapture(); exit(); }
       else if (k === 'team-management') setRoute({ kind: 'team-management' });
       else if (k === 'history') setRoute({ kind: 'history' });

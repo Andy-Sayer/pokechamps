@@ -9,9 +9,11 @@ export interface MainMenuProps {
   connectionBadge?: { text: string; color: 'green' | 'yellow' | 'red' };
   /** Live HDMI-capture state — drives the "Turn on/off screen" toggle label. */
   captureState?: CaptureState;
+  /** One-line dim note (e.g. the startup sheet-harvest result). */
+  note?: string;
 }
 
-export function MainMenu({ onSelect, connectionBadge, captureState = 'off' }: MainMenuProps) {
+export function MainMenu({ onSelect, connectionBadge, captureState = 'off', note }: MainMenuProps) {
   const screenLabel = captureState === 'off' ? 'Turn on screen (HDMI capture)'
     : captureState === 'starting' ? 'Turn off screen — starting…'
     : captureState === 'no-signal' ? 'Turn off screen — no signal'
@@ -31,6 +33,7 @@ export function MainMenu({ onSelect, connectionBadge, captureState = 'off' }: Ma
       {connectionBadge && (
         <Text color={connectionBadge.color}>{connectionBadge.text}</Text>
       )}
+      {note && <Text dimColor>{note}</Text>}
       <Text dimColor>Choose an action</Text>
       <Box marginTop={1}>
         <SelectInput items={items} onSelect={item => onSelect(item.value)} />
