@@ -65,8 +65,9 @@ export class BattleTracker {
   swapPair(side: 'mine' | 'opp'): void { this.asm.swapPair(side); }
 
   /** Seed an unknown active slot from a confident per-frame species OCR (see
-   *  BattleAssembler.seedActiveIfUnknown) — recovers the roster when the reader joined mid-battle. */
-  seedActive(ref: SlotRef, species: string): void { this.asm.seedActiveIfUnknown(ref, species); }
+   *  BattleAssembler.seedActiveIfUnknown) — recovers the roster when the reader joined
+   *  mid-battle; at high confidence also overrides a garbled (unresolvable) label. */
+  seedActive(ref: SlotRef, species: string, confidence = 0): void { this.asm.seedActiveIfUnknown(ref, species, confidence); }
 
   /** Forward one per-frame HP read onto the assembler's per-action timeline (see
    *  BattleAssembler.recordHp) — the fine-grained signal that gives each hit its own
@@ -86,7 +87,8 @@ export class BattleTracker {
     // (A same-move repeat is a banner re-fire and stays deduped in the assembler.)
     const missedBoundary = e.kind === 'move' && this.asm.moveStartsNewTurn(e.side, e.species ?? e.label, e.move);
     if ((isActionStart(e) && this.sawAction && this.sawEot) || missedBoundary) {
-      done = this.asm.endTurnLines(hp, this.hpBefore, touched);
+      const lines = this.asm.endTurnLines(hp, this.hpBefore, touched);
+      done = lines.length ? lines : null;        // every line suppressed → nothing to ratify
       this.hpBefore = { ...hp };                 // this turn's post-HP = next turn's pre-HP
       this.sawAction = false; this.sawEot = false;
     }
@@ -107,7 +109,7 @@ export class BattleTracker {
     const lines = this.asm.endTurnLines(hp, this.hpBefore, touched);
     this.hpBefore = { ...hp };
     this.sawAction = false; this.sawEot = false;
-    return lines;
+    return lines.length ? lines : null;          // a fully-suppressed turn (dropped garble) emits nothing
   }
 
   /** Close the final (in-progress) turn. */

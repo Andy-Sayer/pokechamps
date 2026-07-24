@@ -42,7 +42,7 @@ export function emitAction(a: TurnAction): string {
 
 /** A settled turn → all its turn-log lines (actions, standalone megas, then faint lines). */
 export function emitTurnLog(obs: TurnObservation): string[] {
-  const lines = obs.actions.map(emitAction);
+  const lines = obs.actions.filter(a => !a.suppress).map(emitAction);
   // Standalone mega declarations for mons that mega'd but whose move wasn't captured.
   for (const ref of obs.megas ?? []) lines.push(`${ref} mega`);
   // Stat-boost state lines (Intimidate on switch-in, Nasty Plot, …).

@@ -99,7 +99,7 @@ export class BattleStateMachine {
       // Seed the roster from the per-frame species OCR so a reader that JOINED mid-battle (no
       // send-out banner / no --leads) can still resolve move banners to a slot. Only fills UNKNOWN
       // slots (seedActive is a no-op otherwise), so banner-tracked switches stay authoritative.
-      if (s.species && s.speciesConfidence >= 0.75) this.tracker.seedActive(ref, s.species);
+      if (s.species && s.speciesConfidence >= 0.75) this.tracker.seedActive(ref, s.species, s.speciesConfidence);
     }
     // PAIR-ORDER RECONCILE: the opening double send-out banner ("sent out A and B!")
     // lists the pair in an arbitrary order, but the nameplate INDEX is ground truth.

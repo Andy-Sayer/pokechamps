@@ -30,7 +30,9 @@ describe('BattleAssembler — weather', () => {
   test('a nicknamed opponent resolves its move via the roster label (species-resolve gap)', () => {
     const a = new BattleAssembler({});
     feed(a, ['Vell sent out Fluffy!', 'The opposing Fluffy used Trick Room!']);
-    expect(a.endTurnLines()).toEqual(['o1 > switch > Fluffy', 'o1 > Trick Room > self']);
+    // The nickname tracks the SLOT (the move resolves), but its switch line is
+    // suppressed — `o1 > switch > Fluffy` would choke the parser (no such species).
+    expect(a.endTurnLines()).toEqual(['o1 > Trick Room > self']);
   });
 });
 

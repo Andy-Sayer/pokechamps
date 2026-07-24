@@ -80,6 +80,44 @@ describe('BattleTracker — live-match regressions', () => {
   });
 });
 
+describe('nicknamed opponent — garbled OCR regression (2026-07-24 vs KEDD, グーちゃん)', () => {
+  // The real trace: the send-out banner re-OCR'd as different garbage each re-fire,
+  // the nicknamed mon's plate never resolves, and every opp banner then failed to
+  // resolve against the garbage roster.
+  const G1 = 'Siâ€”72 3D and JN 2', G2 = 'Bvâ€”72 3D and JINR 2', G3 = 'Sâ€”72 5S and JX 2';
+
+  test('re-fired garbled send-outs collapse to one pair; lines are suppressed, not garbage', () => {
+    const t = new BattleTracker({});
+    for (const g of [G1, G2, G3]) t.feed(parseBanner(`KEDD sent out ${g}!`));
+    t.feed(parseBanner('Go! Talonflame and Kingambit!'));
+    const lines = t.flushPending({}, new Set())!;
+    expect(lines).toEqual(['m1 > switch > Talonflame', 'm2 > switch > Kingambit']);   // no garbage switch lines
+    const roster = t.getRoster();
+    expect(roster.o1).toBeTruthy();               // both opp slots CLAIMED by the garbled pair…
+    expect(roster.o2).toBeTruthy();               // …so plates/elimination can bind them later
+  });
+
+  test('a confident canonical plate overrides a garbled label; elimination resolves the nicknamed slot', () => {
+    const t = new BattleTracker({});
+    t.feed(parseBanner(`KEDD sent out ${G1}!`));
+    t.seedActive('o1', 'Absol', 1);                              // plate 0 reads clean
+    expect(t.getRoster().o1).toBe('Absol');
+    t.feed(parseBanner('The opposing Absol used Sucker Punch!'));
+    t.feed(parseBanner('The opposing Tâ€”51 A Q used Swords Dance!'));   // nicknamed mon, fresh garble
+    const lines = t.flushPending({}, new Set())!;
+    expect(lines.some(l => l.startsWith('o1 > Sucker Punch'))).toBe(true);                  // Absol resolved to o1
+    expect(lines.some(l => l.startsWith('o2 > Swords Dance'))).toBe(true);                  // elimination → o2
+  });
+
+  test('an unresolvable send-out never clobbers a fully-tracked (leads-seeded) side', () => {
+    const t = new BattleTracker({ o1: 'Absol', o2: 'Skarmory', m1: 'Talonflame', m2: 'Kingambit' });
+    t.feed(parseBanner(`KEDD sent out ${G1}!`));
+    expect(t.getRoster().o1).toBe('Absol');
+    expect(t.getRoster().o2).toBe('Skarmory');
+    expect(t.flushPending({}, new Set())).toBeNull();            // nothing real happened
+  });
+});
+
 describe('panelBrightnessRatio — dim team-sheet regression (2026-07-24, all-Ice read as all-Steel)', () => {
   const flat = (mul: number): Frame => {
     const w = 480, h = 270;

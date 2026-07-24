@@ -82,6 +82,7 @@ export interface TurnAction {
   spread?: { ref: SlotRef; hpRemainingPercent: number; hpRemainingRaw?: number }[]; // spread move
   switchTo?: string;                                  // species (switch)
   replacement?: boolean;                              // post-faint send-in (→ `oSnorlax in o1`), not a chosen switch
+  suppress?: boolean;                                 // keep in the timeline (HP windows) but emit NO line (unresolvable garble)
   mega?: boolean;
   crit?: boolean;
 }

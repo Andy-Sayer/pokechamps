@@ -18,7 +18,7 @@
 // post-faint replacement (all currently surface as a switch line — see notes).
 
 import type { BattleMessage, Side } from './bannerParse.js';
-import { matchSpecies } from './fuzzyMatch.js';
+import { matchSpecies, similarity } from './fuzzyMatch.js';
 import type { SlotRef, TurnAction, TurnObservation } from './types.js';
 import { emitTurnLog } from './turnLog.js';
 import { getMove, toId } from '@pokechamps/core/domain/data.js';
@@ -119,8 +119,17 @@ export class BattleAssembler {
    *  unresolved, and turns emit empty (nothing gets keyed in). Purely additive: a slot already
    *  tracked (via a lead, a send-out banner, or a prior seed) is left alone, so OCR flicker during
    *  a switch/faint animation can't clobber a known mon. */
-  seedActiveIfUnknown(ref: SlotRef, species: string): void {
-    if (this.roster[ref] == null) this.roster[ref] = species;
+  seedActiveIfUnknown(ref: SlotRef, species: string, confidence = 0): void {
+    if (this.roster[ref] == null) { this.roster[ref] = species; return; }
+    // PLATE OVERRIDE: a slot occupied by a GARBLED label (a banner OCR that never
+    // resolves to a legal species — seen live with a Japanese-nicknamed opponent)
+    // yields to a high-confidence canonical plate read; the plate index is ground
+    // truth. A label that resolves (real species, or a nickname the caller already
+    // canonicalised) is never clobbered — OCR flicker can't overwrite a known mon.
+    if (confidence >= 0.85) {
+      const cur = matchSpecies(this.roster[ref]!);
+      if (!cur || cur.score < 0.6) this.roster[ref] = species;
+    }
   }
 
   /** In-progress lines for the CURRENT (unclosed) turn — a live preview for the ratify
@@ -165,6 +174,23 @@ export class BattleAssembler {
     const sp = norm(species);
     if (norm(this.roster[a]) === sp) return a;
     if (norm(this.roster[b]) === sp) return b;
+    // FUZZY: a nicknamed mon's label OCRs differently on every read (non-Latin glyphs
+    // come out as unstable garbage), so exact equality never binds. Similarity binds
+    // the stable part of the garble…
+    const simA = this.roster[a] ? similarity(this.roster[a]!, species) : 0;
+    const simB = this.roster[b] ? similarity(this.roster[b]!, species) : 0;
+    if (Math.max(simA, simB) >= 0.6 && simA !== simB) return simA > simB ? a : b;
+    // …and ELIMINATION handles the rest: if exactly one slot holds a CLEAN species
+    // name that this label clearly isn't, the actor must be the other, messy slot.
+    if (this.roster[a] && this.roster[b]) {
+      const cleanNotIt = (r: SlotRef): boolean => {
+        const m = matchSpecies(this.roster[r]!);
+        return !!m && m.score >= 0.75 && similarity(this.roster[r]!, species) < 0.5;
+      };
+      const messy = (r: SlotRef): boolean => { const m = matchSpecies(this.roster[r]!); return !m || m.score < 0.6; };
+      if (cleanNotIt(a) && messy(b)) return b;
+      if (cleanNotIt(b) && messy(a)) return a;
+    }
     return null;
   }
 
@@ -227,19 +253,39 @@ export class BattleAssembler {
         // filled BEFORE the banner parsed (that race made real send-outs vanish).
         const spIn = norm(msg.species ?? msg.label);
         if (spIn && this.actions.some(x => x.kind === 'switch' && norm(x.switchTo ?? null) === spIn)) break;
+        // FUZZY re-fire dedupe: a garbled send-out banner (nicknamed mon) re-OCRs as
+        // DIFFERENT garbage each re-fire, so exact dedupe misses and each variant
+        // stacked a bogus switch (seen live: three garbage switches in turn 0). Two
+        // real same-turn switch-ins never look 55% alike; two garbles of one banner do.
+        if (this.actions.some(x => x.kind === 'switch' && sideOf(x.actor) === msg.side && similarity(x.switchTo ?? '', msg.label) >= 0.55)) break;
         // Opening DOUBLE send-out: "X sent out A and B!" / "Go! A and B!" names both leads in
         // one banner. Split when BOTH halves resolve to real species (guards a nickname that
         // happens to contain "and") — resolveSpecies token-matches the pair to just one, so
-        // we can't rely on species being null.
+        // we can't rely on species being null. When NEITHER slot is tracked yet (the opening,
+        // by definition two mons) split even on unresolvable halves: a nicknamed lead's
+        // garbled label still claims its slot, so later plate overrides / elimination can
+        // bind it — collapsing the pair to one slot left the nicknamed mon unresolvable
+        // for the whole match (seen live vs a Japanese-nicknamed opponent).
         const parts = msg.label.split(/\s+and\s+/i).map(s => s.trim()).filter(Boolean);
         if (parts.length === 2) {
           const r1 = matchSpecies(parts[0]!), r2 = matchSpecies(parts[1]!);
-          if (r1 && r1.score >= 0.7 && r2 && r2.score >= 0.7) {
-            this.roster[a] = r1.value; this.roster[b] = r2.value;
-            this.actions.push({ actor: a, kind: 'switch', switchTo: r1.value });
-            this.actions.push({ actor: b, kind: 'switch', switchTo: r2.value });
+          const bothResolve = !!(r1 && r1.score >= 0.7 && r2 && r2.score >= 0.7);
+          if (bothResolve || (this.roster[a] == null && this.roster[b] == null)) {
+            const s1 = bothResolve ? r1!.value : parts[0]!;
+            const s2 = bothResolve ? r2!.value : parts[1]!;
+            this.roster[a] = s1; this.roster[b] = s2;
+            this.actions.push({ actor: a, kind: 'switch', switchTo: s1 });
+            this.actions.push({ actor: b, kind: 'switch', switchTo: s2 });
             break;
           }
+        }
+        // An UNRESOLVABLE label with no empty slot to land in is a garbled re-fire or
+        // nickname noise, never a real switch (a voluntary switch's "come back!" and a
+        // faint both clear a slot first) — dropping it protects a leads-seeded roster
+        // from being clobbered by garbage.
+        if (msg.species == null && this.roster[a] != null && this.roster[b] != null) {
+          this.notes.push(`switchIn dropped (unresolvable "${msg.label}", no open ${msg.side} slot)`);
+          break;
         }
         // Prefer the slot the per-frame OCR already seeded with this species (the
         // plate index is ground truth), then the first empty slot.
@@ -404,6 +450,20 @@ export class BattleAssembler {
       if (post == null) return 0;
       return Math.max(0, this.baselineBefore(ref, i, hpBefore) - post.pct);
     };
+
+    // PASS 0 — SWITCH LABEL REPAIR. A switch whose label never resolved to a species
+    // (nicknamed mon → garbled OCR) can't emit as-is: the parser would choke on
+    // `o1 > switch > <garbage>`. If the plate override has since put the CANONICAL
+    // species into the slot, rewrite the label from the roster; otherwise keep the
+    // action for the HP timeline but suppress its line.
+    for (const a of this.actions) {
+      if (a.kind !== 'switch' || !a.switchTo) continue;
+      const m = matchSpecies(a.switchTo);
+      if (m && m.score >= 0.6) continue;
+      const cur = this.roster[a.actor] ? matchSpecies(this.roster[a.actor]!) : null;
+      if (cur && cur.score >= 0.75) a.switchTo = cur.value;
+      else { a.suppress = true; this.notes.push(`switch into ${a.actor} unresolved ("${a.switchTo}") — line suppressed`); }
+    }
 
     // PASS 1 — SPREAD DETECTION. A dex spread move (allAdjacentFoes / allAdjacent)
     // whose window shows BOTH foes dropping is a spread hit → per-target damage list
