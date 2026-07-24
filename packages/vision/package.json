@@ -16,7 +16,8 @@
     "serve": "tsx scripts/serve.ts",
     "record": "tsx scripts/record.ts",
     "youtube": "tsx scripts/youtube.ts",
-    "harvest-sheet": "tsx scripts/harvest-sheet.ts"
+    "harvest-sheet": "tsx scripts/harvest-sheet.ts",
+    "read-team": "tsx scripts/read-team.ts"
   },
   "dependencies": {
     "@pokechamps/core": "*",
