@@ -1,10 +1,12 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { OpponentEntry, PokemonSet } from '@pokechamps/core/domain/types.js';
 import { speciesTypes } from '@pokechamps/core/domain/typechart.js';
+import { toId } from '@pokechamps/core/domain/data.js';
 import { defaultOpponentSet } from '@pokechamps/core/domain/bring.js';
 import { predictOppBack } from '@pokechamps/core/domain/oppBringPredict.js';
 import type { Stores } from '@pokechamps/core/storage/index.js';
+import { onProposal as onWatchProposal } from './watcher.js';
 
 export interface OpponentLeadPickerProps {
   stores: Stores;
@@ -34,6 +36,30 @@ export function OpponentLeadPicker({ stores, opponent, myTeam, onConfirm, onCanc
   // opponent's brings vs our team (same technique as our own bring decision).
   const oppSets = useMemo(() => opponent.map(e => defaultOpponentSet(e, 50)), [opponent]);
 
+  // VISION PRE-FILL: while this screen asks "which 2 did they send out?", the live
+  // watcher is READING the send-out banner that answers it. When a proposal's opp
+  // switch lines resolve to exactly two of the six, pre-select them — the user just
+  // confirms with Enter (never auto-confirmed, and a manual toggle wins from then on).
+  const [visionMsg, setVisionMsg] = useState<string | null>(null);
+  const manualTouch = useRef(false);
+  const lastAutoKey = useRef('');
+  useEffect(() => onWatchProposal(p => {
+    if (manualTouch.current) return;
+    const seen: number[] = [];
+    for (const l of p.lines) {
+      const m = l.match(/^o[12] > switch > (.+)$/);
+      if (!m) continue;
+      const idx = opponent.findIndex(o => toId(o.species) === toId(m[1]!));
+      if (idx >= 0 && !seen.includes(idx)) seen.push(idx);
+    }
+    if (seen.length !== 2) return;
+    const key = [...seen].sort((a, b) => a - b).join(',');
+    if (lastAutoKey.current === key) return;
+    lastAutoKey.current = key;
+    setChosen(new Set(seen));
+    setVisionMsg(`⌁ vision saw ${seen.map(i => opponent[i]!.species).join(' + ')} sent out — Enter to confirm`);
+  }), [opponent]);
+
   useInput((input, key) => {
     // Esc + Left-arrow both go back one step (to BringPicker) so the user
     // can fix the bring if they realise they messed it up. When no
@@ -43,6 +69,7 @@ export function OpponentLeadPicker({ stores, opponent, myTeam, onConfirm, onCanc
     if (key.upArrow) setCursor(c => Math.max(0, c - 1));
     if (key.downArrow) setCursor(c => Math.min(opponent.length - 1, c + 1));
     if (input === ' ') {
+      manualTouch.current = true;   // the user's hand wins over vision pre-fill from here on
       const next = new Set(chosen);
       if (next.has(cursor)) next.delete(cursor);
       else if (next.size < LEAD_SIZE) next.add(cursor);
@@ -59,6 +86,7 @@ export function OpponentLeadPicker({ stores, opponent, myTeam, onConfirm, onCanc
       <Text bold color="cyan">Opponent's leads — which 2 did they send out at preview?</Text>
       <Text dimColor>↑/↓ to move · space to toggle · Enter when 2 selected · ←/ESC to go back to bring</Text>
       <Text dimColor>The other 2 of their bring will reveal as they switch in or come in on a faint.</Text>
+      {visionMsg && <Text color="green">{visionMsg}</Text>}
       <Box flexDirection="column" marginTop={1}>
         {opponent.map((o, i) => {
           const pik = stores.pikalytics.get(o.species);
