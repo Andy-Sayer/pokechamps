@@ -48,6 +48,15 @@ describe('BattleTracker — live-match regressions', () => {
     expect(lines.indexOf('m1 ko')).toBeLessThan(lines.indexOf('mMeowscarada in m1'));
   });
 
+  test('a garbled re-read of the same move is a re-fire, not a boundary — and repairs the name', () => {
+    const t = new BattleTracker(LEADS);
+    expect(t.feed(parseBanner('The opposing Charizard used Fake Qut!'))).toBeNull();   // OCR'd Q
+    expect(t.feed(parseBanner('The opposing Charizard used Fake Out!'))).toBeNull();   // re-read, clean — must NOT split
+    const lines = t.flushPending({}, new Set())!;
+    expect(lines.filter(l => l.includes('Fake'))).toHaveLength(1);
+    expect(lines.some(l => l.includes('Fake Out'))).toBe(true);                        // clean re-read fixed the name
+  });
+
   test('the same actor using a DIFFERENT move closes the missed turn boundary', () => {
     const t = new BattleTracker(LEADS);
     expect(t.feed(parseBanner('Talonflame used Brave Bird!'))).toBeNull();

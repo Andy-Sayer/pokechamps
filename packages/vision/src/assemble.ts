@@ -83,7 +83,11 @@ export class BattleAssembler {
   moveStartsNewTurn(side: Side, label: string, move: string): boolean {
     const ref = this.resolveSlot(side, label);
     if (!ref) return false;
-    return this.actions.some(a => a.kind === 'move' && a.actor === ref && norm(a.move ?? '') !== norm(move));
+    // CLEARLY different moves only: a re-OCR of the same banner varies by a glyph or
+    // two ("Fake Out" → "Fake Qut") and must stay a re-fire, not a boundary — a false
+    // split shipped a one-line garbage turn live. Real different moves by one mon
+    // ("Brave Bird" vs "Tailwind") sit far below 0.7 similarity.
+    return this.actions.some(a => a.kind === 'move' && a.actor === ref && similarity(a.move ?? '', move) < 0.7);
   }
 
   /** Swap the two slots of one side — roster, per-turn state, and every recorded ref.
@@ -238,9 +242,19 @@ export class BattleAssembler {
         if (!ref) { this.notes.push(`move: unresolved ${msg.side} "${msg.label}" (${msg.move})`); break; }
         // BANNER RE-FIRE dedupe: OCR drops a persisting banner for a couple of frames
         // mid-animation, the clear window expires, and the same banner parses again.
-        // A mon acts once per turn, so an identical actor+move this turn is a re-read.
+        // A mon acts once per turn, so an identical actor+move this turn is a re-read —
+        // fuzzily: a re-read can garble a glyph ("Fake Out" → "Fake Qut"). When the
+        // LATER read is the one that resolves in the dex, it fixes the recorded name.
         // (Seen live: doubled Acrobatics / Solar Beam attributed to two targets.)
-        if (this.actions.some(a => a.kind === 'move' && a.actor === ref && norm(a.move ?? '') === norm(msg.move))) break;
+        {
+          const dup = this.actions.find(a => a.kind === 'move' && a.actor === ref && similarity(a.move ?? '', msg.move) >= 0.7);
+          if (dup) {
+            // getMove returns a STUB ({exists: false}) for unknown ids, never undefined.
+            const real = (m: string) => (getMove(toId(m)) as { exists?: boolean } | undefined)?.exists === true;
+            if (!real(dup.move ?? '') && real(msg.move)) dup.move = msg.move;
+            break;
+          }
+        }
         const action: TurnAction = { actor: ref, kind: 'move', move: msg.move };
         if (this.megaPending.delete(ref)) action.mega = true;
         this.actions.push(action);

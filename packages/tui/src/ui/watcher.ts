@@ -14,7 +14,13 @@
 // are pure liability during normal play. Pass { debug: true } only when actively diagnosing.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { appendFile } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+
+// Every proposal the TUI RECEIVES is teed to this file (best-effort, async) — the
+// reader's own --debug trace shows what was EMITTED, but "the panel never updated"
+// bugs need the receiving side's record to tell a reader stall from a UI stall.
+const PROPOSAL_LOG = fileURLToPath(new URL('../../../vision/fixtures/live/watcher-proposals.jsonl', import.meta.url));
 
 export interface WatchProposal { lines: string[]; confidence?: number; partial?: boolean }
 export interface WatchOpts { leads?: string[]; full?: boolean; debug?: boolean }
@@ -64,7 +70,13 @@ function launch(opts: WatchOpts): ChildProcess | null {
   rl.on('line', (line) => {
     const s = line.trim();
     if (s[0] !== '{') return;
-    try { const parsed = JSON.parse(s) as WatchProposal; if (Array.isArray(parsed.lines) && parsed.lines.length) for (const cb of propCbs) cb(parsed); }
+    try {
+      const parsed = JSON.parse(s) as WatchProposal;
+      if (Array.isArray(parsed.lines) && parsed.lines.length) {
+        appendFile(PROPOSAL_LOG, JSON.stringify({ ts: Date.now(), ...parsed }) + '\n', () => { /* best-effort */ });
+        for (const cb of propCbs) cb(parsed);
+      }
+    }
     catch { /* partial/garbled line */ }
   });
   return p;
