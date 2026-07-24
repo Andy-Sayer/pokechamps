@@ -2634,25 +2634,26 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
 
   finalizeTurnRef.current = finalizeTurn;
 
-  // Ratify a vision proposal: apply each line into the turn draft (you then /next to
-  // finalize, exactly as with typed input), and pop it. When MORE finalized turns are
-  // queued behind it, this turn is complete by definition (the reader only finalizes
-  // turn N+1 after N ended) — auto-/next so the next one presents against a clean
-  // draft instead of deadlocking behind the panel's input gate.
+  // Ratify a vision proposal. Accepting a FINALIZED turn applies its lines AND
+  // finalizes (/next) in one stroke — ratifying IS the review, and without the
+  // auto-/next every accepted turn piled into the same open draft ("repeating turn 1"
+  // live). Accepting a PARTIAL (early accept-as-is) keeps the manual flow: the turn
+  // isn't complete, so the draft stays open for the rest. Lines that error skip the
+  // auto-finalize so the user can repair the draft first.
   const acceptVisionProposal = (lines: string[]) => {
     const errors = lines.map(applyTurnLine).filter((e): e is string => e != null);
     const wasFinal = visionFinals.length > 0;
     const moreQueued = visionFinals.length > 1;
     if (wasFinal) setVisionFinals(q => q.slice(1));
     else setVisionPreview(null);
-    if (wasFinal && moreQueued && errors.length === 0 && !finalizing) {
+    if (wasFinal && errors.length === 0 && !finalizing) {
       setFinalizing(true);
       setTimeout(() => { try { finalizeTurnRef.current(); } finally { setFinalizing(false); } }, 0);
-      setMessage(`Vision: applied + finalized (${visionFinals.length - 1} more queued turn(s) to ratify).`);
+      setMessage(`Vision: turn applied + finalized.${moreQueued ? ` ${visionFinals.length - 1} more queued turn(s) to ratify.` : ''}`);
       return;
     }
     setMessage(errors.length
-      ? `Vision: applied with ${errors.length} issue(s) — first: ${errors[0]}`
+      ? `Vision: applied with ${errors.length} issue(s) — first: ${errors[0]} — fix the draft, then /next.`
       : `Vision: applied ${lines.length} line(s). Review the draft, then /next to finalize.`);
   };
 
