@@ -55,6 +55,11 @@ export class BattleAssembler {
   private missedTargets = new Set<string>();        // "actionIdx:ref" pairs where the move missed
   private vacatedByFaint = new Set<SlotRef>();      // slots emptied by a faint — the next switch-in there is a REPLACEMENT (persists across turns: the send-in often lands in the next proposal)
   private turnsClosed = 0;                          // turns emitted so far — guards the pair-order swap to pre-first-emission
+  // NICKNAME ALIASES: a nicknamed mon's banners carry the nickname, never the species.
+  // A Latin nickname OCRs stably, so binding label→slot once (from the send-out pair,
+  // aligned against the slot the RESOLVABLE partner didn't claim) makes every later
+  // "The opposing Courtois used X" resolve. Cleared when the slot changes occupant.
+  private nickAlias: Partial<Record<SlotRef, string>> = {};
 
   /** Seed the two leads per side (from the team-preview / nameplate appearance read). */
   constructor(leads: Partial<Roster> = {}) {
@@ -100,6 +105,7 @@ export class BattleAssembler {
     const [a, b] = slotsFor(side);
     const swapRef = (r: SlotRef): SlotRef => (r === a ? b : r === b ? a : r);
     [this.roster[a], this.roster[b]] = [this.roster[b], this.roster[a]];
+    [this.nickAlias[a], this.nickAlias[b]] = [this.nickAlias[b], this.nickAlias[a]];
     [this.hpSamples[a], this.hpSamples[b]] = [this.hpSamples[b], this.hpSamples[a]];
     for (const act of this.actions) {
       act.actor = swapRef(act.actor);
@@ -132,7 +138,20 @@ export class BattleAssembler {
     // canonicalised) is never clobbered — OCR flicker can't overwrite a known mon.
     if (confidence >= 0.85) {
       const cur = matchSpecies(this.roster[ref]!);
-      if (!cur || cur.score < 0.6) this.roster[ref] = species;
+      if (!cur || cur.score < 0.6) {
+        // NEVER duplicate a species across the pair: if the plate species already
+        // occupies the SIBLING slot, this is pair-ORDER evidence (banner order vs
+        // plate order), not an identity fix — overwriting made Camerupt occupy BOTH
+        // slots live (Earth Power → o1 while the mega → o2). Swap while nothing has
+        // been emitted; later, just refuse.
+        const [a, b] = slotsFor(sideOf(ref));
+        const sib = ref === a ? b : a;
+        if (norm(this.roster[sib]) === norm(species)) {
+          if (this.turnsClosed === 0) { this.swapPair(sideOf(ref)); this.notes.push(`pair order corrected from plate (${species} at ${ref})`); }
+          return;
+        }
+        this.roster[ref] = species;
+      }
     }
   }
 
@@ -178,6 +197,10 @@ export class BattleAssembler {
     const sp = norm(species);
     if (norm(this.roster[a]) === sp) return a;
     if (norm(this.roster[b]) === sp) return b;
+    // Nickname alias (bound at send-out): exact-ish match on the remembered label.
+    for (const r of [a, b]) {
+      if (this.nickAlias[r] && similarity(this.nickAlias[r]!, species) >= 0.55) return r;
+    }
     // FUZZY: a nicknamed mon's label OCRs differently on every read (non-Latin glyphs
     // come out as unstable garbage), so exact equality never binds. Similarity binds
     // the stable part of the garble…
@@ -292,6 +315,29 @@ export class BattleAssembler {
             this.actions.push({ actor: b, kind: 'switch', switchTo: s2 });
             break;
           }
+          // Both slots already tracked (leads-seeded): the banner adds no occupancy,
+          // but it can NAME a nickname. A part that resolves confirms its slot; the
+          // unresolvable part is the OTHER slot's nickname — bind it as that slot's
+          // alias so every later banner carrying it resolves ("sent out Courtois and
+          // Camerupt!" with leads Milotic/Camerupt → "Courtois" aliases the Milotic slot).
+          if (this.roster[a] != null && this.roster[b] != null) {
+            const rs = [r1, r2];
+            const claimed = new Set<SlotRef>();
+            let nickIdx = -1;
+            parts.forEach((_, i) => {
+              const m = rs[i];
+              if (m && m.score >= 0.7) {
+                const slot = norm(this.roster[a]) === norm(m.value) ? a : norm(this.roster[b]) === norm(m.value) ? b : null;
+                if (slot) claimed.add(slot);
+              } else nickIdx = i;
+            });
+            if (nickIdx >= 0 && claimed.size === 1) {
+              const open: SlotRef = claimed.has(a) ? b : a;
+              this.nickAlias[open] = parts[nickIdx]!;
+              this.notes.push(`nickname alias: "${parts[nickIdx]}" → ${open} (${this.roster[open]})`);
+            }
+            break;
+          }
         }
         // An UNRESOLVABLE label with no empty slot to land in is a garbled re-fire or
         // nickname noise, never a real switch (a voluntary switch's "come back!" and a
@@ -314,12 +360,13 @@ export class BattleAssembler {
         // species ref the parser can canonicalise; a nickname stays a switch line.
         const replacement = this.vacatedByFaint.has(target) && msg.species != null;
         this.vacatedByFaint.delete(target);
+        delete this.nickAlias[target];   // new occupant — the old nickname binding is stale
         this.actions.push({ actor: target, kind: 'switch', switchTo: species, replacement: replacement || undefined });
         break;
       }
       case 'switchOut': {
         const ref = this.resolveSlot(msg.side, msg.species ?? msg.label);
-        if (ref) this.roster[ref] = null;
+        if (ref) { this.roster[ref] = null; delete this.nickAlias[ref]; }
         break;
       }
       case 'faint': {
@@ -327,6 +374,7 @@ export class BattleAssembler {
         if (ref) {
           if (this.faints.includes(ref)) break;            // re-fired faint banner
           this.attachTarget(msg.side, ref); this.faints.push(ref); this.roster[ref] = null;
+          delete this.nickAlias[ref];
           // The ko goes INTO the action timeline: emitted trailing, it would land after
           // the replacement's `in` line and faint the wrong (new) occupant of the slot.
           this.actions.push({ actor: ref, kind: 'ko' });

@@ -46,18 +46,25 @@ export function OpponentLeadPicker({ stores, opponent, myTeam, onConfirm, onCanc
   useEffect(() => onWatchProposal(p => {
     if (manualTouch.current) return;
     const seen: number[] = [];
+    let unrecognized = 0;
     for (const l of p.lines) {
       const m = l.match(/^o[12] > switch > (.+)$/);
       if (!m) continue;
       const idx = opponent.findIndex(o => toId(o.species) === toId(m[1]!));
-      if (idx >= 0 && !seen.includes(idx)) seen.push(idx);
+      if (idx >= 0) { if (!seen.includes(idx)) seen.push(idx); }
+      else unrecognized++;
     }
-    if (seen.length !== 2) return;
+    // Pre-fill whatever resolved — a NICKNAMED lead ("sent out Courtois and
+    // Camerupt!") leaves only one recognizable, and one pre-selected beats none.
+    if (seen.length === 0 || seen.length > 2) return;
     const key = [...seen].sort((a, b) => a - b).join(',');
     if (lastAutoKey.current === key) return;
     lastAutoKey.current = key;
     setChosen(new Set(seen));
-    setVisionMsg(`⌁ vision saw ${seen.map(i => opponent[i]!.species).join(' + ')} sent out — Enter to confirm`);
+    const names = seen.map(i => opponent[i]!.species).join(' + ');
+    setVisionMsg(seen.length === 2
+      ? `⌁ vision saw ${names} sent out — Enter to confirm`
+      : `⌁ vision saw ${names} + ${unrecognized ? 'an unrecognized name (nicknamed?)' : 'one it could not read'} — toggle their other lead, then Enter`);
   }), [opponent]);
 
   useInput((input, key) => {

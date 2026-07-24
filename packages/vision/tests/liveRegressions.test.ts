@@ -127,6 +127,33 @@ describe('nicknamed opponent — garbled OCR regression (2026-07-24 vs KEDD, グ
   });
 });
 
+describe('Latin nickname — Courtois regression (2026-07-24 vs Migueloncio)', () => {
+  test('a plate read never duplicates a species across the pair — it corrects the order', () => {
+    // Banner order put Camerupt at o2; the true plate shows Camerupt at o1. The old
+    // override wrote Camerupt into BOTH slots (Earth Power → o1 while the mega → o2).
+    const t = new BattleTracker({});
+    t.feed(parseBanner('Migueloncio sent out Courtois and Camerupt!'));   // o1='Courtois' o2='Camerupt' by banner order
+    t.seedActive('o1', 'Camerupt', 0.95);                                 // plate 0 is the real Camerupt
+    const r = t.getRoster();
+    expect(r.o1).toBe('Camerupt');
+    expect(r.o2).toBe('Courtois');                                        // swapped, never duplicated
+    t.feed(parseBanner("The opposing Camerupt's Cameruptite is reacting to Migueloncio's Omni Ring!"));
+    t.feed(parseBanner('The opposing Camerupt has Mega Evolved into Mega Camerupt!'));
+    t.feed(parseBanner('The opposing Camerupt used Earth Power!'));
+    const lines = t.flushPending({}, new Set())!;
+    expect(lines.some(l => l.startsWith('o1+mega > Earth Power'))).toBe(true);   // mega + move on the SAME slot
+  });
+
+  test('with leads seeded, the send-out pair binds the nickname as the unclaimed slot alias', () => {
+    const t = new BattleTracker({ o1: 'Milotic', o2: 'Camerupt', m1: 'Talonflame', m2: 'Kingambit' });
+    t.feed(parseBanner('Migueloncio sent out Courtois and Camerupt!'));
+    expect(t.getRoster().o1).toBe('Milotic');                             // leads untouched
+    t.feed(parseBanner('The opposing Courtois used Trick Room!'));        // nickname → aliased slot
+    const lines = t.flushPending({}, new Set())!;
+    expect(lines).toContain('o1 > Trick Room > self');
+  });
+});
+
 describe('panelBrightnessRatio — dim team-sheet regression (2026-07-24, all-Ice read as all-Steel)', () => {
   const flat = (mul: number): Frame => {
     const w = 480, h = 270;
