@@ -621,9 +621,34 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // spans team-select → battle (started at either). Here we just subscribe: proposals →
   // the ratify panel, and the watching flag → the badge. Stop the child when we leave battle.
   const [watching, setWatching] = useState(watcherIsWatching());
+  // Fresh state for the (deps-[]) proposal subscription — the closure would otherwise
+  // see mount-time actives/turn-count forever.
+  const visionStateRef = useRef({ match: initial, activeIdx: initialActiveIndices(initial) });
   useEffect(() => {
     const offP = onWatchProposal(p => {
-      const prop: ProposalLike = { lines: p.lines, confidence: p.confidence ?? 0.9, notes: [], partial: p.partial };
+      // SEND-OUT REDUNDANCY FILTER: before any turn is logged, a `switch` line that
+      // names the mon ALREADY active in that slot carries zero information (the user
+      // picked the leads) — ratifying it would log a phantom turn of no-op switches
+      // and shift turn numbering off the game's. A DISAGREEING send-out line stays:
+      // accepting it corrects the engine's occupancy (seen live: crossed opp slots).
+      const st = visionStateRef.current;
+      let lines = p.lines;
+      if (st.match.turns.length === 0) {
+        lines = lines.filter(l => {
+          const m = l.match(/^([mo])([12]) > switch > (.+)$/);
+          if (!m) return true;
+          const slot = parseInt(m[2]!, 10) - 1;
+          const idx = m[1] === 'm' ? st.activeIdx.mine[slot] : st.activeIdx.theirs[slot];
+          const team = m[1] === 'm' ? st.match.myTeam : st.match.opponentTeam;
+          const sp = idx != null ? team[idx]?.species : undefined;
+          return !(sp && toId(sp) === toId(m[3]!));
+        });
+        if (!lines.length) {
+          if (!p.partial) setMessage('⌁ vision confirmed the send-out — leads match, nothing to log.');
+          return;
+        }
+      }
+      const prop: ProposalLike = { lines, confidence: p.confidence ?? 0.9, notes: [], partial: p.partial };
       if (p.partial) setVisionPreview(prop);
       else { setVisionFinals(q => [...q, prop]); setVisionPreview(null); }
     });
@@ -637,6 +662,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // one logged before a hit does. Applied at finalize; shown in the turn display.
   const [draftBoostEvents, setDraftBoostEvents] = useState<{ order: number; update: StateUpdate; raw: string }[]>([]);
   const [activeIdx, setActiveIdx] = useState(() => initialActiveIndices(initial));
+  visionStateRef.current = { match, activeIdx };   // keep the proposal-filter closure current
 
   // Spectator mode: the parent re-renders us with a fresh `match` prop on every
   // live WS frame. Mirror it into local state (and re-derive the active slots
