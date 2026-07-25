@@ -1353,6 +1353,12 @@ const DEBUFF_MOVES: Record<string, BoostMap> = {
   scaryface: { spe: -2 }, cottonspore: { spe: -2 },
   screech: { def: -2 }, metalsound: { spd: -2 }, faketears: { spd: -2 },
   tickle: { atk: -1, def: -1 }, nobleroar: { atk: -1, spa: -1 },
+  // Memento is the biggest debuff in the game and it COSTS the user its life. Modelling
+  // the drops without the faint would make it a strictly better Charm and the search
+  // would spam it, so the self-faint is applied alongside (see the debuff resolution).
+  // Legal users here are meta-real: Whimsicott, Gholdengo, Sinistcha, Chandelure,
+  // Polteageist, Spiritomb.
+  memento: { atk: -2, spa: -2 },
 };
 // Spread variants hit BOTH live foes (Growl/Leer/Tail Whip/String Shot).
 // Accuracy/evasion droppers (Sand Attack…) stay excluded by the same policy as
@@ -3420,6 +3426,8 @@ function resolveTurn(
       if (toId(t.oppAbility[foe] ?? '') === 'magicbounce') accDrop(oppToFoeDrop, actor, dm.boosts);
       else accDrop(myToFoeDrop, foe, dm.boosts);
     }
+    // Memento: the drops are paid for with the caster's life.
+    if (isSelfdestruct(dm.move)) myHp[actor] = 0;
   }
   for (const [actor, target] of oppTargets) {
     if (!isDebuffTarget(target)) continue;
@@ -3430,6 +3438,7 @@ function resolveTurn(
       if (toId(t.myAbility[foe] ?? '') === 'magicbounce') accDrop(myToFoeDrop, actor, dm.boosts);
       else accDrop(oppToFoeDrop, foe, dm.boosts);
     }
+    if (isSelfdestruct(dm.move)) oppHp[actor] = 0;
   }
 
   // Taunt / Encore (option restriction). Tick down what was active at the start
