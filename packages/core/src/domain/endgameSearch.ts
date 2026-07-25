@@ -4145,6 +4145,19 @@ function oppSurvival(entry: OpponentEntry): Survival | undefined {
  * is already a %. Benched-but-live mons are included so the search can model
  * replacements after a KO.
  */
+/** Did this mon use a protect VARIANT on the most recent logged turn? Gen 9 divides
+ *  the success chance by 3 for each consecutive use, so the search treats a mon that
+ *  protected last turn as unable to protect again — but only if it's TOLD. Without
+ *  this the live path always reported a fresh streak, and the recommender would happily
+ *  suggest Protect on back-to-back turns: the single most over-suggestible move in the
+ *  game, and the one you lean on to stall Trick Room / Tailwind / weather. */
+function protectedOnLastTurn(match: Match, side: 'mine' | 'theirs', teamIdx: number): boolean {
+  const last = match.turns?.[match.turns.length - 1];
+  if (!last) return false;
+  return last.actions.some(a =>
+    a.side === side && a.attackerTeamIndex === teamIdx && PROTECT_MOVE_IDS.has(toId(a.move ?? '')));
+}
+
 export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchInput {
   const myActive = new Set<number>(active.mine.filter((x): x is number => x != null));
   const oppActive = new Set<number>(active.theirs.filter((x): x is number => x != null));
@@ -4165,6 +4178,7 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
     mine.push({
       set, hpPercent, active: myActive.has(idx), megaActive: match.myMegaUsed?.includes(idx),
       boosts: match.myBoosts?.[idx], status: match.myStatus?.[idx], survival: mySurvival(set),
+      protectedLastTurn: myActive.has(idx) && protectedOnLastTurn(match, 'mine', idx),
       // Fake Out / First Impression eligibility — true until the mon moves after entry.
       firstTurnOut: myActive.has(idx) && firstTurnOut(match, 'mine', idx),
       // Choice lock: holder moved since its last entry (a knocked-off item lifts it).
@@ -4186,6 +4200,7 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
     opp.push({
       entry, hpPercent, active: oppActive.has(idx), megaActive: entry.megaUsed,
       boosts: entry.currentBoosts, status: entry.status, survival: oppSurvival(entry),
+      protectedLastTurn: oppActive.has(idx) && protectedOnLastTurn(match, 'theirs', idx),
       firstTurnOut: oppActive.has(idx) && firstTurnOut(match, 'theirs', idx),
       // Hard Choice lock only from a KNOWN (revealed) Choice item — soft repeat-
       // move suspicions stay display-only and never restrict the search.
