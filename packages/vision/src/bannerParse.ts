@@ -37,7 +37,10 @@ export type BattleMessage =
   | { kind: 'heal'; side: Side; label: string; species: string | null; source: string }
   | { kind: 'ability'; side: Side; label: string; species: string | null; ability: string }
   | { kind: 'residual'; side: Side; label: string; species: string | null; source: string }
-  | { kind: 'status'; side: Side; label: string; species: string | null; status: string }
+  // `reminder` distinguishes the pre-move volatile nag ("X is confused!", printed every
+  // turn X tries to act) from the INFLICTION ("X became confused!", printed once, by the
+  // move that just landed). Only the infliction names a move's target.
+  | { kind: 'status'; side: Side; label: string; species: string | null; status: string; reminder?: boolean }
   // crit: side/label name the TARGET when the doubles form ("A critical hit on X!") is
   // used; the bare singles form ("A critical hit!") has side=null → tag the last move.
   | { kind: 'crit'; side: Side | null; label: string | null; species: string | null }
@@ -211,8 +214,13 @@ export function parseBanner(raw: string): BattleMessage {
       /^.+? fell asleep/i.test(rest) ? 'sleep' :
       /^.+? (?:is|was) frozen solid/i.test(rest) ? 'freeze' :
       /^.+? (?:is|became) confused/i.test(rest) ? 'confusion' : null;
-    if (status && (m = /^(.+?) (?:is|was|became|fell)\b/i.exec(rest)))
-      return { kind: 'status', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()), status };
+    if (status && (m = /^(.+?) (?:is|was|became|fell)\b/i.exec(rest))) {
+      // "X IS confused!" is the per-turn nag before X acts; "X BECAME confused!" is the
+      // infliction. (Only confusion prints both forms — the other statuses use "is"/"was"
+      // for the infliction itself, so they are never reminders.)
+      const reminder = status === 'confusion' && /^.+? is confused/i.test(rest);
+      return { kind: 'status', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()), status, ...(reminder ? { reminder: true } : {}) };
+    }
   }
   if ((m = /^(.+?) fainted$/i.exec(rest)))
     return { kind: 'faint', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()) };

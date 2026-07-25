@@ -308,3 +308,85 @@ describe('BattleAssembler — slot resolution & roster', () => {
     expect(obs.notes.join(' ')).toMatch(/unresolved.*Garchomp/i);
   });
 });
+
+// Confusion self-damage. Banner wording is VERBATIM from the archived live trace
+// (fixtures/live-debug-archive-231556): the game prints "X is confused!" immediately
+// before the sideless "It hurt itself in its confusion!", which is what makes the
+// self-hit attributable at all.
+describe('BattleAssembler — confusion self-damage', () => {
+  const ROSTER = { m1: 'Talonflame', m2: 'Kingambit', o1: 'Pelipper', o2: 'Archaludon' };
+
+  test('the self-hit is not billed to an untargeted foe move, and HP is synced instead', () => {
+    const a = new BattleAssembler(ROSTER);
+    // The sharp case: NO per-frame samples (so per-action windows can't help) and an
+    // offensive move whose target the banner never named. o1 self-hits for 35 while the
+    // real victim o2 loses 10 — the turn-scoped "biggest HP drop" signal would hand the
+    // move to o1 on drop size alone, inventing a 35% damage observation on a mon nobody
+    // attacked. That is the exact inference poison this reconciler exists to stop.
+    // Order matters: the confused mon moves FIRST, so its self-hit lands before any
+    // action exists to window-scope it. Only the turn-scoped guard can catch this one.
+    feed(a, [
+      'The opposing Pelipper is confused!',
+      'It hurt itself in its confusion!',
+      'Talonflame used Brave Bird!',
+    ]);
+    const lines = a.endTurnLines({ o1: 65, o2: 90 }, { o1: 100, o2: 100 });
+    expect(lines).toContain('m1 > Brave Bird > o2 > 90');
+    expect(lines.some(l => /Brave Bird > o1/.test(l))).toBe(false);
+    // The 35 isn't lost, it's just billed to nobody — the sync line carries it.
+    expect(lines).toContain('hp o1=65');
+  });
+
+  test("a foe move in the SAME turn keeps its own window's damage", () => {
+    const a = new BattleAssembler(ROSTER);
+    a.recordHp('o1', 100, true);
+    feed(a, ['The opposing Pelipper is confused!', 'It hurt itself in its confusion!']);
+    a.recordHp('o1', 82, true);                       // self-hit window
+    feed(a, ['Talonflame used Brave Bird!']);
+    a.recordHp('o1', 30, true);                       // Brave Bird's own window
+    const lines = a.endTurnLines({ o1: 30 }, { o1: 100 });
+    // Brave Bird is billed 82→30, NOT 100→30: the self-hit sits in the prior window.
+    expect(lines).toContain('m1 > Brave Bird > o1 > 30');
+  });
+
+  test('confusion is a volatile — it does not follow the slot to a new occupant', () => {
+    const a = new BattleAssembler(ROSTER);
+    feed(a, ['The opposing Pelipper became confused!']);
+    a.endTurn();
+    feed(a, ['The opposing Pelipper went back to Vell!', 'Vell sent out Kingdra!']);
+    a.endTurn();
+    // A sideless self-hit now has nobody to attribute to → flagged, never guessed onto
+    // the slot's NEW tenant.
+    feed(a, ['It hurt itself in its confusion!']);
+    const obs = a.endTurn({ o1: 70 }, { o1: 100 });
+    expect(obs.notes.some(n => /unattributed/.test(n))).toBe(true);
+    expect(obs.stateLines ?? []).not.toContain('hp o1=70');
+  });
+
+  test('the INFLICTION line pins the confusing move\'s target; the reminder does not', () => {
+    // Verbatim from the archived live match (f4881-4908), including the species clash —
+    // BOTH sides had a Pelipper. The opposing Pelipper's Hurricane hit mine and confused
+    // it, so the target is real data even though no effectiveness line was printed.
+    // Suppressing the self-damage without this pin pushed Hurricane onto m1 instead.
+    const a = new BattleAssembler({ m1: 'Dragonite', m2: 'Pelipper', o1: 'Pelipper', o2: 'Swampert' });
+    feed(a, [
+      'The opposing Swampert used Waterfall!',
+      "It's not very effective on Dragonite.",
+      'The opposing Pelipper used Hurricane!',
+      'Pelipper became confused!',          // infliction → names who Hurricane hit
+      'Pelipper is confused!',              // per-turn nag → names who is about to act
+      'It hurt itself in its confusion!',
+    ]);
+    const lines = a.endTurnLines({ m1: 17, m2: 33 }, { m1: 40, m2: 100 });
+    expect(lines).toContain('o1 > Hurricane > m2');   // right target, no damage slot
+    expect(lines.some(l => /Hurricane > m1/.test(l))).toBe(false);
+    expect(lines).toContain('hp m2=33%');
+  });
+
+  test('a mine-side self-hit syncs RAW on-screen HP, not a percent', () => {
+    const a = new BattleAssembler(ROSTER);
+    feed(a, ['Talonflame is confused!', 'It hurt itself in its confusion!']);
+    a.recordHp('m1', 62, true, 109);                  // "109/175" on the nameplate
+    expect(a.endTurnLines({ m1: 62 }, { m1: 100 })).toContain('hp m1=109');
+  });
+});

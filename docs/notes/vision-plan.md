@@ -81,14 +81,26 @@ Switch 2 / VOD ──▶ frames ──▶ readFrame(RegionMap)         ← banne
   (`m1 > … > 117` from the "117/175" plate), opp-side the bare percent; an explicit `60%`
   only when my digits never resolved. Tune `gapFrames` / `clearFrames` / `settleFrames`
   on a live stream.
-- **P4 Self-damage reconciler** ⚠️ **SUPERSEDED IN PART — one real gap left.** The
-  per-action windows of P3 removed most of the need (self-inflicted loss lands in its own
-  window, not the attacker's), and `hpLoss` was repurposed: after the holder's own
-  offensive move it's the **Life Orb tell** → an in-timeline `o2 item Life Orb` reveal
-  (which also fires the item-clause ripple), gated so Substitute / Belly Drum / Steel Beam
-  can't false-positive. **`confusionHit` is parsed but never consumed by the assembler** —
-  a confusion self-hit's HP drop can still be attributed to an opponent's move window.
-  That's the remaining P4 work.
+- **P4 Self-damage reconciler** ✅ DONE (2026-07-24). Two halves. `hpLoss` was repurposed:
+  after the holder's own offensive move it's the **Life Orb tell** → an in-timeline
+  `o2 item Life Orb` reveal (which also fires the item-clause ripple), gated so Substitute
+  / Belly Drum / Steel Beam can't false-positive. `confusionHit` ("It hurt itself in its
+  confusion!") is **sideless**, so it's attributed via the confusion line that precedes it,
+  and the exclusion is two-layered: **window-scoped** (the open action's window is marked,
+  so a real hit on that mon in another window still counts) plus **turn-scoped** (a
+  self-damaged mon is dropped from the turn-wide "biggest HP drop" / "plate appeared"
+  target signals, which its own self-hit would otherwise win outright). The lost HP isn't
+  dropped — it's billed to nobody and re-synced with an `hp <ref>=<val>` state line, so the
+  engine tracks the screen without any move being credited for it.
+  **The subtlety that only real footage exposed:** the game prints *both* "X became
+  confused!" (the infliction, printed once by the move that just landed) and "X is
+  confused!" (a nag before every turn X tries to act). They parsed identically, so
+  suppressing the self-damage pushed the confusing move's target onto the wrong mon —
+  caught on the archived trace where BOTH sides had a Pelipper and the opposing one's
+  Hurricane confused mine. `parseBanner` now flags the reminder form, and the infliction
+  form pins the target like any other follow-up. Replaying both live traces changes exactly
+  one line: `o1 > Hurricane > m2 > 33%` (Hurricane billed for the self-hit) becomes
+  `o1 > Hurricane > m2` + `hp m2=33%`.
 - **P5 Region robustness across sources** ⚠️ PARTIAL. `find-banner.ts` is the one-frame
   sanity check and the GameShare inset is auto-detected, but there's still no per-source
   region override for facecam / overlay VODs.
@@ -115,7 +127,10 @@ Switch 2 / VOD ──▶ frames ──▶ readFrame(RegionMap)         ← banne
    nine review-pass fixes have not yet faced a live ranked match — every prior live test
    found defects that offline replay didn't. This is the top item and it needs a play
    session, not a commit.
-2. **`confusionHit` reconciliation** (the P4 remnant above).
+2. **Status-infliction target pins beyond confusion.** "X was burned!" / "X is paralyzed!"
+   name who the move hit just as reliably, and the assembler still ignores them for
+   targeting. Same one-line change as the confusion infliction pin — deliberately left out
+   of that fix to keep its blast radius to the bug being closed.
 3. **Sprite coverage** — 90 species covered. Missing meta: **Annihilape, Corviknight,
    Glimmora, Tsareena**. Regionals are 3/17 (`Raichu-Alola` matters — Mega Raichu X/Y is
    the M-B headline). The app-owned harvest routine grows this automatically from every

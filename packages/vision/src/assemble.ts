@@ -52,6 +52,9 @@ export class BattleAssembler {
   private megaPending = new Set<SlotRef>();
   private hpSamples: Partial<Record<SlotRef, HpSample[]>> = {};
   private protectedThisTurn = new Set<SlotRef>();   // Protect users — no damage inferred onto them
+  private confused = new Set<SlotRef>();            // carries ACROSS turns (confusion lasts 2-5)
+  private lastConfusionRef: SlotRef | null = null;  // most recent "X is/became confused!" this turn
+  private selfDamaged = new Set<SlotRef>();         // hurt ITSELF this turn — turn-final HP is not foe damage
   private missedTargets = new Set<string>();        // "actionIdx:ref" pairs where the move missed
   private vacatedByFaint = new Set<SlotRef>();      // slots emptied by a faint — the next switch-in there is a REPLACEMENT (persists across turns: the send-in often lands in the next proposal)
   private vacatedSpecies: Partial<Record<SlotRef, string>> = {};  // who fainted there — the dead mon's plate lingers a few frames and must not re-seed its own vacated slot
@@ -82,6 +85,7 @@ export class BattleAssembler {
     this.megaPending.clear(); this.hpSamples = {}; this.protectedThisTurn.clear();
     this.missedTargets.clear(); this.vacatedByFaint.clear(); this.nickAlias = {};
     this.vacatedSpecies = {};
+    this.confused.clear(); this.selfDamaged.clear(); this.lastConfusionRef = null;
     this.turnsClosed = 0;
   }
 
@@ -134,6 +138,9 @@ export class BattleAssembler {
     this.megaPending = new Set([...this.megaPending].map(swapRef));
     this.protectedThisTurn = new Set([...this.protectedThisTurn].map(swapRef));
     this.vacatedByFaint = new Set([...this.vacatedByFaint].map(swapRef));
+    this.confused = new Set([...this.confused].map(swapRef));
+    this.selfDamaged = new Set([...this.selfDamaged].map(swapRef));
+    if (this.lastConfusionRef) this.lastConfusionRef = swapRef(this.lastConfusionRef);
     this.missedTargets = new Set([...this.missedTargets].map(k => {
       const [i, r] = k.split(':');
       return `${i}:${swapRef(r as SlotRef)}`;
@@ -414,12 +421,18 @@ export class BattleAssembler {
         this.vacatedByFaint.delete(target);
         delete this.vacatedSpecies[target];
         delete this.nickAlias[target];   // new occupant — the old nickname binding is stale
+        this.confused.delete(target);    // …and volatiles don't survive the slot's old tenant
+        if (this.lastConfusionRef === target) this.lastConfusionRef = null;
         this.actions.push({ actor: target, kind: 'switch', switchTo: species, replacement: replacement || undefined });
         break;
       }
       case 'switchOut': {
         const ref = this.resolveSlot(msg.side, msg.species ?? msg.label);
-        if (ref) { this.roster[ref] = null; delete this.nickAlias[ref]; }
+        if (ref) {
+          this.roster[ref] = null; delete this.nickAlias[ref];
+          this.confused.delete(ref);   // confusion is a volatile — it's gone on switch-out
+          if (this.lastConfusionRef === ref) this.lastConfusionRef = null;
+        }
         break;
       }
       case 'faint': {
@@ -430,6 +443,8 @@ export class BattleAssembler {
           this.vacatedSpecies[ref] = this.roster[ref] ?? undefined;
           this.roster[ref] = null;
           delete this.nickAlias[ref];
+          this.confused.delete(ref);
+          if (this.lastConfusionRef === ref) this.lastConfusionRef = null;
           // The ko goes INTO the action timeline: emitted trailing, it would land after
           // the replacement's `in` line and faint the wrong (new) occupant of the slot.
           this.actions.push({ actor: ref, kind: 'ko' });
@@ -483,6 +498,24 @@ export class BattleAssembler {
         if (ref) this.protectedThisTurn.add(ref);
         break;
       }
+      case 'confusionHit': {
+        // "It hurt itself in its confusion!" — SELF-inflicted HP loss, and the banner
+        // names nobody. Attribute it to the mon the confusion reminder just named (the
+        // game prints "X is confused!" first), else to the only confused mon on the
+        // field. Unattributed, the drop reads as an opponent's damage and poisons the
+        // spread inference — the same failure class as an un-suppressed miss.
+        const ref = this.lastConfusionRef
+          ?? [...this.confused].filter(r => this.roster[r] != null)[0]
+          ?? null;
+        if (!ref) { this.notes.push('confusion self-hit seen but unattributed (no "X is confused!" line) — HP may be misread as foe damage'); break; }
+        // WINDOW-scoped: the drop lands in the window of the action that's currently
+        // open (samples are tagged with actions.length), so exclude just that window —
+        // a real hit on this mon in ANOTHER window stays a valid observation.
+        if (this.actions.length) this.missedTargets.add(`${this.actions.length - 1}:${ref}`);
+        this.selfDamaged.add(ref);
+        this.notes.push(`${ref} hurt itself in confusion — self-damage excluded from foe attribution`);
+        break;
+      }
       case 'miss':
         // "X avoided the attack!" — the most recent move into X missed: pin the target
         // (the aim is real data) but flag it so no damage slot is emitted; an
@@ -519,6 +552,20 @@ export class BattleAssembler {
         const MAP: Record<string, string> = { burn: 'brn', paralysis: 'par', poison: 'psn', toxic: 'tox', sleep: 'slp', freeze: 'frz' };
         const st = MAP[msg.status];
         if (st) this.stateLines.push(`${ref} ${st}`);
+        else if (msg.status === 'confusion') {
+          // Volatile — no state-line grammar, so it isn't keyed. But it IS the attribution
+          // key for the sideless "It hurt itself in its confusion!" that may follow: the
+          // game prints "X is confused!" immediately before the self-hit, every turn X
+          // tries to move (live trace: "Pelipper is confused!" → "It hurt itself…").
+          this.confused.add(ref); this.lastConfusionRef = ref;
+          // The INFLICTION line also names who the move that just landed HIT — the same
+          // signal class as flinch/effectiveness, and the only target evidence a neutral
+          // confusing hit leaves. (The per-turn reminder names the mon about to ACT, not
+          // a target, so it must never pin.) Live trace: the opposing Pelipper's Hurricane
+          // confused MY Pelipper — without this pin the self-damage guard below pushed the
+          // target onto the wrong mon entirely.
+          if (!msg.reminder) this.attachTarget(msg.side, ref, false);
+        }
         else this.notes.push(`${ref} ${msg.status} observed (volatile — no state-line grammar, not keyed)`);
         break;
       }
@@ -630,7 +677,13 @@ export class BattleAssembler {
       let pick = [f1, f2].filter(r => (this.roster[r] != null || this.faints.includes(r)) && !this.protectedThisTurn.has(r) && !this.missedTargets.has(`${i}:${r}`) && immDrop(r, i) >= 3)  // 1. window drop (a since-fainted foe still counts; never a missed/immune ref)
         .sort((x, y) => immDrop(y, i) - immDrop(x, i))[0];
       if (!pick) {
-        const foes = [f1, f2].filter(r => !claimed.has(r) && !this.missedTargets.has(`${i}:${r}`));
+        // A mon that hurt ITSELF this turn is excluded from the TURN-scoped signals: its
+        // plate appears and its turn-total HP drop is large for reasons that have nothing
+        // to do with a foe's move, so both signals would preferentially (and wrongly) pick
+        // it. Signal 1 above stays available — that one is window-scoped and the confused
+        // mon's own window is already excluded, so a genuine hit in another window still
+        // resolves.
+        const foes = [f1, f2].filter(r => !claimed.has(r) && !this.missedTargets.has(`${i}:${r}`) && !this.selfDamaged.has(r));
         pick = foes.find(r => touched?.has(r) && this.roster[r]);                            // 2. plate appeared
         if (!pick) pick = foes.filter(r => dropOf(r) >= 3).sort((x, y) => dropOf(y) - dropOf(x))[0]; // 3. HP fell (turn)
         if (!pick) {                                                                          // 4. default to a live foe
@@ -666,6 +719,15 @@ export class BattleAssembler {
         else if (!a.spread.length) { a.spread = undefined; return; }
       }
       if (a.spread) {
+        // Same self-damage rule as the single-target branch: a spread member whose only
+        // available value is the turn-final read, when that read includes its own
+        // confusion hit, is dropped from the list rather than billed to this move.
+        a.spread = a.spread.filter(s =>
+          !(this.selfDamaged.has(s.ref) && this.lastSample(s.ref, i + 1, cutFor(i, s.ref)) == null));
+        if (a.spread.length === 1) { a.target = a.spread[0]!.ref; a.spread = undefined; }
+        else if (!a.spread.length) { a.spread = undefined; return; }
+      }
+      if (a.spread) {
         for (const s of a.spread) {
           const smp = this.lastSample(s.ref, i + 1, cutFor(i, s.ref));
           s.hpRemainingPercent = smp?.pct ?? hpBySlot[s.ref] ?? this.baselineBefore(s.ref, i, hpBefore);
@@ -680,6 +742,14 @@ export class BattleAssembler {
         // pinned Yawn picked up the target's unrelated settled read: `> m1 > 27%`.)
         if (!isOffensive(a.move)) return;
         const smp = this.lastSample(a.target, i + 1, cutFor(i, a.target));
+        // Self-damage (confusion) with no window sample: the only value left is the
+        // TURN-FINAL read, which already has the self-hit baked in — emitting it would
+        // bill this move for HP the mon took off itself. Better no observation than a
+        // wrong one; the `hp` sync line below still keeps the engine's HP honest.
+        if (smp == null && this.selfDamaged.has(a.target)) {
+          this.notes.push(`damage slot suppressed (${a.move}→${a.target}): target self-damaged this turn, no clean window read`);
+          return;
+        }
         const pct = smp?.pct ?? hpBySlot[a.target];
         if (pct == null) return;
         // ZERO-DROP GUARD: an offensive move whose target shows NO HP drop at all is a
@@ -696,6 +766,19 @@ export class BattleAssembler {
         if (smp?.raw != null) a.hpRemainingRaw = smp.raw;
       }
     });
+    // HP SYNC for self-damage. A confusion self-hit is real HP loss that we deliberately
+    // bill to NOBODY, so no move line carries it — close the turn with an explicit bulk-HP
+    // line for those slots instead (same value convention as a damage slot: m-side raw,
+    // o-side percent). State lines emit after the actions, so this is the turn's last word
+    // on that slot. Without it the engine's HP drifts above the screen for the rest of the
+    // match, which is worse than the mis-attribution we just avoided.
+    for (const ref of this.selfDamaged) {
+      const smp = this.lastSample(ref, 0, Number.MAX_SAFE_INTEGER);
+      const pct = smp?.pct ?? hpBySlot[ref];
+      if (pct == null) continue;
+      this.stateLines.push(`hp ${ref}=${ref.startsWith('m') ? (smp?.raw != null ? `${smp.raw}` : `${pct}%`) : `${pct}`}`);
+    }
+
     // Megas whose MOVE was never captured (missed banner) still happened → emit them as
     // standalone mega lines so the forme change isn't lost.
     const megas = [...this.megaPending];
@@ -703,7 +786,10 @@ export class BattleAssembler {
     this.turnsClosed++;
     // vacatedByFaint deliberately survives the reset — the replacement send-in usually
     // lands in the NEXT proposal (end-of-turn replacements cross the gap boundary).
+    // `confused` deliberately survives the reset (confusion lasts 2-5 turns and the
+    // reminder banner re-fires each turn) — it's cleared when the mon leaves the field.
     this.actions = []; this.faints = []; this.notes = []; this.stateLines = []; this.megaPending.clear(); this.hpSamples = {}; this.protectedThisTurn.clear(); this.missedTargets.clear();
+    this.selfDamaged.clear(); this.lastConfusionRef = null;
     return obs;
   }
 
