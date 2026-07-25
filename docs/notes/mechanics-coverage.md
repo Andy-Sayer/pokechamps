@@ -337,7 +337,7 @@ search, so trust it over prose. As of 2026-07-24 its nine rule classes are:
 | Class | What's approximated | Why |
 |---|---|---|
 | `redirection` | Ally Switch / Spotlight | position shuffling — our slot-less model can't represent it |
-| `teamprotect` | Mat Block / Crafty Shield | (Wide/Quick Guard ARE modelled) |
+| ~~`teamprotect`~~ | ✅ CLOSED 2026-07-25 — Mat Block (damage, first-turn-out) + Crafty Shield (status) join Wide/Quick Guard | |
 | `foedebuff` | accuracy/evasion drops | **policy**: maximin never prices hit chance — informational only |
 | `twoturn` | Sky Drop only | it carries a FOE off the field — slot-less model |
 | `restriction` | Torment / Imprison / Spite | no live tracking to carry, no in-tree cast model |

@@ -47,10 +47,9 @@ const RULES: GapRule[] = [
   // them, so they stay informational.
   { kind: 'redirection', label: 'position shuffle (Ally Switch / Spotlight)',
     moves: ['allyswitch', 'spotlight'] },
-  // Wide / Quick Guard are now MODELLED (side-wide protect actions). Mat Block /
-  // Crafty Shield remain a gap.
-  { kind: 'teamprotect', label: 'team protect (Mat Block / Crafty Shield)',
-    moves: ['matblock', 'craftyshield'] },
+  // TEAM PROTECT: rule removed 2026-07-25 — the whole class is modelled. Wide Guard
+  // (spread), Quick Guard (priority), Mat Block (all DAMAGING moves, first turn out
+  // only) and Crafty Shield (all STATUS moves) are each side-wide protect actions.
   // NOTE: the 100%-chance DAMAGING foe-drops (Icy Wind/Snarl/Electroweb/Struggle
   // Bug/Breaking Swipe/Low Sweep/Bulldoze/Lunge/Acid Spray/Mystical Fire/…) are now
   // MODELLED (Cell.foeDrop). Only the dedicated 0-damage stat-lowering moves remain

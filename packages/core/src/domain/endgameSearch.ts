@@ -340,6 +340,8 @@ const ENCORE_BASE = -90;  // Encore → foe idx (foe locked into its last move)
 const FAKEOUT_BASE = -100; // Fake Out → foe idx (chip + guaranteed flinch, first turn out only)
 const PRIO_BASE = -110;   // priority attack (Sucker Punch/Grassy Glide/Aqua Jet/…) → foe idx
 const TRAP_BASE = -120;   // trapping move (Block/Mean Look/…) → foe idx; victim can't use SWITCH
+const MAT_BLOCK = -132;    // Mat Block (+0, first turn out) — blocks the foes' DAMAGING moves, side-wide
+const CRAFTY_SHIELD = -133; // Crafty Shield (+3) — blocks the foes' STATUS moves, side-wide
 const HEALING_WISH = -131; // Healing Wish — sacrifice the user; the replacement enters fully healed
 const SET_PERISH = -130;  // Perish Song — every on-field non-Soundproof mon (BOTH sides) gets the clock
 function isSwitchTarget(t: number): boolean { return t <= SWITCH_BASE && t > LEECH_BASE; }
@@ -674,6 +676,12 @@ interface Tables {
   /** Healing Wish move name per mon (null = doesn't know it). Sacrifices the user to
    *  bring the replacement in at full HP with its status cured. */
   myHealingWish: (string | null)[]; oppHealingWish: (string | null)[];
+  /** Mat Block (first turn out only — blocks DAMAGING moves side-wide) and Crafty Shield
+   *  (blocks STATUS moves side-wide). The team-protect siblings of Wide/Quick Guard.
+   *  M-B legality: Mat Block is Greninja-only; Crafty Shield is Chimecho / Cofagrigus /
+   *  Klefki / Runerigus. */
+  myMatBlock: boolean[]; oppMatBlock: boolean[];
+  myCraftyShield: boolean[]; oppCraftyShield: boolean[];
   myPerishMove: (string | null)[];
   oppPerishMove: (string | null)[];
   // Trapping-move capability (Block / Mean Look / Jaw Lock / …): blocks the
@@ -2001,6 +2009,10 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppSetupMove: opp.map(o => findSetupMove(o.entry.knownMoves)?.move ?? null),
     myBatonMove: mine.map(m => findMoveId(m.set.moves ?? [], 'batonpass')),
     oppBatonMove: opp.map(o => findMoveId(o.entry.knownMoves, 'batonpass')),
+    myMatBlock: mine.map(m => !!findMoveId(m.set.moves ?? [], 'matblock')),
+    oppMatBlock: opp.map(o => !!findMoveId(o.entry.knownMoves, 'matblock')),
+    myCraftyShield: mine.map(m => !!findMoveId(m.set.moves ?? [], 'craftyshield')),
+    oppCraftyShield: opp.map(o => !!findMoveId(o.entry.knownMoves, 'craftyshield')),
     myHealingWish: mine.map(m => findMoveId(m.set.moves ?? [], 'healingwish')),
     oppHealingWish: opp.map(o => findMoveId(o.entry.knownMoves, 'healingwish')),
     myPerishMove: mine.map(m => findMoveId(m.set.moves ?? [], 'perishsong')),
@@ -2639,6 +2651,12 @@ function resolveTurn(
   const oppWideGuard = sideUsed(oppTargets, WIDE_GUARD, oppAsleep);
   const myQuickGuard = sideUsed(myTargets, QUICK_GUARD, myAsleep);
   const oppQuickGuard = sideUsed(oppTargets, QUICK_GUARD, oppAsleep);
+  // Mat Block blocks the foes' DAMAGING moves for the whole side (it does NOT stop
+  // status moves); Crafty Shield is the mirror image — status only, damage still lands.
+  const myMatBlock = sideUsed(myTargets, MAT_BLOCK, myAsleep);
+  const oppMatBlock = sideUsed(oppTargets, MAT_BLOCK, oppAsleep);
+  const myCraftyShield = sideUsed(myTargets, CRAFTY_SHIELD, myAsleep);
+  const oppCraftyShield = sideUsed(oppTargets, CRAFTY_SHIELD, oppAsleep);
 
   // Redirection (Follow Me / Rage Powder): a live user pulls the FOES' single-target
   // moves onto itself this turn. Rage Powder (a powder) is ignored by Grass-type /
@@ -2691,7 +2709,7 @@ function resolveTurn(
   const nonAttack = (target: number) =>
     isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isStatusTarget(target) || isFieldTarget(target)
     || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN || target === RECOVER || target === SET_HAZARD
-    || target === REDIRECT || target === SLEEP_SKIP || target === HELP_HAND || target === WIDE_GUARD || target === QUICK_GUARD || target === SAP || target === CLEAR_HAZARD || target === SET_SUB || target === COUNTER || target === SET_ROOM || target === SET_PERISH || target === HEALING_WISH || isTrapTarget(target) || isPivotTarget(target) || isDebuffTarget(target)
+    || target === REDIRECT || target === SLEEP_SKIP || target === HELP_HAND || target === WIDE_GUARD || target === QUICK_GUARD || target === SAP || target === CLEAR_HAZARD || target === SET_SUB || target === COUNTER || target === SET_ROOM || target === SET_PERISH || target === HEALING_WISH || target === MAT_BLOCK || target === CRAFTY_SHIELD || isTrapTarget(target) || isPivotTarget(target) || isDebuffTarget(target)
     || isTauntTarget(target) || isEncoreTarget(target);
   // Fake Out flinches: a mon hit by Fake Out (resolved at +3 before it acts) skips
   // its action this turn.
@@ -2762,7 +2780,7 @@ function resolveTurn(
       if (myFlinched.has(act.actor)) continue;        // flinched by Fake Out
       if (act.target === PROTECT) continue;           // mon uses Protect — no damage dealt
       if (isFakeOutTarget(act.target)) {              // Fake Out: chip + flinch the target
-        if (oppQuickGuard) continue;                  // Quick Guard blocks Fake Out (+3 priority)
+        if (oppQuickGuard || oppMatBlock) continue;    // Quick Guard (priority) / Mat Block (damage) stop Fake Out
         const f = redirect(fakeOutFoeIdx(act.target), oppSwitchIn);
         if ((oppHp[f] ?? 0) > 0 && !oppProtected.has(f)) {
           const fc = t.myFakeOutCell[act.actor]?.[f];
@@ -2773,7 +2791,7 @@ function resolveTurn(
         continue;
       }
       if (act.target === SPREAD) {
-        if (oppWideGuard) continue;                  // Wide Guard blocks the spread for the whole foe side
+        if (oppWideGuard || oppMatBlock) continue;    // Wide Guard / Mat Block stop the spread, side-wide
         // Spread move — hit every live, unprotected foe ON THE FIELD AFTER switches
         // (oppActiveNow; a benched mon isn't in range of a spread move).
         const sp = t.mySpread[act.actor]!;
@@ -2828,6 +2846,7 @@ function resolveTurn(
       if (!oc) continue;                              // no priority move vs this foe
       if (psychicBlocked(oc.priority, t.oppGrounded[oTgt]!)) continue; // Psychic Terrain blocks priority
       if (oppQuickGuard && oc.priority > 0) continue;  // Quick Guard blocks priority moves
+      if (oppMatBlock) continue;                       // Mat Block blocks ALL damaging moves, side-wide
       if (isSuckerLike(oc.move) && !targetWillAttack('opp', oTgt)) continue; // Sucker Punch whiffs vs a non-attacker
       // Ability redirection: a live foe with Storm Drain (Water) / Lightning
       // Rod (Electric) pulls single-target moves of that type onto itself and
@@ -2906,7 +2925,7 @@ function resolveTurn(
       if (oppFlinched.has(act.actor)) continue;       // flinched by Fake Out
       if (act.target === PROTECT) continue;           // opp mon uses Protect
       if (isFakeOutTarget(act.target)) {              // opp Fake Out: chip + flinch my mon
-        if (myQuickGuard) continue;                   // Quick Guard blocks Fake Out (+3 priority)
+        if (myQuickGuard || myMatBlock) continue;      // Quick Guard (priority) / Mat Block (damage) stop Fake Out
         const f = redirect(fakeOutFoeIdx(act.target), mySwitchIn);
         if ((myHp[f] ?? 0) > 0 && !myProtected.has(f)) {
           const fc = t.oppFakeOutCell[act.actor]?.[f];
@@ -2917,7 +2936,7 @@ function resolveTurn(
         continue;
       }
       if (act.target === SPREAD) {
-        if (myWideGuard) continue;                    // Wide Guard blocks the spread for my whole side
+        if (myWideGuard || myMatBlock) continue;       // Wide Guard / Mat Block stop the spread, side-wide
         // Opp spread move — hit every live, unprotected mon of mine ON THE FIELD
         // AFTER switches (myActiveNow; my bench isn't in range).
         const sp = t.oppSpread[act.actor]!;
@@ -2965,7 +2984,8 @@ function resolveTurn(
       }
       if (!tc) continue;                              // no priority move vs this foe
       if (psychicBlocked(tc.priority, t.myGrounded[mTgt]!)) continue; // Psychic Terrain blocks priority
-      if (myQuickGuard && tc.priority > 0) continue;  // Quick Guard blocks priority moves
+      if (myQuickGuard && tc.priority > 0) continue;
+      if (myMatBlock) continue;                        // Mat Block blocks ALL damaging moves, side-wide  // Quick Guard blocks priority moves
       if (isSuckerLike(tc.move) && !targetWillAttack('mine', mTgt)) continue; // Sucker Punch whiffs vs a non-attacker
       // Ability redirection onto MY side: my Storm Drain/Lightning Rod holder
       // absorbs the foes' single-target moves of its type (mirror of above —
@@ -3361,6 +3381,7 @@ function resolveTurn(
       }
       continue;
     }
+    if (oppCraftyShield) continue;   // Crafty Shield blocks status moves for the foe's whole side
     if (!oppStatus[foe] && (oppSubHp[foe] ?? 0) <= 0 && statusLands(sm.status, sm.move, t.oppSpecies[foe]!, t.oppAbility[foe], t.oppGrounded[foe]!, s.terrain)) {
       if (sm.delayed) { if ((oppYawn[foe] ?? 0) <= 0) oppYawn[foe] = 2; } // Yawn: sleeps end of NEXT turn
       else {
@@ -3381,6 +3402,7 @@ function resolveTurn(
       }
       continue;
     }
+    if (myCraftyShield) continue;
     if (!myStatus[foe] && (mySubHp[foe] ?? 0) <= 0 && statusLands(sm.status, sm.move, t.mySpecies[foe]!, t.myAbility[foe], t.myGrounded[foe]!, s.terrain)) {
       if (sm.delayed) { if ((myYawn[foe] ?? 0) <= 0) myYawn[foe] = 2; } // Yawn: sleeps end of NEXT turn
       else {
@@ -3447,6 +3469,7 @@ function resolveTurn(
   for (const [actor, target] of myTargets) {
     if (!isDebuffTarget(target)) continue;
     const dm = t.myDebuffMove[actor]; if (!dm) continue;
+    if (oppCraftyShield) continue;   // status-category move → blocked side-wide
     // Spread debuffs (Growl/Leer) land on EVERY live foe; single-target ones
     // on the (post-switch) chosen foe.
     const foes = dm.spread ? oppActiveNow : [redirect(debuffFoeIdx(target), oppSwitchIn)];
@@ -3463,6 +3486,7 @@ function resolveTurn(
   for (const [actor, target] of oppTargets) {
     if (!isDebuffTarget(target)) continue;
     const dm = t.oppDebuffMove[actor]; if (!dm) continue;
+    if (myCraftyShield) continue;
     const foes = dm.spread ? myActiveNow : [redirect(debuffFoeIdx(target), mySwitchIn)];
     for (const foe of foes) {
       if ((myHp[foe] ?? 0) <= 0) continue;
@@ -3830,6 +3854,9 @@ function jointActions(
   // mon actually worth the sacrifice (damaged or statused). Offering it when the bench
   // is healthy would just throw a Pokémon away.
   healingWish?: boolean[],
+  // Team protect (root only). Mat Block is FIRST-TURN-OUT only, like Fake Out; Crafty
+  // Shield has no such restriction.
+  teamProtect?: { mat: boolean[]; crafty: boolean[]; firstTurn: boolean[] },
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -3908,6 +3935,8 @@ function jointActions(
       ...(canQuickGuard ? [QUICK_GUARD] : []),
       ...(canSap ? [SAP] : []),
       ...(healingWish?.[actor] === true ? [HEALING_WISH] : []),
+      ...(teamProtect?.mat[actor] === true && teamProtect.firstTurn[actor] === true ? [MAT_BLOCK] : []),
+      ...(teamProtect?.crafty[actor] === true ? [CRAFTY_SHIELD] : []),
       ...(canClearHazard ? [CLEAR_HAZARD] : []),
       ...(canSub ? [SET_SUB] : []),
       ...(canCounter ? [COUNTER] : []),
@@ -4469,7 +4498,8 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
       || moveTrapHolds(s.oppTrappedBy[j], s.myActive, s.myHp)),
     t.oppPerishMove.map(pm => !!pm && s.myActive.some(i => (s.myHp[i] ?? 0) > 0 && (s.myPerish[i] ?? 0) === 0 && toId(t.myAbility[i] ?? '') !== 'soundproof')),
     { move: t.oppTrapMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0 && s.myTrappedBy[i] == null && !isType(t.mySpecies[i]!, 'Ghost')) },
-    t.oppHealingWish.map(hw => !!hw && benchWorthHealing(s.oppActive, s.oppHp, s.oppStatus, t.oppN)));
+    t.oppHealingWish.map(hw => !!hw && benchWorthHealing(s.oppActive, s.oppHp, s.oppStatus, t.oppN)),
+    { mat: t.oppMatBlock, crafty: t.oppCraftyShield, firstTurn: s.oppFirstTurn });
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -4564,6 +4594,10 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null, choiceMove
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Counter', targetSpecies: 'foe', self: true });
     } else if (target === SET_ROOM) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myRoomMove[actor] === 'gravity' ? 'Gravity' : t.myRoomMove[actor] === 'wonderRoom' ? 'Wonder Room' : 'Magic Room', targetSpecies: 'field', self: true });
+    } else if (target === MAT_BLOCK) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Mat Block', targetSpecies: 'my side', self: true });
+    } else if (target === CRAFTY_SHIELD) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Crafty Shield', targetSpecies: 'my side', self: true });
     } else if (target === HEALING_WISH) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myHealingWish[actor] ?? 'Healing Wish', targetSpecies: 'the replacement', self: true });
     } else if (target === SET_PERISH) {
@@ -4611,6 +4645,10 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null, choiceM
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppPivotMove[actor] ?? 'U-turn', targetSpecies: t.mySpecies[pivotFoeIdx(target)]!, switch: true });
     } else if (isStatusTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppStatusMove[actor]?.move ?? 'status', targetSpecies: t.mySpecies[statusFoeIdx(target)]! });
+    } else if (target === MAT_BLOCK) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Mat Block', targetSpecies: 'my side', self: true });
+    } else if (target === CRAFTY_SHIELD) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Crafty Shield', targetSpecies: 'my side', self: true });
     } else if (target === HEALING_WISH) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myHealingWish[actor] ?? 'Healing Wish', targetSpecies: 'the replacement', self: true });
     } else if (target === SET_PERISH) {
@@ -5686,6 +5724,8 @@ export type TurnAction =
   | { kind: 'recover' }                   // Recover / Roost / Wish (delayed) — self-heal
   | { kind: 'substitute' }                // Substitute — pay 25% HP for a sub
   | { kind: 'counter' }                   // Counter / Mirror Coat / Metal Burst — reflect
+  | { kind: 'matblock' }               // Mat Block — side-wide block of DAMAGING moves (first turn out)
+  | { kind: 'craftyshield' }           // Crafty Shield — side-wide block of STATUS moves
   | { kind: 'healingwish' }            // sacrifice self; the replacement enters fully healed
   | { kind: 'room' };                     // Gravity / Wonder Room / Magic Room — set a field room
 
@@ -5759,6 +5799,8 @@ export function resolveOneTurn(
     else if (a.kind === 'recover') { myTargets.set(actor, RECOVER); myMove.set(actor, t.myRecover[actor]?.move ?? 'Recover'); }
     else if (a.kind === 'substitute') { myTargets.set(actor, SET_SUB); myMove.set(actor, 'Substitute'); }
     else if (a.kind === 'counter') { myTargets.set(actor, COUNTER); myMove.set(actor, t.myCounter[actor] ? 'Counter' : ''); }
+    else if (a.kind === 'matblock') { myTargets.set(actor, MAT_BLOCK); myMove.set(actor, 'Mat Block'); }
+    else if (a.kind === 'craftyshield') { myTargets.set(actor, CRAFTY_SHIELD); myMove.set(actor, 'Crafty Shield'); }
     else if (a.kind === 'healingwish') { myTargets.set(actor, HEALING_WISH); myMove.set(actor, t.myHealingWish[actor] ?? 'Healing Wish'); }
     else if (a.kind === 'room') { myTargets.set(actor, SET_ROOM); myMove.set(actor, t.myRoomMove[actor] ?? ''); }
     // Protect: record the mon's actual variant as the move used. It was left blank,
@@ -5786,6 +5828,8 @@ export function resolveOneTurn(
     else if (a.kind === 'recover') { oppTargets.set(actor, RECOVER); oppMove.set(actor, t.oppRecover[actor]?.move ?? 'Recover'); }
     else if (a.kind === 'substitute') { oppTargets.set(actor, SET_SUB); oppMove.set(actor, 'Substitute'); }
     else if (a.kind === 'counter') { oppTargets.set(actor, COUNTER); oppMove.set(actor, t.oppCounter[actor] ? 'Counter' : ''); }
+    else if (a.kind === 'matblock') { oppTargets.set(actor, MAT_BLOCK); oppMove.set(actor, 'Mat Block'); }
+    else if (a.kind === 'craftyshield') { oppTargets.set(actor, CRAFTY_SHIELD); oppMove.set(actor, 'Crafty Shield'); }
     else if (a.kind === 'healingwish') { oppTargets.set(actor, HEALING_WISH); oppMove.set(actor, t.oppHealingWish[actor] ?? 'Healing Wish'); }
     else if (a.kind === 'room') { oppTargets.set(actor, SET_ROOM); oppMove.set(actor, t.oppRoomMove[actor] ?? ''); }
     else { oppTargets.set(actor, PROTECT); oppMove.set(actor, t.oppProtectMove[actor] ?? 'Protect'); }
