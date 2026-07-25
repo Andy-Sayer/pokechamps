@@ -56,9 +56,17 @@ describe('screen-layout detection', () => {
     expect(d.feed(synth(true))).toBe('inset');           // run continued across it
   });
 
-  test.runIf(has('gameshare-battle.png') && has('battle1.png'))(
-    'REAL frames: a GameShare battle capture vs a direct capture', async () => {
-      expect(voteScreenLayout(await loadFrame(join(FIX, 'gameshare-battle.png')))).toBe('inset');
+  // The only frames that ever reach the live pipeline come from the dongle via serve.ts's
+  // latest.png tap, so these must be 1920x1080 DONGLE captures — not desktop screenshots
+  // of a GameShare window (fixtures/gameshare-screen.png is 3968x1152 and gameshare-left
+  // is 1920x1152; neither is representative, and neither can reach readFrame).
+  test.runIf(has('gameshare-battle.png') && has('gameshare-feed.png') && has('battle1.png'))(
+    'REAL dongle frames: GameShare captures vs a direct capture', async () => {
+      for (const f of ['gameshare-battle.png', 'gameshare-feed.png']) {
+        const frame = await loadFrame(join(FIX, f));
+        expect(`${f} ${frame.width}x${frame.height}`).toBe(`${f} 1920x1080`);
+        expect(voteScreenLayout(frame)).toBe('inset');
+      }
       expect(voteScreenLayout(await loadFrame(join(FIX, 'battle1.png')))).toBe('full');
     });
 });
