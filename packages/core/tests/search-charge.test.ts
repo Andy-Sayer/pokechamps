@@ -81,3 +81,36 @@ describe('two-turn charge — the commitment', () => {
     expect(sunny.mine[0]!.charging ?? null).toBeNull();
   });
 });
+
+describe('two-turn charge — Mega Sol carries its own sun', () => {
+  // Meganium-Mega's Champions ability makes its OWN moves resolve as though Sunny Day
+  // were up, whatever the field says (damage.ts already forces sun for its offensive
+  // calc). So its Solar Beam must fire in one turn even under a foe's rain — reading the
+  // field weather alone would wrongly make the meta's one Grass mega lose a turn exactly
+  // when it's being countered. Meganium + Meganiumite are both M-B legal and it learns
+  // Solar Beam AND Solar Blade, so this is a reachable position, not a curiosity.
+  const megan = mon({ species: 'Meganium-Mega', ability: 'Mega Sol', item: 'Meganiumite', nature: 'Modest', evs: { ...ZERO_EVS, spa: 252 }, moves: ['Solar Beam'] });
+  const chomp = mon({ species: 'Garchomp', ability: 'Rough Skin', moves: ['Earthquake'] });
+
+  test('Solar Beam fires in ONE turn under rain, not two', () => {
+    const rainy = input1v1(megan, chomp, { field: { ...NEUTRAL_FIELD, weather: 'Rain' } });
+    const r = resolveOneTurn(rainy, ATTACK, ATTACK);
+    expect(r.opp[0]!.hpPct).toBeLessThan(100);
+    expect(r.mine[0]!.charging ?? null).toBeNull();   // never committed to a charge turn
+  });
+
+  test('…and in no weather at all', () => {
+    const r = resolveOneTurn(input1v1(megan, chomp), ATTACK, ATTACK);
+    expect(r.opp[0]!.hpPct).toBeLessThan(100);
+  });
+
+  test('its personal sun is SUN only — it does not skip a rain charge', () => {
+    // Guard against "personal weather" being read as a blanket skip: Electro Shot needs
+    // RAIN, and Mega Sol emulating sun must not satisfy it.
+    const solElectro = mon({ species: 'Meganium-Mega', ability: 'Mega Sol', nature: 'Modest', evs: { ...ZERO_EVS, spa: 252 }, moves: ['Electro Shot'] });
+    const peli = mon({ species: 'Pelipper', ability: 'Drizzle', moves: ['Hurricane'] });
+    const r = resolveOneTurn(input1v1(solElectro, peli), ATTACK, ATTACK);
+    expect(r.opp[0]!.hpPct).toBe(100);                 // still a two-turn move
+    expect(r.mine[0]!.charging).toBe('Electro Shot');
+  });
+});

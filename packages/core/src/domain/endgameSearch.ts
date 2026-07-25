@@ -2138,10 +2138,17 @@ function chargeSkipWeather(move: string | null | undefined): Weather | null | un
   const id = toId(move ?? '');
   return CHARGE_MOVES.has(id) ? CHARGE_MOVES.get(id)! : undefined;
 }
-/** Does this charge move resolve in ONE turn under the weather now in effect? */
-function chargeSkipped(move: string | null | undefined, weather: Weather): boolean {
+/** Does this charge move resolve in ONE turn for THIS user right now?
+ *  Weather is the field's — except for **Mega Sol** (Meganium-Mega, a Champions custom
+ *  ability): the holder's own moves resolve as if Sunny Day were up NO MATTER the real
+ *  weather, so its Solar Beam / Solar Blade skips the charge even in a foe's rain. That
+ *  mirrors the offensive-side sun that `damage.ts` already forces for this ability, and
+ *  it only ever emulates SUN — a rain skip (Electro Shot) is unaffected. */
+function chargeSkipped(move: string | null | undefined, weather: Weather, ability?: string | null): boolean {
   const w = chargeSkipWeather(move);
-  return w != null && normWeather(weather) === normWeather(w);
+  if (w == null) return false;
+  const effective: Weather = toId(ability ?? '') === 'megasol' ? ('Sun' as Weather) : weather;
+  return normWeather(effective) === normWeather(w);
 }
 // Semi-invulnerable charge moves: the user is off the field on the charge turn, so
 // targeted damage misses it. Modelled by adding it to the turn's protected set.
@@ -2701,7 +2708,7 @@ function resolveTurn(
       // (rare; the usual source is a switch-in ability or standing weather). Already
       // charging this move → this is the firing turn, so fall through and deal damage.
       if (s.myCharging[act.actor] !== oc.move && chargeSkipWeather(oc.move) !== undefined
-          && !chargeSkipped(oc.move, s.weather)) {
+          && !chargeSkipped(oc.move, s.weather, t.myAbility[act.actor])) {
         myCharging[act.actor] = oc.move;
         // Fly / Dig / Phantom Force spend the charge turn off the field. Adding to the
         // protected set here (mid-resolution) is deliberate: foes that already acted this
@@ -2834,7 +2841,7 @@ function resolveTurn(
       // moment our weather displaces theirs, which is a full turn of tempo the search
       // used to hand them for free.
       if (s.oppCharging[act.actor] !== tc.move && chargeSkipWeather(tc.move) !== undefined
-          && !chargeSkipped(tc.move, s.weather)) {
+          && !chargeSkipped(tc.move, s.weather, t.oppAbility[act.actor])) {
         oppCharging[act.actor] = tc.move;
         if (isSemiInvulnerable(tc.move)) oppProtected.add(act.actor);
         continue;                                     // no damage on the charge turn

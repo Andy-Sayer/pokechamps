@@ -292,6 +292,11 @@ EOT residual, root-ply action, switch-in hook).
    Semi-invulnerable charges (Fly / Dig / Phantom Force) also dodge targeted damage on
    the charge turn. Power Herb is not legal in M-B, so there is no item skip.
    *(Recharge — Hyper Beam / Giga Impact → `my/oppRecharge` — shipped earlier.)*
+   **Mega Sol** (Meganium-Mega) is honoured: its personal sun makes ITS OWN Solar Beam /
+   Solar Blade skip the charge whatever the field weather is — the same offensive-side sun
+   `damage.ts` forces for that ability. It emulates SUN only, so it never skips Electro
+   Shot's rain requirement. Meganium + Meganiumite are M-B legal and it learns both solar
+   moves, so this is a reachable position rather than a curiosity.
    Approximation: weather is read as it stands at the START of the turn, so a sun set
    by a faster mon that same turn won't rescue a slower Solar Beam from charging.
 10. ~~**Rocky Helmet / Rough Skin / Iron Barbs**~~ ✅ SHIPPED — a contact hit into a
