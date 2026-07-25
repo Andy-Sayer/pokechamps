@@ -94,12 +94,15 @@ const RULES: GapRule[] = [
   // and stone-heavy: berries, Life Orb, Leftovers, Focus Sash/Band, Choice SCARF (no
   // Band/Specs), type boosters, weather rocks, Light Clay, Quick Claw, Wide/Zoom Lens.
   // Warning about an item nobody can hold is noise. Re-check on a regulation change.
-  // Item swap/loss. Still a real gap, but M-B's small item list bounds it: the only
-  // holdables whose loss changes the model are Life Orb (recoil + x1.3), Leftovers (EOT
-  // heal), Focus Sash/Band (survival charge), Choice Scarf (speed) and the type boosters.
-  // No Assault Vest / Eviolite / Rocky Helmet / Boots to worry about.
-  { kind: 'itemswap', label: 'item swap/loss (Trick / Knock Off)',
-    moves: ['trick', 'switcheroo', 'bestow', 'knockoff', 'thief', 'covet', 'corrosivegas'] },
+  // Item REMOVAL (Knock Off / Thief / Covet / Corrosive Gas) is now modelled: the
+  // stripped mon loses its Life Orb recoil, its Leftovers/Black Sludge healing and its
+  // berry triggers. What remains approximate is the DAMAGE scaling an item was giving
+  // (Life Orb x1.3, type boosters, Expert Belt), which is baked into cells built once
+  // per ply and can't be un-baked mid-tree.
+  // Item SWAPPING (Trick / Switcheroo / Bestow) is still unmodelled — a swap hands the
+  // other mon something, so it isn't just a removal.
+  { kind: 'itemswap', label: 'item swap (Trick / Switcheroo) + post-removal damage scaling',
+    moves: ['trick', 'switcheroo', 'bestow'] },
   // Confusion is a PROBABILISTIC secondary (33% self-hit) — deliberately NOT
   // auto-applied, the same policy as flinch and the 25% full-paralysis chance
   // (sim-divergences.md). Flagged as informational so the user weighs the dice.

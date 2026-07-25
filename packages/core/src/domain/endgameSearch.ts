@@ -1097,6 +1097,12 @@ interface State {
    *  no other action — and it clears once fired or the mon leaves the field. */
   myCharging: (string | null)[];
   oppCharging: (string | null)[];
+  /** Item knocked off / stolen this game. M-B's item list is small, so what its loss
+   *  actually changes is bounded: Life Orb recoil, Leftovers/Black Sludge healing, and
+   *  the berry triggers. (Damage SCALING — Life Orb x1.3, type boosters, Expert Belt —
+   *  stays baked into the cells; see the note at the removal site.) */
+  myItemGone: boolean[];
+  oppItemGone: boolean[];
   /** Turns still locked into a multi-turn move (Outrage / Petal Dance / Thrash):
    *  while >0 the mon can only attack — no switch / setup / protect. */
   myLocked: number[];
@@ -1421,6 +1427,12 @@ function isSuckerLike(move: string | null | undefined): boolean { return SUCKER_
 // Self-destruct moves (Explosion / Self-Destruct / Misty Explosion / Final Gambit /
 // Memento / Healing Wish …): the user faints after the move resolves.
 function isFinalGambit(move: string | null | undefined): boolean { return toId(move ?? '') === 'finalgambit'; }
+
+// Moves that REMOVE the target's item outright (as opposed to swapping it — Trick /
+// Switcheroo / Bestow stay unmodelled, since a swap gives the other mon something).
+// Knock Off alone has 73 legal users in M-B, so this is not a corner case.
+const ITEM_REMOVING_MOVES: ReadonlySet<string> = new Set(['knockoff', 'thief', 'covet', 'corrosivegas']);
+function removesItem(move: string | null | undefined): boolean { return ITEM_REMOVING_MOVES.has(toId(move ?? '')); }
 
 // ABILITY RETYPING. The "-ate" abilities and Champions' Dragonize change a move's TYPE.
 // The calc already prices the damage correctly, but `Cell.type` fed the raw dex type to
@@ -2204,6 +2216,8 @@ function initialState(input: SearchInput): State {
     oppRecharge: input.opp.map(() => false),
     myCharging: input.mine.map(() => null),
     oppCharging: input.opp.map(() => null),
+    myItemGone: input.mine.map(() => false),
+    oppItemGone: input.opp.map(o => !!o.entry.itemConsumed),
     myLocked: input.mine.map(() => 0),
     oppLocked: input.opp.map(() => 0),
     // Live Choice locks: only honored when the item is genuinely a Choice item
@@ -2428,6 +2442,8 @@ function resolveTurn(
   const oppRecharge = s.oppRecharge.map(() => false);
   const myCharging = [...s.myCharging];               // carries until the move fires
   const oppCharging = [...s.oppCharging];
+  const myItemGone = [...s.myItemGone];
+  const oppItemGone = [...s.oppItemGone];
   const myLocked = s.myLocked.slice();
   const oppLocked = s.oppLocked.slice();
   // Choice lock: set when an unlocked Choice holder attacks; an already-locked
@@ -2809,7 +2825,7 @@ function resolveTurn(
           procWp('opp', foe, sp.type);
         }
         if (sp.selfDrop) mySelfDrop.set(act.actor, sp.selfDrop);
-        if (t.myLifeOrb[act.actor] && spreadDealt) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10);
+        if (t.myLifeOrb[act.actor] && !myItemGone[act.actor] && spreadDealt) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10);
         if (isSelfdestruct(sp.move)) myHp[act.actor] = 0;   // Explosion / Self-Destruct: user faints
         if (t.myChoice[act.actor] && !myChoiceMove[act.actor]) myChoiceMove[act.actor] = sp.move; // Choice: lock to the spread move
         continue;
@@ -2889,7 +2905,7 @@ function resolveTurn(
             markResist(oppResistBerryUsed, t.oppResistBerryType, foe, cell.type, t.oppSpecies[foe]!);
             procWp('opp', foe, cell.type);
           }
-          if (t.myLifeOrb[act.actor] && dealtAny) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10);
+          if (t.myLifeOrb[act.actor] && !myItemGone[act.actor] && dealtAny) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10);
           if (t.myChoice[act.actor] && !myChoiceMove[act.actor]) myChoiceMove[act.actor] = oc.move;
           continue;
         }
@@ -2909,8 +2925,15 @@ function resolveTurn(
         if (oc.drain > 0) myHp[act.actor] = Math.min(100, myHp[act.actor]! + oc.drain * oDealt * (t.oppMaxHp[oTgt]! / (t.myMaxHp[act.actor] || 1)));
         if (oc.contact && t.oppContactChip[oTgt]! > 0 && !t.myResidual[act.actor]!.magicGuard) myHp[act.actor] = Math.max(0, myHp[act.actor]! - t.oppContactChip[oTgt]!);
         if (oc.recoil > 0 && !t.myResidual[act.actor]!.magicGuard && !t.myRockHead[act.actor]) myHp[act.actor] = Math.max(0, myHp[act.actor]! - oc.recoil * oDealt * (t.oppMaxHp[oTgt]! / (t.myMaxHp[act.actor] || 1)));
-        if (t.myLifeOrb[act.actor]) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10); // Life Orb recoil (10% max HP)
+        if (t.myLifeOrb[act.actor] && !myItemGone[act.actor]) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10); // Life Orb recoil (10% max HP)
       }
+      // Knock Off / Thief / Covet / Corrosive Gas strip the target's item once they
+      // connect. What that actually changes here is bounded by M-B's item list: Life Orb
+      // recoil, Leftovers healing, and the berry triggers. The damage SCALING an item
+      // gave (Life Orb x1.3, type boosters, Expert Belt) is baked into the cells and
+      // can't be un-baked mid-tree — a documented approximation, and one that errs
+      // toward the foe keeping its damage rather than inventing a swing.
+      if (oDealt > 0 && removesItem(oc.move)) oppItemGone[oTgt] = true;
       // Spicy Spray on the DEFENDER burns my attacker (if the hit actually landed and
       // the attacker is still standing — a KO'd attacker can't carry a burn).
       if (oDealt > 0 && spicySpray(t.oppAbility[oTgt]) && (myHp[act.actor] ?? 0) > 0) myPunishStatus.set(act.actor, 'brn');
@@ -2954,7 +2977,7 @@ function resolveTurn(
           procWp('mine', me, sp.type);
         }
         if (sp.selfDrop) oppSelfDrop.set(act.actor, sp.selfDrop);
-        if (t.oppLifeOrb[act.actor] && spreadDealt) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
+        if (t.oppLifeOrb[act.actor] && !oppItemGone[act.actor] && spreadDealt) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
         if (isSelfdestruct(sp.move)) oppHp[act.actor] = 0;   // Explosion / Self-Destruct: user faints
         if (t.oppChoice[act.actor] && !oppChoiceMove[act.actor]) oppChoiceMove[act.actor] = sp.move; // Choice: lock to the spread move
         continue;
@@ -3021,7 +3044,7 @@ function resolveTurn(
             markResist(myResistBerryUsed, t.myResistBerryType, me, cell.type, t.mySpecies[me]!);
             procWp('mine', me, cell.type);
           }
-          if (t.oppLifeOrb[act.actor] && dealtAny) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
+          if (t.oppLifeOrb[act.actor] && !oppItemGone[act.actor] && dealtAny) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
           if (t.oppChoice[act.actor] && !oppChoiceMove[act.actor]) oppChoiceMove[act.actor] = tc.move;
           continue;
         }
@@ -3040,8 +3063,9 @@ function resolveTurn(
         if (tc.drain > 0) oppHp[act.actor] = Math.min(100, oppHp[act.actor]! + tc.drain * mDealt * (t.myMaxHp[mTgt]! / (t.oppMaxHp[act.actor] || 1)));
         if (tc.contact && t.myContactChip[mTgt]! > 0 && !t.oppResidual[act.actor]!.magicGuard) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - t.myContactChip[mTgt]!);
         if (tc.recoil > 0 && !t.oppResidual[act.actor]!.magicGuard && !t.oppRockHead[act.actor]) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - tc.recoil * mDealt * (t.myMaxHp[mTgt]! / (t.oppMaxHp[act.actor] || 1)));
-        if (t.oppLifeOrb[act.actor]) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
+        if (t.oppLifeOrb[act.actor] && !oppItemGone[act.actor]) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
       }
+      if (mDealt > 0 && removesItem(tc.move)) myItemGone[mTgt] = true;
       // Spicy Spray mirror: MY Scovillain-Mega burns the opp attacker that hit it. The
       // opp side reads the RESOLVED ability, so this only fires for a known/mega'd holder.
       if (mDealt > 0 && spicySpray(t.myAbility[mTgt]) && (oppHp[act.actor] ?? 0) > 0) oppPunishStatus.set(act.actor, 'brn');
@@ -3271,8 +3295,14 @@ function resolveTurn(
     if (grassy && grounded) delta += 100 / 16;
     if (delta !== 0) hp[idx] = Math.max(0, Math.min(100, hp[idx]! + delta));
   };
-  for (const mi of myActiveNow) residual(myHp, mi, t.myResidual[mi]!, s.myStatus[mi]!, myToxicN, t.myGrounded[mi]!);
-  for (const oj of oppActiveNow) residual(oppHp, oj, t.oppResidual[oj]!, s.oppStatus[oj]!, oppToxicN, t.oppGrounded[oj]!);
+  // A knocked-off Leftovers stops healing — recompute that mon's residual profile with
+  // no item rather than reusing the table built at the root.
+  const myResid = (i: number): ResidualInfo => (myItemGone[i]
+    ? residualInfo(t.mySpecies[i]!, t.myAbility[i], undefined, s.myStatus[i]) : t.myResidual[i]!);
+  const oppResid = (j: number): ResidualInfo => (oppItemGone[j]
+    ? residualInfo(t.oppSpecies[j]!, t.oppAbility[j], undefined, s.oppStatus[j]) : t.oppResidual[j]!);
+  for (const mi of myActiveNow) residual(myHp, mi, myResid(mi), s.myStatus[mi]!, myToxicN, t.myGrounded[mi]!);
+  for (const oj of oppActiveNow) residual(oppHp, oj, oppResid(oj), s.oppStatus[oj]!, oppToxicN, t.oppGrounded[oj]!);
 
   // Recovery moves: heal the caster (if it survived the turn) by the move's % of
   // its max, weather-scaled for Synthesis/Moonlight/Morning Sun / Shore Up. A
@@ -3362,6 +3392,11 @@ function resolveTurn(
   // the turn. A fresh lock set this turn (s.*Locked was 0) keeps its full count.
   for (const i of myActiveNow) if (s.myLocked[i]! > 0) myLocked[i] = s.myLocked[i]! - 1;
   for (const j of oppActiveNow) if (s.oppLocked[j]! > 0) oppLocked[j] = s.oppLocked[j]! - 1;
+  // Item view AFTER this turn's Knock Off / Thief: a stripped berry can't cure or
+  // trigger. Computed here (post-damage) so a knock-off landing this turn is reflected.
+  const myItemLive = t.myItem.map((it, i) => (myItemGone[i] ? undefined : it));
+  const oppItemLive = t.oppItem.map((it, j) => (oppItemGone[j] ? undefined : it));
+
   // Inflict a status — but a Lum/Cheri/… berry immediately cures it (and is eaten).
   const inflict = (foe: number, status: string, toxicN: number[], statusArr: string[], berryUsed: boolean[], item: (string | undefined)[]) => {
     statusArr[foe] = status; if (status === 'tox') toxicN[foe] = 1;
@@ -3376,7 +3411,7 @@ function resolveTurn(
     // caster's own immunities). The foe is untouched.
     if (toId(t.oppAbility[foe] ?? '') === 'magicbounce') {
       if ((myHp[actor] ?? 0) > 0 && !myStatus[actor] && statusLands(sm.status, sm.move, t.mySpecies[actor]!, t.myAbility[actor], t.myGrounded[actor]!, s.terrain)) {
-        inflict(actor, sm.status, myToxicN, myStatus, myBerryUsed, t.myItem);
+        inflict(actor, sm.status, myToxicN, myStatus, myBerryUsed, myItemLive);
         if (sm.status === 'slp' && myStatus[actor] === 'slp') mySleepTurns[actor] = 2;
       }
       continue;
@@ -3385,7 +3420,7 @@ function resolveTurn(
     if (!oppStatus[foe] && (oppSubHp[foe] ?? 0) <= 0 && statusLands(sm.status, sm.move, t.oppSpecies[foe]!, t.oppAbility[foe], t.oppGrounded[foe]!, s.terrain)) {
       if (sm.delayed) { if ((oppYawn[foe] ?? 0) <= 0) oppYawn[foe] = 2; } // Yawn: sleeps end of NEXT turn
       else {
-        inflict(foe, sm.status, oppToxicN, oppStatus, oppBerryUsed, t.oppItem);
+        inflict(foe, sm.status, oppToxicN, oppStatus, oppBerryUsed, oppItemLive);
         if (sm.status === 'slp' && oppStatus[foe] === 'slp') oppSleepTurns[foe] = 2;
       }
     }
@@ -3397,7 +3432,7 @@ function resolveTurn(
     if ((myHp[foe] ?? 0) <= 0) continue;
     if (toId(t.myAbility[foe] ?? '') === 'magicbounce') {
       if ((oppHp[actor] ?? 0) > 0 && !oppStatus[actor] && statusLands(sm.status, sm.move, t.oppSpecies[actor]!, t.oppAbility[actor], t.oppGrounded[actor]!, s.terrain)) {
-        inflict(actor, sm.status, oppToxicN, oppStatus, oppBerryUsed, t.oppItem);
+        inflict(actor, sm.status, oppToxicN, oppStatus, oppBerryUsed, oppItemLive);
         if (sm.status === 'slp' && oppStatus[actor] === 'slp') oppSleepTurns[actor] = 2;
       }
       continue;
@@ -3406,7 +3441,7 @@ function resolveTurn(
     if (!myStatus[foe] && (mySubHp[foe] ?? 0) <= 0 && statusLands(sm.status, sm.move, t.mySpecies[foe]!, t.myAbility[foe], t.myGrounded[foe]!, s.terrain)) {
       if (sm.delayed) { if ((myYawn[foe] ?? 0) <= 0) myYawn[foe] = 2; } // Yawn: sleeps end of NEXT turn
       else {
-        inflict(foe, sm.status, myToxicN, myStatus, myBerryUsed, t.myItem);
+        inflict(foe, sm.status, myToxicN, myStatus, myBerryUsed, myItemLive);
         if (sm.status === 'slp' && myStatus[foe] === 'slp') mySleepTurns[foe] = 2;
       }
     }
@@ -3414,10 +3449,10 @@ function resolveTurn(
   // Protect-variant contact punish that inflicts status (Baneful Bunker poison /
   // Burning Bulwark burn) on the attacker — respects immunities like a status move.
   for (const [atk, st] of oppPunishStatus) {
-    if ((oppHp[atk] ?? 0) > 0 && !oppStatus[atk] && statusLands(st, '', t.oppSpecies[atk]!, t.oppAbility[atk], t.oppGrounded[atk]!, s.terrain)) inflict(atk, st, oppToxicN, oppStatus, oppBerryUsed, t.oppItem);
+    if ((oppHp[atk] ?? 0) > 0 && !oppStatus[atk] && statusLands(st, '', t.oppSpecies[atk]!, t.oppAbility[atk], t.oppGrounded[atk]!, s.terrain)) inflict(atk, st, oppToxicN, oppStatus, oppBerryUsed, oppItemLive);
   }
   for (const [atk, st] of myPunishStatus) {
-    if ((myHp[atk] ?? 0) > 0 && !myStatus[atk] && statusLands(st, '', t.mySpecies[atk]!, t.myAbility[atk], t.myGrounded[atk]!, s.terrain)) inflict(atk, st, myToxicN, myStatus, myBerryUsed, t.myItem);
+    if ((myHp[atk] ?? 0) > 0 && !myStatus[atk] && statusLands(st, '', t.mySpecies[atk]!, t.myAbility[atk], t.myGrounded[atk]!, s.terrain)) inflict(atk, st, myToxicN, myStatus, myBerryUsed, myItemLive);
   }
   // Yawn resolution (end of turn): a pending yawn ticks down; at 0 the drowsy
   // mon falls asleep unless it picked up another status meanwhile. Switching
@@ -3430,8 +3465,8 @@ function resolveTurn(
       if (statusArr[idx] === 'slp') sleepArr[idx] = 2;
     }
   };
-  for (const i of myActiveNow) yawnTick(i, myYawn, myStatus, mySleepTurns, myToxicN, myBerryUsed, t.myItem, t.mySpecies[i]!, t.myAbility[i], t.myGrounded[i]!);
-  for (const j of oppActiveNow) yawnTick(j, oppYawn, oppStatus, oppSleepTurns, oppToxicN, oppBerryUsed, t.oppItem, t.oppSpecies[j]!, t.oppAbility[j], t.oppGrounded[j]!);
+  for (const i of myActiveNow) yawnTick(i, myYawn, myStatus, mySleepTurns, myToxicN, myBerryUsed, myItemLive, t.mySpecies[i]!, t.myAbility[i], t.myGrounded[i]!);
+  for (const j of oppActiveNow) yawnTick(j, oppYawn, oppStatus, oppSleepTurns, oppToxicN, oppBerryUsed, oppItemLive, t.oppSpecies[j]!, t.oppAbility[j], t.oppGrounded[j]!);
   // Perish bookkeeping, in turn order: (1) switching out REMOVES the count
   // (the whole reason trapping + Perish Song is a kill combo) — Baton Pass
   // TRANSFERS it to the incoming mon instead; (2) the EOT tick; (3) a cast
@@ -3605,8 +3640,8 @@ function resolveTurn(
       if (trig.boost) boost[i] = addBoosts(boost[i]!, { [trig.boost.stat]: trig.boost.amount } as BoostMap);
     }
   };
-  berryHp(s.myHp, myHp, myBoost, myBerryUsed, t.myItem, myActiveNow);
-  berryHp(s.oppHp, oppHp, oppBoost, oppBerryUsed, t.oppItem, oppActiveNow);
+  berryHp(s.myHp, myHp, myBoost, myBerryUsed, myItemLive, myActiveNow);
+  berryHp(s.oppHp, oppHp, oppBoost, oppBerryUsed, oppItemLive, oppActiveNow);
   // Unburden: any item consumed THIS turn (White Herb / berry; berryUsed went
   // false→true) on an Unburden holder doubles its Speed from next ply.
   for (const i of myActiveNow) if (t.myHasUnburden[i] && !s.myBerryUsed[i] && myBerryUsed[i]) myUnburden[i] = true;
@@ -3668,7 +3703,7 @@ function resolveTurn(
     myBerryUsed, oppBerryUsed, myHazards, oppHazards, mySleepTurns, oppSleepTurns, myYawn, oppYawn, myPerish, oppPerish, myTrappedBy, oppTrappedBy,
     myTaunt, oppTaunt, myEncore, oppEncore, myEncoreAct, oppEncoreAct,
     myUnburden, oppUnburden, myResistBerryUsed, oppResistBerryUsed, myFirstTurn, oppFirstTurn,
-    myDisguise, oppDisguise, myRecharge, oppRecharge, myCharging, oppCharging, myLocked, oppLocked, myChoiceMove, oppChoiceMove, mySubHp, oppSubHp,
+    myDisguise, oppDisguise, myRecharge, oppRecharge, myCharging, oppCharging, myItemGone, oppItemGone, myLocked, oppLocked, myChoiceMove, oppChoiceMove, mySubHp, oppSubHp,
     myWish, oppWish, myFutureTurns, oppFutureTurns, myFutureDmg, oppFutureDmg,
     gravity, wonderRoom, magicRoom, gravityTurns, wonderRoomTurns, magicRoomTurns,
   };
