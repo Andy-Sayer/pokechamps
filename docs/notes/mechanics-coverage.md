@@ -319,6 +319,18 @@ phase. *(Counter/Mirror Coat, forced-switch items, room cast + Gravity-grounding
 Wish, Future Sight, Substitute, Magic Bounce, Disguise/Ice Face, freeze,
 self-destruct, Taunt/Encore are handled.)*
 
+**Ability retyping ✅ SHIPPED 2026-07-25.** The "-ate" abilities and Champions' Dragonize
+change a move's TYPE, and `Cell.type` fed the raw DEX type to every type-keyed consumer
+(resist-berry marking, Weakness Policy, Misty Terrain halving Dragon, terrain boosts,
+Storm Drain / Lightning Rod absorb). Damage was always right — that comes from the calc —
+but the label was wrong, and not for exotic mons: **Sylveon is Pixilate**, so its Hyper
+Voice, a spread move you meet constantly, read as Normal instead of Fairy. Also Aurorus
+(Refrigerate) and the Gardevoir / Altaria (Pixilate), Pinsir (Aerilate), Glalie
+(Refrigerate), Feraligatr (Dragonize) megas. Applied to the per-move cells AND the spread
+options. **Known limitation:** Weather Ball / Terrain Pulse retype from the FIELD, which a
+cell baked once per ply can't represent — a weather change mid-tree would have to change
+the move's type — so those still carry the dex type.
+
 **The authoritative open list is `unmodeled.ts`** — it is kept in lockstep with the
 search, so trust it over prose. As of 2026-07-24 its nine rule classes are:
 

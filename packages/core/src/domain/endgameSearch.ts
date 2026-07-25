@@ -1381,6 +1381,29 @@ function isSuckerLike(move: string | null | undefined): boolean { return SUCKER_
 // Self-destruct moves (Explosion / Self-Destruct / Misty Explosion / Final Gambit /
 // Memento / Healing Wish …): the user faints after the move resolves.
 function isFinalGambit(move: string | null | undefined): boolean { return toId(move ?? '') === 'finalgambit'; }
+
+// ABILITY RETYPING. The "-ate" abilities and Champions' Dragonize change a move's TYPE.
+// The calc already prices the damage correctly, but `Cell.type` fed the raw dex type to
+// everything downstream that keys off type: resist-berry marking, Weakness Policy,
+// Misty Terrain halving Dragon, terrain boosts, Storm Drain / Lightning Rod absorb.
+// This is not an exotic case in Reg M-B — SYLVEON is Pixilate, so its Hyper Voice (a
+// spread move you meet constantly) was labelled Normal instead of Fairy; Aurorus is
+// Refrigerate; and the megas add Gardevoir / Altaria (Pixilate), Pinsir (Aerilate),
+// Glalie (Refrigerate) and Feraligatr (Dragonize).
+// NOTE: only ABILITY retyping is handled. Weather Ball / Terrain Pulse retype from the
+// FIELD, which a cell baked once per ply cannot represent — under a weather change the
+// move would need to change type mid-tree. Left as a documented limitation rather than
+// baking a root-weather type that would then be rescaled as if it were fixed.
+const RETYPE_ABILITIES: ReadonlyMap<string, string> = new Map([
+  ['pixilate', 'Fairy'], ['aerilate', 'Flying'], ['refrigerate', 'Ice'],
+  ['galvanize', 'Electric'], ['dragonize', 'Dragon'],
+]);
+/** The move's type after the attacker's ability, or null when nothing changes. */
+function retypedMoveType(move: string | null | undefined, ability: string | null | undefined): string | null {
+  const to = RETYPE_ABILITIES.get(toId(ability ?? ''));
+  if (!to) return null;
+  return moveType(move ?? '') === 'Normal' ? to : null;   // -ate/Dragonize convert NORMAL moves only
+}
 function isSelfdestruct(move: string | null | undefined): boolean {
   return !!(getMove(move ?? '') as { selfdestruct?: unknown } | undefined)?.selfdestruct;
 }
@@ -1873,6 +1896,22 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
       if (!c || !isFinalGambit(c.move)) return;
       c.dmgMin = dmg; c.dmgMid = dmg; c.dmgMax = dmg; c.koRolls = [dmg];
     };
+    // Ability retyping, applied to the same cell arrays (and the SPREAD options, which
+    // matter most here — Sylveon's Hyper Voice is a spread move).
+    const retype = (c: { move: string; type: string } | null | undefined, ability: string | null | undefined): void => {
+      if (!c) return;
+      const t2 = retypedMoveType(c.move, ability);
+      if (t2) c.type = t2;
+    };
+    const myAb = (a: number): string | null | undefined => mine[a]?.set.ability;
+    const oppAb = (a: number): string | null | undefined => opp[a]?.entry.ability;
+    off.forEach((row, a) => row?.forEach(c => retype(c, myAb(a))));
+    offMoves.forEach((row, a) => row?.forEach(list => list?.forEach(c => retype(c, myAb(a)))));
+    thr.forEach((row, a) => row?.forEach(c => retype(c, oppAb(a))));
+    thrMoves.forEach((row, a) => row?.forEach(list => list?.forEach(c => retype(c, oppAb(a)))));
+    mySpread.forEach((so, a) => retype(so, myAb(a)));
+    oppSpread.forEach((so, a) => retype(so, oppAb(a)));
+
     off.forEach((row, a) => row?.forEach((c, d) =>
       patch(c, fgDamage(mine[a]!.hpPercent, myMax[a]!, oppMax[d]!, opp[d]!.entry.species))));
     offMoves.forEach((row, a) => row?.forEach((list, d) => list?.forEach(c =>
