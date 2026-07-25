@@ -2162,17 +2162,15 @@ describe('unmodeled-mechanics detector (self-flagging)', () => {
     expect(r.unmodeled?.find(u => u.kind === 'twoturn')).toBeUndefined();
   });
 
-  // Sky Drop is the one two-turn move still outside the model: it carries a FOE off the
-  // field, which the slot-less state can't represent.
-  test('flags Sky Drop, the two-turn move that is still unmodelled', () => {
+  // Sky Drop is modelled too now (the victim is carried off: untargetable, and its whole
+  // turn is silenced), so the two-turn class flags NOTHING.
+  test('does NOT flag Sky Drop — the whole two-turn class is modelled', () => {
     const r = searchToDepth({
       mine: [{ set: mon({ species: 'Talonflame', ability: 'Gale Wings', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Sky Drop', 'Brave Bird'] }), hpPercent: 100, active: true }],
       opp: [{ entry: oppOf(mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Earthquake'] })), hpPercent: 100, active: true }],
       field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
     }, 1);
-    const twoturn = r.unmodeled?.find(u => u.kind === 'twoturn');
-    expect(twoturn).toBeDefined();
-    expect(twoturn!.examples).toContain('Talonflame Sky Drop');
+    expect(r.unmodeled?.find(u => u.kind === 'twoturn')).toBeUndefined();
   });
 
   // Opponent scan is REVEALED-only: an unseen Icy Wind isn't warned about, a

@@ -67,8 +67,10 @@ const RULES: GapRule[] = [
   // Force) also dodge targeted damage on the charge turn. Power Herb is not legal in M-B,
   // so there is no item skip to model. What remains unmodelled is Sky Drop (it carries a
   // FOE off the field, which our slot-less model can't represent).
-  { kind: 'twoturn', label: 'two-turn move that displaces a foe (Sky Drop)',
-    moves: ['skydrop'] },
+  // TWO-TURN: rule removed 2026-07-25. Charge moves are modelled weather-conditionally,
+  // and Sky Drop — the one that displaces a FOE — is too: on the charge turn the victim
+  // is untargetable AND loses its whole turn, then it can't act on the turn the move
+  // lands either. It also simply fails above 200kg, which the calc already enforces.
   // Taunt + Encore are MODELLED (option restriction), and a live-match Disable
   // now root-carries into the search pools. Torment/Imprison/Spite remain (no
   // live tracking to carry, no in-tree cast model).

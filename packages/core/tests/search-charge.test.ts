@@ -114,3 +114,40 @@ describe('two-turn charge — Mega Sol carries its own sun', () => {
     expect(r.mine[0]!.charging).toBe('Electro Shot');
   });
 });
+
+describe('Sky Drop takes its victim off the field too', () => {
+  // A FAST Sky Drop user against a SLOW victim: the drop resolves first, so the victim
+  // loses its action outright. (Against a faster victim it would already have moved —
+  // that ordering falls out of the single speed-ordered resolution loop.)
+  // NB the victim must weigh under 200kg — Sky Drop simply fails above that, which the
+  // calc enforces: an early draft of this test used Snorlax (460kg) and the move produced
+  // no cell at all.
+  const aero = mon({ species: 'Aerodactyl', ability: 'Pressure', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Sky Drop'] });
+  const shroom = mon({ species: 'Amoonguss', ability: 'Regenerator', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Sludge Bomb'] });
+
+  test('the charge turn deals no damage AND the victim loses its move', () => {
+    const r = resolveOneTurn(input1v1(aero, shroom), ATTACK, ATTACK);
+    expect(r.opp[0]!.hpPct).toBe(100);   // charging → no damage dealt
+    expect(r.mine[0]!.hpPct).toBe(100);  // Sludge Bomb never happened: Amoonguss was carried up
+  });
+
+  // The pair that isolates it: SAME victim, SAME action (heal itself), only the charge
+  // move differs. Sky Drop silences it; Phantom Force — which hides the user alone —
+  // does not. Using a self-heal avoids confounding "did it act" with "could it reach the
+  // hidden attacker", since a semi-invulnerable mon can't be targeted either way.
+  const clef = mon({ species: 'Clefable', ability: 'Unaware', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Soft-Boiled', 'Moonblast'] });
+  const RECOVER: Map<number, TurnAction> = new Map([[0, { kind: 'recover' }]]);
+  const hurt = (my: PokemonSet): SearchInput => ({
+    mine: [{ set: my, hpPercent: 100, active: true }],
+    opp: [{ entry: oppOf(clef), hpPercent: 60, active: true }],
+    field: { ...NEUTRAL_FIELD },
+  });
+
+  test('Sky Drop stops the victim healing; Phantom Force does not (control pair)', () => {
+    const pult2 = mon({ species: 'Dragapult', ability: 'Clear Body', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Phantom Force'] });
+    const dropped = resolveOneTurn(hurt(aero), ATTACK, RECOVER).opp[0]!.hpPct;
+    const free = resolveOneTurn(hurt(pult2), ATTACK, RECOVER).opp[0]!.hpPct;
+    expect(free).toBeGreaterThan(60);    // Phantom Force: Clefable still heals
+    expect(dropped).toBe(60);            // Sky Drop: carried up, no heal
+  });
+});

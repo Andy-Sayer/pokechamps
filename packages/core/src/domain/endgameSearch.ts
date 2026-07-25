@@ -1092,6 +1092,9 @@ interface State {
   /** Must recharge this turn (used Hyper Beam / Giga Impact last turn → can't act). */
   myRecharge: boolean[];
   oppRecharge: boolean[];
+  /** Carried off the field by Sky Drop last turn → can't act this turn. */
+  mySkyDropped: boolean[];
+  oppSkyDropped: boolean[];
   /** Mid-charge two-turn move (Solar Beam without sun, Phantom Force, …): the move id
    *  the mon committed to last turn. While set it MUST fire that move — no switching,
    *  no other action — and it clears once fired or the mon leaves the field. */
@@ -2214,6 +2217,8 @@ function initialState(input: SearchInput): State {
     oppDisguise: input.opp.map(o => hasDisguise(o.entry.ability)),
     myRecharge: input.mine.map(() => false),
     oppRecharge: input.opp.map(() => false),
+    mySkyDropped: input.mine.map(() => false),
+    oppSkyDropped: input.opp.map(() => false),
     myCharging: input.mine.map(() => null),
     oppCharging: input.opp.map(() => null),
     myItemGone: input.mine.map(() => false),
@@ -2274,6 +2279,11 @@ const CHARGE_MOVES: ReadonlyMap<string, Weather | null> = new Map<string, Weathe
   ['freezeshock', null], ['iceburn', null], ['geomancy', null],
   ['fly', null], ['dig', null], ['dive', null], ['bounce', null],
   ['phantomforce', null], ['shadowforce', null],
+  // Sky Drop carries the TARGET up with it: on the charge turn neither mon is on the
+  // field, so the victim can't be hit AND can't act. That second half is what made this
+  // "structural" before — it needed a way to say a FOE is absent — but it's the same
+  // shape as recharge (set this turn, consumed next), so it costs one state flag.
+  ['skydrop', null],
 ]);
 /** undefined = not a charge move; else the Weather that skips the charge (null = none). */
 function chargeSkipWeather(move: string | null | undefined): Weather | null | undefined {
@@ -2440,10 +2450,16 @@ function resolveTurn(
   const oppDisguise = s.oppDisguise.slice();
   const myRecharge = s.myRecharge.map(() => false);   // recharge is consumed this turn (see below)
   const oppRecharge = s.oppRecharge.map(() => false);
+  const mySkyDropped = s.mySkyDropped.map(() => false);   // consumed this turn, like recharge
+  const oppSkyDropped = s.oppSkyDropped.map(() => false);
   const myCharging = [...s.myCharging];               // carries until the move fires
   const oppCharging = [...s.oppCharging];
   const myItemGone = [...s.myItemGone];
   const oppItemGone = [...s.oppItemGone];
+  // Carried up by a Sky Drop that resolved EARLIER this turn — a slower victim loses its
+  // action outright, which is the move's real payoff. (A faster victim already acted, so
+  // it keeps its turn; that ordering falls out of the single speed-ordered loop.)
+  const carriedNow = { mine: new Set<number>(), opp: new Set<number>() };
   const myLocked = s.myLocked.slice();
   const oppLocked = s.oppLocked.slice();
   // Choice lock: set when an unlocked Choice holder attacks; an already-locked
@@ -2648,8 +2664,8 @@ function resolveTurn(
   // "Can't act this turn": asleep (with turns left) OR frozen. Freeze thaws only
   // 20%/turn, so over the short search horizon we conservatively treat a frozen
   // mon as frozen throughout (it never gets a wake-decrement like sleep does).
-  const myAsleep = (i: number) => (s.myStatus[i] === 'slp' && (s.mySleepTurns[i] ?? 0) > 0) || s.myStatus[i] === 'frz' || s.myRecharge[i] === true;
-  const oppAsleep = (j: number) => (s.oppStatus[j] === 'slp' && (s.oppSleepTurns[j] ?? 0) > 0) || s.oppStatus[j] === 'frz' || s.oppRecharge[j] === true;
+  const myAsleep = (i: number) => (s.myStatus[i] === 'slp' && (s.mySleepTurns[i] ?? 0) > 0) || s.myStatus[i] === 'frz' || s.myRecharge[i] === true || s.mySkyDropped[i] === true;
+  const oppAsleep = (j: number) => (s.oppStatus[j] === 'slp' && (s.oppSleepTurns[j] ?? 0) > 0) || s.oppStatus[j] === 'frz' || s.oppRecharge[j] === true || s.oppSkyDropped[j] === true;
 
   // Build protected sets: a mon using PROTECT is immune to all damage this turn (an
   // asleep mon can't, even if a deep ply nominally offered it).
@@ -2793,7 +2809,8 @@ function resolveTurn(
     acted.add(`${act.side}:${act.actor}`);
     if (act.side === 'mine') {
       if (myHp[act.actor]! <= 0) continue;          // KO'd before acting
-      if (myFlinched.has(act.actor)) continue;        // flinched by Fake Out
+      if (myFlinched.has(act.actor)) continue;
+      if (carriedNow.mine.has(act.actor)) continue;   // carried up by a Sky Drop already this turn        // flinched by Fake Out
       if (act.target === PROTECT) continue;           // mon uses Protect — no damage dealt
       if (isFakeOutTarget(act.target)) {              // Fake Out: chip + flinch the target
         if (oppQuickGuard || oppMatBlock) continue;    // Quick Guard (priority) / Mat Block (damage) stop Fake Out
@@ -2885,6 +2902,14 @@ function resolveTurn(
         // protected set here (mid-resolution) is deliberate: foes that already acted this
         // turn DID connect, which is exactly the real ordering.
         if (isSemiInvulnerable(oc.move)) myProtected.add(act.actor);
+        // Sky Drop takes the VICTIM up as well: untargetable now, and unable to act next.
+        if (toId(oc.move) === 'skydrop') {
+          oppProtected.add(oTgt); oppSkyDropped[oTgt] = true; carriedNow.opp.add(oTgt);
+          // A carried mon loses its WHOLE turn, not just its attack. The later blocks
+          // (recover / status / debuff / field moves) iterate the target MAP rather than
+          // the ordered action list, so dropping its entry here silences all of them.
+          oppTargets.delete(oTgt);
+        }
         continue;                                     // no damage on the charge turn
       }
       myCharging[act.actor] = null;                   // fired (or skipped by weather)
@@ -2946,6 +2971,7 @@ function resolveTurn(
     } else {
       if (oppHp[act.actor]! <= 0) continue;
       if (oppFlinched.has(act.actor)) continue;       // flinched by Fake Out
+      if (carriedNow.opp.has(act.actor)) continue;    // carried up by a Sky Drop already this turn
       if (act.target === PROTECT) continue;           // opp mon uses Protect
       if (isFakeOutTarget(act.target)) {              // opp Fake Out: chip + flinch my mon
         if (myQuickGuard || myMatBlock) continue;      // Quick Guard (priority) / Mat Block (damage) stop Fake Out
@@ -3026,6 +3052,10 @@ function resolveTurn(
           && !chargeSkipped(tc.move, s.weather, t.oppAbility[act.actor])) {
         oppCharging[act.actor] = tc.move;
         if (isSemiInvulnerable(tc.move)) oppProtected.add(act.actor);
+        if (toId(tc.move) === 'skydrop') {
+          myProtected.add(mTgt); mySkyDropped[mTgt] = true; carriedNow.mine.add(mTgt);
+          myTargets.delete(mTgt);
+        }
         continue;                                     // no damage on the charge turn
       }
       oppCharging[act.actor] = null;                  // fired (or skipped by weather)
@@ -3381,8 +3411,8 @@ function resolveTurn(
   const myBerryUsed = s.myBerryUsed.slice();
   const oppBerryUsed = s.oppBerryUsed.slice();
   // Status persists on a mon that switches out; a switch-in arrives clean (awake).
-  for (const inn of mySwitchIn.values()) { myStatus[inn] = ''; myToxicN[inn] = 0; mySleepTurns[inn] = 0; myYawn[inn] = 0; myDisguise[inn] = hasDisguise(t.myAbility[inn]); myRecharge[inn] = false; myCharging[inn] = null; myLocked[inn] = 0; myChoiceMove[inn] = null; mySubHp[inn] = 0; myWish[inn] = 0; }
-  for (const inn of oppSwitchIn.values()) { oppStatus[inn] = ''; oppToxicN[inn] = 0; oppSleepTurns[inn] = 0; oppYawn[inn] = 0; oppDisguise[inn] = hasDisguise(t.oppAbility[inn]); oppRecharge[inn] = false; oppCharging[inn] = null; oppLocked[inn] = 0; oppChoiceMove[inn] = null; oppSubHp[inn] = 0; oppWish[inn] = 0; }
+  for (const inn of mySwitchIn.values()) { myStatus[inn] = ''; myToxicN[inn] = 0; mySleepTurns[inn] = 0; myYawn[inn] = 0; myDisguise[inn] = hasDisguise(t.myAbility[inn]); myRecharge[inn] = false; mySkyDropped[inn] = false; myCharging[inn] = null; myLocked[inn] = 0; myChoiceMove[inn] = null; mySubHp[inn] = 0; myWish[inn] = 0; }
+  for (const inn of oppSwitchIn.values()) { oppStatus[inn] = ''; oppToxicN[inn] = 0; oppSleepTurns[inn] = 0; oppYawn[inn] = 0; oppDisguise[inn] = hasDisguise(t.oppAbility[inn]); oppRecharge[inn] = false; oppSkyDropped[inn] = false; oppCharging[inn] = null; oppLocked[inn] = 0; oppChoiceMove[inn] = null; oppSubHp[inn] = 0; oppWish[inn] = 0; }
   // Wake: a mon that started the turn asleep ticks its counter down (it couldn't act
   // this turn); it wakes when the counter hits 0. Runs BEFORE this turn's infliction
   // so a freshly-slept mon keeps its full count.
@@ -3703,7 +3733,7 @@ function resolveTurn(
     myBerryUsed, oppBerryUsed, myHazards, oppHazards, mySleepTurns, oppSleepTurns, myYawn, oppYawn, myPerish, oppPerish, myTrappedBy, oppTrappedBy,
     myTaunt, oppTaunt, myEncore, oppEncore, myEncoreAct, oppEncoreAct,
     myUnburden, oppUnburden, myResistBerryUsed, oppResistBerryUsed, myFirstTurn, oppFirstTurn,
-    myDisguise, oppDisguise, myRecharge, oppRecharge, myCharging, oppCharging, myItemGone, oppItemGone, myLocked, oppLocked, myChoiceMove, oppChoiceMove, mySubHp, oppSubHp,
+    myDisguise, oppDisguise, myRecharge, oppRecharge, mySkyDropped, oppSkyDropped, myCharging, oppCharging, myItemGone, oppItemGone, myLocked, oppLocked, myChoiceMove, oppChoiceMove, mySubHp, oppSubHp,
     myWish, oppWish, myFutureTurns, oppFutureTurns, myFutureDmg, oppFutureDmg,
     gravity, wonderRoom, magicRoom, gravityTurns, wonderRoomTurns, magicRoomTurns,
   };

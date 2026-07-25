@@ -339,7 +339,7 @@ search, so trust it over prose. As of 2026-07-24 its nine rule classes are:
 | `redirection` | Ally Switch / Spotlight | position shuffling — our slot-less model can't represent it |
 | ~~`teamprotect`~~ | ✅ CLOSED 2026-07-25 — Mat Block (damage, first-turn-out) + Crafty Shield (status) join Wide/Quick Guard | |
 | `foedebuff` | accuracy/evasion drops | **policy**: maximin never prices hit chance — informational only |
-| `twoturn` | Sky Drop only | it carries a FOE off the field — slot-less model |
+| ~~`twoturn`~~ | ✅ CLOSED 2026-07-25 — Sky Drop carries the victim off too: untargetable, and its whole turn is silenced | |
 | `restriction` | Torment / Imprison / Spite | no live tracking to carry, no in-tree cast model |
 | ~~`selffaint`~~ | ✅ CLOSED 2026-07-25 — Final Gambit, Memento and Healing Wish all modelled; Lunar Dance has no legal M-B user | |
 | ~~`reactiveitem`~~ | ✅ CLOSED 2026-07-25 — **none are legal in M-B**, nor is Weakness Policy | |
