@@ -2331,6 +2331,13 @@ function resolveTurn(
   // Protect-variant on-contact punish deferred to the status pass (poison/burn).
   const myPunishStatus = new Map<number, string>();   // my attacker statused by an OPP protect
   const oppPunishStatus = new Map<number, string>();  // opp attacker statused by MY protect
+  // Spicy Spray (Scovillain-Mega, Champions custom): ANY damaging hit on the holder
+  // burns the attacker — not contact-gated, matching the live engine (match/engine.ts).
+  // It rides the same accumulator as the Protect-variant punishes because it is the same
+  // shape: a DEFENDER ability inflicting a status on the ATTACKER, resolved later with
+  // the normal immunity + status-berry rules. Burn halves physical damage, so leaving it
+  // out made the search over-rate physical attackers into a Scovillain-Mega.
+  const spicySpray = (ability: string | null | undefined): boolean => toId(ability ?? '') === 'spicyspray';
   // Apply a Protect-variant's on-contact punish to `attacker` on `side` (its CONTACT
   // move was blocked by the protecting foe). Drops route through the foe-drop
   // accumulators (Defiant / immunity apply); chip is direct; status is deferred.
@@ -2756,6 +2763,9 @@ function resolveTurn(
         if (oc.recoil > 0 && !t.myResidual[act.actor]!.magicGuard && !t.myRockHead[act.actor]) myHp[act.actor] = Math.max(0, myHp[act.actor]! - oc.recoil * oDealt * (t.oppMaxHp[oTgt]! / (t.myMaxHp[act.actor] || 1)));
         if (t.myLifeOrb[act.actor]) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10); // Life Orb recoil (10% max HP)
       }
+      // Spicy Spray on the DEFENDER burns my attacker (if the hit actually landed and
+      // the attacker is still standing — a KO'd attacker can't carry a burn).
+      if (oDealt > 0 && spicySpray(t.oppAbility[oTgt]) && (myHp[act.actor] ?? 0) > 0) myPunishStatus.set(act.actor, 'brn');
       if (isSelfdestruct(oc.move)) myHp[act.actor] = 0;   // Explosion / Self-Destruct: user faints
       if ((myHp[act.actor] ?? 0) > 0) {                   // recharge / lock apply only if the user survived
         if (isRechargeMove(oc.move)) myRecharge[act.actor] = true;
@@ -2883,6 +2893,9 @@ function resolveTurn(
         if (tc.recoil > 0 && !t.oppResidual[act.actor]!.magicGuard && !t.oppRockHead[act.actor]) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - tc.recoil * mDealt * (t.myMaxHp[mTgt]! / (t.oppMaxHp[act.actor] || 1)));
         if (t.oppLifeOrb[act.actor]) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
       }
+      // Spicy Spray mirror: MY Scovillain-Mega burns the opp attacker that hit it. The
+      // opp side reads the RESOLVED ability, so this only fires for a known/mega'd holder.
+      if (mDealt > 0 && spicySpray(t.myAbility[mTgt]) && (oppHp[act.actor] ?? 0) > 0) oppPunishStatus.set(act.actor, 'brn');
       if (isSelfdestruct(tc.move)) oppHp[act.actor] = 0;   // Explosion / Self-Destruct: user faints
       if ((oppHp[act.actor] ?? 0) > 0) {
         if (isRechargeMove(tc.move)) oppRecharge[act.actor] = true;
