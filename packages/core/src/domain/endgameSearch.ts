@@ -340,6 +340,7 @@ const ENCORE_BASE = -90;  // Encore → foe idx (foe locked into its last move)
 const FAKEOUT_BASE = -100; // Fake Out → foe idx (chip + guaranteed flinch, first turn out only)
 const PRIO_BASE = -110;   // priority attack (Sucker Punch/Grassy Glide/Aqua Jet/…) → foe idx
 const TRAP_BASE = -120;   // trapping move (Block/Mean Look/…) → foe idx; victim can't use SWITCH
+const HEALING_WISH = -131; // Healing Wish — sacrifice the user; the replacement enters fully healed
 const SET_PERISH = -130;  // Perish Song — every on-field non-Soundproof mon (BOTH sides) gets the clock
 function isSwitchTarget(t: number): boolean { return t <= SWITCH_BASE && t > LEECH_BASE; }
 function switchBenchIdx(t: number): number { return SWITCH_BASE - t; }
@@ -670,6 +671,9 @@ interface Tables {
   myBatonMove: (string | null)[];
   oppBatonMove: (string | null)[];
   // Perish Song capability (sets the clock on every on-field non-Soundproof mon).
+  /** Healing Wish move name per mon (null = doesn't know it). Sacrifices the user to
+   *  bring the replacement in at full HP with its status cured. */
+  myHealingWish: (string | null)[]; oppHealingWish: (string | null)[];
   myPerishMove: (string | null)[];
   oppPerishMove: (string | null)[];
   // Trapping-move capability (Block / Mean Look / Jaw Lock / …): blocks the
@@ -873,6 +877,17 @@ function isProtectMove(move: string): boolean {
 function findProtectMove(moves: string[]): string | null {
   return moves.find(m => isProtectMove(m)) ?? null;
 }
+// Healing Wish is only worth a Pokémon when the bench holds one worth reviving — a mon
+// that is hurt or statused. With a healthy bench it is pure loss, so it isn't offered.
+function benchWorthHealing(active: number[], hp: number[], status: string[], n: number): boolean {
+  for (let i = 0; i < n; i++) {
+    if (active.includes(i)) continue;
+    const h = hp[i] ?? 0;
+    if (h > 0 && (h < 100 || (status[i] ?? '') !== '')) return true;
+  }
+  return false;
+}
+
 function findMoveId(moves: string[], id: string): string | null {
   return moves.find(m => toId(m) === id) ?? null;
 }
@@ -1986,6 +2001,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppSetupMove: opp.map(o => findSetupMove(o.entry.knownMoves)?.move ?? null),
     myBatonMove: mine.map(m => findMoveId(m.set.moves ?? [], 'batonpass')),
     oppBatonMove: opp.map(o => findMoveId(o.entry.knownMoves, 'batonpass')),
+    myHealingWish: mine.map(m => findMoveId(m.set.moves ?? [], 'healingwish')),
+    oppHealingWish: opp.map(o => findMoveId(o.entry.knownMoves, 'healingwish')),
     myPerishMove: mine.map(m => findMoveId(m.set.moves ?? [], 'perishsong')),
     oppPerishMove: opp.map(o => findMoveId(o.entry.knownMoves, 'perishsong')),
     myTrapMove: mine.map(m => (m.set.moves ?? []).find(isTrappingMove) ?? null),
@@ -2674,7 +2691,7 @@ function resolveTurn(
   const nonAttack = (target: number) =>
     isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isStatusTarget(target) || isFieldTarget(target)
     || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN || target === RECOVER || target === SET_HAZARD
-    || target === REDIRECT || target === SLEEP_SKIP || target === HELP_HAND || target === WIDE_GUARD || target === QUICK_GUARD || target === SAP || target === CLEAR_HAZARD || target === SET_SUB || target === COUNTER || target === SET_ROOM || target === SET_PERISH || isTrapTarget(target) || isPivotTarget(target) || isDebuffTarget(target)
+    || target === REDIRECT || target === SLEEP_SKIP || target === HELP_HAND || target === WIDE_GUARD || target === QUICK_GUARD || target === SAP || target === CLEAR_HAZARD || target === SET_SUB || target === COUNTER || target === SET_ROOM || target === SET_PERISH || target === HEALING_WISH || isTrapTarget(target) || isPivotTarget(target) || isDebuffTarget(target)
     || isTauntTarget(target) || isEncoreTarget(target);
   // Fake Out flinches: a mon hit by Fake Out (resolved at +3 before it acts) skips
   // its action this turn.
@@ -3264,6 +3281,20 @@ function resolveTurn(
   // a sub already up at the root IS modelled by the apply-routing above).
   for (const [actor, target] of myTargets) if (target === SET_SUB && (myHp[actor] ?? 0) > 25 && (mySubHp[actor] ?? 0) <= 0) { myHp[actor]! -= 25; mySubHp[actor] = 25; }
   for (const [actor, target] of oppTargets) if (target === SET_SUB && (oppHp[actor] ?? 0) > 25 && (oppSubHp[actor] ?? 0) <= 0) { oppHp[actor]! -= 25; oppSubHp[actor] = 25; }
+  // Healing Wish: the caster faints outright and the mon that replaces it arrives at
+  // full HP with its status cured. Modelled as a PENDING heal consumed by the refill
+  // below, which is also the correct ordering — the replacement is healed on entry and
+  // THEN eats hazards, so Stealth Rock still chips the freshly-revived mon.
+  let myHealPending = false, oppHealPending = false;
+  for (const [actor, target] of myTargets) {
+    if (target !== HEALING_WISH || (myHp[actor] ?? 0) <= 0) continue;
+    myHp[actor] = 0; myHealPending = true;
+  }
+  for (const [actor, target] of oppTargets) {
+    if (target !== HEALING_WISH || (oppHp[actor] ?? 0) <= 0) continue;
+    oppHp[actor] = 0; oppHealPending = true;
+  }
+
   // Strength Sap: heal the caster by the target's Attack STAT (as % of the caster's
   // max HP) and drop the target's Attack −1. Auto-targets the highest-Attack live
   // foe — the dominant sap (most heal + neuters the biggest physical threat).
@@ -3587,10 +3618,14 @@ function resolveTurn(
   // A replacement brought in after a faint enters at EOT and eats the hazards
   // present NOW (the post-set copies) — this is what makes a hazard set this turn
   // (incl. Stone Axe's SR) actually bite the opponent's next mon.
-  for (const inMon of myActive) if (!myActiveNow.includes(inMon))
+  for (const inMon of myActive) if (!myActiveNow.includes(inMon)) {
+    if (myHealPending) { myHp[inMon] = 100; myStatus[inMon] = ''; myToxicN[inMon] = 0; myHealPending = false; }
     applyHazard(inMon, myHp, hazardEffectFor(myHazards, t.mySpecies[inMon]!, t.myAbility[inMon], t.myItem[inMon], gravity), myStatus, myToxicN, myBoost);
-  for (const inMon of oppActive) if (!oppActiveNow.includes(inMon))
+  }
+  for (const inMon of oppActive) if (!oppActiveNow.includes(inMon)) {
+    if (oppHealPending) { oppHp[inMon] = 100; oppStatus[inMon] = ''; oppToxicN[inMon] = 0; oppHealPending = false; }
     applyHazard(inMon, oppHp, hazardEffectFor(oppHazards, t.oppSpecies[inMon]!, t.oppAbility[inMon], t.oppItem[inMon], gravity), oppStatus, oppToxicN, oppBoost);
+  }
   // First-turn-out next ply: every mon that switched/refilled in this turn (gates
   // Fake Out's flinch).
   const myFirstTurn = s.myFirstTurn.map(() => false);
@@ -3791,6 +3826,10 @@ function jointActions(
   // Trapping-move cast (root only): per-actor move + the foe indices that can
   // still be pinned (live, not Ghost, not already trapped).
   trapCast?: { move: (string | null)[]; foes: number[] },
+  // Healing Wish (root only): a true entry → the mon knows it AND there is a live bench
+  // mon actually worth the sacrifice (damaged or statused). Offering it when the bench
+  // is healthy would just throw a Pokémon away.
+  healingWish?: boolean[],
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -3868,6 +3907,7 @@ function jointActions(
       ...(canWideGuard ? [WIDE_GUARD] : []),
       ...(canQuickGuard ? [QUICK_GUARD] : []),
       ...(canSap ? [SAP] : []),
+      ...(healingWish?.[actor] === true ? [HEALING_WISH] : []),
       ...(canClearHazard ? [CLEAR_HAZARD] : []),
       ...(canSub ? [SET_SUB] : []),
       ...(canCounter ? [COUNTER] : []),
@@ -4428,7 +4468,8 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
       trappedBy(sp, t.oppAbility[j], t.oppItem[j], t.oppGrounded[j]!, s.myActive, s.myHp, t.myAbility)
       || moveTrapHolds(s.oppTrappedBy[j], s.myActive, s.myHp)),
     t.oppPerishMove.map(pm => !!pm && s.myActive.some(i => (s.myHp[i] ?? 0) > 0 && (s.myPerish[i] ?? 0) === 0 && toId(t.myAbility[i] ?? '') !== 'soundproof')),
-    { move: t.oppTrapMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0 && s.myTrappedBy[i] == null && !isType(t.mySpecies[i]!, 'Ghost')) });
+    { move: t.oppTrapMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0 && s.myTrappedBy[i] == null && !isType(t.mySpecies[i]!, 'Ghost')) },
+    t.oppHealingWish.map(hw => !!hw && benchWorthHealing(s.oppActive, s.oppHp, s.oppStatus, t.oppN)));
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -4523,6 +4564,8 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null, choiceMove
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Counter', targetSpecies: 'foe', self: true });
     } else if (target === SET_ROOM) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myRoomMove[actor] === 'gravity' ? 'Gravity' : t.myRoomMove[actor] === 'wonderRoom' ? 'Wonder Room' : 'Magic Room', targetSpecies: 'field', self: true });
+    } else if (target === HEALING_WISH) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myHealingWish[actor] ?? 'Healing Wish', targetSpecies: 'the replacement', self: true });
     } else if (target === SET_PERISH) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myPerishMove[actor] ?? 'Perish Song', targetSpecies: 'everyone on field', self: true });
     } else if (isTrapTarget(target)) {
@@ -4568,6 +4611,8 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null, choiceM
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppPivotMove[actor] ?? 'U-turn', targetSpecies: t.mySpecies[pivotFoeIdx(target)]!, switch: true });
     } else if (isStatusTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppStatusMove[actor]?.move ?? 'status', targetSpecies: t.mySpecies[statusFoeIdx(target)]! });
+    } else if (target === HEALING_WISH) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myHealingWish[actor] ?? 'Healing Wish', targetSpecies: 'the replacement', self: true });
     } else if (target === SET_PERISH) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppPerishMove[actor] ?? 'Perish Song', targetSpecies: 'everyone on field', self: true });
     } else if (isTrapTarget(target)) {
@@ -5641,6 +5686,7 @@ export type TurnAction =
   | { kind: 'recover' }                   // Recover / Roost / Wish (delayed) — self-heal
   | { kind: 'substitute' }                // Substitute — pay 25% HP for a sub
   | { kind: 'counter' }                   // Counter / Mirror Coat / Metal Burst — reflect
+  | { kind: 'healingwish' }            // sacrifice self; the replacement enters fully healed
   | { kind: 'room' };                     // Gravity / Wonder Room / Magic Room — set a field room
 
 /** Post-turn structural state of one mon (by team-index). HP is our coarse
@@ -5713,6 +5759,7 @@ export function resolveOneTurn(
     else if (a.kind === 'recover') { myTargets.set(actor, RECOVER); myMove.set(actor, t.myRecover[actor]?.move ?? 'Recover'); }
     else if (a.kind === 'substitute') { myTargets.set(actor, SET_SUB); myMove.set(actor, 'Substitute'); }
     else if (a.kind === 'counter') { myTargets.set(actor, COUNTER); myMove.set(actor, t.myCounter[actor] ? 'Counter' : ''); }
+    else if (a.kind === 'healingwish') { myTargets.set(actor, HEALING_WISH); myMove.set(actor, t.myHealingWish[actor] ?? 'Healing Wish'); }
     else if (a.kind === 'room') { myTargets.set(actor, SET_ROOM); myMove.set(actor, t.myRoomMove[actor] ?? ''); }
     // Protect: record the mon's actual variant as the move used. It was left blank,
     // which made ResolvedSlot.moveUsed lie on protect turns AND left the sim
@@ -5739,6 +5786,7 @@ export function resolveOneTurn(
     else if (a.kind === 'recover') { oppTargets.set(actor, RECOVER); oppMove.set(actor, t.oppRecover[actor]?.move ?? 'Recover'); }
     else if (a.kind === 'substitute') { oppTargets.set(actor, SET_SUB); oppMove.set(actor, 'Substitute'); }
     else if (a.kind === 'counter') { oppTargets.set(actor, COUNTER); oppMove.set(actor, t.oppCounter[actor] ? 'Counter' : ''); }
+    else if (a.kind === 'healingwish') { oppTargets.set(actor, HEALING_WISH); oppMove.set(actor, t.oppHealingWish[actor] ?? 'Healing Wish'); }
     else if (a.kind === 'room') { oppTargets.set(actor, SET_ROOM); oppMove.set(actor, t.oppRoomMove[actor] ?? ''); }
     else { oppTargets.set(actor, PROTECT); oppMove.set(actor, t.oppProtectMove[actor] ?? 'Protect'); }
   }

@@ -341,7 +341,7 @@ search, so trust it over prose. As of 2026-07-24 its nine rule classes are:
 | `foedebuff` | accuracy/evasion drops | **policy**: maximin never prices hit chance — informational only |
 | `twoturn` | Sky Drop only | it carries a FOE off the field — slot-less model |
 | `restriction` | Torment / Imprison / Spite | no live tracking to carry, no in-tree cast model |
-| `selffaint` | Final Gambit / Memento / Healing Wish / Lunar Dance | (Explosion-family IS modelled) |
+| ~~`selffaint`~~ | ✅ CLOSED 2026-07-25 — Final Gambit, Memento and Healing Wish all modelled; Lunar Dance has no legal M-B user | |
 | `reactiveitem` | Throat Spray / Blunder Policy / Room Service / Snowball / … | rest of the reactive items |
 | `itemswap` | Trick / Switcheroo / Knock Off / Thief | changes the item table mid-tree |
 | `confusion` | 33% self-hit | **policy**: same as flinch / full-paralysis — the user weighs the dice |

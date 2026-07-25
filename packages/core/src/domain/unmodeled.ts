@@ -77,11 +77,14 @@ const RULES: GapRule[] = [
     moves: ['torment', 'imprison', 'spite'] },
   // Explosion / Self-Destruct / Misty Explosion are MODELLED (isSelfdestruct → user
   // faints). The HP-based / sacrifice-pivot ones are not.
-  // Final Gambit is now MODELLED (damage = the user's CURRENT HP, converted into the
-  // target's HP units; Ghost immune; user faints only if it connects). The rest still
-  // aren't: they trade the user for a heal or a debuff, which the search can't value.
-  { kind: 'selffaint', label: 'self-faint move (Memento / Healing Wish / Lunar Dance)',
-    moves: ['healingwish', 'lunardance', 'memento'] },
+  // SELF-FAINT moves are now fully modelled, so this rule is gone:
+  //   Final Gambit  — damage = the user's CURRENT HP in the target's units; Ghost immune;
+  //                   the user faints only if it connects.
+  //   Memento       — the -2 Atk / -2 SpA drop through the debuff path, and the user dies.
+  //   Healing Wish  — the user dies; the replacement enters at full HP, status cured,
+  //                   THEN eats hazards.
+  //   Lunar Dance   — no legal user in Reg M-B (checked against the format allow-list),
+  //                   so there is nothing to model. Revisit on a regulation change.
   // on-KO boost (Moxie/Beast Boost), hazard clear, Weakness Policy (procWp) and
   // Booster Energy (Protosynthesis/Quark Drive via the calc's boostedStat +
   // search Spe ×1.5) are MODELLED; the rest of the reactive items are not.
