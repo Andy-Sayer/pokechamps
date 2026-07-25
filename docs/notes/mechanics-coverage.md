@@ -340,7 +340,7 @@ search, so trust it over prose. As of 2026-07-24 its nine rule classes are:
 | ~~`teamprotect`~~ | ✅ CLOSED 2026-07-25 — Mat Block (damage, first-turn-out) + Crafty Shield (status) join Wide/Quick Guard | |
 | `foedebuff` | accuracy/evasion drops | **policy**: maximin never prices hit chance — informational only |
 | ~~`twoturn`~~ | ✅ CLOSED 2026-07-25 — Sky Drop carries the victim off too: untargetable, and its whole turn is silenced | |
-| `restriction` | Torment / Imprison / Spite | no live tracking to carry, no in-tree cast model |
+| ~~`restriction`~~ | ✅ CLOSED 2026-07-25 — Torment + Imprison cast in speed order, enforced by substituting the best legal move. Spite (PP) is out of scope by horizon: a 3-5 turn search can't exhaust PP | |
 | ~~`selffaint`~~ | ✅ CLOSED 2026-07-25 — Final Gambit, Memento and Healing Wish all modelled; Lunar Dance has no legal M-B user | |
 | ~~`reactiveitem`~~ | ✅ CLOSED 2026-07-25 — **none are legal in M-B**, nor is Weakness Policy | |
 | `itemswap` | Trick / Switcheroo / Knock Off / Thief | changes the item table mid-tree. **Bounded by M-B's item list**: only Life Orb, Leftovers, Focus Sash/Band, Choice Scarf and the type boosters change anything — no Assault Vest / Eviolite / Rocky Helmet / Boots exist here |

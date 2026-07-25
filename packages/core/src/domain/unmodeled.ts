@@ -73,11 +73,14 @@ const RULES: GapRule[] = [
   // and Sky Drop — the one that displaces a FOE — is too: on the charge turn the victim
   // is untargetable AND loses its whole turn, then it can't act on the turn the move
   // lands either. It also simply fails above 200kg, which the calc already enforces.
-  // Taunt + Encore are MODELLED (option restriction), and a live-match Disable
-  // now root-carries into the search pools. Torment/Imprison/Spite remain (no
-  // live tracking to carry, no in-tree cast model).
-  { kind: 'restriction', label: 'move restriction (Torment / Imprison / Spite)',
-    moves: ['torment', 'imprison', 'spite'] },
+  // MOVE RESTRICTION: rule removed 2026-07-25. Taunt, Encore and Disable were already
+  // modelled; Torment (can't repeat your last move) and Imprison (seals every move the
+  // caster shares with the foes) now are too — both cast in the speed-ordered loop, and
+  // both enforced by substituting the best LEGAL move at resolution, since what they
+  // restrict is moves rather than targets. A mon with nothing legal left loses its turn.
+  // SPITE is deliberately not modelled and never will be under a bounded horizon: it
+  // removes 4 PP, and PP is not tracked because a 3-5 turn search cannot exhaust a move
+  // from full. Flagging it would warn about something that cannot change a decision.
   // Explosion / Self-Destruct / Misty Explosion are MODELLED (isSelfdestruct → user
   // faints). The HP-based / sacrifice-pivot ones are not.
   // SELF-FAINT moves are now fully modelled, so this rule is gone:

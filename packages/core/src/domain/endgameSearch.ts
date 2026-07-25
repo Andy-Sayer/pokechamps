@@ -69,6 +69,9 @@ export interface SearchMyMon {
    *  and predictions plumb it — the search just never passed it, so every cell was
    *  built as though the mon had never been hit. */
   timesHit?: number;
+  /** Under Torment, and the move it used last — together they forbid a repeat. */
+  tormented?: boolean;
+  lastMove?: string;
   /** Focus Sash / Sturdy survival (my items are known, so prob is 0 or 1). */
   survival?: Survival;
   /** Already under Leech Seed — the OPP search-index of the seeder (heals it). */
@@ -105,6 +108,8 @@ export interface SearchOppMon {
   protectedLastTurn?: boolean;
   /** Damaging hits taken since entry — Rage Fist scaling (see SearchMyMon). */
   timesHit?: number;
+  tormented?: boolean;
+  lastMove?: string;
   /** Focus Sash / Sturdy survival — probabilistic (from inference or usage %). */
   survival?: Survival;
   /** A KNOWN-but-not-yet-brought mon, folded in so the opponent can switch it in
@@ -340,6 +345,8 @@ const ENCORE_BASE = -90;  // Encore → foe idx (foe locked into its last move)
 const FAKEOUT_BASE = -100; // Fake Out → foe idx (chip + guaranteed flinch, first turn out only)
 const PRIO_BASE = -110;   // priority attack (Sucker Punch/Grassy Glide/Aqua Jet/…) → foe idx
 const TRAP_BASE = -120;   // trapping move (Block/Mean Look/…) → foe idx; victim can't use SWITCH
+const TORMENT_BASE = -160; // Torment → foe idx `TORMENT_BASE - target`
+const IMPRISON = -170;     // Imprison — seal the moves this mon shares with the foes
 const SWAP_BASE = -150;     // Trick / Switcheroo / Bestow → foe idx `SWAP_BASE - target`
 const SPOTLIGHT_BASE = -140; // Spotlight → ally idx `SPOTLIGHT_BASE - target`; that ally soaks the foes' single-target moves
 const ALLY_SWITCH = -134;  // Ally Switch — swap the two actives, so incoming single-target moves cross over
@@ -691,6 +698,10 @@ interface Tables {
   mySpotlight: boolean[]; oppSpotlight: boolean[];
   /** Trick / Switcheroo / Bestow move name, or null. */
   myItemSwapMove: (string | null)[]; oppItemSwapMove: (string | null)[];
+  /** Knows Torment / Imprison, and (for Imprison) the mon's own move ids to seal. */
+  myTorment: boolean[]; oppTorment: boolean[];
+  myImprison: boolean[]; oppImprison: boolean[];
+  myMoveIds: string[][]; oppMoveIds: string[][];
   myMatBlock: boolean[]; oppMatBlock: boolean[];
   myCraftyShield: boolean[]; oppCraftyShield: boolean[];
   myPerishMove: (string | null)[];
@@ -907,6 +918,9 @@ function benchWorthHealing(active: number[], hp: number[], status: string[], n: 
   return false;
 }
 
+const tormentCode = (foe: number): number => TORMENT_BASE - foe;
+const isTormentTarget = (t: number): boolean => t <= TORMENT_BASE && t > TORMENT_BASE - 8;
+const tormentFoeIdx = (t: number): number => TORMENT_BASE - t;
 const swapCode = (foe: number): number => SWAP_BASE - foe;
 const isSwapTarget = (t: number): boolean => t <= SWAP_BASE && t > SWAP_BASE - 8;
 const swapFoeIdx = (t: number): number => SWAP_BASE - t;
@@ -1125,6 +1139,15 @@ interface State {
    *  stays baked into the cells; see the note at the removal site.) */
   myItemNow: (string | null | undefined)[];
   oppItemNow: (string | null | undefined)[];
+  /** Move each mon used last turn — Torment forbids repeating it. */
+  myLastMove: (string | null)[];
+  oppLastMove: (string | null)[];
+  /** Under Torment (can't use the same move twice running). */
+  myTormented: boolean[];
+  oppTormented: boolean[];
+  /** Move ids sealed for this SIDE by a foe's Imprison (the imprisoner's own moveset). */
+  mySealed: string[];
+  oppSealed: string[];
   /** Turns still locked into a multi-turn move (Outrage / Petal Dance / Thrash):
    *  while >0 the mon can only attack — no switch / setup / protect. */
   myLocked: number[];
@@ -1517,6 +1540,20 @@ function isWhiteHerb(item: string | null | undefined): boolean { return toId(ite
 function isChoiceItem(item: string | null | undefined): boolean { const i = toId(item ?? ''); return i === 'choiceband' || i === 'choicespecs' || i === 'choicescarf'; }
 // The locked move's per-move cell vs one foe (Choice lock substitution).
 // Undefined when the locked move can't damage this foe → the attack fizzles.
+// The inverse of lockedCellFor: the best cell EXCLUDING a set of forbidden moves. This
+// is how Torment ("can't repeat your last move") and Imprison ("can't use a move the
+// imprisoner also knows") are enforced — at resolution, by substituting the best legal
+// move, rather than by pulling whole TARGETS out of option generation. Targets aren't
+// the restricted thing; moves are.
+function bestCellExcluding(cells: Cell[] | undefined, forbidden: Set<string>): Cell | undefined {
+  let best: Cell | undefined;
+  for (const c of cells ?? []) {
+    if (forbidden.has(toId(c.move))) continue;
+    if (c.dmgMax <= 0) continue;
+    if (!best || c.dmgMid > best.dmgMid) best = c;
+  }
+  return best;
+}
 function lockedCellFor(cells: Cell[] | undefined, locked: string): Cell | undefined {
   const lid = toId(locked);
   return cells?.find(c => toId(c.move) === lid && c.dmgMax > 0);
@@ -2049,6 +2086,12 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppSetupMove: opp.map(o => findSetupMove(o.entry.knownMoves)?.move ?? null),
     myBatonMove: mine.map(m => findMoveId(m.set.moves ?? [], 'batonpass')),
     oppBatonMove: opp.map(o => findMoveId(o.entry.knownMoves, 'batonpass')),
+    myTorment: mine.map(m => !!findMoveId(m.set.moves ?? [], 'torment')),
+    oppTorment: opp.map(o => !!findMoveId(o.entry.knownMoves, 'torment')),
+    myImprison: mine.map(m => !!findMoveId(m.set.moves ?? [], 'imprison')),
+    oppImprison: opp.map(o => !!findMoveId(o.entry.knownMoves, 'imprison')),
+    myMoveIds: mine.map(m => (m.set.moves ?? []).map(toId)),
+    oppMoveIds: opp.map(o => o.entry.knownMoves.map(toId)),
     myItemSwapMove: mine.map(m => (m.set.moves ?? []).find(mv => swapsItem(mv) || bestowsItem(mv)) ?? null),
     oppItemSwapMove: opp.map(o => o.entry.knownMoves.find(mv => swapsItem(mv) || bestowsItem(mv)) ?? null),
     mySpotlight: mine.map(m => !!findMoveId(m.set.moves ?? [], 'spotlight')),
@@ -2254,6 +2297,11 @@ function initialState(input: SearchInput): State {
     oppCharging: input.opp.map(() => null),
     myItemNow: input.mine.map(() => undefined),
     oppItemNow: input.opp.map(o => (o.entry.itemConsumed ? null : undefined)),
+    myLastMove: input.mine.map(m => m.lastMove ?? m.choiceLockedMove ?? null),
+    oppLastMove: input.opp.map(o => o.lastMove ?? o.choiceLockedMove ?? null),
+    myTormented: input.mine.map(m => m.tormented === true),
+    oppTormented: input.opp.map(o => o.tormented === true),
+    mySealed: [], oppSealed: [],
     myLocked: input.mine.map(() => 0),
     oppLocked: input.opp.map(() => 0),
     // Live Choice locks: only honored when the item is genuinely a Choice item
@@ -2487,6 +2535,24 @@ function resolveTurn(
   const oppCharging = [...s.oppCharging];
   const myItemNow = [...s.myItemNow];
   const oppItemNow = [...s.oppItemNow];
+  const myLastMove = [...s.myLastMove];
+  const oppLastMove = [...s.oppLastMove];
+  const myTormented = [...s.myTormented];
+  const oppTormented = [...s.oppTormented];
+  let mySealed = [...s.mySealed];
+  let oppSealed = [...s.oppSealed];
+  // Forbidden move ids for an actor right now: its own last move while Tormented, plus
+  // anything its side has had sealed by a foe's Imprison.
+  const myForbidden = (i: number): Set<string> => {
+    const f = new Set<string>(mySealed);
+    if (myTormented[i] && myLastMove[i]) f.add(toId(myLastMove[i]!));
+    return f;
+  };
+  const oppForbidden = (j: number): Set<string> => {
+    const f = new Set<string>(oppSealed);
+    if (oppTormented[j] && oppLastMove[j]) f.add(toId(oppLastMove[j]!));
+    return f;
+  };
   // Effective holder view: the override when one exists, else the table.
   // `|| undefined` matters: an unheld slot is stored as an empty STRING in the tables,
   // and treating '' as "holding something" made a Trick appear to leave the foe's item
@@ -2813,6 +2879,8 @@ function resolveTurn(
     if (nonAttack(target) || myAsleep(actor)) continue;
     const priority = target === SPREAD ? t.mySpread[actor]!.priority
       : target === ALLY_SWITCH ? movePriority('Ally Switch')
+      : target === IMPRISON ? movePriority('Imprison')
+      : isTormentTarget(target) ? movePriority('Torment')
       : target === PROTECT ? movePriority(t.myProtectMove[actor] ?? 'Protect')
       : isFakeOutTarget(target) ? 3
       : isPrioTarget(target) ? (t.myPrioCell[actor]?.[prioFoeIdx(target)]?.priority ?? 1)
@@ -2823,6 +2891,8 @@ function resolveTurn(
     if (nonAttack(target) || oppAsleep(actor)) continue;
     const priority = target === SPREAD ? t.oppSpread[actor]!.priority
       : target === ALLY_SWITCH ? movePriority('Ally Switch')
+      : target === IMPRISON ? movePriority('Imprison')
+      : isTormentTarget(target) ? movePriority('Torment')
       : target === PROTECT ? movePriority(t.oppProtectMove[actor] ?? 'Protect')
       : isFakeOutTarget(target) ? 3
       : isPrioTarget(target) ? (t.oppPrioCell[actor]?.[prioFoeIdx(target)]?.priority ?? 1)
@@ -2874,6 +2944,17 @@ function resolveTurn(
       if (myHp[act.actor]! <= 0) continue;          // KO'd before acting
       if (myFlinched.has(act.actor)) continue;
       if (carriedNow.mine.has(act.actor)) continue;   // carried up by a Sky Drop already this turn
+      if (isTormentTarget(act.target)) {              // seal the foe's last move from here on
+        const foe = redirect(tormentFoeIdx(act.target), oppSwitchIn);
+        if ((oppHp[foe] ?? 0) > 0) oppTormented[foe] = true;
+        continue;
+      }
+      if (act.target === IMPRISON) {                  // seal the shared moves side-wide
+        const mine0 = new Set(t.myMoveIds[act.actor] ?? []);
+        const shared = oppActiveNow.flatMap(j => (t.oppMoveIds[j] ?? []).filter(id => mine0.has(id)));
+        if (shared.length) oppSealed = [...new Set([...oppSealed, ...shared])];
+        continue;
+      }
       if (act.target === ALLY_SWITCH) {               // swap my two actives for LATER attackers
         const live = myActiveNow.filter(i => (myHp[i] ?? 0) > 0);
         if (live.length === 2) { mySwapPair.length = 0; mySwapPair.push(live[0]!, live[1]!); }
@@ -2922,9 +3003,19 @@ function resolveTurn(
       const myPrio = isPrioTarget(act.target);
       let oTgt = swapThrough(oppSwapPair, oppRedirTarget(act.actor) ?? redirect(myPrio ? prioFoeIdx(act.target) : act.target, oppSwitchIn));
       const myLockMv = myChoiceMove[act.actor];
+      // Torment / Imprison: if the chosen move is forbidden, fall back to this mon's
+      // best LEGAL move against the same target; with nothing legal, the turn is lost.
       let oc = myPrio ? t.myPrioCell[act.actor]?.[oTgt]
         : myLockMv ? lockedCellFor(t.offMoves[act.actor]?.[oTgt], myLockMv)
         : t.off[act.actor]![oTgt]!;
+      {
+        const forb = myForbidden(act.actor);
+        if (forb.size && oc && forb.has(toId(oc.move))) {
+          const alt = bestCellExcluding(t.offMoves[act.actor]?.[oTgt], forb);
+          if (!alt) continue;                       // nothing legal left — the mon stalls
+          oc = alt;
+        }
+      }
       // Doubles retarget: a single-target move whose target already FAINTED hits
       // the remaining live foe with the SAME move (its per-move cell vs the new
       // target) — Showdown never lets it fizzle for free. The sim diff-harness
@@ -3035,11 +3126,23 @@ function resolveTurn(
         if (isRechargeMove(oc.move)) myRecharge[act.actor] = true;
         else if (isLockedMove(oc.move) && myLocked[act.actor]! <= 0) myLocked[act.actor] = 2;
       }
+      myLastMove[act.actor] = oc.move;   // what Torment forbids repeating next turn
       if (t.myChoice[act.actor] && !myChoiceMove[act.actor]) myChoiceMove[act.actor] = oc.move; // Choice: lock to the move used
     } else {
       if (oppHp[act.actor]! <= 0) continue;
       if (oppFlinched.has(act.actor)) continue;       // flinched by Fake Out
       if (carriedNow.opp.has(act.actor)) continue;    // carried up by a Sky Drop already this turn
+      if (isTormentTarget(act.target)) {
+        const foe = redirect(tormentFoeIdx(act.target), mySwitchIn);
+        if ((myHp[foe] ?? 0) > 0) myTormented[foe] = true;
+        continue;
+      }
+      if (act.target === IMPRISON) {
+        const theirs0 = new Set(t.oppMoveIds[act.actor] ?? []);
+        const shared = myActiveNow.flatMap(i => (t.myMoveIds[i] ?? []).filter(id => theirs0.has(id)));
+        if (shared.length) mySealed = [...new Set([...mySealed, ...shared])];
+        continue;
+      }
       if (act.target === ALLY_SWITCH) {
         const live = oppActiveNow.filter(j => (oppHp[j] ?? 0) > 0);
         if (live.length === 2) { oppSwapPair.length = 0; oppSwapPair.push(live[0]!, live[1]!); }
@@ -3089,6 +3192,14 @@ function resolveTurn(
       let tc = oppPrio ? t.oppPrioCell[act.actor]?.[mTgt]
         : oppLockMv ? lockedCellFor(t.thrMoves[act.actor]?.[mTgt], oppLockMv)
         : t.thr[act.actor]![mTgt]!;
+      {
+        const forb = oppForbidden(act.actor);
+        if (forb.size && tc && forb.has(toId(tc.move))) {
+          const alt = bestCellExcluding(t.thrMoves[act.actor]?.[mTgt], forb);
+          if (!alt) continue;
+          tc = alt;
+        }
+      }
       // Doubles retarget onto my side (same rule as above, mirrored).
       if ((myHp[mTgt] ?? 0) <= 0) {
         const alt = myActiveNow.find(i => i !== mTgt && (myHp[i] ?? 0) > 0);
@@ -3177,6 +3288,7 @@ function resolveTurn(
         if (isRechargeMove(tc.move)) oppRecharge[act.actor] = true;
         else if (isLockedMove(tc.move) && oppLocked[act.actor]! <= 0) oppLocked[act.actor] = 2;
       }
+      oppLastMove[act.actor] = tc.move;
       if (t.oppChoice[act.actor] && !oppChoiceMove[act.actor]) oppChoiceMove[act.actor] = tc.move; // Choice: lock to the move used
     }
   }
@@ -3841,7 +3953,8 @@ function resolveTurn(
     myBerryUsed, oppBerryUsed, myHazards, oppHazards, mySleepTurns, oppSleepTurns, myYawn, oppYawn, myPerish, oppPerish, myTrappedBy, oppTrappedBy,
     myTaunt, oppTaunt, myEncore, oppEncore, myEncoreAct, oppEncoreAct,
     myUnburden, oppUnburden, myResistBerryUsed, oppResistBerryUsed, myFirstTurn, oppFirstTurn,
-    myDisguise, oppDisguise, myRecharge, oppRecharge, mySkyDropped, oppSkyDropped, myCharging, oppCharging, myItemNow, oppItemNow, myLocked, oppLocked, myChoiceMove, oppChoiceMove, mySubHp, oppSubHp,
+    myDisguise, oppDisguise, myRecharge, oppRecharge, mySkyDropped, oppSkyDropped, myCharging, oppCharging, myItemNow, oppItemNow,
+    myLastMove, oppLastMove, myTormented, oppTormented, mySealed, oppSealed, myLocked, oppLocked, myChoiceMove, oppChoiceMove, mySubHp, oppSubHp,
     myWish, oppWish, myFutureTurns, oppFutureTurns, myFutureDmg, oppFutureDmg,
     gravity, wonderRoom, magicRoom, gravityTurns, wonderRoomTurns, magicRoomTurns,
   };
@@ -4029,7 +4142,7 @@ function jointActions(
   healingWish?: boolean[],
   // Team protect (root only). Mat Block is FIRST-TURN-OUT only, like Fake Out; Crafty
   // Shield has no such restriction.
-  teamProtect?: { mat: boolean[]; crafty: boolean[]; firstTurn: boolean[]; allySwitch: boolean[]; spotlight?: boolean[]; allies?: number[]; swap?: boolean[]; swapFoes?: number[] },
+  teamProtect?: { mat: boolean[]; crafty: boolean[]; firstTurn: boolean[]; allySwitch: boolean[]; spotlight?: boolean[]; allies?: number[]; swap?: boolean[]; swapFoes?: number[]; torment?: boolean[]; imprison?: boolean[] },
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -4114,6 +4227,8 @@ function jointActions(
       ...(teamProtect?.spotlight?.[actor] === true
         ? (teamProtect.allies ?? []).filter(a => a !== actor).map(spotlightCode) : []),
       ...(teamProtect?.swap?.[actor] === true ? (teamProtect.swapFoes ?? []).map(swapCode) : []),
+      ...(teamProtect?.torment?.[actor] === true ? (teamProtect.swapFoes ?? []).map(tormentCode) : []),
+      ...(teamProtect?.imprison?.[actor] === true ? [IMPRISON] : []),
       ...(canClearHazard ? [CLEAR_HAZARD] : []),
       ...(canSub ? [SET_SUB] : []),
       ...(canCounter ? [COUNTER] : []),
@@ -4680,7 +4795,10 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
       allySwitch: t.oppAllySwitch.map(k => k && s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0).length === 2),
       spotlight: t.oppSpotlight, allies: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0),
       swap: t.oppItemSwapMove.map((mv, j) => !!mv && s.myActive.some(i => (s.myHp[i] ?? 0) > 0 && (t.myItem[i] || '') !== (t.oppItem[j] || ''))),
-      swapFoes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) });
+      swapFoes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0),
+      torment: t.oppTorment.map((k, j) => k && !s.oppTormented[j]),
+      imprison: t.oppImprison.map((k, j) => k && s.myActive.some(i => (s.myHp[i] ?? 0) > 0
+        && (t.myMoveIds[i] ?? []).some(id => (t.oppMoveIds[j] ?? []).includes(id)))) });
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -4775,6 +4893,10 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null, choiceMove
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Counter', targetSpecies: 'foe', self: true });
     } else if (target === SET_ROOM) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myRoomMove[actor] === 'gravity' ? 'Gravity' : t.myRoomMove[actor] === 'wonderRoom' ? 'Wonder Room' : 'Magic Room', targetSpecies: 'field', self: true });
+    } else if (isTormentTarget(target)) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Torment', targetSpecies: t.oppSpecies[tormentFoeIdx(target)]! });
+    } else if (target === IMPRISON) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Imprison', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (isSwapTarget(target)) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myItemSwapMove[actor] ?? 'Trick', targetSpecies: t.oppSpecies[swapFoeIdx(target)]! });
     } else if (isSpotlightTarget(target)) {
@@ -4832,6 +4954,10 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null, choiceM
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppPivotMove[actor] ?? 'U-turn', targetSpecies: t.mySpecies[pivotFoeIdx(target)]!, switch: true });
     } else if (isStatusTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppStatusMove[actor]?.move ?? 'status', targetSpecies: t.mySpecies[statusFoeIdx(target)]! });
+    } else if (isTormentTarget(target)) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Torment', targetSpecies: t.oppSpecies[tormentFoeIdx(target)]! });
+    } else if (target === IMPRISON) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Imprison', targetSpecies: t.mySpecies[actor]!, self: true });
     } else if (isSwapTarget(target)) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myItemSwapMove[actor] ?? 'Trick', targetSpecies: t.oppSpecies[swapFoeIdx(target)]! });
     } else if (isSpotlightTarget(target)) {
@@ -5917,6 +6043,8 @@ export type TurnAction =
   | { kind: 'recover' }                   // Recover / Roost / Wish (delayed) — self-heal
   | { kind: 'substitute' }                // Substitute — pay 25% HP for a sub
   | { kind: 'counter' }                   // Counter / Mirror Coat / Metal Burst — reflect
+  | { kind: 'torment'; target: number }   // seal the foe's last move for the rest of the battle
+  | { kind: 'imprison' }                  // seal the moves this mon shares with the foes
   | { kind: 'itemswap'; target: number }  // Trick / Switcheroo / Bestow at the foe
   | { kind: 'spotlight'; ally: number }  // make `ally` soak the foes' single-target moves
   | { kind: 'allyswitch' }             // swap the two actives — incoming single-target moves cross over
@@ -5995,6 +6123,8 @@ export function resolveOneTurn(
     else if (a.kind === 'recover') { myTargets.set(actor, RECOVER); myMove.set(actor, t.myRecover[actor]?.move ?? 'Recover'); }
     else if (a.kind === 'substitute') { myTargets.set(actor, SET_SUB); myMove.set(actor, 'Substitute'); }
     else if (a.kind === 'counter') { myTargets.set(actor, COUNTER); myMove.set(actor, t.myCounter[actor] ? 'Counter' : ''); }
+    else if (a.kind === 'torment') { myTargets.set(actor, tormentCode(a.target)); myMove.set(actor, 'Torment'); }
+    else if (a.kind === 'imprison') { myTargets.set(actor, IMPRISON); myMove.set(actor, 'Imprison'); }
     else if (a.kind === 'itemswap') { myTargets.set(actor, swapCode(a.target)); myMove.set(actor, t.myItemSwapMove[actor] ?? 'Trick'); }
     else if (a.kind === 'spotlight') { myTargets.set(actor, spotlightCode(a.ally)); myMove.set(actor, 'Spotlight'); }
     else if (a.kind === 'allyswitch') { myTargets.set(actor, ALLY_SWITCH); myMove.set(actor, 'Ally Switch'); }
@@ -6027,6 +6157,8 @@ export function resolveOneTurn(
     else if (a.kind === 'recover') { oppTargets.set(actor, RECOVER); oppMove.set(actor, t.oppRecover[actor]?.move ?? 'Recover'); }
     else if (a.kind === 'substitute') { oppTargets.set(actor, SET_SUB); oppMove.set(actor, 'Substitute'); }
     else if (a.kind === 'counter') { oppTargets.set(actor, COUNTER); oppMove.set(actor, t.oppCounter[actor] ? 'Counter' : ''); }
+    else if (a.kind === 'torment') { oppTargets.set(actor, tormentCode(a.target)); oppMove.set(actor, 'Torment'); }
+    else if (a.kind === 'imprison') { oppTargets.set(actor, IMPRISON); oppMove.set(actor, 'Imprison'); }
     else if (a.kind === 'itemswap') { oppTargets.set(actor, swapCode(a.target)); oppMove.set(actor, t.oppItemSwapMove[actor] ?? 'Trick'); }
     else if (a.kind === 'spotlight') { oppTargets.set(actor, spotlightCode(a.ally)); oppMove.set(actor, 'Spotlight'); }
     else if (a.kind === 'allyswitch') { oppTargets.set(actor, ALLY_SWITCH); oppMove.set(actor, 'Ally Switch'); }
