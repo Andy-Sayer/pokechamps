@@ -91,8 +91,12 @@ export interface TurnDiffResult {
 // Choice string for one active slot, using the move OUR engine actually picked.
 function choiceFor(action: TurnAction | undefined, moveUsed: string | undefined, targetSlotPos: number): string {
   if (!action) return 'default';
-  if (action.kind === 'protect') return 'default';
   const id = toId(moveUsed ?? '');
+  // Protect is self-targeting, so no target slot. Sending 'default' here (the old
+  // behaviour) let the SIM choose its own move while OUR engine protected — the two
+  // engines were then playing different turns, which is why protect was "deferred"
+  // rather than compared. With the variant name threaded through it compares properly.
+  if (action.kind === 'protect') return id ? `move ${id}` : 'default';
   if (!id) return 'default';
   if (action.kind === 'spread') return `move ${id}`;
   return `move ${id} ${targetSlotPos}`;

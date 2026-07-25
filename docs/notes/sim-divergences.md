@@ -76,11 +76,40 @@ pessimistic/optimistic regimes, so it is not a decision-correctness bug.
   is a more precise damage point (per-move cells / a KO-probability envelope), not a new
   mechanic. Tracked as the remaining harness item.
 
-## Harness blind spot (important)
+## Run 2026-07-25 — baseline re-measured + PROTECT now compared
 
-The harness drives **"attack with the best-damage move"** actions only. It therefore does
-NOT exercise the action-CHOICE mechanics — sleep, redirection, pivot, Taunt, Encore,
-setup, status moves, hazards, recovery, switches. Those are validated by **unit tests**
+**Baseline unchanged: 30/213** (13.7% vs June's 38/277 = 13.7%), `fainted` still **0**,
+and every divergence is still the policy-excluded probabilistic class (status 12,
+boost:spa 7, boost:spd 6, boost:def 5, boost:atk 3). So the engine work since June
+(sleep, redirection, hazard clear, foe stat-drops, two-turn charge, Spicy Spray,
+Eelevate grounding, Final Gambit) did **not** cost any resolution fidelity.
+
+**Protect is now actually compared.** It was listed as "deferred", but the reason was a
+BUG rather than a decision: `resolveOneTurn` set the PROTECT target without recording
+which protect variant the mon has, so `moveUsed` was blank and `simDiff.choiceFor` fell
+back to `'default'` — telling the sim "pick for me" while our engine protected. The two
+engines were playing different turns, so the comparison was meaningless and Protect was
+quietly excluded. Both halves fixed; the variant (Protect / Spiky Shield / King's
+Shield / …) is threaded through to the sim.
+
+Result with `--protect 0.25`: **22/213**, no new divergence field. The drop is just
+fewer damaging hits (a quarter of actions no longer attack), NOT an improvement.
+Sanity check `--protect 1`: **0/151** — with every active protecting, the two engines
+agree completely. That is also the evidence the choice is landing: if the sim were
+still picking its own move it would attack, and its damage secondaries would show up as
+status/boost divergences at roughly the attacking-run rate instead of zero.
+
+`--protect <rate>` controls the share (default 0.25, `0` reproduces the historical
+baseline exactly — the roll is only drawn when it can matter, so the PRNG stream and
+therefore the generated positions are unchanged).
+
+## Harness blind spot (still true for everything else)
+
+Beyond Protect, the harness drives **"attack with the best-damage move"** actions only.
+It therefore does NOT exercise the remaining action-CHOICE mechanics — sleep,
+redirection, pivot, Taunt, Encore, setup, status moves, hazards, recovery, switches.
+Switches in particular are not merely unimplemented: these positions have **no bench**,
+so a switch isn't expressible without changing the position generator. Those are validated by **unit tests**
 (`endgame-search.test.ts`) and surfaced by the **`unmodeled.ts` detector**, not by this
 divergence count. So "43/277" measures *resolution* fidelity for a chosen attack, not
 *action-offering* fidelity. Both are needed; this file covers the former.

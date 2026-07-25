@@ -5626,7 +5626,11 @@ export function resolveOneTurn(
     else if (a.kind === 'substitute') { myTargets.set(actor, SET_SUB); myMove.set(actor, 'Substitute'); }
     else if (a.kind === 'counter') { myTargets.set(actor, COUNTER); myMove.set(actor, t.myCounter[actor] ? 'Counter' : ''); }
     else if (a.kind === 'room') { myTargets.set(actor, SET_ROOM); myMove.set(actor, t.myRoomMove[actor] ?? ''); }
-    else { myTargets.set(actor, PROTECT); }
+    // Protect: record the mon's actual variant as the move used. It was left blank,
+    // which made ResolvedSlot.moveUsed lie on protect turns AND left the sim
+    // diff-harness with no move to send (it fell back to 'default', i.e. "sim, pick
+    // for me" — so a Protect turn was never actually compared between engines).
+    else { myTargets.set(actor, PROTECT); myMove.set(actor, t.myProtectMove[actor] ?? 'Protect'); }
   }
   for (const [actor, a] of oppActions) {
     if (a.kind === 'attack') { oppTargets.set(actor, a.target); oppMove.set(actor, t.thr[actor]?.[a.target]?.move ?? ''); }
@@ -5648,7 +5652,7 @@ export function resolveOneTurn(
     else if (a.kind === 'substitute') { oppTargets.set(actor, SET_SUB); oppMove.set(actor, 'Substitute'); }
     else if (a.kind === 'counter') { oppTargets.set(actor, COUNTER); oppMove.set(actor, t.oppCounter[actor] ? 'Counter' : ''); }
     else if (a.kind === 'room') { oppTargets.set(actor, SET_ROOM); oppMove.set(actor, t.oppRoomMove[actor] ?? ''); }
-    else { oppTargets.set(actor, PROTECT); }
+    else { oppTargets.set(actor, PROTECT); oppMove.set(actor, t.oppProtectMove[actor] ?? 'Protect'); }
   }
   const pass: Pass = {
     regime: 'expected',

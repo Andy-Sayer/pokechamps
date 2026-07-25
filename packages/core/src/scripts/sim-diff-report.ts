@@ -77,9 +77,24 @@ async function main() {
 
   for (let n = 0; n < N; n++) {
     const input = buildPosition(rand);
-    // Each active attacks a random live foe (index 0 or 1).
-    const myAct = new Map<number, TurnAction>([[0, { kind: 'attack', target: Math.floor(rand() * 2) }], [1, { kind: 'attack', target: Math.floor(rand() * 2) }]]);
-    const opAct = new Map<number, TurnAction>([[0, { kind: 'attack', target: Math.floor(rand() * 2) }], [1, { kind: 'attack', target: Math.floor(rand() * 2) }]]);
+    // Each active attacks a random live foe — or PROTECTS. Until now the harness only
+    // ever attacked, so it measured RESOLUTION fidelity for a chosen hit and never
+    // action CHOICE. Protect is the cheapest way in: every roster mon has a variant, it
+    // needs no bench (these positions have none, so switching isn't expressible), and it
+    // exercises a genuinely different code path — damage suppression, spread-vs-protect,
+    // and the contact punishes (Spiky Shield / King's Shield) that hang off it.
+    // `--protect <rate>` tunes the share of protecting actives (default 0.25, 0 = off).
+    const pIdx = process.argv.indexOf('--protect');
+    const protectRate = pIdx >= 0 ? Number(process.argv[pIdx + 1] ?? 0.25) : 0.25;
+    // NB: only draw the protect roll when it can matter. Drawing unconditionally would
+    // shift the PRNG stream and silently change which POSITIONS get generated, so
+    // `--protect 0` would no longer reproduce the historical baseline it's meant to.
+    const act = (): TurnAction => {
+      if (protectRate > 0 && rand() < protectRate) return { kind: 'protect' };
+      return { kind: 'attack', target: Math.floor(rand() * 2) };
+    };
+    const myAct = new Map<number, TurnAction>([[0, act()], [1, act()]]);
+    const opAct = new Map<number, TurnAction>([[0, act()], [1, act()]]);
     try {
       // Skip degenerate positions where our engine has no move for an actor.
       const our = resolveOneTurn(input, myAct, opAct);
