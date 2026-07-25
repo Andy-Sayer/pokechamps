@@ -1,4 +1,4 @@
-import type { RegionMap, Rect, TeamPreviewRegions } from './types.js';
+import type { RegionMap, Rect, TeamPreviewRegions, Frame } from './types.js';
 
 const rect = (x: number, w: number, y: number, h: number): Rect => ({ x, y, w, h });
 
@@ -101,6 +101,77 @@ export const GAMESHARE_INSET: ScreenInset = { x: 160 / 1920, y: 90 / 1080, scale
 export const insetRect = (r: Rect, ins: ScreenInset): Rect => ({
   x: ins.x + r.x * ins.scale, y: ins.y + r.y * ins.scale, w: r.w * ins.scale, h: r.h * ins.scale,
 });
+
+/** One frame's vote on which of the TWO layouts we're looking at — the user's own
+ *  screen (full frame) or a friend's GameShare (5/6 centred inset). Those are the only
+ *  two sources the app supports, so this is a hypothesis TEST at the known geometry,
+ *  not a measurement: measuring the border by luma threshold does not work (dark game
+ *  content reads as border — real direct-capture frames measured 0.44-0.48 "shrink").
+ *
+ *  The signal is the STEP at the expected boundary: on a shared feed the outer band is
+ *  near-black and uniform while the picture just inside it is much brighter; on a direct
+ *  capture the game runs to the edge, so the outer band is bright. Measured on real
+ *  fixtures — outer-band mean luma: GameShare 18-19, direct 71-236.
+ *
+ *  Returns null when the frame can't vote (a fade, a black screen, a dark cinematic
+ *  edge-to-edge): outer dark AND inner dark is not an inset, it's just a dark frame.
+ *  ABSTAINING and voting 'full' must stay distinct — a run of dark frames would
+ *  otherwise read as evidence for direct capture. Callers accumulate votes across
+ *  frames rather than trusting one; see `LayoutDetector`. */
+export type LayoutVote = 'full' | 'inset' | null;
+
+export function voteScreenLayout(frame: Frame, ins: ScreenInset = GAMESHARE_INSET): LayoutVote {
+  const W = frame.width, H = frame.height, d = frame.data;
+  const bx = Math.round(ins.x * W), by = Math.round(ins.y * H);
+  if (bx < 4 || by < 4) return null;
+  const luma = (x: number, y: number): number => {
+    const i = (y * W + x) * 4;
+    return 0.299 * d[i]! + 0.587 * d[i + 1]! + 0.114 * d[i + 2]!;
+  };
+  const mean = (x0: number, x1: number, y0: number, y1: number): number => {
+    let s = 0, n = 0;
+    for (let y = Math.max(0, y0); y < Math.min(H, y1); y += 3)
+      for (let x = Math.max(0, x0); x < Math.min(W, x1); x += 3) { s += luma(x, y); n++; }
+    return n ? s / n : 0;
+  };
+  // The four border bands, and a strip of picture just inside each of them.
+  const outer = Math.max(mean(0, bx, 0, H), mean(W - bx, W, 0, H), mean(0, W, 0, by), mean(0, W, H - by, H));
+  const inner = Math.min(
+    mean(bx, bx + 40, by, H - by), mean(W - bx - 40, W - bx, by, H - by),
+    mean(bx, W - bx, by, by + 40), mean(bx, W - bx, H - by - 40, H - by));
+  if (outer >= 35) return 'full';                  // picture reaches the edge → direct capture
+  if (inner < 30 || inner < outer * 1.5) return null;  // dark all through → abstain, don't guess
+  return 'inset';
+}
+
+/**
+ * Sticky layout decision across frames. The app supports exactly two sources — the
+ * user's own screen and a friend's GameShare — and the reader must handle BOTH without
+ * being told which, including a share that starts or stops mid-session.
+ *
+ * Single-frame votes are not trustworthy on their own (a bright flash at the edge of a
+ * shared feed, a dark frame on a direct one), so a flip requires `needed` consecutive
+ * agreeing votes; abstentions neither flip nor reset. Starts at 'full' because that's
+ * the common case (your own capture) and it's what a fresh reader should assume.
+ */
+export class LayoutDetector {
+  private current: Exclude<LayoutVote, null>;
+  private streak = 0;
+  private streakFor: Exclude<LayoutVote, null> | null = null;
+  constructor(private readonly needed = 4, start: Exclude<LayoutVote, null> = 'full') { this.current = start; }
+
+  /** Feed a frame; returns the layout to USE for it (the sticky decision, not the vote). */
+  feed(frame: Frame): Exclude<LayoutVote, null> {
+    const v = voteScreenLayout(frame);
+    if (v == null) return this.current;                        // abstain: no evidence either way
+    if (v === this.current) { this.streak = 0; this.streakFor = null; return this.current; }
+    if (v !== this.streakFor) { this.streakFor = v; this.streak = 0; }
+    if (++this.streak >= this.needed) { this.current = v; this.streak = 0; this.streakFor = null; }
+    return this.current;
+  }
+
+  get layout(): Exclude<LayoutVote, null> { return this.current; }
+}
 
 /** Remap a full-frame RegionMap into a shrunk inset (GameShare). Every box is
  *  scaled + offset by the inset, so the SAME calibration drives a GameShare feed

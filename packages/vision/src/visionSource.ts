@@ -8,7 +8,7 @@ import type { OcrReader } from './ocr.js';
 import { readHpFractionGated } from './hpBar.js';
 import { parseHpNumber, parseAbsHp } from './hpRead.js';
 import { matchSpecies } from './fuzzyMatch.js';
-import { toPixels } from './regions.js';
+import { toPixels, insetRegionMap, LayoutDetector } from './regions.js';
 import { BattleStateMachine } from './stateMachine.js';
 import type { Roster } from './assemble.js';
 
@@ -97,9 +97,21 @@ const withTimeout = <T>(p: Promise<T>, ms: number, label: string): Promise<T> =>
 export async function runVision(
   deps: VisionDeps,
   onProposal: (p: TurnProposal) => void,
-  opts: { stop?: () => boolean; leads?: Partial<Roster>; onFrame?: (fr: FrameRead, raw: Frame) => void; onError?: (e: Error, consecutive: number) => void; onProgress?: () => void; onWedge?: () => void; frameTimeoutMs?: number; resetAfter?: number; watchdogMs?: number } = {},
+  opts: { stop?: () => boolean; leads?: Partial<Roster>; onFrame?: (fr: FrameRead, raw: Frame) => void; onError?: (e: Error, consecutive: number) => void; onProgress?: () => void; onWedge?: () => void; frameTimeoutMs?: number; resetAfter?: number; watchdogMs?: number; autoLayout?: boolean; onLayout?: (l: 'full' | 'inset') => void } = {},
 ): Promise<void> {
   const sm = new BattleStateMachine(opts.leads ?? {});
+  // LAYOUT AUTO-DETECT (default on). The app has exactly two frame sources — your own
+  // screen and a friend's GameShare — and which one is live is not something the user
+  // should have to declare: getting it wrong means every region lands on the wrong
+  // pixels and turns come up silently EMPTY, with no on-screen hint why. So decide it
+  // per frame from the picture itself, with hysteresis so a share starting or stopping
+  // mid-session is picked up but a single odd frame can't thrash the map.
+  // CONTRACT: with autoLayout on, `deps.regions` must be the FULL-FRAME map — the inset
+  // is derived here. Pass autoLayout:false when handing in an already-inset map.
+  const autoLayout = opts.autoLayout !== false;
+  const baseRegions = deps.regions;
+  const insetRegions = autoLayout ? insetRegionMap(baseRegions) : baseRegions;
+  const layoutDet = autoLayout ? new LayoutDetector() : null;
   let consecErrors = 0;
   let n = 0;
   const stage = process.env.VISION_STAGE ? (s: string) => process.stderr.write(`[stage] ${Date.now()} f${n} ${s}\n`) : () => {};
@@ -130,7 +142,14 @@ export async function runVision(
       // + skip. The timeout guards against a hang that would otherwise stall the loop forever.
       try {
         stage('read:start');
-        const fr = await withTimeout(readFrame(frame, deps), opts.frameTimeoutMs ?? 4000, 'frame read');
+        let frameDeps = deps;
+        if (layoutDet) {
+          const was = layoutDet.layout;
+          const now = layoutDet.feed(frame);
+          if (now !== was) opts.onLayout?.(now);
+          frameDeps = { ...deps, regions: now === 'inset' ? insetRegions : baseRegions };
+        }
+        const fr = await withTimeout(readFrame(frame, frameDeps), opts.frameTimeoutMs ?? 4000, 'frame read');
         stage('read:done');
         opts.onFrame?.(fr, frame);   // instrumentation hook (see read-live --debug)
         stage('feed');

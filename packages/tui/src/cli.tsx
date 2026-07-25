@@ -78,7 +78,7 @@ function App() {
   useEffect(() => onWatchingChange(setWatching), []);
   useInput((input, key) => {
     if (key.ctrl && (input === 'w' || input === '\x17')) {
-      if (watcherIsWatching()) stopWatcher(); else startWatcher({ full: true });
+      if (watcherIsWatching()) stopWatcher(); else startWatcher({});   // layout auto-detected (own screen vs GameShare)
     }
   });
 

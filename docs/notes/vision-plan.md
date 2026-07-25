@@ -23,7 +23,8 @@ Switch 2 / VOD ──▶ frames ──▶ readFrame(RegionMap)         ← banne
    `scripts/read-live.ts`, which drives `runVision` → `TurnProposal` JSON on stdout.
    **Ctrl+W** toggles it globally (works from the menu onward, so the watcher spans
    team-select → battle); it auto-respawns on an unexpected child exit.
-   **Default is the GameShare inset** — pass `--full` for a direct 1080p feed.
+   **The frame layout is auto-detected** — your own screen vs a friend's GameShare —
+   so neither needs a mode (`/watch full` / `/watch share` force one if ever needed).
 3. `OpponentInput` auto-reads the team-preview screen while the watcher is on (polling
    until the panel appears), prefilling all six slots with per-slot confidence.
    **Ctrl+R** is the one-off snapshot read.
@@ -101,13 +102,31 @@ Switch 2 / VOD ──▶ frames ──▶ readFrame(RegionMap)         ← banne
   form pins the target like any other follow-up. Replaying both live traces changes exactly
   one line: `o1 > Hurricane > m2 > 33%` (Hurricane billed for the self-hit) becomes
   `o1 > Hurricane > m2` + `hp m2=33%`.
-- **P5 Region robustness across sources** ⚠️ PARTIAL. `find-banner.ts` is the one-frame
-  sanity check and the GameShare inset is auto-detected, but there's still no per-source
-  region override for facecam / overlay VODs.
-- **P6 Remaining banner grammar** ✅ mostly. Crit, status, weather start/end, miss, drowsy
-  (Yawn's only target signal), immunity, residual, end-of-game all landed. Keep harvesting
-  UNK lines with `DEBUG_UNK=1` — Wide Guard / Quick Guard and post-game lines are the
-  known holes.
+- **P5 Region robustness across sources** ✅ CLOSED — **scoped down, then solved**
+  (2026-07-24). The per-source override registry this item asked for is **not being
+  built**: the user's decision is that the app needs to work for exactly two sources —
+  their own screen and a friend's GameShare — and VOD tracing is done. Overrides for
+  overlay/facecam VODs would be configuration for a problem that no longer occurs.
+  What the two supported sources DID need was removing the manual flag. The layout is
+  now detected from the picture per frame (`voteScreenLayout` + `LayoutDetector`), so a
+  share that starts or stops mid-session is picked up on its own. Measuring the border
+  by luma threshold does **not** work — dark game content reads as border, and real
+  direct captures measured 0.44–0.48 "shrink" — so it's a hypothesis test at the known
+  5/6 geometry instead: outer band near-black AND a brightness step inward. Real
+  fixtures: GameShare outer-band luma 18–19, direct 71–236. Dark frames (fades) **abstain**
+  rather than voting, and a flip needs 4 consecutive agreeing votes.
+  **This was a live bug, not just a tidy-up:** Ctrl+W hard-coded `full: true`, so watching
+  a friend's GameShare put every region on the wrong pixels — silent empty turns with no
+  on-screen hint why — unless you knew to type `/watch` instead.
+- **P6 Remaining banner grammar** ✅ mostly, and now **self-harvesting**. Crit, status,
+  weather start/end, miss, drowsy (Yawn's only target signal), immunity, residual,
+  end-of-game all landed. Wide Guard / Quick Guard and post-game lines are the known holes,
+  and the game's exact wording for them is unknown — guessing a regex is worse than the gap,
+  because it silently never fires and looks handled. So `read-live` now appends every
+  unparsed real-looking banner to `fixtures/unknown-banners.log` (deduped, capped, text
+  only, **always on — not gated on `--debug`**, since a hole you only capture while
+  debugging is a hole you never fix). Next time a Wide Guard happens in a real match, the
+  wording is on disk and the grammar is a one-liner.
 - **P7 Opponent team-preview read** ✅ built, ⏳ coverage grinding. See below.
 - **P8 Grabbers** ✅ for practical purposes: `FileFrameGrabber` (offline VOD dirs),
   `StaticFrameGrabber`, `LatestTapGrabber` (live, over the `serve.ts` tap).
@@ -136,8 +155,11 @@ Switch 2 / VOD ──▶ frames ──▶ readFrame(RegionMap)         ← banne
    the M-B headline). The app-owned harvest routine grows this automatically from every
    opponent you key manually; the VOD grind covers the rest
    ([`harvested-vods.md`](harvested-vods.md), [`sprite-refs-plan.md`](sprite-refs-plan.md)).
-4. **Per-source region overrides** (P5 remnant) — only bites on overlay-heavy VODs.
-5. **Banner UNK harvest** (P6 remnant) — Wide/Quick Guard, post-game lines.
+4. **Wide Guard / Quick Guard banner lines** — blocked on ground truth, and now waiting
+   passively: the capture in P6 records the wording the first time one is used in a real
+   match. Check `fixtures/unknown-banners.log` after a session that saw one.
+   *(Per-source region overrides are NOT on this list — see the P5 closeout: the supported
+   sources are your own screen and a GameShare, both auto-detected.)*
 
 ## Validation loop
 

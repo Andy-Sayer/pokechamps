@@ -5,13 +5,16 @@
 // serve process that owns the capture device.
 //
 //   1) npm run -w @pokechamps/vision serve        # owns the dongle, writes latest.png
-//   2) npx tsx scripts/read-live.ts [--full] [--leads o1=Ninetales,o2=Whimsicott,m1=Espathra,m2=Maushold]
+//   2) npx tsx scripts/read-live.ts [--full|--share] [--leads o1=Ninetales,o2=Whimsicott,m1=Espathra,m2=Maushold]
 //
-// --full = no GameShare inset (full-frame regions). Default assumes a GameShare
-// inset (the shared screen is a 5/6 centred inset — see regions.GAMESHARE_INSET).
+// LAYOUT IS AUTO-DETECTED by default — your own screen (full frame) and a friend's
+// GameShare (a 5/6 centred inset, see regions.GAMESHARE_INSET) are told apart from the
+// picture itself, per frame, with hysteresis. A share that starts or stops mid-session
+// is picked up on its own. --full / --share force one and skip detection.
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runVision } from '../src/visionSource.js';
+import { parseBanner } from '../src/bannerParse.js';
 import { LatestTapGrabber } from '../src/frameGrabber.js';
 import { TesseractOcrReader } from '../src/ocr.js';
 import { CHAMPIONS_DOUBLES_PLACEHOLDER, insetRegionMap } from '../src/regions.js';
@@ -22,7 +25,8 @@ import { join } from 'node:path';
 import { Jimp } from 'jimp';
 
 const arg = (f: string) => { const i = process.argv.indexOf(f); return i >= 0 ? process.argv[i + 1] : undefined; };
-const gameshare = !process.argv.includes('--full');
+const forceFull = process.argv.includes('--full');
+const forceShare = process.argv.includes('--share') || process.argv.includes('--gameshare');
 const tapArg = arg('--tap');
 const tap = tapArg ? resolve(tapArg) : resolve(dirname(fileURLToPath(import.meta.url)), '../fixtures/live/latest.png');
 
@@ -33,12 +37,14 @@ if (leadsArg) for (const pair of leadsArg.split(',')) {
   if (k && v && ['m1', 'm2', 'o1', 'o2'].includes(k)) (leads as Record<string, string>)[k] = v;
 }
 
-const regions = gameshare ? insetRegionMap(CHAMPIONS_DOUBLES_PLACEHOLDER) : CHAMPIONS_DOUBLES_PLACEHOLDER;
+// Auto mode hands runVision the FULL-FRAME map and lets it derive the inset (its contract).
+const regions = forceShare ? insetRegionMap(CHAMPIONS_DOUBLES_PLACEHOLDER) : CHAMPIONS_DOUBLES_PLACEHOLDER;
+const autoLayout = !forceFull && !forceShare;
 const grabber = new LatestTapGrabber(tap);
 const ocr = new TesseractOcrReader();
 
 console.error(`[read-live] tap=${tap}`);
-console.error(`[read-live] regions=${regions.label} · leads=${JSON.stringify(leads)}`);
+console.error(`[read-live] regions=${regions.label} · layout=${autoLayout ? 'auto' : forceShare ? 'gameshare (forced)' : 'full frame (forced)'} · leads=${JSON.stringify(leads)}`);
 console.error('[read-live] reading… (start `serve` first; Ctrl+C to stop)');
 
 process.on('SIGINT', () => { grabber.close(); void ocr.close().finally(() => process.exit(0)); });
@@ -74,7 +80,33 @@ if (debug) {
 const looksReal = (t: string) => (t.match(/[a-z]{3,}/gi)?.length ?? 0) >= 2;
 const MAX_SAVED = 250;
 let encoding = false;
-const onFrame = debug ? (fr: FrameRead, raw: Frame) => {
+// UNPARSED-BANNER CAPTURE — always on, text only. The banner grammar still has holes
+// (Wide Guard / Quick Guard among them) and the only way to learn the game's EXACT
+// wording is to catch it the first time it appears in a real match. Guessing a regex is
+// worse than the gap: it silently never fires and looks handled. This is deliberately
+// NOT gated on --debug — a hole you only capture when debugging is a hole you never fix.
+//
+// Cost is a few bytes per NEW line: deduped, capped, real-looking text only, and an
+// async stream. It must stay text-only — it was the full-res PNG dump that starved the
+// event loop and froze the reader (see the --debug frame saver below).
+const UNK_LOG = resolve(dirname(fileURLToPath(import.meta.url)), '../fixtures/unknown-banners.log');
+const unkSeen = new Set<string>();
+let unkStream: WriteStream | null = null;
+const noteUnknown = (text: string): void => {
+  const b = text.trim();
+  if (!b || unkSeen.has(b) || unkSeen.size >= 400) return;
+  if (parseBanner(b).kind !== 'unknown') return;      // already understood → not a hole
+  unkSeen.add(b);
+  try {
+    if (!unkStream) { mkdirSync(dirname(UNK_LOG), { recursive: true }); unkStream = createWriteStream(UNK_LOG, { flags: 'a' }); }
+    unkStream.write(`${new Date().toISOString()}\t${b}\n`);
+  } catch { /* logging must never break the read */ }
+};
+
+const onFrame = (fr: FrameRead, raw: Frame) => {
+  // Always: learn from banners the grammar doesn't understand yet.
+  if (looksReal(fr.battleText)) noteUnknown(fr.battleText);
+  if (!debug) return;
   frameNo++;
   frameStream?.write(JSON.stringify({
     n: frameNo, ts: fr.ts, banner: fr.battleText,
@@ -89,14 +121,17 @@ const onFrame = debug ? (fr: FrameRead, raw: Frame) => {
     const safe = b.slice(0, 40).replace(/[^a-z0-9]/gi, '_');
     void img.write(join(framesDir, `f${String(frameNo).padStart(4, '0')}_${safe}.png`) as `${string}.png`).catch(() => { /* best-effort */ }).finally(() => { encoding = false; });
   }
-} : undefined;
+};
 
 await runVision({ grabber, ocr, regions }, (p) => {
   process.stdout.write(JSON.stringify({ lines: p.lines, confidence: p.confidence, partial: p.partial, occupancy: p.occupancy }) + '\n');
   if (p.lines.length) console.error(`[read-live] ${p.partial ? 'preview' : 'TURN'} → ${p.lines.join('  |  ')}`);
   if (debug && !p.partial) propStream?.write(JSON.stringify({ afterFrame: frameNo, lines: p.lines, confidence: p.confidence, notes: p.notes }) + '\n');
 }, {
-  leads, onFrame,
+  leads, onFrame, autoLayout,
+  // A layout flip is worth saying out loud: it's the difference between reading the
+  // screen and reading nothing, and it means a share just started or ended.
+  onLayout: (l) => console.error(`[read-live] layout → ${l === 'inset' ? 'GameShare inset' : 'full frame'}`),
   // WATCHDOG: runVision self-heals a hung OCR (timeout→reset), but if a frame is ever stuck
   // MID-PROCESSING past the watchdog window (a wedge that defeats even the reset), exit(3) so the
   // parent (TUI watcher) respawns a clean reader. A paused feed does NOT trip it.

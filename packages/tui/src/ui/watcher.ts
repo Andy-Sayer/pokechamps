@@ -30,7 +30,9 @@ export interface WatchProposal {
    *  reconciler. May arrive on a lines-empty message between turns. */
   occupancy?: Partial<Record<'m1' | 'm2' | 'o1' | 'o2', string>>;
 }
-export interface WatchOpts { leads?: string[]; full?: boolean; debug?: boolean }
+/** `layout` forces a frame layout; omit it (the default) to let the reader auto-detect
+ *  your own screen vs a friend's GameShare from the picture, per frame. */
+export interface WatchOpts { leads?: string[]; layout?: 'auto' | 'full' | 'share'; debug?: boolean }
 
 let proc: ChildProcess | null = null;
 let intended = false;          // do we WANT to be watching? deliberate stop clears it → no respawn
@@ -50,7 +52,8 @@ function launch(opts: WatchOpts): ChildProcess | null {
     const readLive = fileURLToPath(new URL('../../../vision/scripts/read-live.ts', import.meta.url));
     const flags = [readLive];
     if (opts.leads?.length) flags.push('--leads', opts.leads.join(','));
-    if (opts.full) flags.push('--full');
+    if (opts.layout === 'full') flags.push('--full');
+    else if (opts.layout === 'share') flags.push('--share');
     if (opts.debug) flags.push('--debug');
     // stderr MUST be 'ignore', not 'pipe': nobody reads it here, and read-live + Tesseract write
     // constant diagnostics to stderr. A piped-but-undrained stderr fills its 64KB buffer in ~a
@@ -101,7 +104,7 @@ export function startWatch(opts: WatchOpts = {}): string {
   proc = launch(opts);
   if (!proc) { intended = false; return "couldn't launch the reader"; }
   emitState();
-  return `watching${opts.full ? ' (full frame)' : ''}`;
+  return `watching${opts.layout === 'full' ? ' (full frame)' : opts.layout === 'share' ? ' (GameShare)' : ' (layout auto)'}`;
 }
 
 export function stopWatch(): void {

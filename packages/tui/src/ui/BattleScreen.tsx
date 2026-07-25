@@ -2724,7 +2724,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
 
   const stopWatch = () => { stopWatcher(); setMessage('Watch off.'); };
 
-  const startWatch = (full: boolean) => {
+  const startWatch = (layout?: 'full' | 'share') => {
     if (watcherIsWatching()) { setMessage('Already watching (started earlier).'); return; }
     // Seed the reader with the active mons per slot so its tracker resolves m1/m2/o1/o2 from
     // the first turn. (If it was started at team-select with no leads, it rebuilds the roster
@@ -2735,18 +2735,19 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     if (a.mine[1] != null && mt[a.mine[1]]) leads.push(`m2=${mt[a.mine[1]]!.species}`);
     if (a.theirs[0] != null && ot[a.theirs[0]]) leads.push(`o1=${ot[a.theirs[0]]!.species}`);
     if (a.theirs[1] != null && ot[a.theirs[1]]) leads.push(`o2=${ot[a.theirs[1]]!.species}`);
-    const status = startWatcher({ leads, full });
-    setMessage(`Watch ON${full ? ' (full frame)' : ''} — ${status}. Start the capture server first (npm run -w @pokechamps/vision serve). Read turns pop up to ratify; Ctrl+R again to stop.`);
+    const status = startWatcher({ leads, layout });
+    setMessage(`Watch ON${layout ? ` (${layout === 'full' ? 'full frame' : 'GameShare'}, forced)` : ''} — ${status}. Start the capture server first (npm run -w @pokechamps/vision serve). Read turns pop up to ratify; Ctrl+R again to stop.`);
   };
 
   // Auto-start the watcher when the battle opens so it captures from TURN 1 (the leads'
   // first actions) with no manual toggle — the user asked for capture-from-the-start.
   // Ctrl+R still stops/restarts it, and this yields complete --debug traces from the
-  // opening for diagnosing the turn reader. Full-frame (direct capture); guard so it
-  // only fires once, and never for a spectator or an already-finished match.
+  // opening for diagnosing the turn reader. The frame layout (your own screen vs a
+  // friend's GameShare) is auto-detected by the reader, so this needs no mode; guard so
+  // it only fires once, and never for a spectator or an already-finished match.
   const autoWatched = useRef(false);
   useEffect(() => {
-    if (!spectator && !match.outcome && !autoWatched.current) { autoWatched.current = true; startWatch(true); }
+    if (!spectator && !match.outcome && !autoWatched.current) { autoWatched.current = true; startWatch(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2892,7 +2893,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       }
       case 'watch': {
         if (watching) { stopWatch(); setMessage('Watch off.'); }
-        else startWatch(args.trim() === 'full');
+        else startWatch(args.trim() === 'full' ? 'full' : args.trim() === 'share' || args.trim() === 'gameshare' ? 'share' : undefined);
         return true;
       }
       case 'crit': setShowCrits(c => { savePrefs({ showCrits: !c }); return !c; }); return true;
