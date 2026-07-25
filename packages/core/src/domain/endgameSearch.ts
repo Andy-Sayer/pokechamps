@@ -639,6 +639,10 @@ interface Tables {
   oppLeechMove: (string | null)[];
   myMaxHp: number[];
   oppMaxHp: number[];
+  /** HP% at the ROOT — Final Gambit's cells are built from it, and resolveTurn
+   *  rescales by live HP so a deeper ply doesn't reuse the root's number. */
+  myRootHp: number[];
+  oppRootHp: number[];
   myGrass: boolean[];
   oppGrass: boolean[];
   // Boost stages baked into the damage cells (= the input boosts). Dynamic
@@ -1376,6 +1380,7 @@ const SUCKER_LIKE = new Set(['suckerpunch', 'thunderclap']);
 function isSuckerLike(move: string | null | undefined): boolean { return SUCKER_LIKE.has(toId(move ?? '')); }
 // Self-destruct moves (Explosion / Self-Destruct / Misty Explosion / Final Gambit /
 // Memento / Healing Wish …): the user faints after the move resolves.
+function isFinalGambit(move: string | null | undefined): boolean { return toId(move ?? '') === 'finalgambit'; }
 function isSelfdestruct(move: string | null | undefined): boolean {
   return !!(getMove(move ?? '') as { selfdestruct?: unknown } | undefined)?.selfdestruct;
 }
@@ -1846,6 +1851,38 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
       return c.dmgMax > 0 ? { ...c, priority: eff(c.move) } : null;
     });
   });
+  // FINAL GAMBIT — deals damage equal to the user's CURRENT HP, then the user faints.
+  // MEASURED, not assumed: @smogon/calc already implements the move (basePower 0 but a
+  // damage callback), and the faint already worked via selfdestruct 'ifHit'. What was
+  // WRONG is that the cell is built without the attacker's current HP, so the calc
+  // assumed FULL HP and the search priced Final Gambit at full value no matter how hurt
+  // the user was — overstating it exactly when you'd actually reach for it. (Accelgor
+  // into Snorlax read 58.1% at both 100% and 50% HP.)
+  // So rebuild it from live HP, in the search's percent-of-TARGET units:
+  // myHp% × (myMaxHp / theirMaxHp) — which reproduces the calc's number exactly at full
+  // HP and scales linearly below it. Fighting-type, so a Ghost defender takes nothing
+  // (and, correctly, the user does NOT faint when the move fails).
+  // Cells use ROOT HP — exact at the ply where the recommendation is made — and
+  // resolveTurn rescales by live HP so deeper plies don't reuse the root's number.
+  {
+    const myMax = mine.map(m => maxHpFor(m.set));
+    const oppMax = opp.map(o => maxHpFor(o.entry.candidates?.[0] ?? defaultOpponentSet(o.entry, 50)));
+    const fgDamage = (atkHp: number, atkMax: number, defMax: number, defSpecies: string): number =>
+      isType(defSpecies, 'Ghost') ? 0 : atkHp * (atkMax / (defMax || 1));
+    const patch = (c: Cell | null | undefined, dmg: number): void => {
+      if (!c || !isFinalGambit(c.move)) return;
+      c.dmgMin = dmg; c.dmgMid = dmg; c.dmgMax = dmg; c.koRolls = [dmg];
+    };
+    off.forEach((row, a) => row?.forEach((c, d) =>
+      patch(c, fgDamage(mine[a]!.hpPercent, myMax[a]!, oppMax[d]!, opp[d]!.entry.species))));
+    offMoves.forEach((row, a) => row?.forEach((list, d) => list?.forEach(c =>
+      patch(c, fgDamage(mine[a]!.hpPercent, myMax[a]!, oppMax[d]!, opp[d]!.entry.species)))));
+    thr.forEach((row, a) => row?.forEach((c, d) =>
+      patch(c, fgDamage(opp[a]!.hpPercent, oppMax[a]!, myMax[d]!, mine[d]!.set.species))));
+    thrMoves.forEach((row, a) => row?.forEach((list, d) => list?.forEach(c =>
+      patch(c, fgDamage(opp[a]!.hpPercent, oppMax[a]!, myMax[d]!, mine[d]!.set.species)))));
+  }
+
   return {
     tt: new Map(),
     myN: mine.length,
@@ -1875,6 +1912,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppTrickRoomMove: opp.map(o => findMoveId(o.entry.knownMoves, 'trickroom')),
     myLeechMove: mine.map(m => findMoveId(m.set.moves ?? [], 'leechseed')),
     oppLeechMove: opp.map(o => findMoveId(o.entry.knownMoves, 'leechseed')),
+    myRootHp: mine.map(m => m.hpPercent),
+    oppRootHp: opp.map(o => o.hpPercent),
     myMaxHp: mine.map(m => maxHpFor(m.set)),
     oppMaxHp: opp.map(o => maxHpFor(o.entry.candidates?.[0] ?? defaultOpponentSet(o.entry, 50))),
     myGrass: mine.map(m => isGrassType(m.set.species)),
@@ -2329,6 +2368,11 @@ function resolveTurn(
     if (has && isSuperEffectiveOn(species, moveType)) (side === 'mine' ? myWpProc : oppWpProc).add(idx);
   };
   // Protect-variant on-contact punish deferred to the status pass (poison/burn).
+  // Final Gambit's cell was built at ROOT HP; the damage is the user's CURRENT HP, so
+  // rescale it whenever the tree has moved off the root. (0 root HP can't happen — a
+  // fainted mon isn't acting — but guard the divide anyway.)
+  const fgScale = (move: string | null | undefined, curHp: number, rootHp: number): number =>
+    isFinalGambit(move) ? (rootHp > 0 ? curHp / rootHp : 0) : 1;
   const myPunishStatus = new Map<number, string>();   // my attacker statused by an OPP protect
   const oppPunishStatus = new Map<number, string>();  // opp attacker statused by MY protect
   // Spicy Spray (Scovillain-Mega, Champions custom): ANY damaging hit on the holder
@@ -2747,7 +2791,7 @@ function resolveTurn(
         }
       }
       const oBefore = oppHp[oTgt]!;
-      apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r) * rageScale(oc.move, myHitsTaken[act.actor] ?? 0) * pierceScale, oc.physical, oc.type, oc.groundMove), oppSurv, oc.multiHit, oppDg(oTgt));
+      apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r) * rageScale(oc.move, myHitsTaken[act.actor] ?? 0) * pierceScale * fgScale(oc.move, myHp[act.actor] ?? 0, t.myRootHp[act.actor] ?? 0), oc.physical, oc.type, oc.groundMove), oppSurv, oc.multiHit, oppDg(oTgt));
       const oDealt = oBefore - oppHp[oTgt]!;
       trackHit(oppBigHit, oTgt, act.actor, oDealt, oc.physical);   // for the opp's Counter
       if (oc.setsHazard) oppHazards = addHazard(oppHazards, oc.setsHazard); // Stone Axe → SR, Ceaseless Edge → Spikes (on their side)
@@ -2878,7 +2922,7 @@ function resolveTurn(
         }
       }
       const mBefore = myHp[mTgt]!;
-      apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r) * rageScale(tc.move, oppHitsTaken[act.actor] ?? 0) * oppPierceScale, tc.physical, tc.type, tc.groundMove), mySurv, tc.multiHit, myDg(mTgt));
+      apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r) * rageScale(tc.move, oppHitsTaken[act.actor] ?? 0) * oppPierceScale * fgScale(tc.move, oppHp[act.actor] ?? 0, t.oppRootHp[act.actor] ?? 0), tc.physical, tc.type, tc.groundMove), mySurv, tc.multiHit, myDg(mTgt));
       const mDealt = mBefore - myHp[mTgt]!;
       trackHit(myBigHit, mTgt, act.actor, mDealt, tc.physical);   // for my Counter
       if (tc.setsHazard) myHazards = addHazard(myHazards, tc.setsHazard); // their Stone Axe / Ceaseless Edge → hazard on my side
