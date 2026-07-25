@@ -27,7 +27,7 @@ mechanic gaps**, now fixed:
 |---|---|---|
 | **Fainted-target retargeting** | ~6.5/10 | A single-target move whose target already fainted RETARGETS the remaining live foe in doubles (Showdown never fizzles it for free). resolveTurn now substitutes the SAME move's per-move cell vs the new target (`offMoves`/`thrMoves` — the stage-(a) tables made the faithful fix possible). |
 | **Dragon Darts doubles split** | ~1.5/10 | With both foes standing, Dragon Darts throws ONE dart at EACH (half the two-hit cell each, the other foe via its own per-move cell); we previously put both darts into one target (over-faint). |
-| **Rage Fist hit scaling** | ~2/10 | +50 BP per damaging hit TAKEN (damage × (1+hits), cap ×7). Counted per-turn in `apply()`; lifetime hit counts from the live match are NOT carried (documented approximation). |
+| **Rage Fist hit scaling** | ~2/10 | +50 BP per damaging hit TAKEN (damage × (1+hits), cap ×7). Counted per-turn in `apply()`. ~~Lifetime hit counts from the live match are NOT carried~~ — **FIXED 2026-07-25**: `SearchInput` now carries `timesHit`, `searchInputFromMatch` populates it from `match.myTimesHit` / `entry.timesHit`, and the cells are built with it. The in-tree `rageScale` is now RELATIVE to the baked baseline, so root hits aren't counted twice. |
 
 Remaining 38: `status` 16 + `boost:*` 26 — all probabilistic secondaries
 (10–30% burn/poison/def-drops, Flame Body), excluded by policy as before. The

@@ -64,6 +64,11 @@ export interface SearchMyMon {
   /** This mon used a Protect-variant LAST turn — seeds the consecutive-protect ban
    *  so a per-turn policy doesn't re-offer a Protect that would just fail. */
   protectedLastTurn?: boolean;
+  /** Damaging hits TAKEN since this mon last entered (Champions resets on switch-out).
+   *  Rage Fist scales +50 BP per hit; the live engine counts it, damage.ts applies it,
+   *  and predictions plumb it — the search just never passed it, so every cell was
+   *  built as though the mon had never been hit. */
+  timesHit?: number;
   /** Focus Sash / Sturdy survival (my items are known, so prob is 0 or 1). */
   survival?: Survival;
   /** Already under Leech Seed — the OPP search-index of the seeder (heals it). */
@@ -98,6 +103,8 @@ export interface SearchOppMon {
   status?: string;
   /** Used a Protect-variant last turn (seeds the consecutive-protect ban). */
   protectedLastTurn?: boolean;
+  /** Damaging hits taken since entry — Rage Fist scaling (see SearchMyMon). */
+  timesHit?: number;
   /** Focus Sash / Sturdy survival — probabilistic (from inference or usage %). */
   survival?: Survival;
   /** A KNOWN-but-not-yet-brought mon, folded in so the opponent can switch it in
@@ -643,6 +650,10 @@ interface Tables {
    *  rescales by live HP so a deeper ply doesn't reuse the root's number. */
   myRootHp: number[];
   oppRootHp: number[];
+  /** Rage Fist hits ALREADY baked into the cells (the live counter at the root). The
+   *  in-tree scale must be relative to this or it double-counts. */
+  myTimesHit: number[];
+  oppTimesHit: number[];
   myGrass: boolean[];
   oppGrass: boolean[];
   // Boost stages baked into the damage cells (= the input boosts). Dynamic
@@ -1764,6 +1775,7 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
       defenderGimmickActive: oppHypoMega(oj),
       attackerBoosts: m.boosts, attackerStatus: m.status,
       defenderBoosts: opp[oj]!.boosts, defenderStatus: opp[oj]!.status,
+      attackerTimesHit: m.timesHit,
     })));
   const off: Cell[][] = offPairs.map(row => row.map(p =>
     cellFrom(p.all.find(c => c.move === p.chosenMove) ?? null)));
@@ -1775,6 +1787,7 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
       defenderGimmickActive: myMega(mi),
       attackerBoosts: opp[oj]!.boosts, attackerStatus: opp[oj]!.status,
       defenderBoosts: m.boosts, defenderStatus: m.status,
+      attackerTimesHit: opp[oj]!.timesHit,
     })));
   const thr: Cell[][] = thrPairs.map(row => row.map(p =>
     cellFrom(p.all.find(c => c.move === p.chosenMove) ?? null)));
@@ -1953,6 +1966,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppLeechMove: opp.map(o => findMoveId(o.entry.knownMoves, 'leechseed')),
     myRootHp: mine.map(m => m.hpPercent),
     oppRootHp: opp.map(o => o.hpPercent),
+    myTimesHit: mine.map(m => m.timesHit ?? 0),
+    oppTimesHit: opp.map(o => o.timesHit ?? 0),
     myMaxHp: mine.map(m => maxHpFor(m.set)),
     oppMaxHp: opp.map(o => maxHpFor(o.entry.candidates?.[0] ?? defaultOpponentSet(o.entry, 50))),
     myGrass: mine.map(m => isGrassType(m.set.species)),
@@ -2247,7 +2262,15 @@ function isDragonDarts(move: string | null | undefined): boolean { return toId(m
 // cross-switch carry. Sim diff-harness finding (under-damage when the user is
 // hit before it acts).
 function isRageFist(move: string | null | undefined): boolean { return toId(move ?? '') === 'ragefist'; }
-function rageScale(move: string, hitsTaken: number): number { return isRageFist(move) ? 1 + Math.min(hitsTaken, 6) : 1; }
+// Rage Fist scales +50 BP per damaging hit TAKEN, capped at 350 BP (= 7x the 50 base).
+// `base` is the live counter already baked into the cell at the root; `extra` is what
+// the mon has taken since, inside the tree. The scale must therefore be RELATIVE to the
+// baked value — returning the absolute multiplier would apply the root hits twice.
+function rageScale(move: string, extraHits: number, baseHits = 0): number {
+  if (!isRageFist(move)) return 1;
+  const mult = (n: number) => 1 + Math.min(n, 6);
+  return mult(baseHits + extraHits) / mult(baseHits);
+}
 
 // Locked multi-turn moves (Outrage family): the user is locked into attacking for
 // 2 more turns (can't switch / setup / protect), then becomes confused.
@@ -2830,7 +2853,7 @@ function resolveTurn(
         }
       }
       const oBefore = oppHp[oTgt]!;
-      apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r) * rageScale(oc.move, myHitsTaken[act.actor] ?? 0) * pierceScale * fgScale(oc.move, myHp[act.actor] ?? 0, t.myRootHp[act.actor] ?? 0), oc.physical, oc.type, oc.groundMove), oppSurv, oc.multiHit, oppDg(oTgt));
+      apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r) * rageScale(oc.move, myHitsTaken[act.actor] ?? 0, t.myTimesHit[act.actor] ?? 0) * pierceScale * fgScale(oc.move, myHp[act.actor] ?? 0, t.myRootHp[act.actor] ?? 0), oc.physical, oc.type, oc.groundMove), oppSurv, oc.multiHit, oppDg(oTgt));
       const oDealt = oBefore - oppHp[oTgt]!;
       trackHit(oppBigHit, oTgt, act.actor, oDealt, oc.physical);   // for the opp's Counter
       if (oc.setsHazard) oppHazards = addHazard(oppHazards, oc.setsHazard); // Stone Axe → SR, Ceaseless Edge → Spikes (on their side)
@@ -2961,7 +2984,7 @@ function resolveTurn(
         }
       }
       const mBefore = myHp[mTgt]!;
-      apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r) * rageScale(tc.move, oppHitsTaken[act.actor] ?? 0) * oppPierceScale * fgScale(tc.move, oppHp[act.actor] ?? 0, t.oppRootHp[act.actor] ?? 0), tc.physical, tc.type, tc.groundMove), mySurv, tc.multiHit, myDg(mTgt));
+      apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r) * rageScale(tc.move, oppHitsTaken[act.actor] ?? 0, t.oppTimesHit[act.actor] ?? 0) * oppPierceScale * fgScale(tc.move, oppHp[act.actor] ?? 0, t.oppRootHp[act.actor] ?? 0), tc.physical, tc.type, tc.groundMove), mySurv, tc.multiHit, myDg(mTgt));
       const mDealt = mBefore - myHp[mTgt]!;
       trackHit(myBigHit, mTgt, act.actor, mDealt, tc.physical);   // for my Counter
       if (tc.setsHazard) myHazards = addHazard(myHazards, tc.setsHazard); // their Stone Axe / Ceaseless Edge → hazard on my side
@@ -4218,6 +4241,7 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
       set, hpPercent, active: myActive.has(idx), megaActive: match.myMegaUsed?.includes(idx),
       boosts: match.myBoosts?.[idx], status: match.myStatus?.[idx], survival: mySurvival(set),
       protectedLastTurn: myActive.has(idx) && protectedOnLastTurn(match, 'mine', idx),
+      timesHit: match.myTimesHit?.[idx],
       // Fake Out / First Impression eligibility — true until the mon moves after entry.
       firstTurnOut: myActive.has(idx) && firstTurnOut(match, 'mine', idx),
       // Choice lock: holder moved since its last entry (a knocked-off item lifts it).
@@ -4240,6 +4264,7 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
       entry, hpPercent, active: oppActive.has(idx), megaActive: entry.megaUsed,
       boosts: entry.currentBoosts, status: entry.status, survival: oppSurvival(entry),
       protectedLastTurn: oppActive.has(idx) && protectedOnLastTurn(match, 'theirs', idx),
+      timesHit: entry.timesHit,
       firstTurnOut: oppActive.has(idx) && firstTurnOut(match, 'theirs', idx),
       // Hard Choice lock only from a KNOWN (revealed) Choice item — soft repeat-
       // move suspicions stay display-only and never restrict the search.
