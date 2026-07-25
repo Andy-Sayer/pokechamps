@@ -1,7 +1,10 @@
 # Sprite-ref library build-out plan
 
-Grow `data/sprite-refs.json` (13 refs today) to cover the meta so `readOppTeam()` can
-identify the opponent's 6 at team preview. Matching is a **background-masked colour
+Grow `data/sprite-refs.json` to cover the meta so `readOppTeam()` can identify the
+opponent's 6 at team preview. **Progress: 13 refs at the time of writing → 125 ref
+entries / 90 species / 44-of-48 meta as of 2026-07-24** (119 verified). `readOppTeam`
+is built and wired into the TUI opponent screen; harvest is now app-owned and self-
+feeding — see [`harvested-vods.md`](harvested-vods.md) for the current gap list. Matching is a **background-masked colour
 histogram** (`colorHist.ts`) — dHash was a dead end (cross-art noise). Because it's
 colour-based, every visually-distinct **variant** needs its own ref, but they all map
 to one **species**.
@@ -162,13 +165,17 @@ which variants have refs (base / shiny / ♀). Drives which VOD to harvest next,
 falls back to manual entry instead of guessing.
 
 ## Phases
-1. **Schema** — variant-keyed refs + species-returning matcher + UPSERT by key. *(small)*
-2. **Player-side harvest** in `bootstrap-refs` + temporal min-redness burst input. *(med)*
-3. **Grind meta base coverage** from VODs (player-side auto + opp-side by-sight). *(grind)*
-4. **Coverage report** → target shiny/♀ gaps. *(small + grind)*
-5. **`readOppTeam()`** — per slot: median-burst → match → confidence flag; validate on
-   held-out preview frames. *(med)*
-6. **Wire into the TUI opponent flow** — auto-populate the 6, user confirms/edits. *(med)*
+1. ✅ **Schema** — variant-keyed refs + species-returning matcher + UPSERT by key.
+2. ✅ **Player-side harvest** in `bootstrap-refs` + temporal min-redness burst input.
+3. ⏳ **Grind meta base coverage** — 44/48 meta; ongoing, and now largely self-feeding
+   via the app-owned sheet harvest (`harvest-all-sheets`, run at TUI startup).
+4. ✅ **Coverage report** — `scripts/sprite-coverage.ts` (meta / regional / long-tail split).
+5. ✅ **`readOppTeam()`** — `oppTeamRead.readOppTeamFromFrame`: per-slot match + confidence,
+   type-icon cross-check, preview-presence gate (`detectPanel` — refuses to invent mons
+   off a non-preview screen), GameShare-inset auto-detection, debug frame persisted per read.
+6. ✅ **Wired into the TUI opponent flow** — auto-reads whenever the watcher is on
+   (Ctrl+R for a one-off); slot-centric confirm, ≥0.7 auto-trusted, Ctrl+D accepts;
+   confirmed slots are harvested back into the ref table.
 
 ## Effort vs coverage
 Meta ≈ 50 species → ~50 base + ~50 shiny + a handful of ♀ ≈ **~110 refs**. Full 208 ≈

@@ -12,7 +12,7 @@ Node TUI assistant for Pokémon Champions doubles:
 2. Log moves + damage turn-by-turn during a manual match.
 3. Infer opponent EV spreads/items/natures from observed damage and predict damage ranges for my moves.
 
-**Format**: Regulation Set M-A (Apr 8 – Jun 17, 2026) — 186 legal species, 117 legal items, **Mega Evolution** (not Tera), item + species clauses on, one mega per battle. Allow-lists live in `data/format.champions.json`. `PokemonSet` has no mega flag — a held mega stone is sufficient signal at the **team validation** layer. For **in-battle damage calcs**, the mega gimmick's `resolveSpecies({set, active})` hook only swaps the base forme for the mega forme name (e.g. Charizard + Charizardite Y -> `Charizard-Mega-Y`) when `active === true`. Pre-mega (stone held, not yet activated) uses base-forme stats. After `/mega` is logged, `applyMegaAction` remaps candidate species names directly. See [`docs/notes/dual-forme-predictions.md`](docs/notes/dual-forme-predictions.md).
+**Format**: Regulation Set M-B (Jun 17 – Sep 2, 2026) — 208 legal species, 148 legal items, **Mega Evolution** (not Tera), item + species clauses on, one mega per battle. (M-A ran Apr 8 – Jun 17; the M-B additions were staged + audited 2026-06-16, see [`docs/notes/regulation-m-b.md`](docs/notes/regulation-m-b.md).) Allow-lists live in `data/format.champions.json`. `PokemonSet` has no mega flag — a held mega stone is sufficient signal at the **team validation** layer. For **in-battle damage calcs**, the mega gimmick's `resolveSpecies({set, active})` hook only swaps the base forme for the mega forme name (e.g. Charizard + Charizardite Y -> `Charizard-Mega-Y`) when `active === true`. Pre-mega (stone held, not yet activated) uses base-forme stats. After `/mega` is logged, `applyMegaAction` remaps candidate species names directly. See [`docs/notes/dual-forme-predictions.md`](docs/notes/dual-forme-predictions.md).
 
 ## Commands
 
@@ -22,11 +22,17 @@ Node TUI assistant for Pokémon Champions doubles:
 - `npm run refresh-data` — dump `@pkmn/dex` into `data/*.json`. Preserves `format.champions.json`.
 - `npm run validate-format` — confirm every id in the format allow-lists resolves in `@pkmn/dex`. Run after hand-editing the format file.
 - `npx tsx packages/core/src/scripts/smoketest.ts` — forward damage + inverse inference sanity check.
-- `npm test` — vitest suite. Also verify against Pikalytics calc and the smoketest for damage changes.
+- `npm test` — vitest suite across all six workspaces (**1471 tests / 127 files green, 2026-07-24**: core 1127, vision 162, server 83, tui 67, web 16, control 16). Also verify against Pikalytics calc and the smoketest for damage changes.
+
+Vision (needs the capture dongle or a VOD; see the package README):
+
+- `npm run -w @pokechamps/vision serve` — own the HDMI device, write the `latest.png` tap. Start this first; everything else only reads the tap.
+- `npx tsx packages/vision/scripts/read-live.ts [--full]` — live turn read → per-turn JSON. Default assumes the **GameShare inset**; `--full` for a direct 1080p feed. The TUI spawns this itself (Ctrl+W).
+- `npm run -w @pokechamps/vision harvest-all-sheets` — batch-harvest archived opponent sheets into `data/sprite-refs.json`. The TUI runs it at startup; commit the file when it grows.
 
 ## Architecture
 
-**Monorepo layout.** npm workspaces under `packages/`: `core` (domain logic, inference, damage, match engine, data scripts, AI wrapper), `tui` (Ink CLI — the primary surface), `server` (optional remote mode), `web` (read-only viewer). Paths below are relative to those packages; core lives at `packages/core/src/`, the TUI at `packages/tui/src/`.
+**Monorepo layout.** npm workspaces under `packages/`: `core` (domain logic, inference, damage, match engine, search, data scripts, AI wrapper), `tui` (Ink CLI — the primary surface), `server` (optional remote mode), `web` (read-only viewer), `vision` (screen → turn-log input adapter), `control` (turn-log → controller-input output adapter; scaffold, no hardware). Paths below are relative to those packages; core lives at `packages/core/src/`, the TUI at `packages/tui/src/`.
 
 **Data (`packages/core/src/domain/data.ts`, `packages/core/src/scripts/refresh-data.ts`).** Game data is dumped from `@pkmn/dex` into editable JSON under `data/`. Always read via `getSpecies/getMove/getItem/getAbility/getNature` — never import from `@pkmn/dex` elsewhere, or you bypass the editable layer. `loadFormat()` / `isLegalSpecies()` / `isLegalItem()` / `searchLegalSpecies()` consume `format.champions.json`.
 
@@ -43,6 +49,10 @@ Node TUI assistant for Pokémon Champions doubles:
 **Gimmicks (`packages/core/src/domain/gimmicks/`).** Mega / Tera / Z-Move / Dynamax sit behind a pluggable `Gimmick` interface so each regulation set can swap one in. The registry in `index.ts` is keyed by `format.champions.json`'s `gimmick` field; `activeGimmick()` resolves it lazily and the rest of the engine (Showdown parse/format, `@smogon/calc` enrichment, inference variants, battle UI, validation, AI prompt summaries) dispatches through optional hooks. Today only `mega` is implemented; the other ids fall back to `noneGimmick`. See `packages/core/src/domain/gimmicks/README.md` for the add-a-gimmick recipe.
 
 **Storage (`packages/core/src/domain/storage.ts`).** Teams in `data/my-teams/<name>.json` as `PokemonSet[]`. Match snapshots in `matches/<id>.json` (gitignored); press `s` in BattleScreen to snapshot.
+
+**Vision (`packages/vision/`).** Pure INPUT adapter: HDMI capture (or a VOD) → the *exact* turn-log strings you'd type. Deterministic CV only — banner OCR + `bannerParse` grammar, HP-number OCR, colour-histogram sprite match; no LLM in the loop. Vision **proposes**, the user **ratifies** (`VisionProposalPanel`). Downstream parser/inference/search are untouched. See [`docs/notes/vision-plan.md`](docs/notes/vision-plan.md).
+
+**Control (`packages/control/`).** The mirror OUTPUT adapter — battle intent → Switch controller input. Software scaffold + `MockBackend` + a dry-run confirm surface only; **no hardware is wired**, and two safety gates stand before any live send. See [`packages/control/README.md`](packages/control/README.md).
 
 ## Conventions
 

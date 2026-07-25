@@ -1,4 +1,9 @@
-# Next-month roadmap — June 2026
+# Next-month roadmap — June 2026 ✅ CLOSED
+
+> **STATUS: fully complete (2026-06-12) — historical.** Every item in this plan
+> shipped; it is kept as the record of what was built and why. It is **not** the
+> current plan — see [`roadmap.md`](roadmap.md)'s header for where things stand now,
+> and [`vision-plan.md`](vision-plan.md) for the track that has carried the work since.
 
 **Written 2026-06-08.** A focused, time-boxed execution plan for the next ~4
 weeks. Complements the strategic [`roadmap.md`](roadmap.md) (pillars, north-star)

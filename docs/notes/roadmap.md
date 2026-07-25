@@ -1,13 +1,24 @@
 # PokeChamps roadmap
 
-> **⏱ Near-term plan:** [`roadmap-2026-06.md`](roadmap-2026-06.md) is the current
-> **month-scoped execution plan** (June 2026) — read that for *what to build next*.
-> This doc remains the strategic/pillar reference + the J north-star. **Note:** the
-> "Recently shipped" / test-count figures below are stale (last bulk-updated
-> 2026-05-29 at ~492–594 tests; the suite is now **994 green** and most of the
-> "Now/Soon" tiers, the entire search long-tail closeout, the inline reveal verbs,
-> and cross-mon item-clause exclusion have since shipped — see git log + the month
-> plan for the true state).
+> **⏱ Read this first (updated 2026-07-24).** This doc is the strategic/pillar
+> reference + the J north-star. The per-pillar prose below is a **historical record**
+> — treat git log and the two living gap docs as the truth, not the tiers here.
+> [`roadmap-2026-06.md`](roadmap-2026-06.md) was June's execution plan and is **fully
+> closed**; there is no July month-plan doc, because since late June the work has been
+> driven by live play rather than a written tier list.
+>
+> **Where things actually stand:** **1471 tests / 127 files green** across six
+> workspaces (core 1127, vision 162, server 83, tui 67, web 16, control 16).
+> Format is **Reg M-B**. The three engine layers are mature — the authoritative open
+> list is `packages/core/src/domain/unmodeled.ts`, mirrored in
+> [`mechanics-coverage.md`](mechanics-coverage.md); the only sizeable search gap left
+> is two-turn/charge moves. Since June the centre of gravity has been
+> **[`vision-plan.md`](vision-plan.md)** (screen → turn-log, now live-validated) and
+> the M-B team/gauntlet work. `packages/control` (the output half of the
+> perceive→decide→act loop) exists as a hardware-free scaffold.
+>
+> **The top open item is not code:** live shakeout of the newest vision fixes in a real
+> ranked match — every prior live test surfaced defects offline replay didn't.
 
 > **See also:** [`accuracy-roadmap.md`](accuracy-roadmap.md) — a focused, tiered punch-list of damage/state/inference/search fidelity gaps and the order to close them. Maintained alongside this strategic doc.
 
@@ -15,7 +26,8 @@
 
 ## Context
 
-**Last updated 2026-05-29.** 594 tests across 4 workspaces, all green.
+**Historical — written 2026-05-29** (kept for the rationale; the numbers are of
+that date, see the header for current state). 594 tests across 4 workspaces, all green.
 A root `vitest.config.ts`
 (`test.projects`) now aggregates every workspace's own config, so both
 `npm test` and a bare `npx vitest run` from the repo root pass —

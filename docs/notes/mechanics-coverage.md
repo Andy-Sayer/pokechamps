@@ -165,7 +165,7 @@ calc. *Audit task:* periodically diff `@smogon/calc` version against Showdown.
 ### Gimmicks
 Mega ✅ (full: search + calc + live). Tera/Z-Move/Dynamax: gimmick interface +
 `none` fallback exist; **this format is Mega only**, so Tera/Z/Dmax are out of
-scope for Reg M-A (revisit per regulation via `format.champions.json`).
+scope for Reg M-B too (revisit per regulation via `format.champions.json`).
 
 ---
 
@@ -256,8 +256,9 @@ EOT residual, root-ply action, switch-in hook).
    Stone Axe (→SR) / Ceaseless Edge (→Spikes) on the defender's side. NOTE: a hazard
    set this turn is correctly dodgeable in a short horizon (a rational opp
    pre-switches its bench mon in before the rock lands), so the realized payoff is
-   the forced-refill case, not a single-turn swing. Hazard CLEAR (Defog/Rapid Spin/…)
-   is still a search GAP.
+   the forced-refill case, not a single-turn swing. Hazard CLEAR (Defog / Rapid Spin /
+   Mortal Spin) has since SHIPPED as its own `hazardclear` action class, offered only
+   when the caster's side actually has hazards.
 4. ~~**Intimidate on switch-in**~~ ✅ SHIPPED — a switch-in with Intimidate drops
    the opposing actives' Atk −1 (into the dynamic boosts), honoring Clear Body /
    Clear Amulet / Hyper Cutter / … immunity. Defiant/Competitive/Guard Dog
@@ -269,29 +270,53 @@ EOT residual, root-ply action, switch-in hook).
    documented approximations.
 
 **P2 — impactful but rarer / more work**
-6. **Foe stat-drops** (Snarl/Icy Wind/Charm/Electroweb) — symmetric to setup but
-   onto the *opponent's* dynamic boosts.
+6. ~~**Foe stat-drops**~~ ✅ SHIPPED — the 100%-chance damaging drops (Icy Wind /
+   Snarl / Electroweb / Struggle Bug / Breaking Swipe / Low Sweep / Bulldoze /
+   Lunge / Acid Spray / Mystical Fire / …) ride `Cell.foeDrop`; the dedicated
+   0-damage debuff moves (single-target AND spread) cast via a `SET_DEBUFF` action.
+   Accuracy/evasion droppers stay excluded by policy (see below).
 7. ~~**Drain self-heal**~~ ✅ SHIPPED — Giga Drain/Drain Punch/… heal the attacker
    `drain × damage-dealt` (Draining Kiss 0.75); single-target. `Cell.drain`.
 8. ~~**Regenerator**~~ ✅ SHIPPED — heals 1/3 max HP when a mon switches out
    (makes pivoting heal); `Tables.my/oppRegen`.
-9. **Two-turn/charge + recharge** (Solar Beam, Fly, Hyper Beam) — model the lost
-   turn / vulnerability window.
+9. **Two-turn/charge** (Solar Beam, Fly, Meteor Beam, Phantom Force) — the lost
+   turn / vulnerability window is still unmodelled in the search. **The single
+   biggest remaining mechanic gap.** *(The recharge half — Hyper Beam / Giga
+   Impact → `my/oppRecharge` can't-act — ✅ SHIPPED.)*
 10. ~~**Rocky Helmet / Rough Skin / Iron Barbs**~~ ✅ SHIPPED — a contact hit into a
     holder chips the attacker (Rocky Helmet 1/6, Rough Skin/Iron Barbs 1/8; Magic
     Guard negates). `Cell.contact` + `Tables.*ContactChip`.
-11. **Sleep** (Spore/Hypnosis/Yawn) — can't-act + wake counter (the big remaining
-    status; deferred because it's a control mechanic, not a scale).
-12. **Redirection** (Follow Me/Rage Powder, Storm Drain/Lightning Rod) + **Wide/
-    Quick Guard** — doubles-defining but complex (slot/targeting model).
+11. ~~**Sleep**~~ ✅ SHIPPED — Spore/Hypnosis/Dark Void etc. set `slp` +
+    `my/oppSleepTurns`; an asleep mon's joint action collapses to "can't act"
+    (shared with freeze + recharge). Yawn is modelled as a *delayed* sleep.
+12. ~~**Redirection + Wide/Quick Guard**~~ ✅ SHIPPED — Follow Me / Rage Powder
+    (with powder immunity: Grass types / Overcoat / Safety Goggles) AND ability
+    redirection (Storm Drain / Lightning Rod absorb) reroute single-target moves;
+    Wide Guard and Quick Guard are side-wide protect action classes.
 
 **P3 — long tail / niche** *(closed 2026-06-05 — see the session block above)*
-Still open: Disable/Torment/Imprison, Booster Energy proc, Black Sludge (search),
-OHKO moves, ability redirection (Storm Drain/Lightning Rod) + Ally Switch. The
-rooms' pure-damage effects (Wonder/Magic Room) remain root-baked → the GPU/recompute
+Also since closed: Disable (live-match root-carry into the search pools), Booster
+Energy (Protosynthesis/Quark Drive via the calc's `boostedStat` + search Spe ×1.5),
+hazard clear, on-KO boost (Moxie/Beast Boost), Weakness Policy. The rooms'
+pure-damage effects (Wonder/Magic Room) remain root-baked → the GPU/recompute
 phase. *(Counter/Mirror Coat, forced-switch items, room cast + Gravity-grounding,
 Wish, Future Sight, Substitute, Magic Bounce, Disguise/Ice Face, freeze,
-self-destruct, Weakness Policy, Taunt/Encore are now handled.)*
+self-destruct, Taunt/Encore are handled.)*
+
+**The authoritative open list is `unmodeled.ts`** — it is kept in lockstep with the
+search, so trust it over prose. As of 2026-07-24 its nine rule classes are:
+
+| Class | What's approximated | Why |
+|---|---|---|
+| `redirection` | Ally Switch / Spotlight | position shuffling — our slot-less model can't represent it |
+| `teamprotect` | Mat Block / Crafty Shield | (Wide/Quick Guard ARE modelled) |
+| `foedebuff` | accuracy/evasion drops | **policy**: maximin never prices hit chance — informational only |
+| `twoturn` | charge moves (P2 #9 above) | real gap |
+| `restriction` | Torment / Imprison / Spite | no live tracking to carry, no in-tree cast model |
+| `selffaint` | Final Gambit / Memento / Healing Wish / Lunar Dance | (Explosion-family IS modelled) |
+| `reactiveitem` | Throat Spray / Blunder Policy / Room Service / Snowball / … | rest of the reactive items |
+| `itemswap` | Trick / Switcheroo / Knock Off / Thief | changes the item table mid-tree |
+| `confusion` | 33% self-hit | **policy**: same as flinch / full-paralysis — the user weighs the dice |
 
 **P4 — infrastructure (separate track)**
 **GPU parallel mode** (original Phase 5) — batch the per-spread forward-damage

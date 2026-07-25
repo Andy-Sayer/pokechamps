@@ -21,10 +21,35 @@ Vision **proposes**, you **ratify** — same self-verifying flow as typed input.
 Deterministic CV (HP-bar pixels + region OCR); any LLM-vision stays an opt-in,
 default-off fallback.
 
-## Status (scaffold)
+## Status: shipped, in live shakeout (2026-07-24)
 
-**Built + tested (hardware-independent):**
-- `hpBar.ts` — `readHpFraction`: HP bar crop → fill fraction.
+The read pipeline runs end-to-end on a real ranked match and is driven from the TUI.
+**162 tests green.** Start `serve` (owns the dongle, writes the `latest.png` tap), then
+hit **Ctrl+W** in the TUI — it spawns `read-live.ts`, auto-reads the opponent's six at
+team preview, and pops each turn into the ratify panel as it builds. Accepting a
+finalized turn auto-finalizes the engine turn.
+
+```
+serve.ts (device owner) ─▶ latest.png tap ─▶ read-live ─▶ runVision ─▶ TurnProposal (JSON)
+   ─▶ TUI watcher singleton ─▶ VisionProposalPanel ─▶ ratify ─▶ engine
+```
+
+Key subsystems beyond the original scaffold: **per-action HP timeline** (per-hit damage
+attribution + spread detection), **occupancy reconciler** (nameplate ground truth
+auto-corrects slot confusion), **team-summary importer** (both summary pages → a verified
+`PokemonSet[]`), **app-owned sheet harvest** (every opponent you key by hand becomes a
+sprite ref at next startup), and a **self-healing reader** (per-frame timeout, OCR worker
+reset, wedge watchdog, auto-respawn).
+
+What's actually left: live shakeout of the newest fixes, `confusionHit` reconciliation,
+sprite coverage (90 species; missing meta = Annihilape / Corviknight / Glimmora /
+Tsareena), per-source region overrides, and the Wide/Quick Guard banner lines.
+`UvcFrameGrabber` stays stubbed — `LatestTapGrabber` over `serve.ts` is the shipped path.
+
+## Foundations (built + tested, hardware-independent)
+- `hpBar.ts` — `readHpFraction`: HP bar crop → fill fraction. The live path uses
+  `readHpFractionGated` (the bar must actually be HP-fill green/yellow/red ∪ dark track,
+  else null) — an ungated read invented 100%/0% on every cinematic frame.
 - `fuzzyMatch.ts` — `matchSpecies` / `matchMove`: noisy OCR → legal species/move.
 - `turnLog.ts` — `emitTurnLog`: TurnObservation → canonical lines (**the contract
   boundary** — encodes the grammar exactly).
@@ -32,7 +57,8 @@ default-off fallback.
 - `colorHist.ts` — `colorHistogram` / `HistogramMatcher` / `loadColorHistRefs`: the
   **validated** OPPONENT-team sprite matcher (icons, no text → OCR can't help). A
   background-masked colour histogram, scored 54/54 under ±8px jitter and 6/6
-  cross-frame on real game art (see below). Seed table in `data/sprite-refs.json`.
+  cross-frame on real game art (see below). Ref table in `data/sprite-refs.json` — 90
+  species, grown automatically by the sheet-harvest routine.
 - `sprite.ts` — `dHash` / `SpriteHashMatcher`: perceptual hash, kept for true
   near-duplicate checks only. **Measured not viable for species ID** — see colorHist.
 - `regions.ts` `CHAMPIONS_TEAM_PREVIEW` — the "Select 4" layout. `oppTeam` is
@@ -57,10 +83,12 @@ your team ("Staraptor" @1.00, "Grimmsnarl", "Sinistcha") + items. The opponent's
 - `regions.ts` `CHAMPIONS_DOUBLES_PLACEHOLDER` calibrated; `stateMachine.ts` live loop
   scaffolded; TUI `VisionProposalPanel` (`/vision`) ratifies a proposed turn.
 
-**Remaining:** consolidate the proven OCR into `ocr.ts` `TesseractOcrReader`; point
-`visionSource.readFrame` at the HP *number* (not the bar); settle-gating + a self-damage
-reconciler; grow `data/sprite-refs.json` toward 208; `UvcFrameGrabber` for live grab
-(capture works via `serve.ts` today).
+**Shipped since (2026-06-28 → 07-24):** the live loop end-to-end (`runVision` →
+`read-live` → TUI watcher), the production `TesseractOcrReader` (per-region `text` /
+`digits` configs + `reset()` recovery), number-based plate-gated HP, the per-action HP
+timeline, GameShare inset support (`insetRegionMap`, the default in `read-live`), the
+opponent preview read + harvest routine, the team-summary importer, and the occupancy
+reconciler.
 
 ## Plan
 

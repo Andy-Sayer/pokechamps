@@ -26,9 +26,17 @@ whenever a VOD is processed. See [`sprite-refs-plan.md`](sprite-refs-plan.md) fo
 - The recurring **"gray cat"** (gray bipedal cat, long curling tail, Fighting/Poison) = **Sneasler** — captured. It was in nearly every VOD; I couldn't ID it because I had Sneasler's look wrong (the old `sneasler` ref was a mislabelled Kingambit). So Sneasler is COMMON (Pikalytics #1 confirmed), not absent.
 - The recurring **"dark witch-hat"** (dark caped flourishing mon, Fairy) = **Floette**, specifically the **Legends-Z-A / Eternal-Flower BLACK colour variant** — only appears WITH the Floettite. NB: Champions shows this mega/Eternal forme in the PREVIEW (not base pixie Floette). Sprite never settles (constant flourish) so the crop is blurry; re-capture if a cleaner frame turns up.
 
-## STILL OPEN
-- Meta gaps (no ref): Annihilape, Corviknight, Froslass, Glimmora, Tsareena, Vivillon.
+## STILL OPEN *(refreshed 2026-07-24 from `npx tsx packages/vision/scripts/sprite-coverage.ts`)*
+- **Meta gaps (no ref): Annihilape, Corviknight, Glimmora, Tsareena** — 44/48 meta covered.
+  *(Froslass and Vivillon have since been covered by the live sheet-harvest routine.)*
+- Regional formes: 3/17. Most wanted: **Raichu-Alola** (Mega Raichu X/Y is the M-B
+  headline), then Slowbro/Slowking-Galar, the Paldean Tauros trio, the Hisui line.
 - Crop-less refs (have ref, no crop): Arcanine, Azumarill, Florges, Gholdengo, Meowscarada, Zoroark-Hisui.
+
+**Note:** the VOD grind is no longer the only source. The **app-owned sheet harvest**
+(TUI startup → `harvest-all-sheets`) turns every opponent you key in manually into a
+`-live` ref, so ordinary ladder play grows the table on its own. Pull VODs for the
+species the ladder hasn't shown you.
 
 ## REJECTED — do NOT re-pull (not usable)
 | VOD id | Creator / title | Why |

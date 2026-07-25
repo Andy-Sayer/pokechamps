@@ -1,6 +1,8 @@
 # Accuracy roadmap
 
-**Last updated 2026-05-29** (status note 2026-06-01 below). A tactical breakdown of correctness gaps and the order to close them. Complements [`roadmap.md`](roadmap.md) (strategic / pillars) — this doc is purely about **damage / state / prediction fidelity**.
+**Last updated 2026-05-29** (status note 2026-06-01 below). **Historical from here down** —
+for what the search still approximates *today*, `packages/core/src/domain/unmodeled.ts`
+is authoritative, summarised in [`mechanics-coverage.md`](mechanics-coverage.md). A tactical breakdown of correctness gaps and the order to close them. Complements [`roadmap.md`](roadmap.md) (strategic / pillars) — this doc is purely about **damage / state / prediction fidelity**.
 
 ## STATUS UPDATE 2026-06-01 — the search-lookahead tier is largely DONE
 
