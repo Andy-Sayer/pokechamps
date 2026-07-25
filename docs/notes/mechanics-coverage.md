@@ -336,7 +336,7 @@ search, so trust it over prose. As of 2026-07-24 its nine rule classes are:
 
 | Class | What's approximated | Why |
 |---|---|---|
-| `redirection` | Ally Switch / Spotlight | position shuffling — our slot-less model can't represent it |
+| `redirection` | Spotlight only | **Ally Switch ✅ modelled 2026-07-25** — a two-active position swap is just a target remap, resolved at its own priority so only slower attackers are redirected. Spotlight (Clefable / Starmie) is still uncast |
 | ~~`teamprotect`~~ | ✅ CLOSED 2026-07-25 — Mat Block (damage, first-turn-out) + Crafty Shield (status) join Wide/Quick Guard | |
 | `foedebuff` | accuracy/evasion drops | **policy**: maximin never prices hit chance — informational only |
 | ~~`twoturn`~~ | ✅ CLOSED 2026-07-25 — Sky Drop carries the victim off too: untargetable, and its whole turn is silenced | |

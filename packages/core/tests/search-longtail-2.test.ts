@@ -136,11 +136,17 @@ describe('Yawn (delayed sleep)', () => {
     void input2;
   });
 
-  test('Yawn is no longer flagged as unmodeled; Ally Switch still is', () => {
+  test('Yawn is not flagged — nor is Ally Switch, now that it is modelled', () => {
     const input = input2v2(target, filler, [yawner, blissey]);
     const flags = unmodeledMechanics(input);
     expect(flags.some(f => f.kind === 'yawn')).toBe(false);
+    // Ally Switch used to be the standing example of a position-shuffle blind spot. It
+    // is modelled now (a two-active swap is a target remap), so flagging it would send
+    // the user to the exact engine for nothing.
     const withAllySwitch = input2v2(mon({ ...target, moves: ['Ally Switch'] }), filler, [yawner, blissey]);
-    expect(unmodeledMechanics(withAllySwitch).some(f => f.kind === 'redirection')).toBe(true);
+    expect(unmodeledMechanics(withAllySwitch).some(f => f.kind === 'redirection')).toBe(false);
+    // Spotlight is what the rule still covers.
+    const withSpotlight = input2v2(mon({ ...target, moves: ['Spotlight'] }), filler, [yawner, blissey]);
+    expect(unmodeledMechanics(withSpotlight).some(f => f.kind === 'redirection')).toBe(true);
   });
 });

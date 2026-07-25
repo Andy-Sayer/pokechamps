@@ -45,8 +45,13 @@ const RULES: GapRule[] = [
   // ability redirection (Storm Drain/Lightning Rod absorb) are MODELLED; only
   // the position-shuffling moves remain — our slot-less model can't represent
   // them, so they stay informational.
-  { kind: 'redirection', label: 'position shuffle (Ally Switch / Spotlight)',
-    moves: ['allyswitch', 'spotlight'] },
+  // ALLY SWITCH is now modelled: with two actives, a position swap is only observable
+  // through TARGETING, which is a two-element remap — the same thing `redirect` already
+  // does for switch-ins. It resolves at its own priority in the ordered loop, so only
+  // attackers SLOWER than it are redirected; a faster foe has already committed.
+  // Spotlight (2 legal users: Clefable, Starmie) still isn't cast in-tree.
+  { kind: 'redirection', label: 'forced redirection onto an ally (Spotlight)',
+    moves: ['spotlight'] },
   // TEAM PROTECT: rule removed 2026-07-25 — the whole class is modelled. Wide Guard
   // (spread), Quick Guard (priority), Mat Block (all DAMAGING moves, first turn out
   // only) and Crafty Shield (all STATUS moves) are each side-wide protect actions.

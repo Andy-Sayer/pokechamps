@@ -340,6 +340,7 @@ const ENCORE_BASE = -90;  // Encore → foe idx (foe locked into its last move)
 const FAKEOUT_BASE = -100; // Fake Out → foe idx (chip + guaranteed flinch, first turn out only)
 const PRIO_BASE = -110;   // priority attack (Sucker Punch/Grassy Glide/Aqua Jet/…) → foe idx
 const TRAP_BASE = -120;   // trapping move (Block/Mean Look/…) → foe idx; victim can't use SWITCH
+const ALLY_SWITCH = -134;  // Ally Switch — swap the two actives, so incoming single-target moves cross over
 const MAT_BLOCK = -132;    // Mat Block (+0, first turn out) — blocks the foes' DAMAGING moves, side-wide
 const CRAFTY_SHIELD = -133; // Crafty Shield (+3) — blocks the foes' STATUS moves, side-wide
 const HEALING_WISH = -131; // Healing Wish — sacrifice the user; the replacement enters fully healed
@@ -680,6 +681,9 @@ interface Tables {
    *  (blocks STATUS moves side-wide). The team-protect siblings of Wide/Quick Guard.
    *  M-B legality: Mat Block is Greninja-only; Crafty Shield is Chimecho / Cofagrigus /
    *  Klefki / Runerigus. */
+  /** Knows Ally Switch. Listed as needing a POSITION model, but it doesn't: with two
+   *  actives a position swap is just a target remap, which `redirect` already does. */
+  myAllySwitch: boolean[]; oppAllySwitch: boolean[];
   myMatBlock: boolean[]; oppMatBlock: boolean[];
   myCraftyShield: boolean[]; oppCraftyShield: boolean[];
   myPerishMove: (string | null)[];
@@ -2024,6 +2028,8 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppSetupMove: opp.map(o => findSetupMove(o.entry.knownMoves)?.move ?? null),
     myBatonMove: mine.map(m => findMoveId(m.set.moves ?? [], 'batonpass')),
     oppBatonMove: opp.map(o => findMoveId(o.entry.knownMoves, 'batonpass')),
+    myAllySwitch: mine.map(m => !!findMoveId(m.set.moves ?? [], 'allyswitch')),
+    oppAllySwitch: opp.map(o => !!findMoveId(o.entry.knownMoves, 'allyswitch')),
     myMatBlock: mine.map(m => !!findMoveId(m.set.moves ?? [], 'matblock')),
     oppMatBlock: opp.map(o => !!findMoveId(o.entry.knownMoves, 'matblock')),
     myCraftyShield: mine.map(m => !!findMoveId(m.set.moves ?? [], 'craftyshield')),
@@ -2460,6 +2466,14 @@ function resolveTurn(
   // action outright, which is the move's real payoff. (A faster victim already acted, so
   // it keeps its turn; that ordering falls out of the single speed-ordered loop.)
   const carriedNow = { mine: new Set<number>(), opp: new Set<number>() };
+  // ALLY SWITCH. A position swap is only observable through TARGETING, and with two
+  // actives that is a two-element remap — the same thing `redirect` does for switch-ins.
+  // It applies to attackers that act AFTER it (the ordered loop gives that for free): a
+  // faster foe has already committed and hit the original mon.
+  const mySwapPair: number[] = [];
+  const oppSwapPair: number[] = [];
+  const swapThrough = (pair: number[], idx: number): number =>
+    (pair.length === 2 ? (idx === pair[0] ? pair[1]! : idx === pair[1] ? pair[0]! : idx) : idx);
   const myLocked = s.myLocked.slice();
   const oppLocked = s.oppLocked.slice();
   // Choice lock: set when an unlocked Choice holder attacks; an already-locked
@@ -2751,6 +2765,7 @@ function resolveTurn(
   for (const [actor, target] of myTargets) {
     if (nonAttack(target) || myAsleep(actor)) continue;
     const priority = target === SPREAD ? t.mySpread[actor]!.priority
+      : target === ALLY_SWITCH ? movePriority('Ally Switch')
       : target === PROTECT ? movePriority(t.myProtectMove[actor] ?? 'Protect')
       : isFakeOutTarget(target) ? 3
       : isPrioTarget(target) ? (t.myPrioCell[actor]?.[prioFoeIdx(target)]?.priority ?? 1)
@@ -2760,6 +2775,7 @@ function resolveTurn(
   for (const [actor, target] of oppTargets) {
     if (nonAttack(target) || oppAsleep(actor)) continue;
     const priority = target === SPREAD ? t.oppSpread[actor]!.priority
+      : target === ALLY_SWITCH ? movePriority('Ally Switch')
       : target === PROTECT ? movePriority(t.oppProtectMove[actor] ?? 'Protect')
       : isFakeOutTarget(target) ? 3
       : isPrioTarget(target) ? (t.oppPrioCell[actor]?.[prioFoeIdx(target)]?.priority ?? 1)
@@ -2810,7 +2826,12 @@ function resolveTurn(
     if (act.side === 'mine') {
       if (myHp[act.actor]! <= 0) continue;          // KO'd before acting
       if (myFlinched.has(act.actor)) continue;
-      if (carriedNow.mine.has(act.actor)) continue;   // carried up by a Sky Drop already this turn        // flinched by Fake Out
+      if (carriedNow.mine.has(act.actor)) continue;   // carried up by a Sky Drop already this turn
+      if (act.target === ALLY_SWITCH) {               // swap my two actives for LATER attackers
+        const live = myActiveNow.filter(i => (myHp[i] ?? 0) > 0);
+        if (live.length === 2) { mySwapPair.length = 0; mySwapPair.push(live[0]!, live[1]!); }
+        continue;
+      }        // flinched by Fake Out
       if (act.target === PROTECT) continue;           // mon uses Protect — no damage dealt
       if (isFakeOutTarget(act.target)) {              // Fake Out: chip + flinch the target
         if (oppQuickGuard || oppMatBlock) continue;    // Quick Guard (priority) / Mat Block (damage) stop Fake Out
@@ -2852,7 +2873,7 @@ function resolveTurn(
       // the max-damage off cell. Redirection (opp Rage Powder/Follow Me) overrides
       // targeting; else the switch-redirect (hit the replacement if it switched).
       const myPrio = isPrioTarget(act.target);
-      let oTgt = oppRedirTarget(act.actor) ?? redirect(myPrio ? prioFoeIdx(act.target) : act.target, oppSwitchIn);
+      let oTgt = swapThrough(oppSwapPair, oppRedirTarget(act.actor) ?? redirect(myPrio ? prioFoeIdx(act.target) : act.target, oppSwitchIn));
       const myLockMv = myChoiceMove[act.actor];
       let oc = myPrio ? t.myPrioCell[act.actor]?.[oTgt]
         : myLockMv ? lockedCellFor(t.offMoves[act.actor]?.[oTgt], myLockMv)
@@ -2972,6 +2993,11 @@ function resolveTurn(
       if (oppHp[act.actor]! <= 0) continue;
       if (oppFlinched.has(act.actor)) continue;       // flinched by Fake Out
       if (carriedNow.opp.has(act.actor)) continue;    // carried up by a Sky Drop already this turn
+      if (act.target === ALLY_SWITCH) {
+        const live = oppActiveNow.filter(j => (oppHp[j] ?? 0) > 0);
+        if (live.length === 2) { oppSwapPair.length = 0; oppSwapPair.push(live[0]!, live[1]!); }
+        continue;
+      }
       if (act.target === PROTECT) continue;           // opp mon uses Protect
       if (isFakeOutTarget(act.target)) {              // opp Fake Out: chip + flinch my mon
         if (myQuickGuard || myMatBlock) continue;      // Quick Guard (priority) / Mat Block (damage) stop Fake Out
@@ -3011,7 +3037,7 @@ function resolveTurn(
       // Priority-attack option uses the opp prio cell; a Choice-LOCKED opp
       // substitutes its locked move's per-move cell; else the max-damage thr cell.
       const oppPrio = isPrioTarget(act.target);
-      let mTgt = myRedirTarget(act.actor) ?? redirect(oppPrio ? prioFoeIdx(act.target) : act.target, mySwitchIn);  // redirection, else switch-redirect
+      let mTgt = swapThrough(mySwapPair, myRedirTarget(act.actor) ?? redirect(oppPrio ? prioFoeIdx(act.target) : act.target, mySwitchIn));  // ally-switch swap, redirection, else switch-redirect
       const oppLockMv = oppChoiceMove[act.actor];
       let tc = oppPrio ? t.oppPrioCell[act.actor]?.[mTgt]
         : oppLockMv ? lockedCellFor(t.thrMoves[act.actor]?.[mTgt], oppLockMv)
@@ -3921,7 +3947,7 @@ function jointActions(
   healingWish?: boolean[],
   // Team protect (root only). Mat Block is FIRST-TURN-OUT only, like Fake Out; Crafty
   // Shield has no such restriction.
-  teamProtect?: { mat: boolean[]; crafty: boolean[]; firstTurn: boolean[] },
+  teamProtect?: { mat: boolean[]; crafty: boolean[]; firstTurn: boolean[]; allySwitch: boolean[] },
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -4002,6 +4028,7 @@ function jointActions(
       ...(healingWish?.[actor] === true ? [HEALING_WISH] : []),
       ...(teamProtect?.mat[actor] === true && teamProtect.firstTurn[actor] === true ? [MAT_BLOCK] : []),
       ...(teamProtect?.crafty[actor] === true ? [CRAFTY_SHIELD] : []),
+      ...(teamProtect?.allySwitch[actor] === true ? [ALLY_SWITCH] : []),
       ...(canClearHazard ? [CLEAR_HAZARD] : []),
       ...(canSub ? [SET_SUB] : []),
       ...(canCounter ? [COUNTER] : []),
@@ -4564,7 +4591,8 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     t.oppPerishMove.map(pm => !!pm && s.myActive.some(i => (s.myHp[i] ?? 0) > 0 && (s.myPerish[i] ?? 0) === 0 && toId(t.myAbility[i] ?? '') !== 'soundproof')),
     { move: t.oppTrapMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0 && s.myTrappedBy[i] == null && !isType(t.mySpecies[i]!, 'Ghost')) },
     t.oppHealingWish.map(hw => !!hw && benchWorthHealing(s.oppActive, s.oppHp, s.oppStatus, t.oppN)),
-    { mat: t.oppMatBlock, crafty: t.oppCraftyShield, firstTurn: s.oppFirstTurn });
+    { mat: t.oppMatBlock, crafty: t.oppCraftyShield, firstTurn: s.oppFirstTurn,
+      allySwitch: t.oppAllySwitch.map(k => k && s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0).length === 2) });
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -4659,6 +4687,8 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null, choiceMove
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Counter', targetSpecies: 'foe', self: true });
     } else if (target === SET_ROOM) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myRoomMove[actor] === 'gravity' ? 'Gravity' : t.myRoomMove[actor] === 'wonderRoom' ? 'Wonder Room' : 'Magic Room', targetSpecies: 'field', self: true });
+    } else if (target === ALLY_SWITCH) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Ally Switch', targetSpecies: 'my ally', self: true });
     } else if (target === MAT_BLOCK) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Mat Block', targetSpecies: 'my side', self: true });
     } else if (target === CRAFTY_SHIELD) {
@@ -4710,6 +4740,8 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null, choiceM
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppPivotMove[actor] ?? 'U-turn', targetSpecies: t.mySpecies[pivotFoeIdx(target)]!, switch: true });
     } else if (isStatusTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppStatusMove[actor]?.move ?? 'status', targetSpecies: t.mySpecies[statusFoeIdx(target)]! });
+    } else if (target === ALLY_SWITCH) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Ally Switch', targetSpecies: 'my ally', self: true });
     } else if (target === MAT_BLOCK) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Mat Block', targetSpecies: 'my side', self: true });
     } else if (target === CRAFTY_SHIELD) {
@@ -5789,6 +5821,7 @@ export type TurnAction =
   | { kind: 'recover' }                   // Recover / Roost / Wish (delayed) — self-heal
   | { kind: 'substitute' }                // Substitute — pay 25% HP for a sub
   | { kind: 'counter' }                   // Counter / Mirror Coat / Metal Burst — reflect
+  | { kind: 'allyswitch' }             // swap the two actives — incoming single-target moves cross over
   | { kind: 'matblock' }               // Mat Block — side-wide block of DAMAGING moves (first turn out)
   | { kind: 'craftyshield' }           // Crafty Shield — side-wide block of STATUS moves
   | { kind: 'healingwish' }            // sacrifice self; the replacement enters fully healed
@@ -5864,6 +5897,7 @@ export function resolveOneTurn(
     else if (a.kind === 'recover') { myTargets.set(actor, RECOVER); myMove.set(actor, t.myRecover[actor]?.move ?? 'Recover'); }
     else if (a.kind === 'substitute') { myTargets.set(actor, SET_SUB); myMove.set(actor, 'Substitute'); }
     else if (a.kind === 'counter') { myTargets.set(actor, COUNTER); myMove.set(actor, t.myCounter[actor] ? 'Counter' : ''); }
+    else if (a.kind === 'allyswitch') { myTargets.set(actor, ALLY_SWITCH); myMove.set(actor, 'Ally Switch'); }
     else if (a.kind === 'matblock') { myTargets.set(actor, MAT_BLOCK); myMove.set(actor, 'Mat Block'); }
     else if (a.kind === 'craftyshield') { myTargets.set(actor, CRAFTY_SHIELD); myMove.set(actor, 'Crafty Shield'); }
     else if (a.kind === 'healingwish') { myTargets.set(actor, HEALING_WISH); myMove.set(actor, t.myHealingWish[actor] ?? 'Healing Wish'); }
@@ -5893,6 +5927,7 @@ export function resolveOneTurn(
     else if (a.kind === 'recover') { oppTargets.set(actor, RECOVER); oppMove.set(actor, t.oppRecover[actor]?.move ?? 'Recover'); }
     else if (a.kind === 'substitute') { oppTargets.set(actor, SET_SUB); oppMove.set(actor, 'Substitute'); }
     else if (a.kind === 'counter') { oppTargets.set(actor, COUNTER); oppMove.set(actor, t.oppCounter[actor] ? 'Counter' : ''); }
+    else if (a.kind === 'allyswitch') { oppTargets.set(actor, ALLY_SWITCH); oppMove.set(actor, 'Ally Switch'); }
     else if (a.kind === 'matblock') { oppTargets.set(actor, MAT_BLOCK); oppMove.set(actor, 'Mat Block'); }
     else if (a.kind === 'craftyshield') { oppTargets.set(actor, CRAFTY_SHIELD); oppMove.set(actor, 'Crafty Shield'); }
     else if (a.kind === 'healingwish') { oppTargets.set(actor, HEALING_WISH); oppMove.set(actor, t.oppHealingWish[actor] ?? 'Healing Wish'); }
