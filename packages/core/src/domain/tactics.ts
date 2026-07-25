@@ -143,7 +143,7 @@ const TERRAIN_ABUSE: Record<string, { kind: 'electric' | 'psychic' | 'grassy'; w
 
 /** Spread moves whose ally-side immunity makes them free in doubles. */
 const SPREAD_IMMUNE: Record<string, { types: string[]; abilities: string[]; items: string[] }> = {
-  earthquake: { types: ['Flying'], abilities: ['levitate'], items: ['airballoon'] },
+  earthquake: { types: ['Flying'], abilities: ['levitate', 'eelevate'], items: ['airballoon'] },
   discharge: { types: ['Ground'], abilities: ['lightningrod', 'motordrive', 'voltabsorb'], items: [] },
   surf: { types: [], abilities: ['waterabsorb', 'stormdrain', 'dryskin'], items: [] },
   sludgewave: { types: ['Steel'], abilities: [], items: [] },

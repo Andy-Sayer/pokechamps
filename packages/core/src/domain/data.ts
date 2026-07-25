@@ -88,6 +88,16 @@ export function getMove(name: string) {
 // Beam) / electric terrain (Electro Shot) can collapse it to one turn —
 // when that happens the user just logs damage normally and the charging
 // state never gets set.
+// Abilities that make a mon UNGROUNDED the way Levitate does. Champions' custom
+// **Eelevate** (Eelektross-Mega) is "Levitate + Beast Boost", so every Levitate check
+// must accept it too — otherwise the mega loses its defining Ground immunity in every
+// layer that tests the ability by NAME (hazards, terrain, the search's grounded flag).
+// The calc is unaffected: damage.ts aliases Eelevate to Levitate before calling it.
+const LEVITATE_ABILITIES: ReadonlySet<string> = new Set(['levitate', 'eelevate']);
+export function isLevitateAbility(ability: string | null | undefined): boolean {
+  return LEVITATE_ABILITIES.has(toId(ability ?? ''));
+}
+
 export function isChargeMove(name: string): boolean {
   const m = getMove(name) as any;
   return !!(m?.flags?.charge);

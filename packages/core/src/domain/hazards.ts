@@ -1,5 +1,5 @@
 import type { HazardState, FieldState, PokemonSet, OpponentEntry } from './types.js';
-import { getSpecies, getAbility, getItem } from './data.js';
+import { getSpecies, getAbility, getItem , isLevitateAbility } from './data.js';
 import { effectiveness } from './typechart.js';
 
 export interface HazardEffect {
@@ -37,7 +37,7 @@ export function applyHazardsToSwitchIn(
   const item = itemName ? (getItem(itemName) as any) : null;
   const isMagicGuard = ability?.name === 'Magic Guard';
   const isHeavyDutyBoots = item?.name === 'Heavy-Duty Boots';
-  const isLevitate = ability?.name === 'Levitate';
+  const isLevitate = isLevitateAbility(ability?.name ?? abilityName);   // incl. Champions' Eelevate
   const isFlying = types.includes('Flying');
   const groundImmune = (isLevitate || isFlying) && !incoming.gravity; // Gravity grounds everything
 

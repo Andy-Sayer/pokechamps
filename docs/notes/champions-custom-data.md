@@ -53,6 +53,31 @@ filled directly into `SPECIES_PATCHES` + `MEGA_ABILITY_OVERRIDES` + `species.jso
 WITHOUT a full `npm run refresh-data` (avoids a wide dex re-dump mid-cycle); the
 patches are in `SPECIES_PATCHES` so the next refresh reproduces them.
 
+## Three-layer re-audit (2026-07-24)
+
+Prompted by a live find: the new two-turn charge model read FIELD weather, so Mega Sol's
+personal sun didn't skip its own Solar Beam charge. That was a general question — which
+custom abilities are honoured in which of the three layers? — so all six were re-checked
+by effect, not by whether the name appears.
+
+| Ability | calc | live engine | search |
+|---|---|---|---|
+| **Mega Sol** | ✅ forces Sun in the holder's offensive calc | ✅ n/a by design — charging state is EVIDENCE-driven (set only when the user logs no damage), so a one-turn Solar Beam never sets it | ✅ damage baked; charge skip fixed (87dce75). ⚠️ latent: the dynamic weather rescale assumes a cell was baked at field weather — a no-op today (Meganium has no Fire/Water attacking moves, and Weather Ball's cell type is Normal) |
+| **Spicy Spray** | n/a (not a damage mod) | ✅ both mirrors (`engine.ts` + `BattleScreen.tsx`) | ❌ **GAP** — the search never burns a contact attacker, so it over-rates physical attackers into Scovillain-Mega (a burn halves their damage from then on) |
+| **Dragonize** | ✅ Normal→Dragon type override | ✅ n/a (damage via the calc) | ⚠️ damage correct (baked), but `Cell.type` is the DEX type, so type-keyed SECONDARY logic (Misty Terrain halving Dragon, resist-berry marking, Weakness Policy) reads Normal. Same shape for Fire Mane's Weather Ball |
+| **Piercing Drill** | n/a | ✅ n/a (Protect blocking is user-logged) | ✅ both directions |
+| **Eelevate** | ✅ aliased to Levitate | ✅ **fixed 2026-07-24** — `hazards.ts` matched `=== 'Levitate'`, so the mega ate Spikes / Toxic Spikes / Sticky Web it should float over | ✅ Beast Boost half already modelled; `isGrounded` matched `'levitate'` only, so it counted as GROUNDED for terrain factors, Psychic-Terrain priority blocking and terrain-based status immunity — **fixed** |
+| **Fire Mane** | ✅ ×1.5 Fire override | n/a | ✅ baked into cells |
+
+**The recurring failure mode is a by-NAME ability test.** Eelevate is Levitate plus Beast
+Boost, and every layer that compared the string missed it while the calc (which aliases it)
+was fine. `isLevitateAbility()` in `data.ts` is now the single source of truth — use it
+instead of comparing to `'Levitate'`, and add any future alias there once.
+
+**Still open** (neither is a data problem; both are search-engine work):
+1. Spicy Spray's on-contact burn in the lookahead.
+2. Ability-modified move TYPE not reaching `Cell.type` (Dragonize, Fire Mane/Weather Ball).
+
 ## Reg M-B move changes (2026-06-28)
 
 Champions rebalanced some moves; `@pkmn/dex` carries NONE of these (mainline

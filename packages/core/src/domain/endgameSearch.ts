@@ -27,7 +27,7 @@ import { ZERO_EVS, MAX_IVS } from './types.js';
 import { predictOffense, predictThreat, predictOffenseCells, predictThreatCells, pikalyticsMoves } from './predictions.js';
 import { representativeSpreadIndices } from './inference.js';
 import { actualSpeed, actualStat, effectiveSpeedRange } from './speed.js';
-import { getMove, getSpecies, getNature, toId, isSpreadMove, moveFlinchChance, isTrappingMove } from './data.js';
+import { getMove, getSpecies, getNature, toId, isSpreadMove, moveFlinchChance, isTrappingMove, isLevitateAbility } from './data.js';
 import { getMegaOptions, megaFormeAbility } from './gimmicks/mega.js';
 import { defaultOpponentSet } from './bring.js';
 import { maxHpFor } from './damage.js';
@@ -1205,7 +1205,7 @@ type Terrain = FieldState['terrain'];           // 'Electric' | 'Grassy' | 'Mist
 // Terrain affects only GROUNDED mons: not Flying-type and not Levitate (Air
 // Balloon / Iron Ball ignored — a documented simplification).
 function isGrounded(species: string, ability: string | null | undefined): boolean {
-  if (toId(ability ?? '') === 'levitate') return false;
+  if (isLevitateAbility(ability)) return false;   // Levitate, and Champions' Eelevate
   return !isType(species, 'Flying');
 }
 // Damage factor terrain applies to ONE hit. Electric/Grassy/Psychic boost the
