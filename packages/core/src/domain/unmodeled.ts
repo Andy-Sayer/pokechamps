@@ -108,13 +108,14 @@ const RULES: GapRule[] = [
   // per ply and can't be un-baked mid-tree.
   // Item SWAPPING (Trick / Switcheroo / Bestow) is still unmodelled — a swap hands the
   // other mon something, so it isn't just a removal.
-  // Item removal AND swapping are modelled (Knock Off / Thief / Covet / Corrosive Gas,
-  // Trick / Switcheroo / Bestow): the holder state is an override, so both the loser and
-  // the RECEIVER get their Life Orb recoil, Leftovers healing and berry triggers
-  // recomputed. What stays approximate is only the DAMAGE scaling an item was giving
-  // (Life Orb x1.3, type boosters), which is baked into cells built once per ply.
-  { kind: 'itemscaling', label: 'damage scaling of an item gained/lost mid-turn',
-    moves: ['trick', 'switcheroo', 'knockoff', 'thief'] },
+  // ITEMS: rule removed 2026-07-25 — removal, swapping AND the damage rescale are all
+  // modelled. The holder is state rather than a table lookup, so the loser and the
+  // RECEIVER both get their Life Orb recoil, Leftovers healing and berry triggers
+  // recomputed, and a cell baked with the old holding is corrected by the ratio of the
+  // new item's multiplier to the old one's (Life Orb x1.3, type boosters x1.2,
+  // Muscle Band / Wise Glasses x1.1). M-B has no DEFENSIVE scaling items to worry about.
+  // Expert Belt is excluded on purpose: its x1.2 is conditional on type effectiveness,
+  // which a cell doesn't carry.
   // Confusion is a PROBABILISTIC secondary (33% self-hit) — deliberately NOT
   // auto-applied, the same policy as flinch and the 25% full-paralysis chance
   // (sim-divergences.md). Flagged as informational so the user weighs the dice.

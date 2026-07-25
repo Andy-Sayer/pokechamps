@@ -332,7 +332,9 @@ cell baked once per ply can't represent — a weather change mid-tree would have
 the move's type — so those still carry the dex type.
 
 **The authoritative open list is `unmodeled.ts`** — it is kept in lockstep with the
-search, so trust it over prose. As of 2026-07-24 its nine rule classes are:
+search, so trust it over prose. **As of 2026-07-25 it is down to TWO rules, and both are
+deliberate POLICY rather than gaps** (see the accuracy/dice ruling below): every
+mechanic the search can model, it now models.
 
 | Class | What's approximated | Why |
 |---|---|---|
@@ -343,7 +345,7 @@ search, so trust it over prose. As of 2026-07-24 its nine rule classes are:
 | ~~`restriction`~~ | ✅ CLOSED 2026-07-25 — Torment + Imprison cast in speed order, enforced by substituting the best legal move. Spite (PP) is out of scope by horizon: a 3-5 turn search can't exhaust PP | |
 | ~~`selffaint`~~ | ✅ CLOSED 2026-07-25 — Final Gambit, Memento and Healing Wish all modelled; Lunar Dance has no legal M-B user | |
 | ~~`reactiveitem`~~ | ✅ CLOSED 2026-07-25 — **none are legal in M-B**, nor is Weakness Policy | |
-| `itemswap` | Trick / Switcheroo / Knock Off / Thief | changes the item table mid-tree. **Bounded by M-B's item list**: only Life Orb, Leftovers, Focus Sash/Band, Choice Scarf and the type boosters change anything — no Assault Vest / Eviolite / Rocky Helmet / Boots exist here |
+| ~~`itemswap`~~ | ✅ CLOSED 2026-07-25 — removal, swapping and the damage rescale. Holder is state; the loser AND receiver get recoil/healing/berries recomputed, and cells are corrected by the new-item/old-item multiplier ratio | |
 | `confusion` | 33% self-hit | **policy**: same as flinch / full-paralysis — the user weighs the dice |
 
 **P4 — infrastructure (separate track)**

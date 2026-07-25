@@ -1545,6 +1545,28 @@ function isChoiceItem(item: string | null | undefined): boolean { const i = toId
 // imprisoner also knows") are enforced — at resolution, by substituting the best legal
 // move, rather than by pulling whole TARGETS out of option generation. Targets aren't
 // the restricted thing; moves are.
+// Offensive damage multiplier an ITEM gives, so a mid-turn Knock Off / Trick can rescale
+// a cell that was baked with the old holding. M-B has no DEFENSIVE scaling items at all
+// (no Assault Vest, Eviolite or Rocky Helmet exist here), so the attacker's side is the
+// whole problem. Expert Belt is excluded on purpose: its x1.2 is conditional on type
+// effectiveness, which the cell doesn't carry.
+const TYPE_BOOST_ITEMS: ReadonlyMap<string, string> = new Map([
+  ['charcoal', 'Fire'], ['blackbelt', 'Fighting'], ['blackglasses', 'Dark'], ['magnet', 'Electric'],
+  ['miracleseed', 'Grass'], ['mysticwater', 'Water'], ['nevermeltice', 'Ice'], ['sharpbeak', 'Flying'],
+  ['silkscarf', 'Normal'], ['silverpowder', 'Bug'], ['softsand', 'Ground'], ['spelltag', 'Ghost'],
+  ['twistedspoon', 'Psychic'], ['poisonbarb', 'Poison'], ['dragonfang', 'Dragon'],
+  ['metalcoat', 'Steel'], ['fairyfeather', 'Fairy'],
+]);
+function itemDamageMult(item: string | undefined, moveType: string, physical: boolean): number {
+  const id = toId(item ?? '');
+  if (!id) return 1;
+  if (id === 'lifeorb') return 1.3;
+  if (id === 'muscleband') return physical ? 1.1 : 1;
+  if (id === 'wiseglasses') return physical ? 1 : 1.1;
+  const boosted = TYPE_BOOST_ITEMS.get(id);
+  return boosted && boosted === moveType ? 1.2 : 1;
+}
+
 function bestCellExcluding(cells: Cell[] | undefined, forbidden: Set<string>): Cell | undefined {
   let best: Cell | undefined;
   for (const c of cells ?? []) {
@@ -2615,6 +2637,14 @@ function resolveTurn(
   // fainted mon isn't acting — but guard the divide anyway.)
   const fgScale = (move: string | null | undefined, curHp: number, rootHp: number): number =>
     isFinalGambit(move) ? (rootHp > 0 ? curHp / rootHp : 0) : 1;
+  // Item-change damage rescale: the cell was baked with the ROOT holding, so correct by
+  // the ratio of what the attacker holds NOW to what it held then. 1 when nothing changed.
+  const myItemScale = (i: number, type: string, physical: boolean): number =>
+    (myItemNow[i] === undefined ? 1
+      : itemDamageMult(myHeld(i), type, physical) / itemDamageMult(t.myItem[i], type, physical));
+  const oppItemScale = (j: number, type: string, physical: boolean): number =>
+    (oppItemNow[j] === undefined ? 1
+      : itemDamageMult(oppHeld(j), type, physical) / itemDamageMult(t.oppItem[j], type, physical));
   const myPunishStatus = new Map<number, string>();   // my attacker statused by an OPP protect
   const oppPunishStatus = new Map<number, string>();  // opp attacker statused by MY protect
   // Spicy Spray (Scovillain-Mega, Champions custom): ANY damaging hit on the holder
@@ -3095,7 +3125,7 @@ function resolveTurn(
         }
       }
       const oBefore = oppHp[oTgt]!;
-      apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r) * rageScale(oc.move, myHitsTaken[act.actor] ?? 0, t.myTimesHit[act.actor] ?? 0) * pierceScale * fgScale(oc.move, myHp[act.actor] ?? 0, t.myRootHp[act.actor] ?? 0), oc.physical, oc.type, oc.groundMove), oppSurv, oc.multiHit, oppDg(oTgt));
+      apply(oppHp, oTgt, myDmg(act.actor, oTgt, myRoll(oc, r) * rageScale(oc.move, myHitsTaken[act.actor] ?? 0, t.myTimesHit[act.actor] ?? 0) * pierceScale * fgScale(oc.move, myHp[act.actor] ?? 0, t.myRootHp[act.actor] ?? 0) * myItemScale(act.actor, oc.type, oc.physical), oc.physical, oc.type, oc.groundMove), oppSurv, oc.multiHit, oppDg(oTgt));
       const oDealt = oBefore - oppHp[oTgt]!;
       trackHit(oppBigHit, oTgt, act.actor, oDealt, oc.physical);   // for the opp's Counter
       if (oc.setsHazard) oppHazards = addHazard(oppHazards, oc.setsHazard); // Stone Axe → SR, Ceaseless Edge → Spikes (on their side)
@@ -3264,7 +3294,7 @@ function resolveTurn(
         }
       }
       const mBefore = myHp[mTgt]!;
-      apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r) * rageScale(tc.move, oppHitsTaken[act.actor] ?? 0, t.oppTimesHit[act.actor] ?? 0) * oppPierceScale * fgScale(tc.move, oppHp[act.actor] ?? 0, t.oppRootHp[act.actor] ?? 0), tc.physical, tc.type, tc.groundMove), mySurv, tc.multiHit, myDg(mTgt));
+      apply(myHp, mTgt, oppDmg(act.actor, mTgt, oppRoll(tc, r) * rageScale(tc.move, oppHitsTaken[act.actor] ?? 0, t.oppTimesHit[act.actor] ?? 0) * oppPierceScale * fgScale(tc.move, oppHp[act.actor] ?? 0, t.oppRootHp[act.actor] ?? 0) * oppItemScale(act.actor, tc.type, tc.physical), tc.physical, tc.type, tc.groundMove), mySurv, tc.multiHit, myDg(mTgt));
       const mDealt = mBefore - myHp[mTgt]!;
       trackHit(myBigHit, mTgt, act.actor, mDealt, tc.physical);   // for my Counter
       if (tc.setsHazard) myHazards = addHazard(myHazards, tc.setsHazard); // their Stone Axe / Ceaseless Edge → hazard on my side

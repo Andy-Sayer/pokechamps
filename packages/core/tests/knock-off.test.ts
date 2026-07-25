@@ -93,3 +93,30 @@ describe('item swapping', () => {
     expect(tricked.mine[0]!.hpPct).toBeGreaterThan(control.mine[0]!.hpPct); // I now hold it
   });
 });
+
+// The last piece: a cell is baked with the ROOT holding, so an item that changes hands
+// mid-turn must RESCALE the damage. M-B has no defensive scaling items (no Assault Vest,
+// Eviolite or Rocky Helmet exist here), so only the attacker's side matters.
+describe('item damage scaling after a change', () => {
+  const orbUser = mon({ species: 'Kingambit', ability: 'Defiant', item: 'Life Orb', nature: 'Adamant', evs: { ...ZERO_EVS, atk: 252 }, moves: ['Iron Head'] });
+  const thiefUser = mon({ species: 'Incineroar', ability: 'Intimidate', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, atk: 252 }, moves: ['Thief'] });
+  const plain = mon({ species: 'Incineroar', ability: 'Intimidate', nature: 'Adamant', evs: { ...ZERO_EVS, hp: 252, atk: 252 }, moves: ['Flare Blitz'] });
+
+  function oppDamageToMe(attacker: PokemonSet): number {
+    // The SLOW Life Orb holder attacks after losing (or keeping) its orb.
+    const input: SearchInput = {
+      mine: [{ set: attacker, hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(orbUser), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    };
+    const r = resolveOneTurn(input, ATTACK, ATTACK);
+    return 100 - r.mine[0]!.hpPct;
+  }
+
+  test('stealing a Life Orb weakens the hit it was about to throw', () => {
+    const stolen = oppDamageToMe(thiefUser);
+    const kept = oppDamageToMe(plain);
+    expect(stolen).toBeGreaterThan(0);
+    expect(stolen).toBeLessThan(kept);   // no more x1.3
+  });
+});
