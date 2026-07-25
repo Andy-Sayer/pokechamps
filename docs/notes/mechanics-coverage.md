@@ -279,10 +279,21 @@ EOT residual, root-ply action, switch-in hook).
    `drain × damage-dealt` (Draining Kiss 0.75); single-target. `Cell.drain`.
 8. ~~**Regenerator**~~ ✅ SHIPPED — heals 1/3 max HP when a mon switches out
    (makes pivoting heal); `Tables.my/oppRegen`.
-9. **Two-turn/charge** (Solar Beam, Fly, Meteor Beam, Phantom Force) — the lost
-   turn / vulnerability window is still unmodelled in the search. **The single
-   biggest remaining mechanic gap.** *(The recharge half — Hyper Beam / Giga
-   Impact → `my/oppRecharge` can't-act — ✅ SHIPPED.)*
+9. ~~**Two-turn/charge**~~ ✅ SHIPPED (2026-07-24) — and **weather-conditional**, which
+   is the whole point. The charge turn deals no damage and commits the mon to firing
+   next turn (it may not switch — `myCharging`/`oppCharging` feed the same option-
+   narrowing path as a Choice lock, minus the switch allowance). **Except** where the
+   weather skips the charge: Solar Beam / Solar Blade in sun, Electro Shot in rain.
+   That exception is the common case — those moves are carried almost entirely by sun
+   and rain teams (Charizard / Torkoal / Pyroar; Archaludon), so modelling them as
+   "always two turns" would have been WRONG more often than the gap it closed. The gap
+   only opens when their weather is absent or DISPLACED — e.g. our rain over their
+   Drought, or Archaludon on a terrain team, where Electro Shot charges every time.
+   Semi-invulnerable charges (Fly / Dig / Phantom Force) also dodge targeted damage on
+   the charge turn. Power Herb is not legal in M-B, so there is no item skip.
+   *(Recharge — Hyper Beam / Giga Impact → `my/oppRecharge` — shipped earlier.)*
+   Approximation: weather is read as it stands at the START of the turn, so a sun set
+   by a faster mon that same turn won't rescue a slower Solar Beam from charging.
 10. ~~**Rocky Helmet / Rough Skin / Iron Barbs**~~ ✅ SHIPPED — a contact hit into a
     holder chips the attacker (Rocky Helmet 1/6, Rough Skin/Iron Barbs 1/8; Magic
     Guard negates). `Cell.contact` + `Tables.*ContactChip`.
@@ -311,7 +322,7 @@ search, so trust it over prose. As of 2026-07-24 its nine rule classes are:
 | `redirection` | Ally Switch / Spotlight | position shuffling — our slot-less model can't represent it |
 | `teamprotect` | Mat Block / Crafty Shield | (Wide/Quick Guard ARE modelled) |
 | `foedebuff` | accuracy/evasion drops | **policy**: maximin never prices hit chance — informational only |
-| `twoturn` | charge moves (P2 #9 above) | real gap |
+| `twoturn` | Sky Drop only | it carries a FOE off the field — slot-less model |
 | `restriction` | Torment / Imprison / Spite | no live tracking to carry, no in-tree cast model |
 | `selffaint` | Final Gambit / Memento / Healing Wish / Lunar Dance | (Explosion-family IS modelled) |
 | `reactiveitem` | Throat Spray / Blunder Policy / Room Service / Snowball / … | rest of the reactive items |

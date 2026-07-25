@@ -61,9 +61,15 @@ const RULES: GapRule[] = [
   // as informational so the user weighs the dice.
   { kind: 'foedebuff', label: 'accuracy/evasion drop (informational — hit chance is never priced)',
     moves: ['sandattack', 'venomdrench', 'flash', 'kinesis', 'smokescreen', 'mudslap'] },
-  { kind: 'twoturn', label: 'two-turn / charge move',
-    moves: ['solarbeam', 'solarblade', 'fly', 'dig', 'dive', 'bounce', 'phantomforce', 'shadowforce',
-      'skyattack', 'meteorbeam', 'electroshot', 'geomancy', 'skullbash', 'razorwind', 'freezeshock', 'iceburn'] },
+  // Two-turn charge moves are now MODELLED, weather-conditionally: the charge turn deals
+  // no damage and commits the mon to firing next turn (no switching), EXCEPT where the
+  // weather skips it (Solar Beam / Solar Blade in sun, Electro Shot in rain — the common
+  // case for their sun/rain carriers). Semi-invulnerable charges (Fly / Dig / Phantom
+  // Force) also dodge targeted damage on the charge turn. Power Herb is not legal in M-B,
+  // so there is no item skip to model. What remains unmodelled is Sky Drop (it carries a
+  // FOE off the field, which our slot-less model can't represent).
+  { kind: 'twoturn', label: 'two-turn move that displaces a foe (Sky Drop)',
+    moves: ['skydrop'] },
   // Taunt + Encore are MODELLED (option restriction), and a live-match Disable
   // now root-carries into the search pools. Torment/Imprison/Spite remain (no
   // live tracking to carry, no in-tree cast model).

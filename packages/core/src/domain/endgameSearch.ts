@@ -1054,6 +1054,11 @@ interface State {
   /** Must recharge this turn (used Hyper Beam / Giga Impact last turn → can't act). */
   myRecharge: boolean[];
   oppRecharge: boolean[];
+  /** Mid-charge two-turn move (Solar Beam without sun, Phantom Force, …): the move id
+   *  the mon committed to last turn. While set it MUST fire that move — no switching,
+   *  no other action — and it clears once fired or the mon leaves the field. */
+  myCharging: (string | null)[];
+  oppCharging: (string | null)[];
   /** Turns still locked into a multi-turn move (Outrage / Petal Dance / Thrash):
    *  while >0 the mon can only attack — no switch / setup / protect. */
   myLocked: number[];
@@ -2069,6 +2074,8 @@ function initialState(input: SearchInput): State {
     oppDisguise: input.opp.map(o => hasDisguise(o.entry.ability)),
     myRecharge: input.mine.map(() => false),
     oppRecharge: input.opp.map(() => false),
+    myCharging: input.mine.map(() => null),
+    oppCharging: input.opp.map(() => null),
     myLocked: input.mine.map(() => 0),
     oppLocked: input.opp.map(() => 0),
     // Live Choice locks: only honored when the item is genuinely a Choice item
@@ -2108,6 +2115,38 @@ const RECHARGE_MOVES: ReadonlySet<string> = new Set([
 function isRechargeMove(move: string | null | undefined): boolean {
   return RECHARGE_MOVES.has(toId(move ?? ''));
 }
+
+// TWO-TURN CHARGE MOVES. The user commits on turn 1 (no damage) and fires on turn 2 —
+// EXCEPT where weather skips the charge, which is the common case in this meta: Solar
+// Beam / Solar Blade fire instantly in SUN, Electro Shot in RAIN. Their carriers are sun
+// and rain teams (Charizard / Torkoal / Pyroar; Archaludon), so the charge only actually
+// happens when their weather is absent or has been OVERWRITTEN — e.g. a Pelipper's rain
+// displacing Drought turns the foe's Solar Beam into a two-turn move. Modelling this as
+// "always two turns" would be WRONG for the common case and worse than not modelling it.
+// Power Herb (the item that skips any charge) is NOT legal in Reg M-B, so there is no
+// item exception to handle.
+// Value is `null` for moves that always charge; a Weather means "skipped under it".
+const CHARGE_MOVES: ReadonlyMap<string, Weather | null> = new Map<string, Weather | null>([
+  ['solarbeam', 'Sun'], ['solarblade', 'Sun'], ['electroshot', 'Rain'],
+  ['meteorbeam', null], ['skyattack', null], ['skullbash', null], ['razorwind', null],
+  ['freezeshock', null], ['iceburn', null], ['geomancy', null],
+  ['fly', null], ['dig', null], ['dive', null], ['bounce', null],
+  ['phantomforce', null], ['shadowforce', null],
+]);
+/** undefined = not a charge move; else the Weather that skips the charge (null = none). */
+function chargeSkipWeather(move: string | null | undefined): Weather | null | undefined {
+  const id = toId(move ?? '');
+  return CHARGE_MOVES.has(id) ? CHARGE_MOVES.get(id)! : undefined;
+}
+/** Does this charge move resolve in ONE turn under the weather now in effect? */
+function chargeSkipped(move: string | null | undefined, weather: Weather): boolean {
+  const w = chargeSkipWeather(move);
+  return w != null && normWeather(weather) === normWeather(w);
+}
+// Semi-invulnerable charge moves: the user is off the field on the charge turn, so
+// targeted damage misses it. Modelled by adding it to the turn's protected set.
+const SEMI_INVULN: ReadonlySet<string> = new Set(['fly', 'dig', 'dive', 'bounce', 'phantomforce', 'shadowforce', 'skydrop']);
+function isSemiInvulnerable(move: string | null | undefined): boolean { return SEMI_INVULN.has(toId(move ?? '')); }
 
 // Dragon Darts: in doubles with both foes standing it throws ONE dart at EACH
 // foe (the two-hit cell's damage splits half/half) instead of both darts at one
@@ -2244,6 +2283,8 @@ function resolveTurn(
   const oppDisguise = s.oppDisguise.slice();
   const myRecharge = s.myRecharge.map(() => false);   // recharge is consumed this turn (see below)
   const oppRecharge = s.oppRecharge.map(() => false);
+  const myCharging = [...s.myCharging];               // carries until the move fires
+  const oppCharging = [...s.oppCharging];
   const myLocked = s.myLocked.slice();
   const oppLocked = s.oppLocked.slice();
   // Choice lock: set when an unlocked Choice holder attacks; an already-locked
@@ -2655,6 +2696,20 @@ function resolveTurn(
         if ((oppFutureTurns[oTgt] ?? 0) <= 0) { oppFutureTurns[oTgt] = 2; oppFutureDmg[oTgt] = myDmg(act.actor, oTgt, oc.dmgMid, oc.physical, oc.type, oc.groundMove); }
         continue;
       }
+      // Two-turn charge. Weather is read as it stands at the START of the turn: a Sun set
+      // by a FASTER mon this same turn won't rescue a slower Solar Beam from charging
+      // (rare; the usual source is a switch-in ability or standing weather). Already
+      // charging this move → this is the firing turn, so fall through and deal damage.
+      if (s.myCharging[act.actor] !== oc.move && chargeSkipWeather(oc.move) !== undefined
+          && !chargeSkipped(oc.move, s.weather)) {
+        myCharging[act.actor] = oc.move;
+        // Fly / Dig / Phantom Force spend the charge turn off the field. Adding to the
+        // protected set here (mid-resolution) is deliberate: foes that already acted this
+        // turn DID connect, which is exactly the real ordering.
+        if (isSemiInvulnerable(oc.move)) myProtected.add(act.actor);
+        continue;                                     // no damage on the charge turn
+      }
+      myCharging[act.actor] = null;                   // fired (or skipped by weather)
       // Dragon Darts in doubles: one dart at EACH standing foe (half the cell
       // each, the other foe via its own per-move cell). A lone foe takes both
       // darts through the normal path below.
@@ -2774,6 +2829,17 @@ function resolveTurn(
         if ((myFutureTurns[mTgt] ?? 0) <= 0) { myFutureTurns[mTgt] = 2; myFutureDmg[mTgt] = oppDmg(act.actor, mTgt, tc.dmgMid, tc.physical, tc.type, tc.groundMove); }
         continue;
       }
+      // Two-turn charge (mirror of the my-side gate). This is the side that matters most
+      // in practice: the foe's Solar Beam / Electro Shot stops being an instant hit the
+      // moment our weather displaces theirs, which is a full turn of tempo the search
+      // used to hand them for free.
+      if (s.oppCharging[act.actor] !== tc.move && chargeSkipWeather(tc.move) !== undefined
+          && !chargeSkipped(tc.move, s.weather)) {
+        oppCharging[act.actor] = tc.move;
+        if (isSemiInvulnerable(tc.move)) oppProtected.add(act.actor);
+        continue;                                     // no damage on the charge turn
+      }
+      oppCharging[act.actor] = null;                  // fired (or skipped by weather)
       // Dragon Darts in doubles (opp side): one dart at EACH of my standing mons.
       if (isDragonDarts(tc.move)) {
         const other = myActiveNow.find(i => i !== mTgt && (myHp[i] ?? 0) > 0 && !myProtected.has(i));
@@ -3102,8 +3168,8 @@ function resolveTurn(
   const myBerryUsed = s.myBerryUsed.slice();
   const oppBerryUsed = s.oppBerryUsed.slice();
   // Status persists on a mon that switches out; a switch-in arrives clean (awake).
-  for (const inn of mySwitchIn.values()) { myStatus[inn] = ''; myToxicN[inn] = 0; mySleepTurns[inn] = 0; myYawn[inn] = 0; myDisguise[inn] = hasDisguise(t.myAbility[inn]); myRecharge[inn] = false; myLocked[inn] = 0; myChoiceMove[inn] = null; mySubHp[inn] = 0; myWish[inn] = 0; }
-  for (const inn of oppSwitchIn.values()) { oppStatus[inn] = ''; oppToxicN[inn] = 0; oppSleepTurns[inn] = 0; oppYawn[inn] = 0; oppDisguise[inn] = hasDisguise(t.oppAbility[inn]); oppRecharge[inn] = false; oppLocked[inn] = 0; oppChoiceMove[inn] = null; oppSubHp[inn] = 0; oppWish[inn] = 0; }
+  for (const inn of mySwitchIn.values()) { myStatus[inn] = ''; myToxicN[inn] = 0; mySleepTurns[inn] = 0; myYawn[inn] = 0; myDisguise[inn] = hasDisguise(t.myAbility[inn]); myRecharge[inn] = false; myCharging[inn] = null; myLocked[inn] = 0; myChoiceMove[inn] = null; mySubHp[inn] = 0; myWish[inn] = 0; }
+  for (const inn of oppSwitchIn.values()) { oppStatus[inn] = ''; oppToxicN[inn] = 0; oppSleepTurns[inn] = 0; oppYawn[inn] = 0; oppDisguise[inn] = hasDisguise(t.oppAbility[inn]); oppRecharge[inn] = false; oppCharging[inn] = null; oppLocked[inn] = 0; oppChoiceMove[inn] = null; oppSubHp[inn] = 0; oppWish[inn] = 0; }
   // Wake: a mon that started the turn asleep ticks its counter down (it couldn't act
   // this turn); it wakes when the counter hits 0. Runs BEFORE this turn's infliction
   // so a freshly-slept mon keeps its full count.
@@ -3408,7 +3474,7 @@ function resolveTurn(
     myBerryUsed, oppBerryUsed, myHazards, oppHazards, mySleepTurns, oppSleepTurns, myYawn, oppYawn, myPerish, oppPerish, myTrappedBy, oppTrappedBy,
     myTaunt, oppTaunt, myEncore, oppEncore, myEncoreAct, oppEncoreAct,
     myUnburden, oppUnburden, myResistBerryUsed, oppResistBerryUsed, myFirstTurn, oppFirstTurn,
-    myDisguise, oppDisguise, myRecharge, oppRecharge, myLocked, oppLocked, myChoiceMove, oppChoiceMove, mySubHp, oppSubHp,
+    myDisguise, oppDisguise, myRecharge, oppRecharge, myCharging, oppCharging, myLocked, oppLocked, myChoiceMove, oppChoiceMove, mySubHp, oppSubHp,
     myWish, oppWish, myFutureTurns, oppFutureTurns, myFutureDmg, oppFutureDmg,
     gravity, wonderRoom, magicRoom, gravityTurns, wonderRoomTurns, magicRoomTurns,
   };
@@ -3461,7 +3527,7 @@ function refill(
 // damage); `spread`/`pivot` = the locked move IS the side's spread / pivot
 // option. A first-turn-only locked move (Choice Band Fake Out) allows nothing
 // but switching out — it fails after the first turn.
-interface ChoiceLockOptions { foes: number[]; spread: boolean; pivot: boolean }
+interface ChoiceLockOptions { foes: number[]; spread: boolean; pivot: boolean; noSwitch?: boolean }
 function choiceLockFor(
   lockedArr: (string | null)[],
   moveCells: Cell[][][],            // offMoves (mine) / thrMoves (opp) — [actor][foe]
@@ -3469,17 +3535,24 @@ function choiceLockFor(
   pivotMove: (string | null)[],
   foeActive: number[],
   foeHp: number[],
+  chargingArr?: (string | null)[],  // mid-charge two-turn move — a HARDER lock than Choice
 ): (ChoiceLockOptions | null)[] {
-  return lockedArr.map((locked, actor) => {
+  return lockedArr.map((locked0, actor) => {
+    // A charging mon is a Choice lock that can't switch out either: its only legal action
+    // is firing the move it committed to. It outranks a Choice lock (both can't disagree —
+    // the charged move IS the choice-locked one — but charging is the stricter of the two).
+    const charging = chargingArr?.[actor] ?? null;
+    const locked = charging ?? locked0;
     if (!locked) return null;
     const lid = toId(locked);
-    if (FIRST_TURN_MOVE_IDS.has(lid)) return { foes: [], spread: false, pivot: false };
+    if (FIRST_TURN_MOVE_IDS.has(lid)) return { foes: [], spread: false, pivot: false, noSwitch: charging != null };
     const foes = foeActive.filter(j => (foeHp[j] ?? 0) > 0
       && (moveCells[actor]?.[j] ?? []).some(c => toId(c.move) === lid && c.dmgMax > 0));
     return {
       foes,
       spread: toId(spread[actor]?.move ?? '') === lid,
       pivot: toId(pivotMove[actor] ?? '') === lid,
+      noSwitch: charging != null,
     };
   });
 }
@@ -3689,7 +3762,7 @@ function jointActions(
           (o >= 0 && cl.foes.includes(o))
           || (o === SPREAD && cl.spread)
           || (isPivotTarget(o) && cl.pivot)
-          || isSwitchTarget(o))
+          || (!cl.noSwitch && isSwitchTarget(o)))
       : options;
     const usable0 = restrict?.locked?.[actor]
       ? pool.filter(o => o >= 0 || o === SPREAD || isPrioTarget(o))
@@ -3917,8 +3990,8 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
   const switchesAllowed = plyFromRoot < (t.switchPlyLimit ?? SWITCH_PLY_LIMIT);
   const myBench = switchesAllowed ? benchSwitchTargets(s.myActive, s.myHp, t.myN) : U;
   const oppBench = switchesAllowed ? benchSwitchTargets(s.oppActive, s.oppHp, t.oppN) : U;
-  const myRestrict = { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct, choice: t.myChoice, locked: s.myLocked.map(x => x > 0), choiceLock: choiceLockFor(s.myChoiceMove, t.offMoves, t.mySpread, t.myPivotMove, s.oppActive, s.oppHp) };
-  const oppRestrict = { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct, choice: t.oppChoice, locked: s.oppLocked.map(x => x > 0), choiceLock: choiceLockFor(s.oppChoiceMove, t.thrMoves, t.oppSpread, t.oppPivotMove, s.myActive, s.myHp) };
+  const myRestrict = { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct, choice: t.myChoice, locked: s.myLocked.map(x => x > 0), choiceLock: choiceLockFor(s.myChoiceMove, t.offMoves, t.mySpread, t.myPivotMove, s.oppActive, s.oppHp, s.myCharging) };
+  const oppRestrict = { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct, choice: t.oppChoice, locked: s.oppLocked.map(x => x > 0), choiceLock: choiceLockFor(s.oppChoiceMove, t.thrMoves, t.oppSpread, t.oppPivotMove, s.myActive, s.myHp, s.oppCharging) };
   const myPrio = { cell: t.myPrioCell, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0), koOnly: true };
   const oppPrio = { cell: t.oppPrioCell, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0), koOnly: true };
   // Support moves at depth too (Helping Hand / Wide Guard / Quick Guard): bounded
@@ -4145,7 +4218,7 @@ function rootMyJoints(t: Tables, s: State): Array<Map<number, number>> {
     t.myRedirectMove,
     { move: t.myPivotMove, foes: myBench.length > 0 ? s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) : [] },
     { move: t.myDebuffMove, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
-    { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct, choice: t.myChoice, locked: s.myLocked.map(x => x > 0), choiceLock: choiceLockFor(s.myChoiceMove, t.offMoves, t.mySpread, t.myPivotMove, s.oppActive, s.oppHp) },
+    { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct, choice: t.myChoice, locked: s.myLocked.map(x => x > 0), choiceLock: choiceLockFor(s.myChoiceMove, t.offMoves, t.mySpread, t.myPivotMove, s.oppActive, s.oppHp, s.myCharging) },
     { taunt: t.myTauntMove, encore: t.myEncoreMove, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
     { has: t.myHasFakeOut, firstTurn: s.myFirstTurn, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
     { cell: t.myPrioCell, foes: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0) },
@@ -4188,7 +4261,7 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     t.oppRedirectMove,
     { move: t.oppPivotMove, foes: oppBench.length > 0 ? s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) : [] },
     { move: t.oppDebuffMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
-    { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct, choice: t.oppChoice, locked: s.oppLocked.map(x => x > 0), choiceLock: choiceLockFor(s.oppChoiceMove, t.thrMoves, t.oppSpread, t.oppPivotMove, s.myActive, s.myHp) },
+    { taunt: s.oppTaunt.map(x => x > 0), encore: s.oppEncore.map(x => x > 0), encoreAct: s.oppEncoreAct, choice: t.oppChoice, locked: s.oppLocked.map(x => x > 0), choiceLock: choiceLockFor(s.oppChoiceMove, t.thrMoves, t.oppSpread, t.oppPivotMove, s.myActive, s.myHp, s.oppCharging) },
     { taunt: t.oppTauntMove, encore: t.oppEncoreMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
     { has: t.oppHasFakeOut, firstTurn: s.oppFirstTurn, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
     { cell: t.oppPrioCell, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) },
@@ -5437,6 +5510,8 @@ export interface ResolvedSlot {
   unburden?: boolean;
   /** Long-tail mechanic state after the turn (for diff-harness / tests). */
   recharge?: boolean;
+  /** Mid-charge two-turn move committed to (null once it fires). */
+  charging?: string | null;
   locked?: number;
   disguise?: boolean;
   subHp?: number;
@@ -5522,8 +5597,8 @@ export function resolveOneTurn(
     status: status[i] ?? '', boosts: { ...boost[i] }, moveUsed: move,
   });
   return {
-    mine: input.mine.map((_, i) => ({ ...slot(i, s.myHp, s.myStatus, s.myBoost, t.mySpecies, myMove.get(i)), taunt: s.myTaunt[i], encore: s.myEncore[i], unburden: s.myUnburden[i], recharge: s.myRecharge[i], locked: s.myLocked[i], disguise: s.myDisguise[i], subHp: s.mySubHp[i], wish: s.myWish[i] })),
-    opp: input.opp.map((_, j) => ({ ...slot(j, s.oppHp, s.oppStatus, s.oppBoost, t.oppSpecies, oppMove.get(j)), taunt: s.oppTaunt[j], encore: s.oppEncore[j], unburden: s.oppUnburden[j], recharge: s.oppRecharge[j], locked: s.oppLocked[j], disguise: s.oppDisguise[j], subHp: s.oppSubHp[j], wish: s.oppWish[j] })),
+    mine: input.mine.map((_, i) => ({ ...slot(i, s.myHp, s.myStatus, s.myBoost, t.mySpecies, myMove.get(i)), taunt: s.myTaunt[i], encore: s.myEncore[i], unburden: s.myUnburden[i], recharge: s.myRecharge[i], charging: s.myCharging[i], locked: s.myLocked[i], disguise: s.myDisguise[i], subHp: s.mySubHp[i], wish: s.myWish[i] })),
+    opp: input.opp.map((_, j) => ({ ...slot(j, s.oppHp, s.oppStatus, s.oppBoost, t.oppSpecies, oppMove.get(j)), taunt: s.oppTaunt[j], encore: s.oppEncore[j], unburden: s.oppUnburden[j], recharge: s.oppRecharge[j], charging: s.oppCharging[j], locked: s.oppLocked[j], disguise: s.oppDisguise[j], subHp: s.oppSubHp[j], wish: s.oppWish[j] })),
     weather: s.weather ?? '',
     terrain: s.terrain ?? '',
   };

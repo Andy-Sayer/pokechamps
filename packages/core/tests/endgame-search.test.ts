@@ -2150,16 +2150,29 @@ describe('unmodeled-mechanics detector (self-flagging)', () => {
     expect(r.unmodeled).toBeUndefined();
   });
 
-  // A still-unmodelled mechanic (two-turn Solar Beam) is flagged with the source.
-  test('flags a two-turn move from my own moveset with a concrete example', () => {
+  // Solar Beam is no longer a blind spot — two-turn charge is MODELLED (weather-
+  // conditionally), so it must NOT be flagged. Flagging a mechanic we now handle is as
+  // dishonest as hiding one we don't: it pushes the user to the exact engine for nothing.
+  test('does NOT flag Solar Beam — two-turn charge is modelled now', () => {
     const r = searchToDepth({
       mine: [{ set: mon({ species: 'Lilligant', ability: 'Chlorophyll', nature: 'Modest', evs: { ...ZERO_EVS, spa: 252, spe: 252 }, moves: ['Solar Beam', 'Giga Drain'] }), hpPercent: 100, active: true }],
       opp: [{ entry: oppOf(mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Earthquake'] })), hpPercent: 100, active: true }],
       field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
     }, 1);
+    expect(r.unmodeled?.find(u => u.kind === 'twoturn')).toBeUndefined();
+  });
+
+  // Sky Drop is the one two-turn move still outside the model: it carries a FOE off the
+  // field, which the slot-less state can't represent.
+  test('flags Sky Drop, the two-turn move that is still unmodelled', () => {
+    const r = searchToDepth({
+      mine: [{ set: mon({ species: 'Talonflame', ability: 'Gale Wings', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Sky Drop', 'Brave Bird'] }), hpPercent: 100, active: true }],
+      opp: [{ entry: oppOf(mon({ species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly', evs: { ...ZERO_EVS, atk: 252, spe: 252 }, moves: ['Earthquake'] })), hpPercent: 100, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    }, 1);
     const twoturn = r.unmodeled?.find(u => u.kind === 'twoturn');
     expect(twoturn).toBeDefined();
-    expect(twoturn!.examples).toContain('Lilligant Solar Beam');
+    expect(twoturn!.examples).toContain('Talonflame Sky Drop');
   });
 
   // Opponent scan is REVEALED-only: an unseen Icy Wind isn't warned about, a
