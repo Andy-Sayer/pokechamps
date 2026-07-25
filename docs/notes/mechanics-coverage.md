@@ -342,8 +342,8 @@ search, so trust it over prose. As of 2026-07-24 its nine rule classes are:
 | `twoturn` | Sky Drop only | it carries a FOE off the field — slot-less model |
 | `restriction` | Torment / Imprison / Spite | no live tracking to carry, no in-tree cast model |
 | ~~`selffaint`~~ | ✅ CLOSED 2026-07-25 — Final Gambit, Memento and Healing Wish all modelled; Lunar Dance has no legal M-B user | |
-| `reactiveitem` | Throat Spray / Blunder Policy / Room Service / Snowball / … | rest of the reactive items |
-| `itemswap` | Trick / Switcheroo / Knock Off / Thief | changes the item table mid-tree |
+| ~~`reactiveitem`~~ | ✅ CLOSED 2026-07-25 — **none are legal in M-B**, nor is Weakness Policy | |
+| `itemswap` | Trick / Switcheroo / Knock Off / Thief | changes the item table mid-tree. **Bounded by M-B's item list**: only Life Orb, Leftovers, Focus Sash/Band, Choice Scarf and the type boosters change anything — no Assault Vest / Eviolite / Rocky Helmet / Boots exist here |
 | `confusion` | 33% self-hit | **policy**: same as flinch / full-paralysis — the user weighs the dice |
 
 **P4 — infrastructure (separate track)**

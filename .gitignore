@@ -55,3 +55,7 @@ Thumbs.db
 
 # Claude Code per-project local settings (machine-specific)
 .claude/settings.local.json
+
+# Scratch/probe scripts (prefix _) — never committed; see docs/notes for the keepers
+packages/*/src/scripts/_*.ts
+packages/*/scripts/_*.ts

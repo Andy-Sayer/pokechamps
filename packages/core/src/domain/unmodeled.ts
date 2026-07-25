@@ -88,8 +88,17 @@ const RULES: GapRule[] = [
   // on-KO boost (Moxie/Beast Boost), hazard clear, Weakness Policy (procWp) and
   // Booster Energy (Protosynthesis/Quark Drive via the calc's boostedStat +
   // search Spe ×1.5) are MODELLED; the rest of the reactive items are not.
-  { kind: 'reactiveitem', label: 'reactive item (Throat Spray / Blunder Policy / …)',
-    items: ['blunderpolicy', 'throatspray', 'roomservice', 'snowball', 'luminousmoss', 'cellbattery', 'absorbbulb'] },
+  // REACTIVE ITEMS: rule removed 2026-07-25 — checked against format.champions.json and
+  // NONE of them are legal in Reg M-B (Blunder Policy, Throat Spray, Room Service,
+  // Snowball, Luminous Moss, Cell Battery, Absorb Bulb — nor Weakness Policy, which the
+  // search models anyway and which is simply inert here). The item allow-list is small
+  // and stone-heavy: berries, Life Orb, Leftovers, Focus Sash/Band, Choice SCARF (no
+  // Band/Specs), type boosters, weather rocks, Light Clay, Quick Claw, Wide/Zoom Lens.
+  // Warning about an item nobody can hold is noise. Re-check on a regulation change.
+  // Item swap/loss. Still a real gap, but M-B's small item list bounds it: the only
+  // holdables whose loss changes the model are Life Orb (recoil + x1.3), Leftovers (EOT
+  // heal), Focus Sash/Band (survival charge), Choice Scarf (speed) and the type boosters.
+  // No Assault Vest / Eviolite / Rocky Helmet / Boots to worry about.
   { kind: 'itemswap', label: 'item swap/loss (Trick / Knock Off)',
     moves: ['trick', 'switcheroo', 'bestow', 'knockoff', 'thief', 'covet', 'corrosivegas'] },
   // Confusion is a PROBABILISTIC secondary (33% self-hit) — deliberately NOT
