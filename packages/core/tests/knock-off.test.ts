@@ -62,3 +62,34 @@ describe('item removal', () => {
     expect(endHp(knocker, 'Life Orb', 80)).toBeCloseTo(endHp(knocker, '', 80), 5);
   });
 });
+
+// Item SWAPS: Trick / Switcheroo exchange the two items, Bestow hands one over. Unlike a
+// removal, both mons end up holding something, so the state is an override rather than a
+// "gone" flag. Observed through Leftovers healing, which is the cleanest item effect to
+// watch: whoever holds it at end of turn ticks up.
+describe('item swapping', () => {
+  // BOTH arms cast a STATUS move so neither deals damage — the only difference is
+  // whether that move is Trick. (A damaging control confounds the comparison: the first
+  // cut compared Trick against Foul Play and simply measured the damage.)
+  const tricker = mon({ species: 'Klefki', ability: 'Prankster', item: '', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Trick', 'Foul Play'] });
+  const twaver = mon({ species: 'Klefki', ability: 'Prankster', item: '', nature: 'Bold', evs: { ...ZERO_EVS, hp: 252, def: 252 }, moves: ['Thunder Wave', 'Foul Play'] });
+  const holder = mon({ species: 'Snorlax', ability: 'Thick Fat', item: 'Leftovers', nature: 'Careful', evs: { ...ZERO_EVS, hp: 252, spd: 252 }, moves: ['Body Slam'] });
+  const CAST: Map<number, TurnAction> = new Map([[0, { kind: 'itemswap', target: 0 }]]);
+  const CTRL: Map<number, TurnAction> = new Map([[0, { kind: 'status', target: 0 }]]);
+
+  function run(my: PokemonSet, act: Map<number, TurnAction>) {
+    const input: SearchInput = {
+      mine: [{ set: my, hpPercent: 70, active: true }],
+      opp: [{ entry: oppOf(holder), hpPercent: 70, active: true }],
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    };
+    return resolveOneTurn(input, act, new Map([[0, { kind: 'attack', target: 0 }]]));
+  }
+
+  test('Trick moves the Leftovers tick from the foe to me', () => {
+    const tricked = run(tricker, CAST);
+    const control = run(twaver, CTRL);
+    expect(control.opp[0]!.hpPct).toBeGreaterThan(tricked.opp[0]!.hpPct);   // foe kept it and healed
+    expect(tricked.mine[0]!.hpPct).toBeGreaterThan(control.mine[0]!.hpPct); // I now hold it
+  });
+});

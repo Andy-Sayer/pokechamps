@@ -45,13 +45,10 @@ const RULES: GapRule[] = [
   // ability redirection (Storm Drain/Lightning Rod absorb) are MODELLED; only
   // the position-shuffling moves remain — our slot-less model can't represent
   // them, so they stay informational.
-  // ALLY SWITCH is now modelled: with two actives, a position swap is only observable
-  // through TARGETING, which is a two-element remap — the same thing `redirect` already
-  // does for switch-ins. It resolves at its own priority in the ordered loop, so only
-  // attackers SLOWER than it are redirected; a faster foe has already committed.
-  // Spotlight (2 legal users: Clefable, Starmie) still isn't cast in-tree.
-  { kind: 'redirection', label: 'forced redirection onto an ally (Spotlight)',
-    moves: ['spotlight'] },
+  // REDIRECTION: rule removed 2026-07-25 — the class is complete. Follow Me / Rage Powder
+  // (self-soak), ability redirection (Storm Drain / Lightning Rod), Ally Switch (a
+  // two-active position swap is a target remap) and Spotlight (soak cast on a chosen
+  // ALLY, so it carries an ally index and is exempt from the powder immunity) are all in.
   // TEAM PROTECT: rule removed 2026-07-25 — the whole class is modelled. Wide Guard
   // (spread), Quick Guard (priority), Mat Block (all DAMAGING moves, first turn out
   // only) and Crafty Shield (all STATUS moves) are each side-wide protect actions.
@@ -108,8 +105,13 @@ const RULES: GapRule[] = [
   // per ply and can't be un-baked mid-tree.
   // Item SWAPPING (Trick / Switcheroo / Bestow) is still unmodelled — a swap hands the
   // other mon something, so it isn't just a removal.
-  { kind: 'itemswap', label: 'item swap (Trick / Switcheroo) + post-removal damage scaling',
-    moves: ['trick', 'switcheroo', 'bestow'] },
+  // Item removal AND swapping are modelled (Knock Off / Thief / Covet / Corrosive Gas,
+  // Trick / Switcheroo / Bestow): the holder state is an override, so both the loser and
+  // the RECEIVER get their Life Orb recoil, Leftovers healing and berry triggers
+  // recomputed. What stays approximate is only the DAMAGE scaling an item was giving
+  // (Life Orb x1.3, type boosters), which is baked into cells built once per ply.
+  { kind: 'itemscaling', label: 'damage scaling of an item gained/lost mid-turn',
+    moves: ['trick', 'switcheroo', 'knockoff', 'thief'] },
   // Confusion is a PROBABILISTIC secondary (33% self-hit) — deliberately NOT
   // auto-applied, the same policy as flinch and the 25% full-paralysis chance
   // (sim-divergences.md). Flagged as informational so the user weighs the dice.

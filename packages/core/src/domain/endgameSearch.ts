@@ -340,6 +340,8 @@ const ENCORE_BASE = -90;  // Encore → foe idx (foe locked into its last move)
 const FAKEOUT_BASE = -100; // Fake Out → foe idx (chip + guaranteed flinch, first turn out only)
 const PRIO_BASE = -110;   // priority attack (Sucker Punch/Grassy Glide/Aqua Jet/…) → foe idx
 const TRAP_BASE = -120;   // trapping move (Block/Mean Look/…) → foe idx; victim can't use SWITCH
+const SWAP_BASE = -150;     // Trick / Switcheroo / Bestow → foe idx `SWAP_BASE - target`
+const SPOTLIGHT_BASE = -140; // Spotlight → ally idx `SPOTLIGHT_BASE - target`; that ally soaks the foes' single-target moves
 const ALLY_SWITCH = -134;  // Ally Switch — swap the two actives, so incoming single-target moves cross over
 const MAT_BLOCK = -132;    // Mat Block (+0, first turn out) — blocks the foes' DAMAGING moves, side-wide
 const CRAFTY_SHIELD = -133; // Crafty Shield (+3) — blocks the foes' STATUS moves, side-wide
@@ -684,6 +686,11 @@ interface Tables {
   /** Knows Ally Switch. Listed as needing a POSITION model, but it doesn't: with two
    *  actives a position swap is just a target remap, which `redirect` already does. */
   myAllySwitch: boolean[]; oppAllySwitch: boolean[];
+  /** Knows Spotlight — makes a CHOSEN ally the target of the foes' single-target moves.
+   *  Follow Me's cousin, but cast on someone else, so it needs an ally index. */
+  mySpotlight: boolean[]; oppSpotlight: boolean[];
+  /** Trick / Switcheroo / Bestow move name, or null. */
+  myItemSwapMove: (string | null)[]; oppItemSwapMove: (string | null)[];
   myMatBlock: boolean[]; oppMatBlock: boolean[];
   myCraftyShield: boolean[]; oppCraftyShield: boolean[];
   myPerishMove: (string | null)[];
@@ -900,6 +907,13 @@ function benchWorthHealing(active: number[], hp: number[], status: string[], n: 
   return false;
 }
 
+const swapCode = (foe: number): number => SWAP_BASE - foe;
+const isSwapTarget = (t: number): boolean => t <= SWAP_BASE && t > SWAP_BASE - 8;
+const swapFoeIdx = (t: number): number => SWAP_BASE - t;
+const spotlightCode = (ally: number): number => SPOTLIGHT_BASE - ally;
+const isSpotlightTarget = (t: number): boolean => t <= SPOTLIGHT_BASE && t > SPOTLIGHT_BASE - 8;
+const spotlightAllyIdx = (t: number): number => SPOTLIGHT_BASE - t;
+
 function findMoveId(moves: string[], id: string): string | null {
   return moves.find(m => toId(m) === id) ?? null;
 }
@@ -1104,12 +1118,13 @@ interface State {
    *  no other action — and it clears once fired or the mon leaves the field. */
   myCharging: (string | null)[];
   oppCharging: (string | null)[];
-  /** Item knocked off / stolen this game. M-B's item list is small, so what its loss
-   *  actually changes is bounded: Life Orb recoil, Leftovers/Black Sludge healing, and
-   *  the berry triggers. (Damage SCALING — Life Orb x1.3, type boosters, Expert Belt —
+  /** Item CHANGED this game: `null` = lost (Knock Off / Thief), a string = now holding
+   *  that item (Trick / Switcheroo / Bestow), `undefined` = untouched. M-B's item list is
+   *  small, so what a change affects is bounded: Life Orb recoil, Leftovers/Black Sludge
+   *  healing, and the berry triggers. (Damage SCALING — Life Orb x1.3, type boosters —
    *  stays baked into the cells; see the note at the removal site.) */
-  myItemGone: boolean[];
-  oppItemGone: boolean[];
+  myItemNow: (string | null | undefined)[];
+  oppItemNow: (string | null | undefined)[];
   /** Turns still locked into a multi-turn move (Outrage / Petal Dance / Thrash):
    *  while >0 the mon can only attack — no switch / setup / protect. */
   myLocked: number[];
@@ -1440,6 +1455,12 @@ function isFinalGambit(move: string | null | undefined): boolean { return toId(m
 // Knock Off alone has 73 legal users in M-B, so this is not a corner case.
 const ITEM_REMOVING_MOVES: ReadonlySet<string> = new Set(['knockoff', 'thief', 'covet', 'corrosivegas']);
 function removesItem(move: string | null | undefined): boolean { return ITEM_REMOVING_MOVES.has(toId(move ?? '')); }
+// Item SWAPS. Trick / Switcheroo exchange the two items; Bestow hands the user's item
+// over one-way. Unlike a removal, the other mon ENDS UP HOLDING something, so both sides
+// need an override rather than a "gone" flag.
+const ITEM_SWAP_MOVES: ReadonlySet<string> = new Set(['trick', 'switcheroo']);
+function swapsItem(move: string | null | undefined): boolean { return ITEM_SWAP_MOVES.has(toId(move ?? '')); }
+function bestowsItem(move: string | null | undefined): boolean { return toId(move ?? '') === 'bestow'; }
 
 // ABILITY RETYPING. The "-ate" abilities and Champions' Dragonize change a move's TYPE.
 // The calc already prices the damage correctly, but `Cell.type` fed the raw dex type to
@@ -2028,6 +2049,10 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppSetupMove: opp.map(o => findSetupMove(o.entry.knownMoves)?.move ?? null),
     myBatonMove: mine.map(m => findMoveId(m.set.moves ?? [], 'batonpass')),
     oppBatonMove: opp.map(o => findMoveId(o.entry.knownMoves, 'batonpass')),
+    myItemSwapMove: mine.map(m => (m.set.moves ?? []).find(mv => swapsItem(mv) || bestowsItem(mv)) ?? null),
+    oppItemSwapMove: opp.map(o => o.entry.knownMoves.find(mv => swapsItem(mv) || bestowsItem(mv)) ?? null),
+    mySpotlight: mine.map(m => !!findMoveId(m.set.moves ?? [], 'spotlight')),
+    oppSpotlight: opp.map(o => !!findMoveId(o.entry.knownMoves, 'spotlight')),
     myAllySwitch: mine.map(m => !!findMoveId(m.set.moves ?? [], 'allyswitch')),
     oppAllySwitch: opp.map(o => !!findMoveId(o.entry.knownMoves, 'allyswitch')),
     myMatBlock: mine.map(m => !!findMoveId(m.set.moves ?? [], 'matblock')),
@@ -2227,8 +2252,8 @@ function initialState(input: SearchInput): State {
     oppSkyDropped: input.opp.map(() => false),
     myCharging: input.mine.map(() => null),
     oppCharging: input.opp.map(() => null),
-    myItemGone: input.mine.map(() => false),
-    oppItemGone: input.opp.map(o => !!o.entry.itemConsumed),
+    myItemNow: input.mine.map(() => undefined),
+    oppItemNow: input.opp.map(o => (o.entry.itemConsumed ? null : undefined)),
     myLocked: input.mine.map(() => 0),
     oppLocked: input.opp.map(() => 0),
     // Live Choice locks: only honored when the item is genuinely a Choice item
@@ -2460,8 +2485,16 @@ function resolveTurn(
   const oppSkyDropped = s.oppSkyDropped.map(() => false);
   const myCharging = [...s.myCharging];               // carries until the move fires
   const oppCharging = [...s.oppCharging];
-  const myItemGone = [...s.myItemGone];
-  const oppItemGone = [...s.oppItemGone];
+  const myItemNow = [...s.myItemNow];
+  const oppItemNow = [...s.oppItemNow];
+  // Effective holder view: the override when one exists, else the table.
+  // `|| undefined` matters: an unheld slot is stored as an empty STRING in the tables,
+  // and treating '' as "holding something" made a Trick appear to leave the foe's item
+  // intact (the receiver got '', which isn't undefined, so nothing was recomputed).
+  const myHeld = (i: number): string | undefined => (myItemNow[i] === undefined ? (t.myItem[i] || undefined) : (myItemNow[i] || undefined));
+  const oppHeld = (j: number): string | undefined => (oppItemNow[j] === undefined ? (t.oppItem[j] || undefined) : (oppItemNow[j] || undefined));
+  const myItemGone = (i: number): boolean => myHeld(i) === undefined;
+  const oppItemGone = (j: number): boolean => oppHeld(j) === undefined;
   // Carried up by a Sky Drop that resolved EARLIER this turn — a slower victim loses its
   // action outright, which is the move's real payoff. (A faster victim already acted, so
   // it keeps its turn; that ordering falls out of the single speed-ordered loop.)
@@ -2711,17 +2744,31 @@ function resolveTurn(
     for (const [actor, tgt] of targets) if (tgt === REDIRECT && (hp[actor] ?? 0) > 0) return actor;
     return null;
   };
-  const myRedirector = findRedirector(myTargets, myHp);
-  const oppRedirector = findRedirector(oppTargets, oppHp);
+  // Spotlight names an ALLY as the soak instead of the caster. It outranks Follow Me
+  // only in the sense of being found first here; either way at most one soak matters.
+  const findSpotlit = (targets: Map<number, number>, hp: number[]): number | null => {
+    for (const [, tgt] of targets) {
+      if (!isSpotlightTarget(tgt)) continue;
+      const ally = spotlightAllyIdx(tgt);
+      if ((hp[ally] ?? 0) > 0) return ally;
+    }
+    return null;
+  };
+  const myRedirector = findSpotlit(myTargets, myHp) ?? findRedirector(myTargets, myHp);
+  const oppRedirector = findSpotlit(oppTargets, oppHp) ?? findRedirector(oppTargets, oppHp);
+  // A Spotlight soak is NOT a powder, so the Rage Powder grass/Overcoat immunity below
+  // must not apply to it — guard on the redirect MOVE, which a spotlit ally won't have.
+  const mySpotlit = findSpotlit(myTargets, myHp);
+  const oppSpotlit = findSpotlit(oppTargets, oppHp);
   // Does an attacker on `side` get its single-target move pulled to the foe's redirector?
   const myRedirTarget = (oppActor: number): number | null => {
     if (myRedirector == null) return null;
-    if (toId(t.myRedirectMove[myRedirector] ?? '') === 'ragepowder' && powderImmune(t.oppSpecies[oppActor]!, t.oppAbility[oppActor])) return null;
+    if (mySpotlit == null && toId(t.myRedirectMove[myRedirector] ?? '') === 'ragepowder' && powderImmune(t.oppSpecies[oppActor]!, t.oppAbility[oppActor])) return null;
     return myRedirector;
   };
   const oppRedirTarget = (myActor: number): number | null => {
     if (oppRedirector == null) return null;
-    if (toId(t.oppRedirectMove[oppRedirector] ?? '') === 'ragepowder' && powderImmune(t.mySpecies[myActor]!, t.myAbility[myActor])) return null;
+    if (oppSpotlit == null && toId(t.oppRedirectMove[oppRedirector] ?? '') === 'ragepowder' && powderImmune(t.mySpecies[myActor]!, t.myAbility[myActor])) return null;
     return oppRedirector;
   };
 
@@ -2755,7 +2802,7 @@ function resolveTurn(
   const nonAttack = (target: number) =>
     isSwitchTarget(target) || isBatonTarget(target) || isLeechTarget(target) || isStatusTarget(target) || isFieldTarget(target)
     || target === SET_BOOST || target === SET_SCREEN || target === SET_WEATHER || target === SET_TERRAIN || target === RECOVER || target === SET_HAZARD
-    || target === REDIRECT || target === SLEEP_SKIP || target === HELP_HAND || target === WIDE_GUARD || target === QUICK_GUARD || target === SAP || target === CLEAR_HAZARD || target === SET_SUB || target === COUNTER || target === SET_ROOM || target === SET_PERISH || target === HEALING_WISH || target === MAT_BLOCK || target === CRAFTY_SHIELD || isTrapTarget(target) || isPivotTarget(target) || isDebuffTarget(target)
+    || target === REDIRECT || target === SLEEP_SKIP || target === HELP_HAND || target === WIDE_GUARD || target === QUICK_GUARD || target === SAP || target === CLEAR_HAZARD || target === SET_SUB || target === COUNTER || target === SET_ROOM || target === SET_PERISH || target === HEALING_WISH || target === MAT_BLOCK || target === CRAFTY_SHIELD || isSpotlightTarget(target) || isSwapTarget(target) || isTrapTarget(target) || isPivotTarget(target) || isDebuffTarget(target)
     || isTauntTarget(target) || isEncoreTarget(target);
   // Fake Out flinches: a mon hit by Fake Out (resolved at +3 before it acts) skips
   // its action this turn.
@@ -2863,7 +2910,7 @@ function resolveTurn(
           procWp('opp', foe, sp.type);
         }
         if (sp.selfDrop) mySelfDrop.set(act.actor, sp.selfDrop);
-        if (t.myLifeOrb[act.actor] && !myItemGone[act.actor] && spreadDealt) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10);
+        if (t.myLifeOrb[act.actor] && !myItemGone(act.actor) && spreadDealt) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10);
         if (isSelfdestruct(sp.move)) myHp[act.actor] = 0;   // Explosion / Self-Destruct: user faints
         if (t.myChoice[act.actor] && !myChoiceMove[act.actor]) myChoiceMove[act.actor] = sp.move; // Choice: lock to the spread move
         continue;
@@ -2951,7 +2998,7 @@ function resolveTurn(
             markResist(oppResistBerryUsed, t.oppResistBerryType, foe, cell.type, t.oppSpecies[foe]!);
             procWp('opp', foe, cell.type);
           }
-          if (t.myLifeOrb[act.actor] && !myItemGone[act.actor] && dealtAny) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10);
+          if (t.myLifeOrb[act.actor] && !myItemGone(act.actor) && dealtAny) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10);
           if (t.myChoice[act.actor] && !myChoiceMove[act.actor]) myChoiceMove[act.actor] = oc.move;
           continue;
         }
@@ -2971,7 +3018,7 @@ function resolveTurn(
         if (oc.drain > 0) myHp[act.actor] = Math.min(100, myHp[act.actor]! + oc.drain * oDealt * (t.oppMaxHp[oTgt]! / (t.myMaxHp[act.actor] || 1)));
         if (oc.contact && t.oppContactChip[oTgt]! > 0 && !t.myResidual[act.actor]!.magicGuard) myHp[act.actor] = Math.max(0, myHp[act.actor]! - t.oppContactChip[oTgt]!);
         if (oc.recoil > 0 && !t.myResidual[act.actor]!.magicGuard && !t.myRockHead[act.actor]) myHp[act.actor] = Math.max(0, myHp[act.actor]! - oc.recoil * oDealt * (t.oppMaxHp[oTgt]! / (t.myMaxHp[act.actor] || 1)));
-        if (t.myLifeOrb[act.actor] && !myItemGone[act.actor]) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10); // Life Orb recoil (10% max HP)
+        if (t.myLifeOrb[act.actor] && !myItemGone(act.actor)) myHp[act.actor] = Math.max(0, myHp[act.actor]! - 10); // Life Orb recoil (10% max HP)
       }
       // Knock Off / Thief / Covet / Corrosive Gas strip the target's item once they
       // connect. What that actually changes here is bounded by M-B's item list: Life Orb
@@ -2979,7 +3026,7 @@ function resolveTurn(
       // gave (Life Orb x1.3, type boosters, Expert Belt) is baked into the cells and
       // can't be un-baked mid-tree — a documented approximation, and one that errs
       // toward the foe keeping its damage rather than inventing a swing.
-      if (oDealt > 0 && removesItem(oc.move)) oppItemGone[oTgt] = true;
+      if (oDealt > 0 && removesItem(oc.move)) oppItemNow[oTgt] = null;
       // Spicy Spray on the DEFENDER burns my attacker (if the hit actually landed and
       // the attacker is still standing — a KO'd attacker can't carry a burn).
       if (oDealt > 0 && spicySpray(t.oppAbility[oTgt]) && (myHp[act.actor] ?? 0) > 0) myPunishStatus.set(act.actor, 'brn');
@@ -3029,7 +3076,7 @@ function resolveTurn(
           procWp('mine', me, sp.type);
         }
         if (sp.selfDrop) oppSelfDrop.set(act.actor, sp.selfDrop);
-        if (t.oppLifeOrb[act.actor] && !oppItemGone[act.actor] && spreadDealt) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
+        if (t.oppLifeOrb[act.actor] && !oppItemGone(act.actor) && spreadDealt) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
         if (isSelfdestruct(sp.move)) oppHp[act.actor] = 0;   // Explosion / Self-Destruct: user faints
         if (t.oppChoice[act.actor] && !oppChoiceMove[act.actor]) oppChoiceMove[act.actor] = sp.move; // Choice: lock to the spread move
         continue;
@@ -3100,7 +3147,7 @@ function resolveTurn(
             markResist(myResistBerryUsed, t.myResistBerryType, me, cell.type, t.mySpecies[me]!);
             procWp('mine', me, cell.type);
           }
-          if (t.oppLifeOrb[act.actor] && !oppItemGone[act.actor] && dealtAny) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
+          if (t.oppLifeOrb[act.actor] && !oppItemGone(act.actor) && dealtAny) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
           if (t.oppChoice[act.actor] && !oppChoiceMove[act.actor]) oppChoiceMove[act.actor] = tc.move;
           continue;
         }
@@ -3119,9 +3166,9 @@ function resolveTurn(
         if (tc.drain > 0) oppHp[act.actor] = Math.min(100, oppHp[act.actor]! + tc.drain * mDealt * (t.myMaxHp[mTgt]! / (t.oppMaxHp[act.actor] || 1)));
         if (tc.contact && t.myContactChip[mTgt]! > 0 && !t.oppResidual[act.actor]!.magicGuard) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - t.myContactChip[mTgt]!);
         if (tc.recoil > 0 && !t.oppResidual[act.actor]!.magicGuard && !t.oppRockHead[act.actor]) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - tc.recoil * mDealt * (t.myMaxHp[mTgt]! / (t.oppMaxHp[act.actor] || 1)));
-        if (t.oppLifeOrb[act.actor] && !oppItemGone[act.actor]) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
+        if (t.oppLifeOrb[act.actor] && !oppItemGone(act.actor)) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
       }
-      if (mDealt > 0 && removesItem(tc.move)) myItemGone[mTgt] = true;
+      if (mDealt > 0 && removesItem(tc.move)) myItemNow[mTgt] = null;
       // Spicy Spray mirror: MY Scovillain-Mega burns the opp attacker that hit it. The
       // opp side reads the RESOLVED ability, so this only fires for a known/mega'd holder.
       if (mDealt > 0 && spicySpray(t.myAbility[mTgt]) && (oppHp[act.actor] ?? 0) > 0) oppPunishStatus.set(act.actor, 'brn');
@@ -3353,10 +3400,45 @@ function resolveTurn(
   };
   // A knocked-off Leftovers stops healing — recompute that mon's residual profile with
   // no item rather than reusing the table built at the root.
-  const myResid = (i: number): ResidualInfo => (myItemGone[i]
-    ? residualInfo(t.mySpecies[i]!, t.myAbility[i], undefined, s.myStatus[i]) : t.myResidual[i]!);
-  const oppResid = (j: number): ResidualInfo => (oppItemGone[j]
-    ? residualInfo(t.oppSpecies[j]!, t.oppAbility[j], undefined, s.oppStatus[j]) : t.oppResidual[j]!);
+  // Recompute whenever the item CHANGED at all — lost or gained. A Trick hands the
+  // receiver a live Leftovers, so reusing the root table would under-heal it just as
+  // surely as it would over-heal the giver.
+  const myResid = (i: number): ResidualInfo => (myItemNow[i] === undefined
+    ? t.myResidual[i]! : residualInfo(t.mySpecies[i]!, t.myAbility[i], myHeld(i), s.myStatus[i]));
+  const oppResid = (j: number): ResidualInfo => (oppItemNow[j] === undefined
+    ? t.oppResidual[j]! : residualInfo(t.oppSpecies[j]!, t.oppAbility[j], oppHeld(j), s.oppStatus[j]));
+  // ITEM SWAPS. Trick / Switcheroo exchange the two items; Bestow hands the user's over
+  // one-way. Unlike a removal both mons end up HOLDING something, which is why the state
+  // is an override rather than a "gone" flag. Cast as its own action: Trick carries no
+  // status, so the status-move table (which is keyed on the status it inflicts) has no
+  // entry for it and it could never have been selected there.
+  for (const [actor, target] of myTargets) {
+    if (!isSwapTarget(target)) continue;
+    const mv = t.myItemSwapMove[actor]; if (!mv) continue;
+    const foe = redirect(swapFoeIdx(target), oppSwitchIn);
+    if ((oppHp[foe] ?? 0) <= 0) continue;
+    const mine0 = myHeld(actor), theirs0 = oppHeld(foe);
+    if (bestowsItem(mv)) {
+      if (mine0 === undefined || theirs0 !== undefined) continue;   // needs a giver and an empty-handed taker
+      myItemNow[actor] = null; oppItemNow[foe] = mine0;
+    } else {
+      myItemNow[actor] = theirs0 ?? null; oppItemNow[foe] = mine0 ?? null;
+    }
+  }
+  for (const [actor, target] of oppTargets) {
+    if (!isSwapTarget(target)) continue;
+    const mv = t.oppItemSwapMove[actor]; if (!mv) continue;
+    const foe = redirect(swapFoeIdx(target), mySwitchIn);
+    if ((myHp[foe] ?? 0) <= 0) continue;
+    const theirs0 = oppHeld(actor), mine0 = myHeld(foe);
+    if (bestowsItem(mv)) {
+      if (theirs0 === undefined || mine0 !== undefined) continue;
+      oppItemNow[actor] = null; myItemNow[foe] = theirs0;
+    } else {
+      oppItemNow[actor] = mine0 ?? null; myItemNow[foe] = theirs0 ?? null;
+    }
+  }
+
   for (const mi of myActiveNow) residual(myHp, mi, myResid(mi), s.myStatus[mi]!, myToxicN, t.myGrounded[mi]!);
   for (const oj of oppActiveNow) residual(oppHp, oj, oppResid(oj), s.oppStatus[oj]!, oppToxicN, t.oppGrounded[oj]!);
 
@@ -3450,8 +3532,8 @@ function resolveTurn(
   for (const j of oppActiveNow) if (s.oppLocked[j]! > 0) oppLocked[j] = s.oppLocked[j]! - 1;
   // Item view AFTER this turn's Knock Off / Thief: a stripped berry can't cure or
   // trigger. Computed here (post-damage) so a knock-off landing this turn is reflected.
-  const myItemLive = t.myItem.map((it, i) => (myItemGone[i] ? undefined : it));
-  const oppItemLive = t.oppItem.map((it, j) => (oppItemGone[j] ? undefined : it));
+  const myItemLive = t.myItem.map((_, i) => myHeld(i));
+  const oppItemLive = t.oppItem.map((_, j) => oppHeld(j));
 
   // Inflict a status — but a Lum/Cheri/… berry immediately cures it (and is eaten).
   const inflict = (foe: number, status: string, toxicN: number[], statusArr: string[], berryUsed: boolean[], item: (string | undefined)[]) => {
@@ -3759,7 +3841,7 @@ function resolveTurn(
     myBerryUsed, oppBerryUsed, myHazards, oppHazards, mySleepTurns, oppSleepTurns, myYawn, oppYawn, myPerish, oppPerish, myTrappedBy, oppTrappedBy,
     myTaunt, oppTaunt, myEncore, oppEncore, myEncoreAct, oppEncoreAct,
     myUnburden, oppUnburden, myResistBerryUsed, oppResistBerryUsed, myFirstTurn, oppFirstTurn,
-    myDisguise, oppDisguise, myRecharge, oppRecharge, mySkyDropped, oppSkyDropped, myCharging, oppCharging, myItemGone, oppItemGone, myLocked, oppLocked, myChoiceMove, oppChoiceMove, mySubHp, oppSubHp,
+    myDisguise, oppDisguise, myRecharge, oppRecharge, mySkyDropped, oppSkyDropped, myCharging, oppCharging, myItemNow, oppItemNow, myLocked, oppLocked, myChoiceMove, oppChoiceMove, mySubHp, oppSubHp,
     myWish, oppWish, myFutureTurns, oppFutureTurns, myFutureDmg, oppFutureDmg,
     gravity, wonderRoom, magicRoom, gravityTurns, wonderRoomTurns, magicRoomTurns,
   };
@@ -3947,7 +4029,7 @@ function jointActions(
   healingWish?: boolean[],
   // Team protect (root only). Mat Block is FIRST-TURN-OUT only, like Fake Out; Crafty
   // Shield has no such restriction.
-  teamProtect?: { mat: boolean[]; crafty: boolean[]; firstTurn: boolean[]; allySwitch: boolean[] },
+  teamProtect?: { mat: boolean[]; crafty: boolean[]; firstTurn: boolean[]; allySwitch: boolean[]; spotlight?: boolean[]; allies?: number[]; swap?: boolean[]; swapFoes?: number[] },
 ): Array<Map<number, number>> {
   const liveFoes = foeActive.filter(j => (foeHp[j] ?? 0) > 0);
   if (liveFoes.length === 0) return [];
@@ -4029,6 +4111,9 @@ function jointActions(
       ...(teamProtect?.mat[actor] === true && teamProtect.firstTurn[actor] === true ? [MAT_BLOCK] : []),
       ...(teamProtect?.crafty[actor] === true ? [CRAFTY_SHIELD] : []),
       ...(teamProtect?.allySwitch[actor] === true ? [ALLY_SWITCH] : []),
+      ...(teamProtect?.spotlight?.[actor] === true
+        ? (teamProtect.allies ?? []).filter(a => a !== actor).map(spotlightCode) : []),
+      ...(teamProtect?.swap?.[actor] === true ? (teamProtect.swapFoes ?? []).map(swapCode) : []),
       ...(canClearHazard ? [CLEAR_HAZARD] : []),
       ...(canSub ? [SET_SUB] : []),
       ...(canCounter ? [COUNTER] : []),
@@ -4592,7 +4677,10 @@ function rootOppJoints(t: Tables, s: State): Array<Map<number, number>> {
     { move: t.oppTrapMove, foes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0 && s.myTrappedBy[i] == null && !isType(t.mySpecies[i]!, 'Ghost')) },
     t.oppHealingWish.map(hw => !!hw && benchWorthHealing(s.oppActive, s.oppHp, s.oppStatus, t.oppN)),
     { mat: t.oppMatBlock, crafty: t.oppCraftyShield, firstTurn: s.oppFirstTurn,
-      allySwitch: t.oppAllySwitch.map(k => k && s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0).length === 2) });
+      allySwitch: t.oppAllySwitch.map(k => k && s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0).length === 2),
+      spotlight: t.oppSpotlight, allies: s.oppActive.filter(j => (s.oppHp[j] ?? 0) > 0),
+      swap: t.oppItemSwapMove.map((mv, j) => !!mv && s.myActive.some(i => (s.myHp[i] ?? 0) > 0 && (t.myItem[i] || '') !== (t.oppItem[j] || ''))),
+      swapFoes: s.myActive.filter(i => (s.myHp[i] ?? 0) > 0) });
 }
 
 // Root maximin over a prebuilt table/state — shared by searchToDepth and the
@@ -4687,6 +4775,10 @@ function playsFromJoint(t: Tables, joint: Map<number, number> | null, choiceMove
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Counter', targetSpecies: 'foe', self: true });
     } else if (target === SET_ROOM) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myRoomMove[actor] === 'gravity' ? 'Gravity' : t.myRoomMove[actor] === 'wonderRoom' ? 'Wonder Room' : 'Magic Room', targetSpecies: 'field', self: true });
+    } else if (isSwapTarget(target)) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myItemSwapMove[actor] ?? 'Trick', targetSpecies: t.oppSpecies[swapFoeIdx(target)]! });
+    } else if (isSpotlightTarget(target)) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Spotlight', targetSpecies: t.mySpecies[spotlightAllyIdx(target)]!, self: true });
     } else if (target === ALLY_SWITCH) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Ally Switch', targetSpecies: 'my ally', self: true });
     } else if (target === MAT_BLOCK) {
@@ -4740,6 +4832,10 @@ function oppPlaysFromJoint(t: Tables, joint: Map<number, number> | null, choiceM
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppPivotMove[actor] ?? 'U-turn', targetSpecies: t.mySpecies[pivotFoeIdx(target)]!, switch: true });
     } else if (isStatusTarget(target)) {
       plays.push({ mySpecies: t.oppSpecies[actor]!, move: t.oppStatusMove[actor]?.move ?? 'status', targetSpecies: t.mySpecies[statusFoeIdx(target)]! });
+    } else if (isSwapTarget(target)) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: t.myItemSwapMove[actor] ?? 'Trick', targetSpecies: t.oppSpecies[swapFoeIdx(target)]! });
+    } else if (isSpotlightTarget(target)) {
+      plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Spotlight', targetSpecies: t.mySpecies[spotlightAllyIdx(target)]!, self: true });
     } else if (target === ALLY_SWITCH) {
       plays.push({ mySpecies: t.mySpecies[actor]!, move: 'Ally Switch', targetSpecies: 'my ally', self: true });
     } else if (target === MAT_BLOCK) {
@@ -5821,6 +5917,8 @@ export type TurnAction =
   | { kind: 'recover' }                   // Recover / Roost / Wish (delayed) — self-heal
   | { kind: 'substitute' }                // Substitute — pay 25% HP for a sub
   | { kind: 'counter' }                   // Counter / Mirror Coat / Metal Burst — reflect
+  | { kind: 'itemswap'; target: number }  // Trick / Switcheroo / Bestow at the foe
+  | { kind: 'spotlight'; ally: number }  // make `ally` soak the foes' single-target moves
   | { kind: 'allyswitch' }             // swap the two actives — incoming single-target moves cross over
   | { kind: 'matblock' }               // Mat Block — side-wide block of DAMAGING moves (first turn out)
   | { kind: 'craftyshield' }           // Crafty Shield — side-wide block of STATUS moves
@@ -5897,6 +5995,8 @@ export function resolveOneTurn(
     else if (a.kind === 'recover') { myTargets.set(actor, RECOVER); myMove.set(actor, t.myRecover[actor]?.move ?? 'Recover'); }
     else if (a.kind === 'substitute') { myTargets.set(actor, SET_SUB); myMove.set(actor, 'Substitute'); }
     else if (a.kind === 'counter') { myTargets.set(actor, COUNTER); myMove.set(actor, t.myCounter[actor] ? 'Counter' : ''); }
+    else if (a.kind === 'itemswap') { myTargets.set(actor, swapCode(a.target)); myMove.set(actor, t.myItemSwapMove[actor] ?? 'Trick'); }
+    else if (a.kind === 'spotlight') { myTargets.set(actor, spotlightCode(a.ally)); myMove.set(actor, 'Spotlight'); }
     else if (a.kind === 'allyswitch') { myTargets.set(actor, ALLY_SWITCH); myMove.set(actor, 'Ally Switch'); }
     else if (a.kind === 'matblock') { myTargets.set(actor, MAT_BLOCK); myMove.set(actor, 'Mat Block'); }
     else if (a.kind === 'craftyshield') { myTargets.set(actor, CRAFTY_SHIELD); myMove.set(actor, 'Crafty Shield'); }
@@ -5927,6 +6027,8 @@ export function resolveOneTurn(
     else if (a.kind === 'recover') { oppTargets.set(actor, RECOVER); oppMove.set(actor, t.oppRecover[actor]?.move ?? 'Recover'); }
     else if (a.kind === 'substitute') { oppTargets.set(actor, SET_SUB); oppMove.set(actor, 'Substitute'); }
     else if (a.kind === 'counter') { oppTargets.set(actor, COUNTER); oppMove.set(actor, t.oppCounter[actor] ? 'Counter' : ''); }
+    else if (a.kind === 'itemswap') { oppTargets.set(actor, swapCode(a.target)); oppMove.set(actor, t.oppItemSwapMove[actor] ?? 'Trick'); }
+    else if (a.kind === 'spotlight') { oppTargets.set(actor, spotlightCode(a.ally)); oppMove.set(actor, 'Spotlight'); }
     else if (a.kind === 'allyswitch') { oppTargets.set(actor, ALLY_SWITCH); oppMove.set(actor, 'Ally Switch'); }
     else if (a.kind === 'matblock') { oppTargets.set(actor, MAT_BLOCK); oppMove.set(actor, 'Mat Block'); }
     else if (a.kind === 'craftyshield') { oppTargets.set(actor, CRAFTY_SHIELD); oppMove.set(actor, 'Crafty Shield'); }

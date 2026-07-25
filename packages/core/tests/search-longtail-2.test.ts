@@ -136,7 +136,7 @@ describe('Yawn (delayed sleep)', () => {
     void input2;
   });
 
-  test('Yawn is not flagged — nor is Ally Switch, now that it is modelled', () => {
+  test('Yawn is not flagged — nor Ally Switch nor Spotlight, all modelled now', () => {
     const input = input2v2(target, filler, [yawner, blissey]);
     const flags = unmodeledMechanics(input);
     expect(flags.some(f => f.kind === 'yawn')).toBe(false);
@@ -145,8 +145,8 @@ describe('Yawn (delayed sleep)', () => {
     // the user to the exact engine for nothing.
     const withAllySwitch = input2v2(mon({ ...target, moves: ['Ally Switch'] }), filler, [yawner, blissey]);
     expect(unmodeledMechanics(withAllySwitch).some(f => f.kind === 'redirection')).toBe(false);
-    // Spotlight is what the rule still covers.
+    // Spotlight is modelled too now, so the redirection class flags nothing at all.
     const withSpotlight = input2v2(mon({ ...target, moves: ['Spotlight'] }), filler, [yawner, blissey]);
-    expect(unmodeledMechanics(withSpotlight).some(f => f.kind === 'redirection')).toBe(true);
+    expect(unmodeledMechanics(withSpotlight).some(f => f.kind === 'redirection')).toBe(false);
   });
 });
