@@ -77,6 +77,11 @@ export interface SearchMyMon {
    *  still got status moves recommended and an Encored foe was treated as free. */
   tauntTurns?: number;
   encoreMove?: string;
+  /** Remaining sleep turns and the toxic counter — both tracked live. Without them the
+   *  search assumed a flat 2 turns of sleep and a fresh tox counter, which under-rates
+   *  how soon a sleeping mon wakes and how hard badly-poisoned damage is ramping. */
+  sleepTurns?: number;
+  toxicCounter?: number;
   /** Focus Sash / Sturdy survival (my items are known, so prob is 0 or 1). */
   survival?: Survival;
   /** Already under Leech Seed — the OPP search-index of the seeder (heals it). */
@@ -117,6 +122,8 @@ export interface SearchOppMon {
   lastMove?: string;
   tauntTurns?: number;
   encoreMove?: string;
+  sleepTurns?: number;
+  toxicCounter?: number;
   /** Focus Sash / Sturdy survival — probabilistic (from inference or usage %). */
   survival?: Survival;
   /** A KNOWN-but-not-yet-brought mon, folded in so the opponent can switch it in
@@ -2284,8 +2291,8 @@ function initialState(input: SearchInput): State {
     weatherTurns: input.field.weatherTurns,
     terrain: input.field.terrain ?? null,
     terrainTurns: input.field.terrainTurns,
-    myToxicN: input.mine.map(m => (m.status === 'tox' ? 1 : 0)),
-    oppToxicN: input.opp.map(o => (o.status === 'tox' ? 1 : 0)),
+    myToxicN: input.mine.map(m => (m.status === 'tox' ? (m.toxicCounter ?? 1) : 0)),
+    oppToxicN: input.opp.map(o => (o.status === 'tox' ? (o.toxicCounter ?? 1) : 0)),
     myStatus: input.mine.map(m => m.status ?? ''),
     oppStatus: input.opp.map(o => o.status ?? ''),
     // A consumed item (Sitrus already eaten, Knock Off'd, …) can't fire again.
@@ -2295,14 +2302,14 @@ function initialState(input: SearchInput): State {
     oppHazards: { ...(input.field.theirHazards ?? {}) },
     // A mon already asleep at the root: we don't know the remaining count, so assume
     // ~2 turns (the middle of Gen 9's 1-3).
-    mySleepTurns: input.mine.map(m => (m.status === 'slp' ? 2 : 0)),
+    mySleepTurns: input.mine.map(m => (m.status === 'slp' ? (m.sleepTurns ?? 2) : 0)),
     myYawn: input.mine.map(() => 0),
     oppYawn: input.opp.map(() => 0),
     myPerish: input.mine.map(m => m.perishCount ?? 0),
     oppPerish: input.opp.map(o => o.perishCount ?? 0),
     myTrappedBy: input.mine.map(m => m.trappedByFoe ?? null),
     oppTrappedBy: input.opp.map(o => o.trappedByFoe ?? null),
-    oppSleepTurns: input.opp.map(o => (o.status === 'slp' ? 2 : 0)),
+    oppSleepTurns: input.opp.map(o => (o.status === 'slp' ? (o.sleepTurns ?? 2) : 0)),
     // Taunt/Encore volatiles aren't carried on SearchInput yet → start clear.
     myTaunt: input.mine.map(m => m.tauntTurns ?? 0),
     oppTaunt: input.opp.map(o => o.tauntTurns ?? 0),
@@ -4683,6 +4690,8 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
       subHpPercent: match.myCurrentSub?.[idx],
       tormented: myActive.has(idx) && tormentedSinceEntry(match, 'mine', idx),
       tauntTurns: match.myTauntTurns?.[idx] ?? (match.myTaunted?.includes(idx) ? 3 : undefined),
+      sleepTurns: match.mySleepCounter?.[idx],
+      toxicCounter: match.myToxCounter?.[idx],
       encoreMove: match.myEncoreMove?.[idx],
       lastMove: myActive.has(idx) ? lastMoveUsed(match, 'mine', idx) : undefined,
       // Fake Out / First Impression eligibility — true until the mon moves after entry.
@@ -4711,6 +4720,8 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
       subHpPercent: entry.substitute,
       tormented: oppActive.has(idx) && tormentedSinceEntry(match, 'theirs', idx),
       tauntTurns: entry.tauntTurns ?? (entry.taunted ? 3 : undefined),
+      sleepTurns: entry.sleepCounter,
+      toxicCounter: entry.toxCounter,
       encoreMove: entry.encoreMove,
       lastMove: oppActive.has(idx) ? lastMoveUsed(match, 'theirs', idx) : undefined,
       firstTurnOut: oppActive.has(idx) && firstTurnOut(match, 'theirs', idx),

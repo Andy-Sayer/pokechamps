@@ -105,3 +105,29 @@ describe('live builder threads Taunt + Encore', () => {
     expect(inp.opp[0]!.encoreMove).toBe('Knock Off');
   });
 });
+
+describe('live builder threads the status COUNTERS', () => {
+  test('sleep turns come from the live counter, not a flat guess', () => {
+    const m = base();
+    m.myStatus = { 0: 'slp' };
+    m.mySleepCounter = { 0: 1 };            // about to wake
+    expect(searchInputFromMatch(m, ACTIVE).mine[0]!.sleepTurns).toBe(1);
+  });
+
+  test('the toxic counter comes through (ramping damage)', () => {
+    const m = base();
+    m.myStatus = { 0: 'tox' };
+    m.myToxCounter = { 0: 4 };
+    expect(searchInputFromMatch(m, ACTIVE).mine[0]!.toxicCounter).toBe(4);
+  });
+
+  test('opponent counters too', () => {
+    const m = base();
+    m.opponentTeam[0]!.status = 'slp';
+    m.opponentTeam[0]!.sleepCounter = 3;
+    m.opponentTeam[0]!.toxCounter = 2;
+    const inp = searchInputFromMatch(m, ACTIVE);
+    expect(inp.opp[0]!.sleepTurns).toBe(3);
+    expect(inp.opp[0]!.toxicCounter).toBe(2);
+  });
+});
