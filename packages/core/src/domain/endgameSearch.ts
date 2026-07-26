@@ -4620,6 +4620,31 @@ function protectedOnLastTurn(match: Match, side: 'mine' | 'theirs', teamIdx: num
     a.side === side && a.attackerTeamIndex === teamIdx && PROTECT_MOVE_IDS.has(toId(a.move ?? '')));
 }
 
+/** The move this mon used on the MOST RECENT turn it acted — what Torment forbids
+ *  repeating. Reset by a switch, since the volatile doesn't survive leaving the field. */
+function lastMoveUsed(match: Match, side: 'mine' | 'theirs', teamIdx: number): string | undefined {
+  const last = match.turns?.[match.turns.length - 1];
+  const act = last?.actions.find(a => a.side === side && a.kind === 'move' && a.attackerTeamIndex === teamIdx);
+  return act?.move ?? undefined;
+}
+
+/** Has this mon been Tormented since it last entered? Torment is a volatile: it lasts
+ *  until the mon leaves the field, so the scan resets on its switches — the same shape
+ *  as `lockedMoveSinceEntry`. The live engine has no torment field to read, so the turn
+ *  log IS the record. */
+function tormentedSinceEntry(match: Match, side: 'mine' | 'theirs', teamIdx: number): boolean {
+  const foeSide = side === 'mine' ? 'theirs' : 'mine';
+  let on = false;
+  for (const turn of match.turns ?? []) {
+    for (const a of turn.actions) {
+      // The victim leaving the field clears it.
+      if (a.side === side && a.kind === 'switch' && (a.attackerTeamIndex === teamIdx || a.targetTeamIndex === teamIdx)) on = false;
+      else if (a.side === foeSide && a.kind === 'move' && toId(a.move ?? '') === 'torment' && a.targetTeamIndex === teamIdx) on = true;
+    }
+  }
+  return on;
+}
+
 export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchInput {
   const myActive = new Set<number>(active.mine.filter((x): x is number => x != null));
   const oppActive = new Set<number>(active.theirs.filter((x): x is number => x != null));
@@ -4642,6 +4667,12 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
       boosts: match.myBoosts?.[idx], status: match.myStatus?.[idx], survival: mySurvival(set),
       protectedLastTurn: myActive.has(idx) && protectedOnLastTurn(match, 'mine', idx),
       timesHit: match.myTimesHit?.[idx],
+      // Substitute: the live engine tracks the sub's HP, and the search models subs —
+      // but nothing connected them, so a sub you had up was invisible to every
+      // recommendation while it soaked your hits.
+      subHpPercent: match.myCurrentSub?.[idx],
+      tormented: myActive.has(idx) && tormentedSinceEntry(match, 'mine', idx),
+      lastMove: myActive.has(idx) ? lastMoveUsed(match, 'mine', idx) : undefined,
       // Fake Out / First Impression eligibility — true until the mon moves after entry.
       firstTurnOut: myActive.has(idx) && firstTurnOut(match, 'mine', idx),
       // Choice lock: holder moved since its last entry (a knocked-off item lifts it).
@@ -4665,6 +4696,9 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
       boosts: entry.currentBoosts, status: entry.status, survival: oppSurvival(entry),
       protectedLastTurn: oppActive.has(idx) && protectedOnLastTurn(match, 'theirs', idx),
       timesHit: entry.timesHit,
+      subHpPercent: entry.substitute,
+      tormented: oppActive.has(idx) && tormentedSinceEntry(match, 'theirs', idx),
+      lastMove: oppActive.has(idx) ? lastMoveUsed(match, 'theirs', idx) : undefined,
       firstTurnOut: oppActive.has(idx) && firstTurnOut(match, 'theirs', idx),
       // Hard Choice lock only from a KNOWN (revealed) Choice item — soft repeat-
       // move suspicions stay display-only and never restrict the search.
