@@ -390,3 +390,51 @@ describe('BattleAssembler — confusion self-damage', () => {
     expect(a.endTurnLines({ m1: 62 }, { m1: 100 })).toContain('hp m1=109');
   });
 });
+
+// A status INFLICTION names who the move hit. Will-O-Wisp and Thunder Wave print no
+// effectiveness line, so this is often the only target evidence in the whole turn —
+// without it those moves emitted `> self` and the engine learned nothing about the aim.
+describe('BattleAssembler — status inflictions pin the target', () => {
+  const ROSTER = { m1: 'Talonflame', m2: 'Kingambit', o1: 'Rotom-Wash', o2: 'Amoonguss' };
+
+  test('"X was burned!" pins the Will-O-Wisp that caused it', () => {
+    const a = new BattleAssembler(ROSTER);
+    feed(a, ['The opposing Rotom-Wash used Will-O-Wisp!', 'Kingambit was burned!']);
+    expect(a.endTurnLines()).toContain('o1 > Will-O-Wisp > m2');
+  });
+
+  test('paralysis pins Thunder Wave the same way', () => {
+    const a = new BattleAssembler(ROSTER);
+    feed(a, ['The opposing Rotom-Wash used Thunder Wave!', 'Talonflame is paralyzed! It may be unable to move!']);
+    expect(a.endTurnLines()).toContain('o1 > Thunder Wave > m1');
+  });
+
+  test('REST does not pin — it sleeps its own user, not a foe\'s target', () => {
+    const a = new BattleAssembler(ROSTER);
+    feed(a, ['The opposing Rotom-Wash used Hydro Pump!', 'Kingambit used Rest!', 'Kingambit fell asleep!']);
+    const lines = a.endTurnLines();
+    // Hydro Pump must NOT be credited with putting Kingambit to sleep.
+    expect(lines.some(l => /Hydro Pump > m2/.test(l))).toBe(false);
+    expect(lines).toContain('m2 slp');
+  });
+
+  test('a CONTACT attacker burned by the defender\'s ability does not pin either', () => {
+    // Flame Body / Static punish the attacker; the status names my mon but the foe's
+    // move never targeted it.
+    const a = new BattleAssembler(ROSTER);
+    // The foe's move here is SELF-targeting so the ordinary target-inference pass can't
+    // claim m1 either — otherwise this test would pass or fail for reasons that have
+    // nothing to do with the status pin (the first cut used Pollen Puff, an offensive
+    // move, and the default-target pass claimed m1 regardless of the guard).
+    feed(a, ['The opposing Amoonguss used Tailwind!', 'Talonflame used Brave Bird!', 'Talonflame was burned!']);
+    const lines = a.endTurnLines();
+    expect(lines).toContain('o2 > Tailwind > self');   // never repointed at m1
+    expect(lines).toContain('m1 brn');                  // …but the burn is still recorded
+  });
+
+  test('the state line is still emitted in every case', () => {
+    const a = new BattleAssembler(ROSTER);
+    feed(a, ['The opposing Rotom-Wash used Will-O-Wisp!', 'Kingambit was burned!']);
+    expect(a.endTurnLines()).toContain('m2 brn');
+  });
+});

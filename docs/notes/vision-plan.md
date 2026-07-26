@@ -146,10 +146,15 @@ Switch 2 / VOD ──▶ frames ──▶ readFrame(RegionMap)         ← banne
    nine review-pass fixes have not yet faced a live ranked match — every prior live test
    found defects that offline replay didn't. This is the top item and it needs a play
    session, not a commit.
-2. **Status-infliction target pins beyond confusion.** "X was burned!" / "X is paralyzed!"
-   name who the move hit just as reliably, and the assembler still ignores them for
-   targeting. Same one-line change as the confusion infliction pin — deliberately left out
-   of that fix to keep its blast radius to the bug being closed.
+2. ~~**Status-infliction target pins**~~ ✅ DONE (2026-07-26). "X was burned!" /
+   "X is paralyzed!" now pin the move that caused them — often the ONLY target evidence a
+   status move leaves, since Will-O-Wisp and Thunder Wave print no effectiveness line, so
+   those moves used to emit `> self` and teach the engine nothing about the aim. Guarded
+   against self-infliction, which is what makes it safe: **Rest** sleeps its own user, and
+   a **contact attacker** picking up burn/par/psn is an ability punish (Flame Body /
+   Static / Effect Spore) rather than a foe's target — pinning either would be exactly the
+   kind of lie the miss/Protect guards exist to prevent. Replaying the 2026-07-23 live
+   trace produces byte-identical output.
 3. **Sprite coverage** — 90 species covered. Missing meta: **Annihilape, Corviknight,
    Glimmora, Tsareena**. Regionals are 3/17 (`Raichu-Alola` matters — Mega Raichu X/Y is
    the M-B headline). The app-owned harvest routine grows this automatically from every

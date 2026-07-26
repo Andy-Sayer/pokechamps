@@ -266,6 +266,19 @@ export class BattleAssembler {
     return undefined;
   }
 
+  /** Did THIS mon's own turn cause the status, rather than a foe's move? Two cases:
+   *  it used a self-statusing move (Rest), or it made contact into an ability that
+   *  burns/paralyses/poisons the attacker (Flame Body / Static / Effect Spore / Poison
+   *  Point). Either way the status names the mon itself, not a foe's target. */
+  private selfInflicted(ref: SlotRef, status: string): boolean {
+    const own = this.actions.find(a => a.kind === 'move' && a.actor === ref);
+    if (!own) return false;
+    if (toId(own.move ?? '') === 'rest' && status === 'sleep') return true;
+    // A contact attacker picking up burn/par/psn is the classic ability punish.
+    const contact = !!(getMove(toId(own.move ?? '')) as { flags?: Record<string, unknown> } | undefined)?.flags?.contact;
+    return contact && (status === 'burn' || status === 'paralysis' || status === 'poison');
+  }
+
   /** Pin the most recent move into `ref` as AIMED at it but dealing NO damage (a miss
    *  or an immunity) — the target is real data, a damage slot would be poison. */
   private markNoDamage(side: Side, ref: SlotRef | null): void {
@@ -551,7 +564,18 @@ export class BattleAssembler {
         if (!ref) { this.notes.push(`status unresolved ${msg.side} "${msg.label}"`); break; }
         const MAP: Record<string, string> = { burn: 'brn', paralysis: 'par', poison: 'psn', toxic: 'tox', sleep: 'slp', freeze: 'frz' };
         const st = MAP[msg.status];
-        if (st) this.stateLines.push(`${ref} ${st}`);
+        if (st) {
+          this.stateLines.push(`${ref} ${st}`);
+          // The infliction ALSO names who the move that just landed hit — the same signal
+          // class as flinch / effectiveness, and often the only target evidence a status
+          // move leaves (Will-O-Wisp and Thunder Wave print no effectiveness line).
+          // `offensiveOnly: false` so a status move can own the pin.
+          // GUARDED against self-infliction: Rest sleeps its OWN user, and an ability
+          // (Flame Body / Static / Effect Spore) burns or paralyses the ATTACKER — in
+          // both cases the named mon is not the foe's target, and a pin would be a lie
+          // of exactly the kind the miss/Protect guards exist to prevent.
+          if (!this.selfInflicted(ref, msg.status)) this.attachTarget(msg.side, ref, false);
+        }
         else if (msg.status === 'confusion') {
           // Volatile — no state-line grammar, so it isn't keyed. But it IS the attribution
           // key for the sideless "It hurt itself in its confusion!" that may follow: the
