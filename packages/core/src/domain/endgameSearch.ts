@@ -72,6 +72,11 @@ export interface SearchMyMon {
   /** Under Torment, and the move it used last — together they forbid a repeat. */
   tormented?: boolean;
   lastMove?: string;
+  /** Taunt turns remaining (>0 blocks status moves) and the move an Encore has locked
+   *  this mon into. Both are tracked live but were never threaded in, so a Taunted mon
+   *  still got status moves recommended and an Encored foe was treated as free. */
+  tauntTurns?: number;
+  encoreMove?: string;
   /** Focus Sash / Sturdy survival (my items are known, so prob is 0 or 1). */
   survival?: Survival;
   /** Already under Leech Seed — the OPP search-index of the seeder (heals it). */
@@ -110,6 +115,8 @@ export interface SearchOppMon {
   timesHit?: number;
   tormented?: boolean;
   lastMove?: string;
+  tauntTurns?: number;
+  encoreMove?: string;
   /** Focus Sash / Sturdy survival — probabilistic (from inference or usage %). */
   survival?: Survival;
   /** A KNOWN-but-not-yet-brought mon, folded in so the opponent can switch it in
@@ -2297,8 +2304,8 @@ function initialState(input: SearchInput): State {
     oppTrappedBy: input.opp.map(o => o.trappedByFoe ?? null),
     oppSleepTurns: input.opp.map(o => (o.status === 'slp' ? 2 : 0)),
     // Taunt/Encore volatiles aren't carried on SearchInput yet → start clear.
-    myTaunt: input.mine.map(() => 0),
-    oppTaunt: input.opp.map(() => 0),
+    myTaunt: input.mine.map(m => m.tauntTurns ?? 0),
+    oppTaunt: input.opp.map(o => o.tauntTurns ?? 0),
     myEncore: input.mine.map(() => 0),
     oppEncore: input.opp.map(() => 0),
     myEncoreAct: input.mine.map(() => NONE),
@@ -2329,8 +2336,11 @@ function initialState(input: SearchInput): State {
     // Live Choice locks: only honored when the item is genuinely a Choice item
     // (my items known; opp's only when revealed — and a knocked-off/consumed
     // item lifts the lock).
-    myChoiceMove: input.mine.map(m => isChoiceItem(m.set.item) ? (m.choiceLockedMove ?? null) : null),
-    oppChoiceMove: input.opp.map(o => isChoiceItem(o.entry.item) && !o.entry.itemConsumed ? (o.choiceLockedMove ?? null) : null),
+    // An ENCORED mon is a per-move lock with switching still allowed — exactly what the
+    // Choice-lock machinery already expresses — so it rides that rather than the
+    // encoreAct path, which would need a full move→action-code mapping to be valid.
+    myChoiceMove: input.mine.map(m => m.encoreMove ?? (isChoiceItem(m.set.item) ? (m.choiceLockedMove ?? null) : null)),
+    oppChoiceMove: input.opp.map(o => o.encoreMove ?? (isChoiceItem(o.entry.item) && !o.entry.itemConsumed ? (o.choiceLockedMove ?? null) : null)),
     mySubHp: input.mine.map(m => m.subHpPercent ?? 0),
     oppSubHp: input.opp.map(o => o.subHpPercent ?? 0),
     myWish: input.mine.map(() => 0),
@@ -4672,6 +4682,8 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
       // recommendation while it soaked your hits.
       subHpPercent: match.myCurrentSub?.[idx],
       tormented: myActive.has(idx) && tormentedSinceEntry(match, 'mine', idx),
+      tauntTurns: match.myTauntTurns?.[idx] ?? (match.myTaunted?.includes(idx) ? 3 : undefined),
+      encoreMove: match.myEncoreMove?.[idx],
       lastMove: myActive.has(idx) ? lastMoveUsed(match, 'mine', idx) : undefined,
       // Fake Out / First Impression eligibility — true until the mon moves after entry.
       firstTurnOut: myActive.has(idx) && firstTurnOut(match, 'mine', idx),
@@ -4698,6 +4710,8 @@ export function searchInputFromMatch(match: Match, active: ActiveSlots): SearchI
       timesHit: entry.timesHit,
       subHpPercent: entry.substitute,
       tormented: oppActive.has(idx) && tormentedSinceEntry(match, 'theirs', idx),
+      tauntTurns: entry.tauntTurns ?? (entry.taunted ? 3 : undefined),
+      encoreMove: entry.encoreMove,
       lastMove: oppActive.has(idx) ? lastMoveUsed(match, 'theirs', idx) : undefined,
       firstTurnOut: oppActive.has(idx) && firstTurnOut(match, 'theirs', idx),
       // Hard Choice lock only from a KNOWN (revealed) Choice item — soft repeat-

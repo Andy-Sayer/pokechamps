@@ -76,3 +76,32 @@ describe('live builder threads Torment + last move', () => {
     expect(inp.mine[1]!.tormented).toBe(true);
   });
 });
+
+describe('live builder threads Taunt + Encore', () => {
+  test('a Taunted mon reaches the search with its turns', () => {
+    const m = base();
+    m.myTauntTurns = { 0: 2 };
+    expect(searchInputFromMatch(m, ACTIVE).mine[0]!.tauntTurns).toBe(2);
+  });
+
+  test('the boolean-only form still counts (turns default to 3)', () => {
+    const m = base();
+    m.myTaunted = [0];
+    expect(searchInputFromMatch(m, ACTIVE).mine[0]!.tauntTurns).toBe(3);
+  });
+
+  test('an Encored mon carries the move it is locked into', () => {
+    const m = base();
+    m.myEncoreMove = { 0: 'Iron Head' };
+    expect(searchInputFromMatch(m, ACTIVE).mine[0]!.encoreMove).toBe('Iron Head');
+  });
+
+  test('the opponent’s Taunt and Encore come through too', () => {
+    const m = base();
+    m.opponentTeam[0]!.taunted = true;
+    m.opponentTeam[0]!.encoreMove = 'Knock Off';
+    const inp = searchInputFromMatch(m, ACTIVE);
+    expect(inp.opp[0]!.tauntTurns).toBe(3);
+    expect(inp.opp[0]!.encoreMove).toBe('Knock Off');
+  });
+});
