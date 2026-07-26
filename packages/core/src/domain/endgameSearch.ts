@@ -24,7 +24,7 @@
  */
 import type { PokemonSet, OpponentEntry, FieldState, Match, HazardState } from './types.js';
 import { ZERO_EVS, MAX_IVS } from './types.js';
-import { predictOffense, predictThreat, predictOffenseCells, predictThreatCells, pikalyticsMoves } from './predictions.js';
+import { predictOffense, predictThreat, predictOffenseCells, predictThreatCells, pikalyticsMoves, type MatchupCell } from './predictions.js';
 import { representativeSpreadIndices } from './inference.js';
 import { actualSpeed, actualStat, effectiveSpeedRange } from './speed.js';
 import { getMove, getSpecies, getNature, toId, isSpreadMove, moveFlinchChance, isTrappingMove, isLevitateAbility } from './data.js';
@@ -1698,6 +1698,9 @@ function cellFrom(c: ReturnType<typeof predictOffense>): Cell {
   if (!c) return { dmgMin: 0, dmgMid: 0, dmgMax: 0, move: '', priority: 0, multiHit: false, koRolls: [], candidates: 0, physical: false, type: '', groundMove: false, drain: 0, contact: false, recoil: 0, setsHazard: null, selfDrop: null, foeDrop: null };
   const lo = c.likelyMinPercent ?? c.minPercent;
   const hi = c.likelyMaxPercent ?? c.maxPercent;
+  // ACCURACY BELONGS IN THE MATRIX, not the decision rule. The cells previously priced a
+  // 70%-accurate Focus Blast exactly like a 100%-accurate Iron Head, so the search
+  // preferred the bigger number and never paid for the whiff.
   return {
     dmgMin: c.minPercent,
     dmgMid: (lo + hi) / 2,
@@ -1919,8 +1922,23 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
       defenderBoosts: opp[oj]!.boosts, defenderStatus: opp[oj]!.status,
       attackerTimesHit: m.timesHit,
     })));
-  const off: Cell[][] = offPairs.map(row => row.map(p =>
-    cellFrom(p.all.find(c => c.move === p.chosenMove) ?? null)));
+  // ACCURACY ENTERS AT MOVE SELECTION, not in the damage numbers. `chosenMove` is the
+  // biggest hitter, which made the search prefer a 70% Focus Blast over a reliable move
+  // of similar power and never pay for the whiff. Re-pick by EXPECTED damage
+  // (damage x accuracy) so reliability competes with power the way a player weighs it.
+  // The reported envelope then stays truthful, which matters: scaling the damage VALUE
+  // instead turns "80% chance of 100" into "certain 80" and an 80%-accurate OHKO stops
+  // reading as lethal — that mis-model flipped a genuinely losing position to winning.
+  const byExpected = (all: MatchupCell[]): MatchupCell | null => {
+    let best: MatchupCell | null = null, bestVal = -1;
+    for (const c of all) {
+      const mid = ((c.likelyMinPercent ?? c.minPercent) + (c.likelyMaxPercent ?? c.maxPercent)) / 2;
+      const v = mid * (moveAccuracyPct(c.move) / 100);
+      if (v > bestVal) { bestVal = v; best = c; }
+    }
+    return best;
+  };
+  const off: Cell[][] = offPairs.map(row => row.map(p => cellFrom(byExpected(p.all))));
   const offMoves: Cell[][][] = offPairs.map(row => row.map(p => p.all.map(cellFrom)));
   const thrPairs = oppEntries.map((oe, oj) => mine.map((m, mi) =>
     predictThreatCells({
@@ -1931,8 +1949,7 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
       defenderBoosts: m.boosts, defenderStatus: m.status,
       attackerTimesHit: opp[oj]!.timesHit,
     })));
-  const thr: Cell[][] = thrPairs.map(row => row.map(p =>
-    cellFrom(p.all.find(c => c.move === p.chosenMove) ?? null)));
+  const thr: Cell[][] = thrPairs.map(row => row.map(p => cellFrom(byExpected(p.all))));
   const thrMoves: Cell[][][] = thrPairs.map(row => row.map(p => p.all.map(cellFrom)));
   const mySpread = mine.map((m, mi) => bestSpread(m, opp, input.field, {
     attackerGimmickActive: myMega(mi), defHypoMega: oppHypoMega,

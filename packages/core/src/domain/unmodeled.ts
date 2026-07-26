@@ -60,6 +60,10 @@ const RULES: GapRule[] = [
   // SET_DEBUFF. Accuracy/evasion droppers stay excluded by the same policy as
   // probabilistic accuracy itself (maximin never prices hit chance) — flagged
   // as informational so the user weighs the dice.
+  // NB accuracy is now folded into MATRIX BUILDING — the cell for a pair is the move with
+  // the best EXPECTED damage (damage x accuracy), so a coin-flip nuke no longer wins on
+  // raw power alone. What stays out of the DECISION RULE is hit chance itself: maximin
+  // never gambles, and accuracy/evasion DROPS are surfaced informationally.
   { kind: 'foedebuff', label: 'accuracy/evasion drop (informational — hit chance is never priced)',
     moves: ['sandattack', 'venomdrench', 'flash', 'kinesis', 'smokescreen', 'mudslap'] },
   // Two-turn charge moves are now MODELLED, weather-conditionally: the charge turn deals

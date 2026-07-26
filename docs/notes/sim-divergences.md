@@ -103,6 +103,15 @@ status/boost divergences at roughly the attacking-run rate instead of zero.
 baseline exactly — the roll is only drawn when it can matter, so the PRNG stream and
 therefore the generated positions are unchanged).
 
+## Run 2026-07-26 — accuracy entered matrix building
+
+**33/216, up from 30/213**, and the shift is a CONSEQUENCE of the change rather than a
+regression: the harness drives OUR chosen move through both engines, and cells are now
+picked by expected damage, so the search selects reliable moves (Thunderbolt over Zap
+Cannon, Drain Punch over Dynamic Punch). Those carry more probabilistic secondaries —
+`status` rose 12 → 17 — which is precisely the policy-excluded class. No `fainted`
+divergence and no new field, so resolution fidelity is intact.
+
 ## Harness blind spot (still true for everything else)
 
 Beyond Protect, the harness drives **"attack with the best-damage move"** actions only.
