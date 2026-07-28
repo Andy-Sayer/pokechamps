@@ -61,3 +61,40 @@ export function reconcileOccupancy(
   }
   return decision;
 }
+
+/** One correction: seat `teamIdx` into `slot` on `side` (it is currently in the other). */
+export interface SeatFix { side: 'mine' | 'theirs'; slot: number; teamIdx: number }
+
+/**
+ * OPENING SEND-OUT lines are never a turn to ratify — they are occupancy facts.
+ *  • a line naming the mon already in that slot carries no information;
+ *  • a line naming a mon sitting in our OTHER slot means our seats are reversed;
+ *  • a line naming a mon that isn't on the field at all is a real switch — keep it.
+ *
+ * Returns the lines still worth logging plus the seat corrections to apply silently.
+ * Routing the second case through the ratify panel is what turned "the opponents
+ * swapped" into a prompt that could be missed, taking turn 1 with it (live 2026-07-28).
+ */
+export function planOpeningSeats(
+  lines: readonly string[],
+  active: { mine: readonly (number | null)[]; theirs: readonly (number | null)[] },
+  speciesAt: (side: 'mine' | 'theirs', teamIdx: number) => string | undefined,
+  findInTeam: (side: 'mine' | 'theirs', species: string) => number,
+  sameSpecies: (a: string, b: string) => boolean,
+): { lines: string[]; seatFix: SeatFix[] } {
+  const seatFix: SeatFix[] = [];
+  const kept = lines.filter(l => {
+    const m = l.match(/^([mo])([12]) > switch > (.+)$/);
+    if (!m) return true;
+    const side: 'mine' | 'theirs' = m[1] === 'm' ? 'mine' : 'theirs';
+    const slot = parseInt(m[2]!, 10) - 1;
+    const cur = side === 'mine' ? active.mine : active.theirs;
+    const idx = cur[slot];
+    const seated = idx != null ? speciesAt(side, idx) : undefined;
+    if (seated && sameSpecies(seated, m[3]!)) return false;         // already there → no-op
+    const other = findInTeam(side, m[3]!);
+    if (other >= 0 && cur.includes(other)) { seatFix.push({ side, slot, teamIdx: other }); return false; }
+    return true;                                                     // genuinely new mon
+  });
+  return { lines: kept, seatFix };
+}

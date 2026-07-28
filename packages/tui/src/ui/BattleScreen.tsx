@@ -45,7 +45,7 @@ import { loadPrefs, savePrefs } from '@pokechamps/core/storage/prefs.js';
 import { BATTLE_COMMANDS, parseCommand, type BattleCommandId } from './slashCommands.js';
 import { VisionProposalPanel, type ProposalLike } from './VisionProposalPanel.js';
 import { startWatch as startWatcher, stopWatch as stopWatcher, isWatching as watcherIsWatching, onProposal as onWatchProposal, onWatchingChange } from './watcher.js';
-import { reconcileOccupancy, freshReconcileState } from './occupancyReconcile.js';
+import { reconcileOccupancy, freshReconcileState, planOpeningSeats } from './occupancyReconcile.js';
 import { deriveActiveIdx, snapshotTurn } from '@pokechamps/core/match/engine.js';
 import { applyMegaAction } from '@pokechamps/core/domain/megaResolve.js';
 import { getMegaOptions } from '@pokechamps/core/domain/gimmicks/mega.js';
@@ -666,17 +666,38 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       const st = visionStateRef.current;
       let lines = p.lines;
       if (st.match.turns.length === 0) {
-        lines = lines.filter(l => {
-          const m = l.match(/^([mo])([12]) > switch > (.+)$/);
-          if (!m) return true;
-          const slot = parseInt(m[2]!, 10) - 1;
-          const idx = m[1] === 'm' ? st.activeIdx.mine[slot] : st.activeIdx.theirs[slot];
-          const team = m[1] === 'm' ? st.match.myTeam : st.match.opponentTeam;
-          const sp = idx != null ? team[idx]?.species : undefined;
-          return !(sp && toId(sp) === toId(m[3]!));
-        });
+        // OPENING SEND-OUT: never a turn to ratify. A line naming the mon already in that
+        // slot carries no information; a line naming a DIFFERENT one is the nameplates
+        // telling us our slots are the wrong way round. Both are occupancy facts, so both
+        // are applied here and filtered out — the panel is for turns the player chooses to
+        // accept, and routing ground truth through it is what made "the opponents swapped"
+        // a prompt that could be missed, taking turn 1 with it (live, 2026-07-28).
+        const plan = planOpeningSeats(
+          lines, st.activeIdx,
+          (side, i) => (side === 'mine' ? st.match.myTeam : st.match.opponentTeam)[i]?.species,
+          (side, sp) => (side === 'mine' ? st.match.myTeam : st.match.opponentTeam)
+            .findIndex(t => t && toId(t.species) === toId(sp)),
+          (a, b) => toId(a) === toId(b),
+        );
+        lines = plan.lines;
+        const seatFix = plan.seatFix;
+        if (seatFix.length) {
+          setActiveIdx(prev => {
+            const next = { mine: [...prev.mine] as typeof prev.mine, theirs: [...prev.theirs] as typeof prev.theirs };
+            for (const f of seatFix) {
+              const arr = f.side === 'mine' ? next.mine : next.theirs;
+              const from = arr.indexOf(f.teamIdx);
+              if (from >= 0 && from !== f.slot) {
+                const a = arr[f.slot] ?? null, b = arr[from] ?? null;
+                arr[f.slot] = b; arr[from] = a;
+              }
+            }
+            return next;
+          });
+          setMessage('⌁ occupancy: seated the leads to match the nameplates (no turn logged).');
+        }
         if (!lines.length) {
-          if (!p.partial) setMessage('⌁ vision confirmed the send-out — leads match, nothing to log.');
+          if (!p.partial && !seatFix.length) setMessage('⌁ vision confirmed the send-out — leads match, nothing to log.');
           return;
         }
       }
