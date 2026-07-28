@@ -755,6 +755,13 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // /grid expands the matchup grid to ALL 6 opponents; off by default so the grid
   // is just the live/brought board you're actually playing.
   const [showFullGrid, setShowFullGrid] = useState(!!stickyPrefs.showFullGrid);
+  // Per-move cells print ONE LINE PER MOVE, so the grid is 2 actives x N opponents x
+  // (1 + moves) lines — 40+ on a normal board. Nothing used to consult the terminal
+  // HEIGHT (useTerminalSize exposes rows; only columns was ever read), so on a short
+  // terminal the whole screen scrolled and the turn log was pushed out of view.
+  // 'auto' collapses to the compact one-line form when it can't fit; /moves forces.
+  const [moveDetail, setMoveDetail] = useState<'auto' | 'on' | 'off'>(
+    (stickyPrefs.moveDetail as 'auto' | 'on' | 'off' | undefined) ?? 'auto');
   // `/help` overlay — full syntax cheat-sheet. Closes on Esc or the next
   // /help invocation.
   const [helpOpen, setHelpOpen] = useState(false);
@@ -834,7 +841,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // docs/notes/endgame-search-plan.md.
   // Terminal width → reflow the side-by-side battle layout on narrow terminals so
   // the matchup grid doesn't overflow / wrap into the team panel.
-  const { columns } = useTerminalSize();
+  const { columns, rows: termRows } = useTerminalSize();
   const stackLayout = columns < 90;   // panel (42) + grid (~48) no longer fit side-by-side
   const [bestSearch, setBestSearch] = useState<SearchResult | null>(null);
   // The narrow+deep "work outwards" probe: a TENTATIVE read several plies past
@@ -2899,6 +2906,12 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       case 'crit': setShowCrits(c => { savePrefs({ showCrits: !c }); return !c; }); return true;
       case 'allmoves': setShowAllMoves(a => { savePrefs({ showAllMoves: !a }); return !a; }); return true;
       case 'why': setShowWhy(w => { savePrefs({ showWhy: !w }); setMessage(`Search detail ${!w ? 'on' : 'off'}.`); return !w; }); return true;
+      case 'moves': setMoveDetail(d => {
+        const next = d === 'auto' ? 'off' : d === 'off' ? 'on' : 'auto';
+        savePrefs({ moveDetail: next });
+        setMessage(`Per-move rows: ${next}${next === 'auto' ? ` (fits automatically — grid needs ~${gridNeeds + GRID_RESERVE} rows, terminal has ${termRows})` : ''}.`);
+        return next;
+      }); return true;
       case 'grid': setShowFullGrid(g => { savePrefs({ showFullGrid: !g }); setMessage(`Full grid ${!g ? 'on (all 6)' : 'off (live board)'}.`); return !g; }); return true;
       case 'info': setInfoPickerOpen(true); return true;
       case 'help':
@@ -3253,6 +3266,27 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     };
   });
 
+  // HEIGHT FIT for the matchup grid. The expanded (per-move) form costs one line per
+  // move on top of each row's header, which is what overflowed short terminals. Estimate
+  // that cost and fall back to the compact one-line rows when it can't fit; GRID_RESERVE
+  // is everything else on screen (best play, risks, tactics, the last 3 turns, the input
+  // line and messages).
+  const GRID_RESERVE = 22;
+  const gridNeeds = useMemo(() => {
+    let n = 0;
+    for (const m of matchups) {
+      if (!m) continue;
+      n += 1;                                   // the "m1 <species>" header
+      for (const row of m.rows) {
+        const isActive = row.oppIdx === activeIdx.theirs[0] || row.oppIdx === activeIdx.theirs[1];
+        if (!showFullGrid && !isActive && !oppBroughtIndices.includes(row.oppIdx as never)) continue;
+        n += 1 + (row.allOffense?.length ?? 0);  // row header + one line per move
+      }
+    }
+    return n;
+  }, [matchups, showFullGrid, activeIdx.theirs, oppBroughtIndices]);
+  const expandMoves = moveDetail === 'on' || (moveDetail === 'auto' && gridNeeds + GRID_RESERVE <= termRows);
+
   // ---------------- render ----------------
 
   return (
@@ -3435,7 +3469,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
               ))}
             </Text>
           )}
-          <Text bold>Matchups{!showFullGrid ? <Text dimColor> (live board · /grid for all 6)</Text> : null}</Text>
+          {/* eslint-disable-next-line @typescript-eslint/no-unused-expressions */}
+          <Text bold>Matchups{!showFullGrid ? <Text dimColor> (live board · /grid for all 6)</Text> : null}{expandMoves ? null : <Text dimColor> · compact{moveDetail === 'auto' ? ` (needs ~${gridNeeds + GRID_RESERVE} rows, have ${termRows})` : ''} · /moves</Text>}</Text>
           {/* Half-block sprites are plain text → safe anywhere in the layout.
               The SIXEL strip lives at the very END of the frame instead (see
               the bottom of this component) — SixelImage's cursor math is only
@@ -3471,8 +3506,8 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
                       opp={row.opp}
                       offense={row.offense}
                       offenseCrit={row.offenseCrit}
-                      allOffense={row.allOffense ?? null}
-                      allOffenseCrit={row.allOffenseCrit ?? null}
+                      allOffense={expandMoves ? (row.allOffense ?? null) : null}
+                      allOffenseCrit={expandMoves ? (row.allOffenseCrit ?? null) : null}
                       threat={row.threat}
                       threatSpread={row.threatSpread}
                       threatFlinch={row.threatFlinch}

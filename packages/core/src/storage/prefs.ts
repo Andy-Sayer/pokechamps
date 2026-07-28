@@ -19,6 +19,9 @@ export interface UiPrefs {
   showWhy?: boolean;
   /** Matchup grid: show ALL 6 opponents instead of just the live/brought ones (/grid). */
   showFullGrid?: boolean;
+  /** Matchup grid: per-move damage rows (/moves). 'auto' collapses them to the compact
+   *  one-line form when the terminal is too short to hold the expanded grid. */
+  moveDetail?: 'auto' | 'on' | 'off';
 }
 
 const FILE = 'prefs.json';
