@@ -438,3 +438,19 @@ describe('BattleAssembler — status inflictions pin the target', () => {
     expect(a.endTurnLines()).toContain('m2 brn');
   });
 });
+
+describe('BattleAssembler — side-wide guard suppresses damage on BOTH slots', () => {
+  test('a spread into a Wide Guarded side emits no damage', () => {
+    const a = new BattleAssembler({ m1: 'Garchomp', m2: 'Kingambit', o1: 'Raichu', o2: 'Sylveon' });
+    for (const r of ['o1', 'o2'] as const) a.recordHp(r, 100, true);
+    feed(a, [
+      'The opposing Raichu used Wide Guard!',
+      'Wide Guard now protects the opposing side!',
+      'Garchomp used Rock Slide!',
+    ]);
+    // Residual/animation noise must not become a damage observation on either slot.
+    a.recordHp('o1', 97, true); a.recordHp('o2', 96, true);
+    const lines = a.endTurnLines({ o1: 97, o2: 96 });
+    expect(lines.some(l => /Rock Slide > (spread|o1|o2).*\d/.test(l))).toBe(false);
+  });
+});

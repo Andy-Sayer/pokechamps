@@ -145,3 +145,25 @@ describe('f-ligature repair covers "affect"', () => {
     expect(parseBanner("It doesn't affect Dragonite...").kind).toBe('effectiveness');
   });
 });
+
+// Wide Guard wording harvested LIVE (2026-07-28) by the unknown-banner log — the exact
+// string the game printed. It names no Pokémon, so the side rides on "opposing".
+describe('side-wide guard banners', () => {
+  test('the exact live line parses, opponent side', () => {
+    const m = parseBanner('Wide Guard now protects the opposing side!');
+    expect(m.kind).toBe('sideProtect');
+    expect((m as { side: string }).side).toBe('opp');
+    expect((m as { move: string }).move).toBe('Wide Guard');
+  });
+
+  test('the my-side form is read as mine', () => {
+    const m = parseBanner('Wide Guard now protects your side!');
+    expect((m as { side: string }).side).toBe('mine');
+  });
+
+  test('Quick Guard uses the same shape', () => {
+    const m = parseBanner('Quick Guard now protects the opposing side!');
+    expect(m.kind).toBe('sideProtect');
+    expect((m as { move: string }).move).toBe('Quick Guard');
+  });
+});

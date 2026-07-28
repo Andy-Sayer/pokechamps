@@ -45,6 +45,10 @@ export type BattleMessage =
   // used; the bare singles form ("A critical hit!") has side=null → tag the last move.
   | { kind: 'crit'; side: Side | null; label: string | null; species: string | null }
   | { kind: 'protect'; side: Side; label: string; species: string | null }
+  // Side-wide protect (Wide Guard / Quick Guard / Mat Block / Crafty Shield). Unlike a
+  // per-mon Protect this names no Pokémon — it names the SIDE, so it can't ride the
+  // `protect` kind, which is keyed on a label.
+  | { kind: 'sideProtect'; side: Side; move: string }
   | { kind: 'drowsy'; side: Side; label: string; species: string | null }
   | { kind: 'miss'; side: Side; label: string; species: string | null }
   | { kind: 'hpLoss'; side: Side; label: string; species: string | null }
@@ -114,6 +118,14 @@ export function parseBanner(raw: string): BattleMessage {
   if (/battle has ended due to a forfeit/i.test(lc)) return { kind: 'end', reason: 'forfeit' };
   if ((m = /^you (?:defeated|beat) (.+)$/i.exec(text))) return { kind: 'end', reason: 'win', trainer: m[1]!.trim() };
   if (/(?:you (?:lost|were defeated)|defeated you)/i.test(lc)) return { kind: 'end', reason: 'loss' };
+  // Side-wide protect. Exact wording harvested LIVE 2026-07-28 by the unknown-banner log:
+  //   "Wide Guard now protects the opposing side!"
+  // The side is carried by the word "opposing" rather than the usual mon-label prefix,
+  // because the line names no Pokémon at all.
+  if ((m = /^(wide guard|quick guard|mat block|crafty shield) now protects (?:the )?(opposing |your )?side$/i.exec(text))) {
+    const move = m[1]!.split(' ').map(cap).join(' ');
+    return { kind: 'sideProtect', side: /opposing/i.test(m[2] ?? '') ? 'opp' : 'mine', move };
+  }
   if (/light screen made your side stronger/i.test(lc)) return { kind: 'screen', screen: 'Light Screen' };
   if (/reflect made your side stronger/i.test(lc)) return { kind: 'screen', screen: 'Reflect' };
 

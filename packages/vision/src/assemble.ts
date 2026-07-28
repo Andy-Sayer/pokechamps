@@ -503,6 +503,14 @@ export class BattleAssembler {
           this.actions.push({ actor: ref, kind: 'state', stateLine: line });
         break;
       }
+      case 'sideProtect': {
+        // Wide/Quick Guard protect the WHOLE side, so every slot on it is off-limits for
+        // damage attribution this turn — exactly the Protect treatment, applied to both
+        // slots. Without it a spread move into a guarded side emits fake damage.
+        for (const r of slotsFor(msg.side)) this.protectedThisTurn.add(r);
+        this.notes.push(`${msg.move} protected the ${msg.side === 'mine' ? 'my' : 'opp'} side — damage suppressed for both slots`);
+        break;
+      }
       case 'protect': {
         // "X protected itself!" — X took no move damage this turn, so an HP dip on it
         // (residual chip) must NOT be read as a hit: exclude it from window-drop target
