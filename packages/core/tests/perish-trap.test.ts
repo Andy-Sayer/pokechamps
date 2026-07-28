@@ -1,206 +1,136 @@
-// Perish clock + trapping in the lookahead search. The search FORECASTS the
-// manually-logged perish counts by real rules: tick at EOT on the field, faint
-// at 0, switching out clears the count (which is why trapping abilities turn
-// Perish Song into a kill), Baton Pass transfers it.
+// A perish trap killed two mons in live play (2026-07-28) and the app said nothing.
+// The search itself was fine — given the clock it values the position as losing and
+// picks the escape. What was missing was the clock (vision had no grammar for the
+// counter banners) and any EXPLANATION of what to do about it.
 import { describe, test, expect } from 'vitest';
-import { searchToDepth, type SearchInput } from '../src/domain/endgameSearch.js';
-import type { PokemonSet, OpponentEntry } from '../src/domain/types.js';
-import { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } from '../src/domain/types.js';
+import { analyzePerishTrap, type PerishSide } from '../src/domain/perishTrap.js';
 
-function mon(p: Partial<PokemonSet> & { species: string; moves: string[] }): PokemonSet {
-  return { level: 50, nature: 'Hardy', evs: { ...ZERO_EVS }, ivs: MAX_IVS, ...p };
-}
-function oppOf(set: PokemonSet): OpponentEntry {
-  return { species: set.species, ability: set.ability, knownMoves: set.moves, candidates: [set] };
-}
+const mon = (p: Partial<PerishSide> & { species: string }): PerishSide =>
+  ({ moves: [], active: true, hpPercent: 100, ...p });
 
-const incin = mon({
-  species: 'Incineroar', ability: 'Intimidate', nature: 'Careful',
-  evs: { hp: 252, atk: 0, def: 4, spa: 0, spd: 252, spe: 0 }, moves: ['Knock Off', 'Protect'],
+const gengar = mon({ species: 'Gengar', moves: ['Perish Song', 'Shadow Ball'] });
+const meanLooker = mon({ species: 'Blastoise', moves: ['Mean Look', 'Surf'] });
+
+describe('perish trap — ACTIVE (clock running)', () => {
+  const trappedChomp = mon({ species: 'Garchomp', moves: ['Earthquake', 'U-turn'], perishCount: 2, trappedByFoe: 1 });
+
+  test('names the victim, the clock and the trapper', () => {
+    const a = analyzePerishTrap([trappedChomp], [gengar, meanLooker])!;
+    expect(a.phase).toBe('active');
+    expect(a.turnsLeft).toBe(2);
+    expect(a.victims).toEqual(['Garchomp']);
+    expect(a.trapper).toBe('Blastoise');
+    expect(a.headline).toContain('PERISH TRAP');
+  });
+
+  test('the pivot escape is offered and marked as saving the mon', () => {
+    const a = analyzePerishTrap([trappedChomp], [gengar, meanLooker])!;
+    const pivot = a.outs.find(o => o.kind === 'pivot' && o.saves);
+    expect(pivot?.label).toContain('U-turn');
+  });
+
+  test('BATON PASS is called out as NOT an escape — it hands the count on', () => {
+    // The subtle one: it bypasses trapping like any pivot, but resolveTurn passes the
+    // perish count to the incoming mon, so it trades one dead mon for another.
+    const bp = mon({ species: 'Garchomp', moves: ['Earthquake', 'Baton Pass'], perishCount: 2, trappedByFoe: 1 });
+    const a = analyzePerishTrap([bp], [gengar, meanLooker])!;
+    const warn = a.outs.find(o => o.label.includes('Baton Pass'));
+    expect(warn).toBeDefined();
+    expect(warn!.saves).toBe(false);
+  });
+
+  test('KOing the trapper frees the switch — but not when the clock beats it', () => {
+    const soon = mon({ species: 'Garchomp', moves: ['Earthquake'], perishCount: 1, trappedByFoe: 1 });
+    const inTime = analyzePerishTrap([trappedChomp], [gengar, meanLooker])!;
+    const tooLate = analyzePerishTrap([soon], [gengar, meanLooker])!;
+    expect(inTime.outs.find(o => o.kind === 'ko-trapper')!.saves).toBe(true);
+    expect(tooLate.outs.find(o => o.kind === 'ko-trapper')!.saves).toBe(false);
+    expect(tooLate.outs.find(o => o.kind === 'ko-trapper')!.label).toContain('too late');
+  });
+
+  test('an untrapped partner is told to switch and clear its own count', () => {
+    const partner = mon({ species: 'Dragonite', moves: ['Extreme Speed'], perishCount: 2 });
+    const a = analyzePerishTrap([trappedChomp, partner], [gengar, meanLooker])!;
+    expect(a.outs.some(o => o.kind === 'partner-switch' && o.label.includes('Dragonite'))).toBe(true);
+  });
+
+  test('a GHOST on the clock is not trapped at all', () => {
+    const ghost = mon({ species: 'Dragapult', moves: ['Dragon Darts'], perishCount: 2, trappedByFoe: 1 });
+    const a = analyzePerishTrap([ghost], [gengar, meanLooker])!;
+    expect(a.headline).not.toContain('cannot leave');
+    expect(a.victims).toEqual(['Dragapult']);
+  });
+
+  test('Shed Shell likewise walks away', () => {
+    const shed = mon({ species: 'Garchomp', item: 'Shed Shell', moves: ['Earthquake'], perishCount: 2, trappedByFoe: 1 });
+    const a = analyzePerishTrap([shed], [gengar, meanLooker])!;
+    expect(a.headline).toContain('switch to clear it');
+  });
 });
-const garchomp = mon({
-  species: 'Garchomp', ability: 'Rough Skin', nature: 'Jolly',
-  evs: { hp: 0, atk: 252, def: 0, spa: 0, spd: 4, spe: 252 }, moves: ['Earthquake', 'Dragon Claw'],
+
+describe('perish trap — ARMED (pieces on the field, no song yet)', () => {
+  test('warns before the song lands and names both pieces', () => {
+    const me = mon({ species: 'Garchomp', moves: ['Earthquake'] });
+    const a = analyzePerishTrap([me], [gengar, meanLooker])!;
+    expect(a.phase).toBe('armed');
+    expect(a.singer).toBe('Gengar');
+    expect(a.trapper).toBe('Blastoise');
+    expect(a.outs.some(o => o.kind === 'ko-trapper')).toBe(true);
+  });
+
+  test('Taunt is offered as the denial', () => {
+    const taunter = mon({ species: 'Whimsicott', ability: 'Prankster', moves: ['Taunt', 'Moonblast'] });
+    const a = analyzePerishTrap([taunter], [gengar, meanLooker])!;
+    expect(a.outs.some(o => o.kind === 'taunt-singer' && o.label.includes('Taunt'))).toBe(true);
+  });
+
+  test('Soundproof is recognised as immunity', () => {
+    const proof = mon({ species: 'Bouffalant', ability: 'Soundproof', moves: ['Head Charge'] });
+    const a = analyzePerishTrap([proof], [gengar, meanLooker])!;
+    expect(a.outs.some(o => o.kind === 'soundproof')).toBe(true);
+  });
+
+  test('a singer with NO trapper is not a trap — stay quiet', () => {
+    const loneSinger = mon({ species: 'Gengar', moves: ['Perish Song'] });
+    const plainFoe = mon({ species: 'Milotic', moves: ['Scald'] });
+    expect(analyzePerishTrap([mon({ species: 'Garchomp', moves: ['Earthquake'] })], [loneSinger, plainFoe])).toBeNull();
+  });
+
+  test('no song anywhere → nothing to say', () => {
+    expect(analyzePerishTrap([mon({ species: 'Garchomp', moves: ['Earthquake'] })], [meanLooker])).toBeNull();
+  });
 });
-const amoonguss = mon({
-  species: 'Amoonguss', ability: 'Regenerator', nature: 'Calm',
-  evs: { hp: 252, atk: 0, def: 4, spa: 0, spd: 252, spe: 0 }, moves: ['Pollen Puff', 'Protect'],
-});
 
-describe('perish clock in search', () => {
-  test('opponent at perish 1 with no bench: position is winning', () => {
-    // Their Garchomp faints at this turn's EOT no matter what it does.
-    const input: SearchInput = {
-      mine: [{ set: incin, hpPercent: 100, active: true }],
-      opp: [{ entry: oppOf(garchomp), hpPercent: 100, active: true, perishCount: 1 }],
-      field: { ...NEUTRAL_FIELD },
-      allOppRevealed: true,
-    };
-    const r = searchToDepth(input, 2);
-    expect(r.score).toBeGreaterThan(0);
-    expect(r.verdict).toBe('winning');
-  });
-
-  test('my mon at perish 1 with a healthy bench: search switches out to clear it', () => {
-    const input: SearchInput = {
+// End-to-end: the advisory must ride on the SearchResult, independent of depth. This is
+// the property that matters — a perish trap kills three turns out, past the horizon a
+// live search reaches on a wide board, so the verdict can read fine right up until two
+// mons die. Depth-1 and depth-2 must both carry the warning.
+describe('perish advice rides the SearchResult at any depth', () => {
+  test('depth 1 and depth 2 both carry it', async () => {
+    const { searchToDepth } = await import('../src/domain/endgameSearch.js');
+    const { NEUTRAL_FIELD, ZERO_EVS, MAX_IVS } = await import('../src/domain/types.js');
+    const set = (species: string, moves: string[], ability?: string) =>
+      ({ species, ability, moves, level: 50, nature: 'Hardy', evs: { ...ZERO_EVS }, ivs: MAX_IVS });
+    const oppOf = (s: ReturnType<typeof set>) => ({ species: s.species, knownMoves: s.moves, ability: s.ability, candidates: [s] });
+    const input = {
       mine: [
-        { set: incin, hpPercent: 100, active: true, perishCount: 1 },
-        { set: amoonguss, hpPercent: 100, active: false },
-      ],
-      opp: [{ entry: oppOf(garchomp), hpPercent: 100, active: true }],
-      field: { ...NEUTRAL_FIELD },
-    };
-    const r = searchToDepth(input, 2);
-    const play = r.plays.find(p => p.mySpecies === 'Incineroar');
-    expect(play).toBeTruthy();
-    expect(play!.switch).toBe(true);
-  });
-
-  test('trapped by Shadow Tag: the escape switch is not available', () => {
-    const tagger = mon({ species: 'Gengar', ability: 'Shadow Tag', moves: ['Shadow Ball', 'Protect'] });
-    const input: SearchInput = {
-      mine: [
-        { set: incin, hpPercent: 100, active: true, perishCount: 1 },
-        { set: amoonguss, hpPercent: 100, active: false },
-      ],
-      opp: [{ entry: oppOf(tagger), hpPercent: 100, active: true }],
-      field: { ...NEUTRAL_FIELD },
-    };
-    const r = searchToDepth(input, 2);
-    const play = r.plays.find(p => p.mySpecies === 'Incineroar');
-    expect(play).toBeTruthy();
-    // No switch offered — the trapped mon must act in place and will faint.
-    expect(play!.switch).not.toBe(true);
-  });
-
-  test('move-trapped (Mean Look) by a LIVE active caster: no escape switch generated', () => {
-    // trappedByFoe = 0 → pinned by the opp at SEARCH index 0 (Garchomp, active
-    // + alive). With perish 1 the only good play is switching — the search must
-    // not offer it.
-    const input: SearchInput = {
-      mine: [
-        { set: incin, hpPercent: 100, active: true, perishCount: 1, trappedByFoe: 0 },
-        { set: amoonguss, hpPercent: 100, active: false },
-      ],
-      opp: [{ entry: oppOf(garchomp), hpPercent: 100, active: true }],
-      field: { ...NEUTRAL_FIELD },
-    };
-    const r = searchToDepth(input, 2);
-    const play = r.plays.find(p => p.mySpecies === 'Incineroar');
-    expect(play).toBeTruthy();
-    expect(play!.switch).not.toBe(true);
-  });
-
-  test('trap lifts when the caster leaves the field: the escape switch IS generated', () => {
-    // Same pin record, but the trapper is on the bench — moveTrapHolds must
-    // treat the volatile as released (Gen 8+: Mean Look ends when its user
-    // leaves), so the perish-1 mon escapes.
-    const pelipper = mon({
-      species: 'Pelipper', ability: 'Drizzle', nature: 'Modest',
-      evs: { hp: 4, atk: 0, def: 0, spa: 252, spd: 0, spe: 252 }, moves: ['Hydro Pump', 'Protect'],
-    });
-    const input: SearchInput = {
-      mine: [
-        { set: incin, hpPercent: 100, active: true, perishCount: 1, trappedByFoe: 0 },
-        { set: amoonguss, hpPercent: 100, active: false },
+        { set: set('Garchomp', ['Earthquake', 'U-turn']), hpPercent: 100, active: true, perishCount: 2, trappedByFoe: 1 },
+        { set: set('Dragonite', ['Extreme Speed']), hpPercent: 100, active: true, perishCount: 2 },
+        { set: set('Kingambit', ['Iron Head']), hpPercent: 100, active: false },
       ],
       opp: [
-        { entry: oppOf(garchomp), hpPercent: 100, active: false },   // the trapper, benched
-        { entry: oppOf(pelipper), hpPercent: 100, active: true },
+        { entry: oppOf(set('Gengar', ['Perish Song', 'Shadow Ball'])), hpPercent: 100, active: true, perishCount: 2 },
+        { entry: oppOf(set('Blastoise', ['Mean Look', 'Surf'])), hpPercent: 100, active: true, perishCount: 2 },
+        { entry: oppOf(set('Milotic', ['Scald'])), hpPercent: 100, active: false },
       ],
-      field: { ...NEUTRAL_FIELD },
-    };
-    const r = searchToDepth(input, 2);
-    const play = r.plays.find(p => p.mySpecies === 'Incineroar');
-    expect(play).toBeTruthy();
-    expect(play!.switch).toBe(true);
-  });
-
-  test('ghosts ignore trapping: the escape switch IS available', () => {
-    const tagger = mon({ species: 'Gengar', ability: 'Shadow Tag', moves: ['Shadow Ball', 'Protect'] });
-    const ghost = mon({
-      species: 'Basculegion', ability: 'Adaptability', nature: 'Adamant',
-      evs: { hp: 4, atk: 252, def: 0, spa: 0, spd: 0, spe: 252 }, moves: ['Wave Crash', 'Protect'],
-    });
-    const input: SearchInput = {
-      mine: [
-        { set: ghost, hpPercent: 100, active: true, perishCount: 1 },
-        { set: amoonguss, hpPercent: 100, active: false },
-      ],
-      opp: [{ entry: oppOf(tagger), hpPercent: 100, active: true }],
-      field: { ...NEUTRAL_FIELD },
-    };
-    const r = searchToDepth(input, 2);
-    const play = r.plays.find(p => p.mySpecies === 'Basculegion');
-    expect(play).toBeTruthy();
-    expect(play!.switch).toBe(true);
-  });
-});
-
-describe('perish cast + trap cast in search', () => {
-  const politoed = mon({
-    species: 'Politoed', ability: 'Drizzle', nature: 'Calm',
-    evs: { hp: 252, atk: 0, def: 4, spa: 0, spd: 252, spe: 0 }, moves: ['Perish Song', 'Protect'],
-  });
-  const steelix = mon({
-    species: 'Steelix', ability: 'Sturdy', nature: 'Careful',
-    evs: { hp: 252, atk: 0, def: 4, spa: 0, spd: 252, spe: 0 }, moves: ['Block', 'Protect'],
-  });
-  const clef = mon({
-    species: 'Clefable', ability: 'Magic Guard', nature: 'Calm',
-    evs: { hp: 252, atk: 0, def: 4, spa: 0, spd: 252, spe: 0 }, moves: ['Moonblast', 'Protect'],
-  });
-
-  test('with no damage available, the search wins by singing (cast action found)', () => {
-    // My side cannot deal meaningful damage — the ONLY win is the Perish clock.
-    const input: SearchInput = {
-      mine: [
-        { set: politoed, hpPercent: 100, active: true },
-        { set: clef, hpPercent: 100, active: false },
-      ],
-      opp: [{ entry: oppOf(garchomp), hpPercent: 100, active: true }],
-      field: { ...NEUTRAL_FIELD },
-      allOppRevealed: true,
-    };
-    const r = searchToDepth(input, 5);
-    expect(r.score).toBeGreaterThan(0);
-    expect(r.plays.some(p => p.move === 'Perish Song')).toBe(true);
-  });
-
-  test('sing + Block together doom a foe that has a bench escape', () => {
-    // Opp could normally clear the clock by switching; Block pins whoever is
-    // in front — either way the search should read this as strongly winning
-    // and open with the song.
-    const input: SearchInput = {
-      mine: [
-        { set: politoed, hpPercent: 100, active: true },
-        { set: steelix, hpPercent: 100, active: true },
-        { set: clef, hpPercent: 100, active: false },
-      ],
-      opp: [
-        { entry: oppOf(garchomp), hpPercent: 100, active: true },
-        { entry: oppOf(amoonguss), hpPercent: 100, active: false },
-      ],
-      field: { ...NEUTRAL_FIELD },
-      allOppRevealed: true,
-    };
-    const r = searchToDepth(input, 4);
-    expect(r.plays.some(p => p.move === 'Perish Song')).toBe(true);
-    expect(r.score).toBeGreaterThan(0);
-  });
-
-  test('externally move-trapped mon (trappedByFoe -1) cannot switch to escape its clock', () => {
-    const input: SearchInput = {
-      mine: [
-        { set: incin, hpPercent: 100, active: true, perishCount: 1, trappedByFoe: -1 },
-        { set: amoonguss, hpPercent: 100, active: false },
-      ],
-      opp: [{ entry: oppOf(garchomp), hpPercent: 100, active: true }],
-      field: { ...NEUTRAL_FIELD },
-    };
-    const r = searchToDepth(input, 2);
-    const play = r.plays.find(p => p.mySpecies === 'Incineroar');
-    expect(play).toBeTruthy();
-    expect(play!.switch).not.toBe(true);
-  });
+      field: { ...NEUTRAL_FIELD }, allOppRevealed: true,
+    } as never;
+    for (const depth of [1, 2]) {
+      const r = searchToDepth(input, depth);
+      expect(r.perishTrap, `depth ${depth}`).toBeDefined();
+      expect(r.perishTrap!.phase).toBe('active');
+      expect(r.perishTrap!.turnsLeft).toBe(2);
+      expect(r.perishTrap!.outs.some(o => o.label.includes('U-turn'))).toBe(true);
+    }
+  }, 30000);
 });

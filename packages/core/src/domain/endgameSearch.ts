@@ -25,6 +25,7 @@
 import type { PokemonSet, OpponentEntry, FieldState, Match, HazardState } from './types.js';
 import { ZERO_EVS, MAX_IVS } from './types.js';
 import { predictOffense, predictThreat, predictOffenseCells, predictThreatCells, pikalyticsMoves, type MatchupCell } from './predictions.js';
+import { analyzePerishTrap, type PerishTrapAdvice } from './perishTrap.js';
 import { representativeSpreadIndices } from './inference.js';
 import { actualSpeed, actualStat, effectiveSpeedRange } from './speed.js';
 import { getMove, getSpecies, getNature, toId, isSpreadMove, moveFlinchChance, isTrappingMove, isLevitateAbility } from './data.js';
@@ -278,6 +279,11 @@ export interface SearchResult {
   allOppRevealed: boolean;
   /** Named uncertainties (survival items, swing rolls, unrevealed bench). */
   risks: SearchRisk[];
+  /** Perish-trap read: the pieces on the field, or a clock already running, plus the
+   *  ranked ways out. Independent of search DEPTH on purpose — a perish trap kills three
+   *  turns away, which is past the horizon a live search reaches on a wide board, so the
+   *  maximin can be honestly "winning" right up until it isn't. */
+  perishTrap?: PerishTrapAdvice;
   /** The opponent's minimizing reply to my recommended joint — "how they beat
    *  us". Populated whenever an opp reply exists (most useful when losing). */
   oppLine?: SearchPlay[];
@@ -5520,6 +5526,22 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
 
       const forced = forcedWin || forcedLoss;
 
+      // PERISH TRAP. Pattern-matched rather than searched: see the field note on the
+      // SearchResult member. Computed from the ROOT position, so it holds regardless of
+      // how deep the budget let us go.
+      const perishTrap = analyzePerishTrap(
+        input.mine.map((m, i) => ({
+          species: m.set.species, ability: m.set.ability, item: m.set.item,
+          moves: m.set.moves ?? [], active: !!m.active, hpPercent: m.hpPercent,
+          perishCount: m.perishCount, trappedByFoe: m.trappedByFoe ?? null,
+        })),
+        input.opp.map(o => ({
+          species: o.entry.species, ability: o.entry.ability, item: o.entry.item,
+          moves: o.entry.knownMoves ?? [], active: !!o.active, hpPercent: o.hpPercent,
+          perishCount: o.perishCount, trappedByFoe: o.trappedByFoe ?? null,
+        })),
+      ) ?? undefined;
+
       const risks: SearchRisk[] = [];
       // We only show a numeric win-chance when EVERY blocking risk is priced.
       // An unpriced blocking risk (the unmodelled bench, or roll dependence we
@@ -6009,6 +6031,7 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
         winChance,
         allOppRevealed,
         risks,
+        perishTrap,
         oppLine: oppLine.length ? oppLine : undefined,
         obviousOppPlay: (() => { const p = obviousOppPlay(expected.table, s0); return p.length ? p : undefined; })(),
         assumptions: assumptions.length ? assumptions : undefined,

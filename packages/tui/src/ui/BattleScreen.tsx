@@ -3782,6 +3782,22 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
             {/* ALWAYS-ON, decision-critical: risks, and (when losing) the only-out. */}
             {riskText ? <Text><Text dimColor>  risks: </Text><Text color="yellow">{riskText}</Text></Text> : null}
             {hmLine ? <Text color={v === 'losing' ? 'red' : 'yellow'} bold>  {hmLine}</Text> : null}
+            {/* PERISH TRAP. Deliberately NOT behind /why and not abbreviated: it kills
+                three turns out, which is past the horizon a live search reaches on a wide
+                board, so the verdict can read fine right up until two mons die. It cost a
+                game on 2026-07-28 with the app silent throughout. */}
+            {bestSearch.perishTrap ? (
+              <Box flexDirection="column" marginTop={1}>
+                <Text color={bestSearch.perishTrap.phase === 'active' ? 'red' : 'yellow'} bold>
+                  {bestSearch.perishTrap.headline}
+                </Text>
+                {bestSearch.perishTrap.outs.slice(0, 4).map((o, i) => (
+                  <Text key={`pt-${i}`} color={o.saves ? 'green' : 'gray'}>
+                    {'   '}{o.saves ? '→' : '✗'} {o.label}
+                  </Text>
+                ))}
+              </Box>
+            ) : null}
             {/* ON-DEMAND (/why): the search internals. */}
             {showWhy && watchText ? <Text dimColor>  watch: {watchText}</Text> : null}
             {showWhy && whyText ? <Text dimColor>  why: {whyText}</Text> : null}

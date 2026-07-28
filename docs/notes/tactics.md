@@ -253,3 +253,41 @@ Sweep of all 245 legal species/mega-forme profiles (full learnsets, any legal ab
 - **55** Vanilluxe Aurora Veil [snowwarning]
 - **55** Abomasnow-Mega Aurora Veil [snowwarning]
 - **55** Froslass-Mega Aurora Veil [snowwarning]
+
+
+## Perish trap — the live-advisory layer (2026-07-28)
+
+A perish trap killed two mons in a ranked game with the app silent throughout. The
+post-mortem is worth recording because the obvious diagnosis was wrong.
+
+**The search was never broken.** Given the clock, `endgameSearch` values the position as
+`losing` and picks the U-turn escape by itself — verified on a reconstructed board. Two
+things were missing instead:
+
+1. **The clock never arrived.** Vision had no grammar for "X's perish count fell to N!",
+   so the counters were read off the screen and dropped into the unknown-banner log. The
+   engine's perish machinery (state verb, EOT tick, faint at 0, `perishWeight`) was all
+   present and simply never told. Fixed in `bannerParse`/`assemble`.
+2. **Nothing explained it.** "⌁ best play: U-turn" with no reason is easy to overrule when
+   Earthquake shows a bigger number, and before the song lands there was no warning at all.
+
+`perishTrap.ts` adds the explanation as a PATTERN read rather than a search result, which
+matters: the kill is three turns out, past the horizon a live search reaches on a wide
+board, so the maximin verdict can be honestly fine right up until two mons die. It runs
+off the root position and rides `SearchResult.perishTrap` at every depth.
+
+**Phases.** `armed` — a singer and a trapper are both on the field, no song yet; counters
+are denial (Taunt the singer, Soundproof, KO the trapper first). `active` — a clock is
+running; counters are escape.
+
+**The escape rules mirror the engine exactly**, including two that a plausible summary
+gets wrong:
+- **Baton Pass is not an escape.** It bypasses trapping like any pivot but PASSES THE
+  PERISH COUNT to the incoming mon, so it trades one dead mon for a different one. It is
+  surfaced as an explicit ✗.
+- **A move-trap dies with its trapper** (Mean Look releases when the user leaves or
+  faints), so KOing the trapper genuinely frees the switch — but only when the clock has
+  ≥2 turns left, which the advice states.
+Plus the ordinary outs: escape pivots (U-turn / Volt Switch / Flip Turn / Parting Shot /
+Teleport / Chilly Reception / Shed Tail), Shed Shell, Ghost typing, and the one players
+forget — an untrapped PARTNER on the same clock should switch to clear its own count.
