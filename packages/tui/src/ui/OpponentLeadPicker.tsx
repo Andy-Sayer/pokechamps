@@ -29,6 +29,21 @@ const LEAD_SIZE = 2;
 // the 2 leads up front; the back two reveal themselves via switches or
 // forced send-ins after a faint. This picker captures just the leads —
 // the BattleScreen grows the "brought" set as more opp mons appear on field.
+/** Order the two chosen leads into [o1, o2] using the SCREEN's plate order when vision
+ *  has told us who stands where; otherwise fall back to team-list order. Only a plate
+ *  order that actually covers the chosen pair is trusted — a stale or half-read one must
+ *  not silently mirror the board. Exported for test. */
+export function orderLeads(
+  chosen: ReadonlySet<number>,
+  plate: readonly [number | null, number | null],
+): [number, number] {
+  const byIndex = [...chosen].sort((a, b) => a - b) as [number, number];
+  const [a, b] = plate;
+  if (a == null || b == null || a === b) return byIndex;
+  if (!chosen.has(a) || !chosen.has(b)) return byIndex;
+  return [a, b];
+}
+
 export function OpponentLeadPicker({ stores, opponent, myTeam, onConfirm, onCancel, onBack }: OpponentLeadPickerProps) {
   const [cursor, setCursor] = useState(0);
   const [chosen, setChosen] = useState<Set<number>>(new Set());
@@ -43,16 +58,31 @@ export function OpponentLeadPicker({ stores, opponent, myTeam, onConfirm, onCanc
   const [visionMsg, setVisionMsg] = useState<string | null>(null);
   const manualTouch = useRef(false);
   const lastAutoKey = useRef('');
+  // PLATE ORDER. Which lead is o1 and which is o2 is decided by the SCREEN, not by our
+  // team-list order — the nameplates are ground truth. Confirming by team index instead
+  // produced an engine board mirrored against reality, and the occupancy reconciler then
+  // reported it as "the opponents swapped", which is nonsense from the player's side and
+  // cost a turn to acknowledge (live, 2026-07-28). Holds opponent indices in slot order.
+  const plateOrder = useRef<[number | null, number | null]>([null, null]);
   useEffect(() => onWatchProposal(p => {
     if (manualTouch.current) return;
     const seen: number[] = [];
     let unrecognized = 0;
+    const noteSlot = (slot: 1 | 2, species: string) => {
+      const i = opponent.findIndex(o => toId(o.species) === toId(species));
+      if (i >= 0) plateOrder.current[slot - 1] = i;
+    };
+    // The settled plate assertions are the most direct statement of who is where.
+    if (p.occupancy?.o1) noteSlot(1, p.occupancy.o1);
+    if (p.occupancy?.o2) noteSlot(2, p.occupancy.o2);
     for (const l of p.lines) {
-      const m = l.match(/^o[12] > switch > (.+)$/);
+      const m = l.match(/^o([12]) > switch > (.+)$/);
       if (!m) continue;
-      const idx = opponent.findIndex(o => toId(o.species) === toId(m[1]!));
-      if (idx >= 0) { if (!seen.includes(idx)) seen.push(idx); }
-      else unrecognized++;
+      const idx = opponent.findIndex(o => toId(o.species) === toId(m[2]!));
+      if (idx >= 0) {
+        if (!seen.includes(idx)) seen.push(idx);
+        noteSlot(Number(m[1]) as 1 | 2, m[2]!);       // the send-out line names the slot
+      } else unrecognized++;
     }
     // Pre-fill whatever resolved — a NICKNAMED lead ("sent out Courtois and
     // Camerupt!") leaves only one recognizable, and one pre-selected beats none.
@@ -83,8 +113,7 @@ export function OpponentLeadPicker({ stores, opponent, myTeam, onConfirm, onCanc
       setChosen(next);
     }
     if (key.return && chosen.size === LEAD_SIZE) {
-      const ids = [...chosen].sort((a, b) => a - b) as [number, number];
-      onConfirm(ids);
+      onConfirm(orderLeads(chosen, plateOrder.current));
     }
   });
 
