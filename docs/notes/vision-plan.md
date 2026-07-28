@@ -160,7 +160,13 @@ Switch 2 / VOD ──▶ frames ──▶ readFrame(RegionMap)         ← banne
    the M-B headline). The app-owned harvest routine grows this automatically from every
    opponent you key manually; the VOD grind covers the rest
    ([`harvested-vods.md`](harvested-vods.md), [`sprite-refs-plan.md`](sprite-refs-plan.md)).
-4. **Wide Guard / Quick Guard banner lines** — blocked on ground truth, and now waiting
+4. ~~**Perish clock**~~ ✅ DONE (2026-07-28). "X's perish count fell to N!" had no
+   grammar, so a live perish TRAP passed unnoticed — the lines were read and dropped into
+   the unknown-banner log. They now emit the engine's `<ref> perish N` state verb. Better
+   than the existing cast-based auto-tracking, because the game reprints the count every
+   turn for every affected mon: it stays exact even when the cast was never read or the
+   singer has since switched out.
+5. **Wide Guard / Quick Guard banner lines** — blocked on ground truth, and now waiting
    passively: the capture in P6 records the wording the first time one is used in a real
    match. Check `fixtures/unknown-banners.log` after a session that saw one.
    *(Per-source region overrides are NOT on this list — see the P5 closeout: the supported

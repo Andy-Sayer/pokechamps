@@ -167,3 +167,26 @@ describe('side-wide guard banners', () => {
     expect((m as { move: string }).move).toBe('Quick Guard');
   });
 });
+
+// Perish clock. Caught live 2026-07-28: a perish TRAP went completely unnoticed because
+// these lines had no grammar — vision saw them and dropped them into the unknown log.
+// The exact strings below are copied from that log, curly apostrophes and all.
+describe('perish count banners', () => {
+  test('the opponent form parses with side + count', () => {
+    const m = parseBanner('The opposing Gengar’s perish count fell to 2!');
+    expect(m.kind).toBe('perish');
+    expect((m as { side: string }).side).toBe('opp');
+    expect((m as { species: string | null }).species).toBe('Gengar');
+    expect((m as { count: number }).count).toBe(2);
+  });
+
+  test('my side, straight apostrophe, and the lethal 0', () => {
+    const m = parseBanner("Garchomp's perish count fell to 0!");
+    expect((m as { side: string }).side).toBe('mine');
+    expect((m as { count: number }).count).toBe(0);
+  });
+
+  test('curly apostrophe on my side too (clean() normalises it)', () => {
+    expect(parseBanner('Dragonite’s perish count fell to 1!').kind).toBe('perish');
+  });
+});

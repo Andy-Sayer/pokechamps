@@ -52,6 +52,9 @@ export type BattleMessage =
   | { kind: 'drowsy'; side: Side; label: string; species: string | null }
   | { kind: 'miss'; side: Side; label: string; species: string | null }
   | { kind: 'hpLoss'; side: Side; label: string; species: string | null }
+  // "X's perish count fell to N!" — printed EVERY turn for every affected mon, so it is
+  // far better ground truth than inferring the clock from a cast we may never have read.
+  | { kind: 'perish'; side: Side; label: string; species: string | null; count: number }
   | { kind: 'confusionHit' }
   | { kind: 'weatherStart'; weather: string }
   | { kind: 'weatherEnd' }
@@ -209,6 +212,14 @@ export function parseBanner(raw: string): BattleMessage {
     return { kind: 'residual', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()), source: m[2]!.trim().toLowerCase() };
   // self-inflicted HP loss with no named source ("X lost some of its HP!") — Life Orb,
   // Substitute, Curse, Belly Drum, etc. Self-damage: never an opponent-dealt-damage signal.
+  // Perish clock. Caught live 2026-07-28: a perish TRAP went completely unnoticed
+  // because these lines had no grammar and fell into the unknown-banner log. The cast
+  // ("X used Perish Song!") starts auto-tracking, but if the cast is missed — or the
+  // opponent switched the singer out — the counter banners are the only truth left.
+  if ((m = /^(.+?)'s perish count fell to (\d+)$/i.exec(rest))) {
+    const label = m[1]!.trim();
+    return { kind: 'perish', side, label, species: resolveSpecies(label), count: parseInt(m[2]!, 10) };
+  }
   if ((m = /^(.+?) lost some of its hp$/i.exec(rest)))
     return { kind: 'hpLoss', side, label: m[1]!.trim(), species: resolveSpecies(m[1]!.trim()) };
   if ((m = /^(.+?) avoided the attack$/i.exec(rest)) || (m = /^(.+?)'?s attack missed$/i.exec(rest)))

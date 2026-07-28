@@ -454,3 +454,23 @@ describe('BattleAssembler — side-wide guard suppresses damage on BOTH slots', 
     expect(lines.some(l => /Rock Slide > (spread|o1|o2).*\d/.test(l))).toBe(false);
   });
 });
+
+describe('BattleAssembler — perish clock', () => {
+  test('the count becomes a state line the engine can tick', () => {
+    const a = new BattleAssembler({ m1: 'Garchomp', m2: 'Dragonite', o1: 'Gengar', o2: 'Blastoise' });
+    feed(a, [
+      'The opposing Gengar used Perish Song!',
+      'The opposing Gengar’s perish count fell to 2!',
+      'Garchomp’s perish count fell to 2!',
+    ]);
+    const lines = a.endTurnLines();
+    expect(lines).toContain('o1 perish 2');
+    expect(lines).toContain('m1 perish 2');
+  });
+
+  test('the lethal turn is reported as 0', () => {
+    const a = new BattleAssembler({ m1: 'Garchomp', m2: 'Dragonite', o1: 'Gengar', o2: 'Blastoise' });
+    feed(a, ['The opposing Gengar used Protect!', "Garchomp's perish count fell to 0!"]);
+    expect(a.endTurnLines()).toContain('m1 perish 0');
+  });
+});

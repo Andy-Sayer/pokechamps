@@ -519,6 +519,16 @@ export class BattleAssembler {
         if (ref) this.protectedThisTurn.add(ref);
         break;
       }
+      case 'perish': {
+        // The engine has a perish state verb ("o1 perish 2") and ticks it down itself,
+        // but it can only do that once it KNOWS the clock is running. Emitting the
+        // game's own count keeps it exact even when the cast was never read.
+        const ref = this.resolveSlot(msg.side, msg.species ?? msg.label);
+        if (!ref) { this.notes.push(`perish count unresolved ${msg.side} "${msg.label}"`); break; }
+        const line = `${ref} perish ${msg.count}`;
+        if (!this.stateLines.includes(line)) this.stateLines.push(line);
+        break;
+      }
       case 'confusionHit': {
         // "It hurt itself in its confusion!" — SELF-inflicted HP loss, and the banner
         // names nobody. Attribute it to the mon the confusion reminder just named (the
