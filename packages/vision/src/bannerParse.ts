@@ -61,6 +61,10 @@ const LIGATURE_FIX: [RegExp, string][] = [
   [/\btainted\b/gi, 'fainted'],
   [/\btlinched\b/gi, 'flinched'],
   [/\be[ft]{1,2}ective\b/gi, 'effective'],
+  // "It doesn't atfect X…" — caught live 2026-07-28 by the always-on unknown-banner log.
+  // The immunity line is what marks a hit as NO-DAMAGE, so losing it lets an immune hit
+  // emit a fake 0-damage observation straight into the inference.
+  [/\ba[ft]{1,2}ect\b/gi, 'affect'],
   [/\bbutt?eted\b/gi, 'buffeted'],
   [/\btorteit\b/gi, 'forfeit'],
 ];

@@ -129,3 +129,19 @@ describe('parseBanner — terminal states', () => {
     expect(parseBanner('Ca rf QUSY BN').kind).toBe('unknown');
   });
 });
+
+// Caught live (2026-07-28) by the always-on unknown-banner log: "It doesn't atfect
+// Dragonite..." went unparsed. The immunity line marks a hit as NO-DAMAGE, so losing it
+// lets an immune hit emit a fake 0-damage observation into the inference.
+describe('f-ligature repair covers "affect"', () => {
+  test('the exact garbled line from the live log parses as an immunity', () => {
+    const m = parseBanner("It doesn’t atfect Dragonite...");
+    expect(m.kind).toBe('effectiveness');
+    expect((m as { level: string }).level).toBe('immune');
+    expect((m as { species: string | null }).species).toBe('Dragonite');
+  });
+
+  test('the clean spelling still parses (no regression)', () => {
+    expect(parseBanner("It doesn't affect Dragonite...").kind).toBe('effectiveness');
+  });
+});

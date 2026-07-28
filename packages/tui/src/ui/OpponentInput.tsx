@@ -21,6 +21,10 @@ const CONFIRMED = 1;     // sentinel: a human set/accepted this slot
 
 export function OpponentInput({ stores, onDone, onCancel }: OpponentInputProps) {
   const [species, setSpecies] = useState<string[]>(Array(SIZE).fill(''));
+  // Slots the USER typed. A re-read (the watcher respawns and re-arms the auto-read)
+  // used to overwrite ALL six wholesale, so a corrected team could silently revert or
+  // re-order mid-preview — seen live 2026-07-27.
+  const editedRef = useRef<Set<number>>(new Set());
   const [scores, setScores] = useState<number[]>(Array(SIZE).fill(0)); // 0 empty · 0<x<1 vision · 1 confirmed
   const [activeIdx, setActiveIdx] = useState(0);
   const [value, setValue] = useState('');
@@ -63,6 +67,7 @@ export function OpponentInput({ stores, onDone, onCancel }: OpponentInputProps) 
 
   const commit = (name: string) => {
     const next = species.slice(); next[activeIdx] = name; setSpecies(next);
+    editedRef.current.add(activeIdx);   // never let a re-read clobber a slot you set
     const sc = scores.slice(); sc[activeIdx] = CONFIRMED; setScores(sc);
     const tr = trusted.slice(); tr[activeIdx] = true; setTrusted(tr);
     setValue(''); setHighlight(0);
@@ -111,7 +116,11 @@ export function OpponentInput({ stores, onDone, onCancel }: OpponentInputProps) 
       const archivedPath = archiveOppSheet(framePathRef.current, got);
       archivedSheetRef.current = archivedPath;
       const isVerified = (g: OppSlotRead) => g.source === 'sprite+type' || g.source === 'type-only';
-      setSpecies(got.map(g => g.name || ''));
+      // MERGE, don't replace: keep anything the user has already typed. A second read
+      // sees a different frame, so it can legitimately match a different species or
+      // order — overwriting a hand-corrected slot with that is strictly worse than
+      // keeping the human's answer.
+      setSpecies(prev => got.map((g, i) => (editedRef.current.has(i) ? (prev[i] || g.name || '') : (g.name || ''))));
       setScores(got.map(g => g.score));
       setSlotTypes(got.map(g => g.types.join('/')));
       setSlotCands(got.map(g => g.candidates));
