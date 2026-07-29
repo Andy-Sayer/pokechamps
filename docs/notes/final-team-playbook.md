@@ -46,6 +46,43 @@ Chosen over anti‑meta‑mb and an optimized deception team (fakeperish‑opt) 
 
 **Focus Sash Whimsicott:** Sash only saves at full HP → **break it, then KO.** Either same‑turn double‑target (Garchomp EQ + Talonflame Flare Blitz, as in the Raichu game) or two hits over consecutive turns (Gale Wings **priority Acrobatics** ×2). The search does this automatically; Talonflame's priority is the clean closer.
 
+## Perish trap — the counter for THIS team (sim‑verified 2026‑07‑29)
+
+Lost a live game to Mega Gengar + Blastoise on 2026‑07‑28. Every line below is
+resolved through `@pkmn/sim` with the team's real spreads —
+`packages/core/src/scripts/talonflame-perish-counter.ts`, pinned by
+`talonflame-perish-counter.test.ts` (11/11).
+
+**The team cannot escape a trap, so it must deny the song.** One pivot on the
+roster (Meowscarada's U‑turn), no Shed Shell, no Ghost, no Taunt, no Soundproof.
+Five of six mons are simply dead once Shadow Tag is on them.
+
+**The answer is Garchomp, and it is not close.**
+
+| Line | Result |
+|---|---|
+| **Scarf Garchomp Earthquake → Gengar** | **OHKO on 16/16 seeds, even through the mega.** Scarf 231 outspeeds Mega Gengar's 200, and Ground is 2× on Poison |
+| …with **Talonflame / Pelipper / Dragonite** beside it | partner took damage on **0/16** — all three are Flying, so the spread is free |
+| Talonflame **Acrobatics + Meowscarada Knock Off** | KO **16/16** before the song, base *or* already‑mega. Gale Wings makes Acrobatics **+1 priority**, so it beats the song without winning the speed race |
+| Talonflame Acrobatics **alone** | leaves Gengar on **12%** and the song lands — it needs the second attacker |
+| Meowscarada **U‑turn** under Shadow Tag | real escape, clears the count. The team's **only** one |
+| Tailwind up | Meowscarada then moves before Mega Gengar |
+
+**The bitter irony of the loss: the Garchomp that got trapped and killed is the
+team's cleanest answer to the trap.** Choice‑locked into Earthquake is not the
+problem it looks like — Earthquake is exactly the move that kills the Gengar.
+The mistake was leaving it in *beside* the threat instead of pointing it *at* it.
+
+**Two things that look like counters and are not:**
+- **Knock Off does not remove Gengarite.** A mega stone is not knockable, so do
+  not plan around stripping it — Gengar still held the stone afterwards.
+- **Sucker Punch fails into Perish Song.** The song is a status move, so
+  Kingambit's priority does nothing about it (`|-fail|p1a: Kingambit`).
+
+**Rule of thumb:** if a Gengar is on the field, Garchomp clicks Earthquake with a
+Flying partner out. Do **not** spend the turn KOing the body in front of it — the
+KO opens the slot and they put the trapper back (see `docs/notes/tactics.md`).
+
 ## Bring guide (Nash‑optimal, per opponent)
 
 Vary the bring across games (the mix) so you can't be counter‑brought. Hardest → easiest:
