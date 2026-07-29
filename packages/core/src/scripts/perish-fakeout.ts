@@ -15,7 +15,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { buildBattle, ensureSimLoaded, type SimMon } from '../domain/simBridge.js';
-import { toId } from '../domain/data.js';
+import { toId, getMove } from '../domain/data.js';
 
 interface TeamMon {
   species: string; item?: string | null; ability?: string | null; nature?: string;
@@ -195,6 +195,71 @@ export async function probeFakeOut(): Promise<FakeOutFinding[]> {
       turns === 3,
       `the perished mon faints ${turns} turns after the song, so T2 (kill) and T3 (switch) both fit — ` +
       `a single Protect from Gengar on T2 spends the entire margin`);
+  }
+
+  // === 7. Does Sucker Punch beat Fake Out? ================================
+  {
+    const brackets = ['protect', 'fakeout', 'suckerpunch', 'acrobatics', 'perishsong', 'earthquake', 'uturn']
+      .map(id => { const m: any = getMove(id); return `${m.name} ${m.priority >= 0 ? '+' : ''}${m.priority}`; });
+    const b: any = buildBattle(pos(['Kingambit', 'Talonflame', 'Garchomp']));
+    const n = b.log.length;
+    b.makeChoices(`move ${slot('Kingambit', 'Sucker Punch')} 2, move ${slot('Talonflame', 'Protect')}`, 'move 1 mega, move 1 1');
+    const order: string[] = b.log.slice(n)
+      .filter((l: string) => l.startsWith('|move|') || l.startsWith('|cant|'))
+      .map((l: string) => `${l.split('|')[2]?.split(': ')[1]}:${l.split('|')[3]}`);
+    const flinched = order.some(o => o.startsWith('Kingambit') && o.includes('flinch'));
+    say('Sucker Punch does NOT beat Fake Out — it is two brackets lower',
+      flinched,
+      `brackets: ${brackets.join(', ')}. Observed order: ${order.join(' -> ')} — ` +
+      `Kingambit is flinched before Sucker Punch resolves, and it would fail into a status move anyway`);
+  }
+
+  // === 8. The stall line: they Protect the trapper on T2 ==================
+  // Survival is EXACTLY "trapper dead by T3": if it lives to the start of T4 I am
+  // still trapped for that choice and the count hits 0. So measure the kill.
+  {
+    const killRate = (protectAgainOnT3: boolean): number => {
+      let ko = 0;
+      const pair = `move ${slot('Garchomp', 'Earthquake')}, move ${slot('Talonflame', 'Acrobatics')} 1`;
+      for (let i = 0; i < 40; i++) {
+        const b: any = buildBattle(pos(['Garchomp', 'Talonflame', 'Meowscarada', 'Pelipper'],
+          [i + 1, i * 3 + 2, i * 7 + 5, i * 11 + 3]));
+        b.makeChoices(`move ${slot('Garchomp', 'Earthquake')}, move ${slot('Talonflame', 'Protect')}`, 'move 1 mega, move 1 1');
+        b.makeChoices(pair, 'move 3, move 4');                                        // T2 they Protect
+        b.makeChoices(pair, protectAgainOnT3 ? 'move 3, move 4' : 'move 2 1, move 2 1'); // T3
+        if (byBase(b.sides[1], 'Gengar').fainted) ko++;
+      }
+      return ko;
+    };
+    const stalled = killRate(true), open = killRate(false);
+    say('A T2 Protect does not beat the plan, but it spends the whole margin',
+      open === 40 && stalled >= 24 && stalled < 40,
+      `trapper dead by T3: ${stalled}/40 (${Math.round(stalled / 40 * 100)}%) if they Protect on T3 too, ` +
+      `${open}/40 if they do not. So a repeat Protect is a straight ${Math.round((40 - stalled) / 40 * 100)}% chance ` +
+      `of losing the mon — consecutive Protect usually FAILING is the only reason it is not 0%`);
+  }
+
+  // === 9. Partner flinched: what can Talonflame do alone? =================
+  {
+    const solo = (move: string): { ko: number; left: number[] } => {
+      let ko = 0; const left: number[] = [];
+      for (let i = 0; i < 40; i++) {
+        const b: any = buildBattle(pos(['Talonflame', 'Garchomp', 'Meowscarada'],
+          [i + 1, i * 3 + 2, i * 7 + 5, i * 11 + 3]));
+        // Fake Out goes to my SLOT 2, so only Talonflame acts. Intimidate hit both.
+        b.makeChoices(`move ${slot('Talonflame', move)} 1, move ${slot('Garchomp', 'Earthquake')}`, 'move 1 mega, move 1 2');
+        const g = byBase(b.sides[1], 'Gengar');
+        if (g.fainted) ko++; else left.push(Math.round(g.hp / g.maxhp * 100));
+      }
+      return { ko, left };
+    };
+    const acro = solo('Acrobatics'), blitz = solo('Flare Blitz');
+    const rng = (a: number[]) => a.length ? `${Math.min(...a)}-${Math.max(...a)}%` : 'n/a';
+    say('With the partner flinched, Talonflame alone cannot stop the song',
+      acro.ko <= 4 && blitz.ko <= 4,
+      `Acrobatics: KO ${acro.ko}/40, Gengar left on ${rng(acro.left)}. ` +
+      `Flare Blitz: KO ${blitz.ko}/40, left on ${rng(blitz.left)}. ` +
+      `Flare Blitz hits harder but costs recoil and drops Talonflame off full HP, losing Gale Wings priority`);
   }
 
   return findings;

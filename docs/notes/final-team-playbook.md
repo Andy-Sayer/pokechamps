@@ -79,7 +79,15 @@ The mistake was leaving it in *beside* the threat instead of pointing it *at* it
 - **Sucker Punch fails into Perish Song.** The song is a status move, so
   Kingambit's priority does nothing about it (`|-fail|p1a: Kingambit`).
 
-### …unless they Fake Out (sim‑verified, `perish-fakeout.ts`, 7/7)
+### …unless they Fake Out (sim‑verified, `perish-fakeout.ts`, 10/10)
+
+> **Re‑run any of this yourself.** Every number on this page comes from a committed
+> script, not from working it out on paper:
+> `npx tsx packages/core/src/scripts/perish-fakeout.ts` (this section) ·
+> `talonflame-perish-counter.ts` (the base counter) ·
+> `perish-walkthrough.ts` (turn‑by‑turn) ·
+> `perish-sim-probe.ts` (the generic mechanics). All four are pinned by tests in
+> `packages/core/tests/`, so `npm test` re‑checks them.
 
 The turn‑1 answer has **two independent failure modes**, and the standard Fake Out
 lead — **Incineroar** — brings both:
@@ -139,7 +147,7 @@ can still kill you. Kill it on T2 if it is exposed; never spend T2 on anything e
 | Protect | **+4** |
 | Fake Out | **+3** |
 | Sucker Punch | +1 |
-| Acrobatics (Gale Wings) | +1 |
+| Acrobatics | 0 — **+1 only while Gale Wings applies** (Talonflame at full HP); it is an ability bump, not a property of the move |
 | Perish Song / Earthquake / U‑turn | 0 |
 
 Kingambit's Sucker Punch is **two brackets below** Fake Out, so it gets flinched before
@@ -153,8 +161,8 @@ Talonflame at −1 from Intimidate, hitting Mega Gengar by itself:
 
 | Move | KO | Gengar left on |
 |---|---|---|
-| Acrobatics | 2/40 | **51–60%** |
-| Flare Blitz | 1/40 | **41–56%** |
+| Acrobatics | 3/40 | **51–60%** |
+| Flare Blitz | 2/40 | **41–56%** |
 
 Neither is close. Flare Blitz hits harder but costs recoil and loses Gale Wings priority
 once Talonflame is off full HP. **A flinched partner means the song lands — do not try to

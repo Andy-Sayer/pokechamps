@@ -28,7 +28,7 @@ const find = (fragment: string): FakeOutFinding => {
 describe('perish trap behind a Fake Out lead', () => {
   test('every expectation holds against the real engine', () => {
     expect(findings.filter(f => !f.ok).map(f => `${f.headline} -> ${f.detail}`)).toEqual([]);
-    expect(findings.length).toBeGreaterThanOrEqual(7);
+    expect(findings.length).toBeGreaterThanOrEqual(10);
   });
 
   test.each([
@@ -39,6 +39,9 @@ describe('perish trap behind a Fake Out lead', () => {
     ['FIX B — Kingambit OHKOs it ALONE'],
     ['THE ADAPTED PLAN'],
     ['exactly TWO turns of slack'],
+    ['Sucker Punch does NOT beat Fake Out'],
+    ['A T2 Protect does not beat the plan'],
+    ['Talonflame alone cannot stop the song'],
   ])('%s', (fragment) => {
     const f = find(fragment);
     expect(f.ok, `${f.headline}\n  engine said: ${f.detail}`).toBe(true);
