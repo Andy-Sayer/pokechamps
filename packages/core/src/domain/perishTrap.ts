@@ -283,14 +283,26 @@ export function analyzePerishTrap(mine: readonly PerishSide[], opp: readonly Per
     }
   }
   const soloCombo = trapPiece === singer;
-  const spares = oppActive.filter(o => o !== trapPiece && isTrapper(o))
-    .concat(opp.filter(o => !o.active && (o.hpPercent ?? 0) > 0 && isTrapper(o)));
-  outs.push({ kind: 'ko-trapper', saves: !spares.length,
+  // Same lesson as the active branch, applied one turn EARLIER — which is the turn that
+  // actually decides the game. A body in front of a Gengar is not the trap; killing it
+  // just rotates the real trapper in. Suspicion counts here too: at this point the stone
+  // is usually still unrevealed, so "could mega into a trap" is all the warning there is.
+  const live = opp.filter(o => o !== trapPiece && (o.hpPercent ?? 0) > 0);
+  const spares = live.filter(isTrapper);
+  const suspects = live.filter(couldMegaTrap);
+  const refill = [...spares, ...suspects];
+  outs.push({ kind: 'ko-trapper', saves: !refill.length,
     label: soloCombo
       ? `KO ${trapPiece.species} before the song lands — it sings AND traps, so it is the whole combo`
-      : spares.length
-        ? `KO ${trapPiece.species} before the song lands — but ${spares.map(s2 => s2.species).join('/')} can trap too, so the slot must not just be handed over`
+      : refill.length
+        ? `KO ${trapPiece.species} before the song lands — but ${refill.map(s2 => s2.species).join('/')} ${spares.length ? 'can trap too' : 'can mega into a trapping ability'}, so removing this one may just rotate the real trapper in`
         : `KO ${trapPiece.species} before the song lands — without the trap the song is just a shared clock` });
+  // The singer is the piece that starts the clock: deny it and nothing else matters.
+  // Stated separately from the Taunt out, which only exists if I actually carry Taunt.
+  if (!soloCombo && refill.length) {
+    outs.push({ kind: 'taunt-singer', saves: false,
+      label: `${singer.species} is the piece to remove — shut the song down or leave BEFORE it goes off; the trap only needs one turn to assemble` });
+  }
 
   return {
     phase: 'armed',

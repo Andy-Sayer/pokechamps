@@ -278,7 +278,10 @@ off the root position and rides `SearchResult.perishTrap` at every depth.
 
 **Phases.** `armed` — a singer and a trapper are both on the field, no song yet; counters
 are denial (Taunt the singer, Soundproof, KO the trapper first). `active` — a clock is
-running; counters are escape.
+running; counters are escape. **The armed turn is the one that decides the game**, so the
+open-slot rule below applies there too and harder: if anything on their side can refill
+the trapper's slot, the advisory names the SINGER as the piece to remove and says to shut
+the song down or leave before it goes off — the combo only needs one turn to assemble.
 
 **The escape rules mirror the engine exactly**, including two that a plausible summary
 gets wrong:

@@ -248,6 +248,21 @@ describe('a KO opens a slot the OPPONENT fills', () => {
     expect(ko.label).toContain('Gengar');
   });
 
+  test('the ARMED phase warns one turn earlier — the turn that decides the game', () => {
+    // Gengar in front with a body beside it, stone unrevealed, no song yet. This is the
+    // last turn where anything can be done, so "KO the body" must not read as the answer.
+    const gengar = mon({ species: 'Gengar', moves: ['Perish Song', 'Shadow Ball'] });
+    const blastoise = mon({ species: 'Blastoise', moves: ['Mean Look', 'Surf'] });
+    const chomp = mon({ species: 'Garchomp', item: 'Choice Scarf', moves: ['Earthquake'] });
+    const a = analyzePerishTrap([chomp], [gengar, blastoise])!;
+    expect(a.phase).toBe('armed');
+    const ko = a.outs.find(o => o.kind === 'ko-trapper')!;
+    expect(ko.saves).toBe(false);
+    expect(ko.label).toContain('rotate the real trapper in');
+    // ...and it names the singer as the piece that matters.
+    expect(a.outs.some(o => o.label.includes('Gengar is the piece to remove'))).toBe(true);
+  });
+
   test('an UNREVEALED Gengar downgrades the KO — the stone is the thing we cannot see', () => {
     // No item known, no Shadow Tag showing: nothing in the observed data says "trapper"
     // until the mega lands. That is precisely how the live game was lost.
