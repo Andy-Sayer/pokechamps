@@ -79,6 +79,41 @@ The mistake was leaving it in *beside* the threat instead of pointing it *at* it
 - **Sucker Punch fails into Perish Song.** The song is a status move, so
   Kingambit's priority does nothing about it (`|-fail|p1a: Kingambit`).
 
+### …unless they Fake Out (sim‑verified, `perish-fakeout.ts`, 7/7)
+
+The turn‑1 answer has **two independent failure modes**, and the standard Fake Out
+lead — **Incineroar** — brings both:
+
+| Threat | What it breaks | Evidence |
+|---|---|---|
+| **Fake Out** (+3) | the Earthquake **happening** — beats the Scarf *and* Gale Wings | Garchomp flinched, Earthquake never used, song landed free |
+| **Intimidate** (−1) | the Earthquake **killing** — becomes a NEAR‑kill | **1/16** KO; survivors on **1–16%**, alive and still able to sing |
+
+**Garchomp cannot even Protect the flinch** — its four moves are Rock Slide /
+Earthquake / Dragon Claw / Iron Head. There is no Protect on it. Talonflame does
+carry one and blocks the Fake Out, but Protect does nothing about the *song*.
+
+**Two fixes, both 16/16 through the Intimidate:**
+- **FIX A — Earthquake + Talonflame Acrobatics.** The leftover 1–16% is exactly
+  what Acrobatics covers.
+- **FIX B — Kingambit Kowtow Cleave, alone.** **Defiant answers an Attack drop
+  with +2, so Incineroar's own Intimidate leaves Kingambit at a net +1.** Kowtow
+  is Dark (2× on Ghost). Kingambit is the one mon on the roster that *wants* to be
+  Intimidated — consider it the lead into any Fake Out core.
+
+**The adapted plan — Fake Out DELAYS the answer, it does not beat it:**
+
+| Turn | Do |
+|---|---|
+| **T1** | Eat the Fake Out. The song lands; accept it |
+| **T2** | **Kill the trapper** (EQ + Acrobatics, or Kingambit alone) |
+| **T3** | **Switch the perished mons out** — Shadow Tag died with its owner, so the door is open and switching wipes the count |
+
+Verified end to end: song T1, trapper dead T2, both counts cleared on T3, **nobody
+dies**. The clock allows exactly **two turns of slack**, so **a single Protect from
+Gengar on T2 spends the entire margin** — if that happens, the kill slips to T3 and
+the switch no longer fits.
+
 **Rule of thumb:** if a Gengar is on the field, Garchomp clicks Earthquake with a
 Flying partner out. Do **not** spend the turn KOing the body in front of it — the
 KO opens the slot and they put the trapper back (see `docs/notes/tactics.md`).
