@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { PokemonSet, OpponentEntry } from '@pokechamps/core/domain/types.js';
-import { scoreBrings, matchupGrid, predictOppLeads, defaultOpponentSet, type BringScore } from '@pokechamps/core/domain/bring.js';
+import { scoreBrings, matchupGrid, predictOppLeads, defaultOpponentSet, leadAdvice, type BringScore, type LeadAdvice } from '@pokechamps/core/domain/bring.js';
 import { bringNash, bringThreats } from '@pokechamps/core/domain/bringRecommend.js';
 import { predictOppBring } from '@pokechamps/core/domain/oppBringPredict.js';
 import { tacticLabel } from '@pokechamps/core/domain/tactics.js';
@@ -89,6 +89,13 @@ export function BringPicker({ stores, myTeam, opponent, teamName, onConfirm, onC
 
   const selected = brings[cursor];
   const effectiveIndices = customMode && customIndices ? customIndices : selected?.myIndices;
+  // WHICH TWO TO LEAD. Generic across every detected opponent combo — the rule is
+  // "don't lead a mon they can blank a turn from when it is the answer", which is
+  // not specific to any one matchup. Null when there is nothing worth saying.
+  const leads: LeadAdvice | null = useMemo(
+    () => (effectiveIndices ? leadAdvice(effectiveIndices.map(i => myTeam[i]!), opponent) : null),
+    [effectiveIndices?.join(','), myTeam, opponent],
+  );
   const grid = useMemo(
     () => effectiveIndices ? matchupGrid(myTeam, opponent, effectiveIndices) : [],
     [effectiveIndices, myTeam, opponent],
@@ -259,6 +266,14 @@ export function BringPicker({ stores, myTeam, opponent, teamName, onConfirm, onC
                     {i === cursor && b.rationale.map((r, k) => (
                       <Text key={k} dimColor={!r.startsWith('⚠')} color={r.startsWith('⚠') ? 'red' : r.startsWith('Combo') ? 'cyan' : undefined}>       {r}</Text>
                     ))}
+                    {i === cursor && leads && (
+                      <Box flexDirection="column" marginTop={1}>
+                        <Text color="magenta" bold>       ▸ LEAD {leads.lead.join(' + ')}   <Text dimColor>hold {leads.hold.join(', ')}</Text></Text>
+                        {leads.reasons.map((r, k) => (
+                          <Text key={`lr-${k}`} dimColor>         {r}</Text>
+                        ))}
+                      </Box>
+                    )}
                   </Box>
                 );
               })}

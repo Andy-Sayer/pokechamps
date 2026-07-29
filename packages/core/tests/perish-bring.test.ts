@@ -7,7 +7,7 @@
 // all, and the lead rule that keeps it off the field on turn 1.
 import { describe, test, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { scoreBrings, perishLeadAdvice, PATTERN_COUNTERS, effectiveSpeed } from '../src/domain/bring.js';
+import { scoreBrings, leadAdvice, PATTERN_COUNTERS, effectiveSpeed } from '../src/domain/bring.js';
 import type { OpponentEntry, PokemonSet } from '../src/domain/types.js';
 
 const team: PokemonSet[] = JSON.parse(readFileSync('data/my-teams/TalonFlameAndyBoy.json', 'utf8'));
@@ -57,12 +57,29 @@ describe('perish trap at team preview', () => {
     expect(scores[0]!.rationale.some(r => /Covers opp Perish trap/.test(r))).toBe(true);
   });
 
-  test('the LEAD advice holds the sole racer back and leads the pivot', () => {
-    const advice = perishLeadAdvice(scoreBrings(team, opponent)[0]!.myIndices.map(i => team[i]!), opponent)!;
+  test('the LEAD advice keeps the answers off the field and leads the resilient mon', () => {
+    const advice = leadAdvice(scoreBrings(team, opponent)[0]!.myIndices.map(i => team[i]!), opponent)!;
     expect(advice).not.toBeNull();
-    expect(advice.lead).toContain('Meowscarada');   // it can leave
-    expect(advice.hold).toContain('Garchomp');      // the Fake Out target
-    expect(advice.why).toMatch(/Do NOT lead Garchomp/);
+    // Meowscarada can leave, so whatever lands on turn 1 does not stick.
+    expect(advice.lead).toContain('Meowscarada');
+    // Garchomp answers a combo and CANNOT leave — leading it hands them the blank.
+    expect(advice.hold).toContain('Garchomp');
+    expect(advice.lead).not.toContain('Garchomp');
+    expect(advice.reasons.join(' ')).toMatch(/can leave \(U-turn\)/);
+  });
+
+  test('the rule is GENERIC — it fires on a non-perish threat too', () => {
+    // Nothing here sings. A Fake Out lead plus a Tailwind core is enough: the sole
+    // answer that cannot walk away still gets held back. If this only worked for
+    // perish traps it would be a special case wearing a generic name.
+    const noPerish = ['Incineroar', 'Archaludon', 'Milotic', 'Garganacl', 'Sylveon', 'Pelipper']
+      .map(species => ({ species, knownMoves: [], candidates: [] } as unknown as OpponentEntry));
+    const advice = leadAdvice(scoreBrings(team, noPerish)[0]!.myIndices.map(i => team[i]!), noPerish);
+    if (advice) {
+      expect(advice.lead).toHaveLength(2);
+      expect(advice.reasons.length).toBeGreaterThan(0);
+      expect(advice.reasons.join(' ')).not.toMatch(/perish/i);
+    }
   });
 
   test('no advice when they cannot deny a turn — then lead the racer normally', () => {
@@ -70,6 +87,6 @@ describe('perish trap at team preview', () => {
     // the denial check and would make this fixture prove the opposite.
     const harmless = ['Gengar', 'Milotic', 'Pelipper', 'Archaludon', 'Sylveon', 'Garganacl']
       .map(species => ({ species, knownMoves: [], candidates: [] } as unknown as OpponentEntry));
-    expect(perishLeadAdvice(team.slice(0, 4), harmless)).toBeNull();
+    expect(leadAdvice(team.slice(0, 4), harmless)).toBeNull();
   });
 });

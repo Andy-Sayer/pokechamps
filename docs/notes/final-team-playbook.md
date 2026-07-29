@@ -111,17 +111,36 @@ NONE  Talonflame,Kingambit,Pelipper,Dragonite     answers=[]
 
 Of the 15 brings: **6 covered, 8 thin, 1 with nothing.**
 
-**3. New — which two to LEAD** (`perishLeadAdvice`). On this board:
+**3. New — which two to LEAD** (`leadAdvice`, shown in the bring picker). This is
+deliberately **generic**: it reads every detected opponent combo through the same
+`PATTERN_COUNTERS` table the bring score uses, so nothing about the perish trap is
+special-cased. It was the case that exposed the rule, not the rule itself.
 
-> **LEAD: Meowscarada + Talonflame · HOLD: Garchomp, Dragonite**
-> Meowscarada can leave (U‑turn), so the song catches a mon that walks away, and it
-> brings Garchomp in clean on the next turn — unflinchable, because Fake Out is
-> spent. **Do NOT lead Garchomp: it is your only mon fast enough to beat the
-> singer, so their Fake Out will be aimed at exactly it.**
+Three rules, in order:
+1. **Hold a sole answer back.** If a mon is the only thing in the bring that answers
+   some combo, and they can take a turn away (Fake Out, Prankster Taunt), leading it
+   aims that denial at exactly the mon you cannot afford to lose.
+2. **Lead a denier** — Inner Focus / Covert Cloak / Soundproof / Taunt refuses the
+   opener outright.
+3. **Else lead a resilient mon** — one that can leave (pivot / Ghost / Shed Shell)
+   takes the turn‑1 hit and walks away from it, and its pivot is how the held‑back
+   answer arrives clean.
 
-The rule: lead a **denier** (Taunt/Soundproof) if you have one, else an **escaper**;
-hold the **sole racer** back. Returns nothing when they cannot deny a turn — then
-lead the racer and let it kill the singer on turn 1.
+Plus a general preference: **keep answers off the field when they cannot leave**,
+even when they are not the only one. On this board:
+
+```
+▸ LEAD Meowscarada + Dragonite   hold Talonflame, Garchomp
+  Hold Talonflame back — it is your ONLY answer to Tailwind core, and they can take
+    a turn away from it. Leading it aims that denial at exactly the mon you cannot lose.
+  Lead Meowscarada — it can leave (U-turn), so whatever lands on turn 1 does not
+    stick, and it is how Talonflame arrives clean once the opener is spent.
+  Lead Dragonite — it answers none of their combos, so it is the cheapest thing to
+    expose to the opener.
+```
+
+Returns nothing when they cannot deny a turn — then lead normally and let your best
+mon do its job on turn 1.
 
 ### What ACTUALLY happened, 2026‑07‑28 (`perish-real-game.ts`, 6/6)
 

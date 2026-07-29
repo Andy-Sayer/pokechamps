@@ -39,13 +39,13 @@ for (const s of scores) {
 console.log(`  covered (2+ answers): ${tally.covered}   THIN (1 answer, deniable): ${tally.thin}   none: ${tally.none}`);
 
 // --- and WHICH TWO to lead -------------------------------------------------
-import { perishLeadAdvice } from '../domain/bring.js';
+import { leadAdvice } from '../domain/bring.js';
 const best = scores[0]!;
-const advice = perishLeadAdvice(best.myIndices.map(i => team[i]!), opponent);
+const advice = leadAdvice(best.myIndices.map(i => team[i]!), opponent);
 console.log('\n--- lead advice for the top bring ---');
 if (!advice) console.log('  (no perish threat, or they cannot deny a turn — lead normally)');
 else {
   console.log(`  LEAD: ${advice.lead.join(' + ')}`);
   console.log(`  HOLD: ${advice.hold.join(', ')}`);
-  console.log(`  WHY : ${advice.why}`);
+  for (const r of advice.reasons) console.log(`  · ${r}`);
 }

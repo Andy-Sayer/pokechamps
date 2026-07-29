@@ -237,63 +237,107 @@ const FAKE_OUT_SPECIES: ReadonlySet<string> = new Set([
 export interface LeadAdvice {
   lead: string[];
   hold: string[];
-  why: string;
+  /** One line per rule that fired, most important first. */
+  reasons: string[];
+}
+
+/** Can this set walk away from trouble on its own terms? Pivot moves, Ghost
+ *  typing and Shed Shell all mean "the field is not a cage for me". */
+function isResilient(s: PokemonSet): boolean {
+  return s.moves.some(isPivotMove)
+    || speciesTypes(s.species).includes('Ghost')
+    || toId(s.item ?? '') === 'shedshell';
+}
+/** Can this set refuse a turn being taken from it, or refuse a setup? */
+function isDenier(s: PokemonSet): boolean {
+  return abilityIs(s, 'soundproof') || abilityIs(s, 'innerfocus') || abilityIs(s, 'shielddust')
+    || toId(s.item ?? '') === 'covertcloak' || hasMove(s, 'taunt');
 }
 
 /**
- * WHICH TWO OF THE FOUR TO LEAD, against a perish trap backed by Fake Out.
+ * WHICH TWO OF THE FOUR TO LEAD.
  *
- * Added after the 2026-07-28 loss, where the BRING was already correct — it
- * ranked first and carried two answers (a Scarf racer and a pivot). The game was
- * lost at lead selection: the racer led, their Fake Out blanked it for the one
- * turn it mattered, and the song landed.
+ * Deliberately generic: it reads the opponent's detected tactics through the same
+ * PATTERN_COUNTERS table the bring score uses, so every threat is treated alike and
+ * no single matchup is special-cased. The perish trap that prompted it is just the
+ * case that exposed the rule.
  *
- * The rule that falls out of the sim work:
- *   • a mon that can DENY the song (Taunt / Soundproof) leads — nothing else
- *     compares, because the trap never starts;
- *   • otherwise lead a mon that can LEAVE (pivot / Ghost / Shed Shell). The song
- *     catches something that can walk away, and its pivot is also how the racer
- *     arrives — clean, and unflinchable because Fake Out is already spent;
- *   • HOLD BACK the sole speed answer. Leading it aims their Fake Out at the only
- *     mon that beats the singer.
+ * Three rules, in order:
+ *   1. HOLD A SOLE ANSWER. If a mon is the only thing in the bring that answers some
+ *      threat, and the opponent can take a turn away (Fake Out, Prankster Taunt),
+ *      leading it aims that denial at exactly the mon you cannot afford to lose.
+ *      This is the 2026-07-28 loss in one sentence.
+ *   2. LEAD A DENIER. Something that refuses the denial outright (Inner Focus,
+ *      Covert Cloak, Soundproof, Taunt) is the best thing to have on the field.
+ *   3. ELSE LEAD A RESILIENT MON. One that can leave (pivot / Ghost / Shed Shell)
+ *      takes the hit that lands on turn 1 and walks away from it, and its pivot is
+ *      how the held-back answer arrives clean.
  *
- * Returns null when there is no perish threat, or when they cannot deny a turn —
- * in that case lead normally and let the racer do its job on turn 1.
+ * Returns null when nothing applies — no detected threat, or they cannot deny a
+ * turn, in which case lead normally and let your best mon do its job on turn 1.
  */
-export function perishLeadAdvice(bring: PokemonSet[], opponent: OpponentEntry[]): LeadAdvice | null {
+export function leadAdvice(bring: PokemonSet[], opponent: OpponentEntry[]): LeadAdvice | null {
+  if (bring.length < 2) return null;
   const level = bring[0]?.level ?? 50;
-  const threats = detectTactics(opponent.map(o => profileFromSpecies(o.species)), { minScore: 60 })
-    .filter(t => t.pattern === 'perish-trap');
+  const threats = detectTactics(opponent.map(o => profileFromSpecies(o.species)), { minScore: 60 });
   if (!threats.length) return null;
-  if (!oppCanDenyATurn(opponent)) return null;          // no Fake Out: lead the racer
+  if (!oppCanDenyATurn(opponent)) return null;
 
-  const threatSpeed = threatSpeedFor(threats[0]!, opponent, level);
-  const denies = (s: PokemonSet) => abilityIs(s, 'soundproof') || hasMove(s, 'taunt');
-  const escapes = (s: PokemonSet) =>
-    s.moves.some(isPivotMove) || speciesTypes(s.species).includes('Ghost') || toId(s.item ?? '') === 'shedshell';
-  const races = (s: PokemonSet) => threatSpeed != null && effectiveSpeed(s) > threatSpeed;
+  // For each threat, who in this bring answers it?
+  const soleAnswerFor = new Map<PokemonSet, string[]>();
+  const answersSomething = new Set<PokemonSet>();
+  for (const t of threats) {
+    const counter = PATTERN_COUNTERS[t.pattern];
+    if (!counter) continue;
+    const ctx: CounterCtx = { threatSpeed: threatSpeedFor(t, opponent, level) };
+    const answers = bring.filter(s => counter(s, ctx));
+    for (const a of answers) answersSomething.add(a);
+    if (answers.length !== 1) continue;                 // 0 = no answer, 2+ = redundant
+    const only = answers[0]!;
+    // detectTactics can return several instances of the same pattern (different
+    // piece pairs); name them once or the reason reads "X and X and X".
+    const named = soleAnswerFor.get(only) ?? [];
+    if (!named.includes(t.name)) named.push(t.name);
+    soleAnswerFor.set(only, named);
+  }
 
-  const deniers = bring.filter(denies);
-  const escapers = bring.filter(s => !denies(s) && escapes(s));
-  const racers = bring.filter(races);
-  if (!deniers.length && !escapers.length && !racers.length) return null;
+  const reasons: string[] = [];
+  const holdBack = [...soleAnswerFor.keys()].filter(s => !isDenier(s) && !isResilient(s));
+  for (const s of holdBack) {
+    reasons.push(`Hold ${s.species} back — it is your ONLY answer to ${soleAnswerFor.get(s)!.join(' and ')}, ` +
+      `and they can take a turn away from it (Fake Out / Taunt). Leading it aims that denial at exactly the mon you cannot lose.`);
+  }
 
-  const soleRacer = racers.length === 1 && !denies(racers[0]!) && !escapes(racers[0]!) ? racers[0]! : null;
-  const first = deniers[0] ?? escapers[0] ?? null;
-  if (!first) return null;
+  const candidates = bring.filter(s => !holdBack.includes(s));
+  if (candidates.length < 2) return null;               // holding everything is not advice
 
-  // Partner: anything that is not the sole racer we want to protect.
-  const partner = bring.find(s => s !== first && s !== soleRacer) ?? bring.find(s => s !== first)!;
-  const why = deniers.length
-    ? `${first.species} can deny the song outright (${hasMove(first, 'taunt') ? 'Taunt' : 'Soundproof'}) — leading it means the trap never starts.`
-    : `${first.species} can leave (${first.moves.find(isPivotMove) ?? (toId(first.item ?? '') === 'shedshell' ? 'Shed Shell' : 'Ghost typing')}), so the song catches a mon that walks away` +
-      (soleRacer ? `, and it brings ${soleRacer.species} in clean on the next turn — unflinchable, because Fake Out is spent.` : '.');
+  // Prefer to lead mons that can absorb the opener: a denier refuses it, a resilient
+  // mon walks away from it. And keep ANSWERS off the field where a denial can blank
+  // them — an answer that cannot leave is worth more held back than led, even when it
+  // is not the only one. This is the generalisation of "do not lead your Scarf into a
+  // Fake Out": nothing about it is specific to perish or to speed.
+  const rank = (s: PokemonSet) =>
+    (isDenier(s) ? 2 : 0) + (isResilient(s) ? 1 : 0) - (answersSomething.has(s) && !isResilient(s) ? 1 : 0);
+  const ordered = [...candidates].sort((a, b) => rank(b) - rank(a));
+  const lead = ordered.slice(0, 2);
+  if (!lead.some(s => rank(s) > 0) && !holdBack.length) return null;   // nothing to say
+
+  for (const s of lead) {
+    if (isDenier(s)) {
+      reasons.push(`Lead ${s.species} — it refuses the denial itself (${hasMove(s, 'taunt') ? 'Taunt' : s.ability ?? 'its ability'}), so their opener does nothing.`);
+    } else if (isResilient(s)) {
+      const how = s.moves.find(isPivotMove) ?? (toId(s.item ?? '') === 'shedshell' ? 'Shed Shell' : 'Ghost typing');
+      reasons.push(`Lead ${s.species} — it can leave (${how}), so whatever lands on turn 1 does not stick` +
+        (holdBack.length ? `, and it is how ${holdBack[0]!.species} arrives clean once the opener is spent.` : '.'));
+    } else if (!answersSomething.has(s)) {
+      reasons.push(`Lead ${s.species} — it answers none of their combos, so it is the cheapest thing to expose to the opener.`);
+    }
+  }
+  if (!reasons.length) return null;
   return {
-    lead: [first.species, partner.species],
-    hold: bring.filter(s => s !== first && s !== partner).map(s => s.species),
-    why: soleRacer
-      ? `${why} Do NOT lead ${soleRacer.species}: it is your only mon fast enough to beat the singer, so their Fake Out will be aimed at exactly it.`
-      : why,
+    lead: lead.map(s => s.species),
+    hold: bring.filter(s => !lead.includes(s)).map(s => s.species),
+    reasons,
   };
 }
 
