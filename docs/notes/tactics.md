@@ -288,6 +288,18 @@ gets wrong:
 - **A move-trap dies with its trapper** (Mean Look releases when the user leaves or
   faints), so KOing the trapper genuinely frees the switch — but only when the clock has
   ≥2 turns left, which the advice states.
+**The Choice lock gates the pivot** (user catch, first version): a Choice-Scarf mon locked
+into Earthquake CANNOT click U-turn, so offering it is illegal advice — worse than silence,
+because it sends the player hunting an escape that isn't there. A pivot is only offered
+when the mon is unlocked or locked into that very pivot; holding a Choice item but not yet
+locked earns a "click it FIRST" note, since the first move taken locks the rest away.
+
+**Three outcomes, kept distinct**, because conflating them is what makes advice useless:
+CERTAIN (a clickable pivot / Shed Shell / Ghost), CONDITIONAL (only breaking the trap by
+KO — real, but this layer has no damage numbers so it must not be dressed up as certain;
+the headline says "only out: KO <trapper>"), and NONE (say so outright and redirect to
+spending the mon well and rescuing the partner).
+
 Plus the ordinary outs: escape pivots (U-turn / Volt Switch / Flip Turn / Parting Shot /
 Teleport / Chilly Reception / Shed Tail), Shed Shell, Ghost typing, and the one players
 forget — an untrapped PARTNER on the same clock should switch to clear its own count.

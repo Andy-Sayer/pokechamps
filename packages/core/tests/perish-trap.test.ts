@@ -134,3 +134,75 @@ describe('perish advice rides the SearchResult at any depth', () => {
     }
   }, 30000);
 });
+
+// CHOICE LOCK. Caught by the user on the first version: a Choice-Scarf Garchomp locked
+// into Earthquake cannot click U-turn, so offering it is ILLEGAL advice — worse than
+// silence, because it sends the player looking for an escape that isn't there.
+describe('perish trap respects the Choice lock', () => {
+  const gengar2 = mon({ species: 'Gengar', moves: ['Perish Song', 'Shadow Ball'] });
+  const looker = mon({ species: 'Blastoise', moves: ['Mean Look', 'Surf'] });
+
+  test('a mon LOCKED into a non-pivot is never told to pivot', () => {
+    const locked = mon({
+      species: 'Garchomp', item: 'Choice Scarf', moves: ['Earthquake', 'U-turn'],
+      perishCount: 2, trappedByFoe: 1, choiceLockedMove: 'Earthquake',
+    });
+    const a = analyzePerishTrap([locked], [gengar2, looker])!;
+    expect(a.outs.some(o => o.kind === 'pivot' && o.saves)).toBe(false);
+    expect(a.outs.some(o => o.label.includes('Choice-locked into Earthquake'))).toBe(true);
+  });
+
+  test('…and the headline names the only remaining out: KO the trapper', () => {
+    // Breaking a MOVE-trap by KO genuinely frees the switch, so this isn't "no escape" —
+    // but it IS conditional on damage this layer can't promise, so it must not be
+    // dressed up as a certain one.
+    const locked = mon({
+      species: 'Garchomp', item: 'Choice Scarf', moves: ['Earthquake', 'U-turn'],
+      perishCount: 2, trappedByFoe: 1, choiceLockedMove: 'Earthquake',
+    });
+    const a = analyzePerishTrap([locked], [gengar2, looker])!;
+    expect(a.headline).toContain('only out: KO Blastoise');
+    expect(a.outs.some(o => o.kind === 'ko-trapper' && o.saves)).toBe(true);
+  });
+
+  test('with the trapper already gone and no pivot, it says NO ESCAPE outright', () => {
+    // Ability-trapped by a mon that can't be removed from the equation: Shadow Tag.
+    const shadowTagger = mon({ species: 'Gothitelle', ability: 'Shadow Tag', moves: ['Psychic'] });
+    const singer2 = mon({ species: 'Gengar', moves: ['Perish Song'] });
+    const locked = mon({
+      species: 'Garchomp', item: 'Choice Scarf', moves: ['Dragon Claw'],
+      perishCount: 1, trappedByFoe: null, choiceLockedMove: 'Dragon Claw',
+    });
+    const a = analyzePerishTrap([locked], [singer2, shadowTagger])!;
+    // perish 1 → the KO comes too late to matter, so nothing saves it.
+    expect(a.headline).toContain('NO ESCAPE');
+    expect(a.outs[0]!.label).toContain('CANNOT escape');
+  });
+
+  test('locked INTO the pivot — that still works', () => {
+    const lockedIntoPivot = mon({
+      species: 'Garchomp', item: 'Choice Scarf', moves: ['Earthquake', 'U-turn'],
+      perishCount: 2, trappedByFoe: 1, choiceLockedMove: 'U-turn',
+    });
+    const a = analyzePerishTrap([lockedIntoPivot], [gengar2, looker])!;
+    expect(a.outs.some(o => o.kind === 'pivot' && o.saves && o.label.includes('U-turn'))).toBe(true);
+  });
+
+  test('holding a Choice item but NOT yet locked → warn to click the pivot first', () => {
+    const unlocked = mon({
+      species: 'Garchomp', item: 'Choice Scarf', moves: ['Earthquake', 'U-turn'],
+      perishCount: 2, trappedByFoe: 1,
+    });
+    const a = analyzePerishTrap([unlocked], [gengar2, looker])!;
+    const pivot = a.outs.find(o => o.kind === 'pivot' && o.saves)!;
+    expect(pivot.label).toContain('click it FIRST');
+  });
+
+  test('no pivot at all, no lock: still NO ESCAPE, and the partner is still rescued', () => {
+    const plain = mon({ species: 'Garchomp', moves: ['Earthquake', 'Dragon Claw'], perishCount: 2, trappedByFoe: 1 });
+    const partner = mon({ species: 'Dragonite', moves: ['Extreme Speed'], perishCount: 2 });
+    const a = analyzePerishTrap([plain, partner], [gengar2, looker])!;
+    expect(a.headline).toContain('only out: KO Blastoise');
+    expect(a.outs.some(o => o.kind === 'partner-switch')).toBe(true);
+  });
+});

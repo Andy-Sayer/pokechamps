@@ -5534,11 +5534,13 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
           species: m.set.species, ability: m.set.ability, item: m.set.item,
           moves: m.set.moves ?? [], active: !!m.active, hpPercent: m.hpPercent,
           perishCount: m.perishCount, trappedByFoe: m.trappedByFoe ?? null,
+          choiceLockedMove: m.choiceLockedMove ?? null,
         })),
         input.opp.map(o => ({
           species: o.entry.species, ability: o.entry.ability, item: o.entry.item,
           moves: o.entry.knownMoves ?? [], active: !!o.active, hpPercent: o.hpPercent,
           perishCount: o.perishCount, trappedByFoe: o.trappedByFoe ?? null,
+          choiceLockedMove: o.choiceLockedMove ?? null,
         })),
       ) ?? undefined;
 

@@ -72,9 +72,24 @@ export interface PerishSide {
   perishCount?: number;
   /** Index of the foe holding this mon with a trapping MOVE, if any. */
   trappedByFoe?: number | null;
+  /** The move a Choice item has locked this mon into, if it has already moved. A locked
+   *  mon CANNOT click a pivot unless the pivot IS the locked move — offering "U-turn out"
+   *  to a Choice-Scarf Garchomp locked into Earthquake is illegal advice, which is worse
+   *  than saying nothing (caught by the user, 2026-07-28). */
+  choiceLockedMove?: string | null;
 }
 
 const has = (m: PerishSide, id: string) => m.moves.some(x => toId(x) === id);
+const CHOICE_ITEMS: ReadonlySet<string> = new Set(['choiceband', 'choicespecs', 'choicescarf']);
+const holdsChoice = (m: PerishSide) => CHOICE_ITEMS.has(toId(m.item ?? ''));
+/** The escape pivot this mon can ACTUALLY click, honouring any Choice lock. */
+function usablePivot(m: PerishSide): string | null {
+  const pivot = m.moves.find(mv => ESCAPE_PIVOTS.has(toId(mv)));
+  if (!pivot) return null;
+  const locked = m.choiceLockedMove;
+  if (locked && toId(locked) !== toId(pivot)) return null;   // locked into something else
+  return pivot;
+}
 const isType = (species: string, t: string): boolean =>
   (((getSpecies(species) as { types?: string[] } | undefined)?.types) ?? []).includes(t);
 const isGrounded = (m: PerishSide): boolean =>
@@ -131,11 +146,20 @@ export function analyzePerishTrap(mine: readonly PerishSide[], opp: readonly Per
     const outs: PerishOut[] = [];
 
     for (const m of stuck) {
-      const pivot = m.moves.find(mv => ESCAPE_PIVOTS.has(toId(mv)));
-      if (pivot) outs.push({ kind: 'pivot', saves: true,
-        label: `${m.species}: ${pivot} out — pivot moves bypass the trap AND clear the clock` });
-      if (has(m, 'batonpass')) outs.push({ kind: 'pivot', saves: false,
-        label: `${m.species}: NOT Baton Pass — it escapes the trap but hands the perish count to whatever comes in` });
+      const pivot = usablePivot(m);
+      if (pivot) {
+        outs.push({ kind: 'pivot', saves: true,
+          label: `${m.species}: ${pivot} out — pivot moves bypass the trap AND clear the clock${holdsChoice(m) && !m.choiceLockedMove ? ' (click it FIRST — a Choice item locks you into whatever you use)' : ''}` });
+      } else if (m.choiceLockedMove && m.moves.some(mv => ESCAPE_PIVOTS.has(toId(mv)))) {
+        // It owns a pivot but can't reach it. Say so rather than staying silent — the
+        // player may be about to look for the escape that isn't there.
+        outs.push({ kind: 'pivot', saves: false,
+          label: `${m.species}: its pivot is unavailable — Choice-locked into ${m.choiceLockedMove}` });
+      }
+      if (has(m, 'batonpass') && (!m.choiceLockedMove || toId(m.choiceLockedMove) === 'batonpass')) {
+        outs.push({ kind: 'pivot', saves: false,
+          label: `${m.species}: NOT Baton Pass — it escapes the trap but hands the perish count to whatever comes in` });
+      }
     }
     if (trapper) {
       const viaMove = stuck.some(m => m.trappedByFoe != null && m.trappedByFoe >= 0);
@@ -149,8 +173,27 @@ export function analyzePerishTrap(mine: readonly PerishSide[], opp: readonly Per
       }
     }
 
+    // Three distinct situations, and conflating them is what makes advice useless.
+    // CERTAIN escape — a pivot it can actually click, Shed Shell, Ghost typing.
+    // CONDITIONAL — only breaking the trap by KO, which this layer cannot promise
+    // because it has no damage numbers; the player has the grid for that.
+    // NONE — say so, and redirect to spending the mon well.
+    const certain = outs.some(o => o.saves && (o.kind === 'pivot' || o.kind === 'shed-shell' || o.kind === 'ghost'));
+    const conditional = !certain && outs.some(o => o.saves && o.kind === 'ko-trapper');
+    if (stuck.length && !certain && !conditional) {
+      const m = stuck[0]!;
+      const why = m.choiceLockedMove
+        ? `Choice-locked into ${m.choiceLockedMove}, no pivot available`
+        : 'no pivot, no Shed Shell';
+      outs.unshift({ kind: 'pivot', saves: false,
+        label: `${m.species} CANNOT escape (${why}) — it faints in ${turnsLeft}. Spend it: hit the trapper, and get the partner out.` });
+    }
+
+    const suffix = certain ? ' and cannot leave'
+      : conditional ? ` — only out: KO ${trapper?.species ?? 'the trapper'}`
+      : ' — NO ESCAPE';
     const headline = stuck.length
-      ? `☠ PERISH TRAP — ${victims.join(' + ')} ${victims.length > 1 ? 'are' : 'is'} on ${turnsLeft} and cannot leave`
+      ? `☠ PERISH TRAP — ${victims.join(' + ')} ${victims.length > 1 ? 'are' : 'is'} on ${turnsLeft}${suffix}`
       : `☠ Perish count running (${turnsLeft}) — switch to clear it`;
     return { phase: 'active', turnsLeft, victims, singer: singer?.species, trapper: trapper?.species ?? undefined, outs, headline };
   }
