@@ -5,6 +5,7 @@ import { getSpecies, toId, isPivotMove } from './data.js';
 import { mostLikely } from './inference.js';
 import { bestOffensive, offensiveTypes, speciesTypes } from './typechart.js';
 import { detectTactics, profileFromSet, profileFromSpecies, tacticLabel, type TacticInstance } from './tactics.js';
+import { getMegaOptions } from './gimmicks/mega.js';
 
 // Scoring a 4-of-6 "bring":
 //  - offense:   for each opp mon, max % HP my best attacker can take in one move
@@ -122,8 +123,34 @@ function speedFor(set: PokemonSet): number {
 // set's real moves/ability/types — this is what earns counter-credit when the
 // opponent's six could run the combo. Exported so the battle screen's combo
 // watch can name WHICH of my brought mons answers a live threat.
-export const PATTERN_COUNTERS: Record<string, (set: PokemonSet) => boolean> = {
-  'perish-trap': s => abilityIs(s, 'soundproof') || hasMove(s, 'taunt') || s.moves.some(isPivotMove),
+/** Extra context a counter may use. Optional so the existing one-argument call
+ *  sites keep working; only perish-trap needs it today. */
+export interface CounterCtx {
+  /** Speed to beat — the singer/setter AFTER any mega, since that is the forme
+   *  that actually moves. Outrunning it is a counter in its own right. */
+  threatSpeed?: number;
+}
+
+/** Speed including a Choice Scarf, which is the whole reason a Scarf mon counts
+ *  as a perish answer at all. */
+export function effectiveSpeed(set: PokemonSet): number {
+  const raw = speedFor(set);
+  return toId(set.item ?? '') === 'choicescarf' ? Math.floor(raw * 1.5) : raw;
+}
+
+export const PATTERN_COUNTERS: Record<string, (set: PokemonSet, ctx?: CounterCtx) => boolean> = {
+  // Rewritten 2026-07-29 after the live loss + sim work (docs/notes/tactics.md).
+  // The old test was `soundproof || taunt || pivot`, which gave the Choice Scarf
+  // Garchomp ZERO credit — and the Scarf was the only real answer on the team,
+  // because outrunning the singer kills it before the song is ever sung. The
+  // passive escapes (Ghost typing, Shed Shell) were missing too.
+  'perish-trap': (s, ctx) =>
+    abilityIs(s, 'soundproof')                                   // the song cannot touch it
+    || hasMove(s, 'taunt')                                       // deny the song outright
+    || speciesTypes(s.species).includes('Ghost')                 // ignores trapping entirely
+    || toId(s.item ?? '') === 'shedshell'                        // switches out regardless
+    || s.moves.some(isPivotMove)                                 // escapes AND clears the count
+    || (ctx?.threatSpeed != null && effectiveSpeed(s) > ctx.threatSpeed),  // kill it first
   'baton-pass': s => hasMove(s, 'haze') || hasMove(s, 'clearsmog') || hasMove(s, 'spectralthief') || hasMove(s, 'roar') || hasMove(s, 'whirlwind') || hasMove(s, 'taunt'),
   'stored-power': s => speciesTypes(s.species).includes('Dark') || hasMove(s, 'haze') || hasMove(s, 'clearsmog') || hasMove(s, 'taunt'),
   'trick-room': s => hasMove(s, 'trickroom') || hasMove(s, 'taunt'),
@@ -166,6 +193,108 @@ export function predictOppLeads(opponent: OpponentEntry[]): { species: [string, 
     return { species: [a!.species, b!.species], tactic: t };
   }
   return null;
+}
+
+/** The speed a counter has to beat for this tactic — the fastest piece, read at
+ *  its MEGA forme where one exists, because that is the forme that moves. A
+ *  Gengar that will become Gengar-Mega must be raced at 130 base, not 110. */
+function threatSpeedFor(t: TacticInstance, opponent: OpponentEntry[], level: number): number | undefined {
+  const names = new Set(t.pieces.map(p => p.species));
+  let best: number | undefined;
+  for (const o of opponent) {
+    if (!names.has(o.species)) continue;
+    for (const name of [o.species, ...getMegaOptions(o.species).map(m => m.forme)]) {
+      const sp = getSpecies(name);
+      if (!sp) continue;
+      // Assume the threat is invested in speed — a slow perish singer is not the
+      // one that beats you, and under-estimating here loses the whole point.
+      const v = Math.floor((Math.floor(((2 * (sp.baseStats?.spe ?? 70) + 31 + 63) * level) / 100) + 5) * 1.1);
+      if (best == null || v > best) best = v;
+    }
+  }
+  return best;
+}
+
+/** Can the opponent's six take a turn away from one of my mons? Fake Out is the
+ *  clean case; a flinch or a Prankster Taunt does the same job. If they can, a
+ *  single answer to anything is fragile by construction. */
+function oppCanDenyATurn(opponent: OpponentEntry[]): boolean {
+  return opponent.some(o => {
+    const learn = (o.knownMoves ?? []).map(m => toId(m));
+    if (learn.includes('fakeout') || learn.includes('taunt')) return true;
+    // Nothing revealed yet: fall back to whether the SPECIES is a known Fake Out
+    // user, since at preview that is all we have.
+    return FAKE_OUT_SPECIES.has(toId(o.species));
+  });
+}
+
+/** Common Fake Out carriers — used only when no moves have been revealed. */
+const FAKE_OUT_SPECIES: ReadonlySet<string> = new Set([
+  'incineroar', 'rillaboom', 'hitmontop', 'meowscarada', 'blastoise', 'mienshao',
+  'kangaskhan', 'ambipom', 'weavile', 'sneasler', 'infernape', 'lucario', 'scrafty',
+]);
+
+export interface LeadAdvice {
+  lead: string[];
+  hold: string[];
+  why: string;
+}
+
+/**
+ * WHICH TWO OF THE FOUR TO LEAD, against a perish trap backed by Fake Out.
+ *
+ * Added after the 2026-07-28 loss, where the BRING was already correct — it
+ * ranked first and carried two answers (a Scarf racer and a pivot). The game was
+ * lost at lead selection: the racer led, their Fake Out blanked it for the one
+ * turn it mattered, and the song landed.
+ *
+ * The rule that falls out of the sim work:
+ *   • a mon that can DENY the song (Taunt / Soundproof) leads — nothing else
+ *     compares, because the trap never starts;
+ *   • otherwise lead a mon that can LEAVE (pivot / Ghost / Shed Shell). The song
+ *     catches something that can walk away, and its pivot is also how the racer
+ *     arrives — clean, and unflinchable because Fake Out is already spent;
+ *   • HOLD BACK the sole speed answer. Leading it aims their Fake Out at the only
+ *     mon that beats the singer.
+ *
+ * Returns null when there is no perish threat, or when they cannot deny a turn —
+ * in that case lead normally and let the racer do its job on turn 1.
+ */
+export function perishLeadAdvice(bring: PokemonSet[], opponent: OpponentEntry[]): LeadAdvice | null {
+  const level = bring[0]?.level ?? 50;
+  const threats = detectTactics(opponent.map(o => profileFromSpecies(o.species)), { minScore: 60 })
+    .filter(t => t.pattern === 'perish-trap');
+  if (!threats.length) return null;
+  if (!oppCanDenyATurn(opponent)) return null;          // no Fake Out: lead the racer
+
+  const threatSpeed = threatSpeedFor(threats[0]!, opponent, level);
+  const denies = (s: PokemonSet) => abilityIs(s, 'soundproof') || hasMove(s, 'taunt');
+  const escapes = (s: PokemonSet) =>
+    s.moves.some(isPivotMove) || speciesTypes(s.species).includes('Ghost') || toId(s.item ?? '') === 'shedshell';
+  const races = (s: PokemonSet) => threatSpeed != null && effectiveSpeed(s) > threatSpeed;
+
+  const deniers = bring.filter(denies);
+  const escapers = bring.filter(s => !denies(s) && escapes(s));
+  const racers = bring.filter(races);
+  if (!deniers.length && !escapers.length && !racers.length) return null;
+
+  const soleRacer = racers.length === 1 && !denies(racers[0]!) && !escapes(racers[0]!) ? racers[0]! : null;
+  const first = deniers[0] ?? escapers[0] ?? null;
+  if (!first) return null;
+
+  // Partner: anything that is not the sole racer we want to protect.
+  const partner = bring.find(s => s !== first && s !== soleRacer) ?? bring.find(s => s !== first)!;
+  const why = deniers.length
+    ? `${first.species} can deny the song outright (${hasMove(first, 'taunt') ? 'Taunt' : 'Soundproof'}) — leading it means the trap never starts.`
+    : `${first.species} can leave (${first.moves.find(isPivotMove) ?? (toId(first.item ?? '') === 'shedshell' ? 'Shed Shell' : 'Ghost typing')}), so the song catches a mon that walks away` +
+      (soleRacer ? `, and it brings ${soleRacer.species} in clean on the next turn — unflinchable, because Fake Out is spent.` : '.');
+  return {
+    lead: [first.species, partner.species],
+    hold: bring.filter(s => s !== first && s !== partner).map(s => s.species),
+    why: soleRacer
+      ? `${why} Do NOT lead ${soleRacer.species}: it is your only mon fast enough to beat the singer, so their Fake Out will be aimed at exactly it.`
+      : why,
+  };
 }
 
 function comb4(n: number): number[][] {
@@ -297,9 +426,22 @@ export function scoreBrings(myTeam: PokemonSet[], opponent: OpponentEntry[], fie
     let threats = 0;
     for (const t of oppThreats) {
       const counter = PATTERN_COUNTERS[t.pattern];
-      const covered = !!counter && indices.some(i => counter(myTeam[i]!));
-      threats += covered ? w.threat : -w.threat;
-      rationale.push(`${covered ? 'Covers' : '⚠ No answer to'} opp ${t.name}: ${tacticLabel(t)}`);
+      const ctx: CounterCtx = { threatSpeed: threatSpeedFor(t, opponent, level) };
+      const answers = counter ? indices.filter(i => counter(myTeam[i]!, ctx)) : [];
+      const covered = answers.length > 0;
+      // REDUNDANCY. Coverage used to be binary — one answer scored the same as
+      // four. The live 2026-07-28 loss is exactly the failure that hides: the
+      // bring had a single answer (Scarf Garchomp) and their Blastoise Fake Out
+      // switched it off for the one turn that mattered. When the opponent can
+      // deny a mon's turn, a lone answer is not an answer.
+      const denial = oppCanDenyATurn(opponent);
+      const thin = covered && answers.length === 1 && denial;
+      threats += thin ? 0 : covered ? w.threat : -w.threat;
+      const names = answers.map(i => myTeam[i]!.species).join('/');
+      rationale.push(
+        thin ? `⚠ ONLY ONE answer to opp ${t.name} (${names}) — they carry Fake Out/priority denial, so it can be blanked for the turn that matters`
+        : covered ? `Covers opp ${t.name} (${names}): ${tacticLabel(t)}`
+        : `⚠ No answer to opp ${t.name}: ${tacticLabel(t)}`);
     }
     const total = offense * w.offense + defense * w.defense + speed * w.speed + roles + matchup * w.matchup + tactics + threats;
     out.push({

@@ -79,6 +79,50 @@ The mistake was leaving it in *beside* the threat instead of pointing it *at* it
 - **Sucker Punch fails into Perish Song.** The song is a status move, so
   Kingambit's priority does nothing about it (`|-fail|p1a: Kingambit`).
 
+### Catching it at PREVIEW (`perish-bring-check.ts`, pinned by `perish-bring.test.ts`)
+
+**The bring was not the mistake.** Run against their real preview six, the bring
+that was actually made — Talonflame / Garchomp / Meowscarada / Dragonite — **ranks
+1st of 15 and is correctly marked covered**, with two answers: Garchomp (outruns
+the singer) and Meowscarada (pivots out). The game was lost one level down, at
+**lead selection**.
+
+Two changes to the bring layer came out of this:
+
+**1. A Choice Scarf racer now counts as a perish answer.** The old test was
+`soundproof || taunt || pivot`, which scored Garchomp — the single best answer on
+the team — at **zero**. Outrunning the singer kills it before the song is sung, so
+it belongs in the list, alongside the passive escapes (Ghost typing, Shed Shell)
+that were also missing. The speed compared against is the **mega** forme, because
+that is the forme that moves.
+
+**2. One answer is no longer treated as coverage.** Scoring was binary: one
+counter scored the same as four. That hides exactly this loss — a lone answer gets
+Fake Out'd off for the turn that matters. When the opponent's six can take a turn
+away (Fake Out revealed, or a known Fake Out species at preview), a single answer
+is flagged rather than credited:
+
+```
+ok    Talonflame,Garchomp,Meowscarada,Dragonite   answers=[Garchomp,Meowscarada]
+THIN  Talonflame,Kingambit,Garchomp,Dragonite     answers=[Garchomp]
+THIN  Talonflame,Kingambit,Meowscarada,Dragonite  answers=[Meowscarada]
+NONE  Talonflame,Kingambit,Pelipper,Dragonite     answers=[]
+```
+
+Of the 15 brings: **6 covered, 8 thin, 1 with nothing.**
+
+**3. New — which two to LEAD** (`perishLeadAdvice`). On this board:
+
+> **LEAD: Meowscarada + Talonflame · HOLD: Garchomp, Dragonite**
+> Meowscarada can leave (U‑turn), so the song catches a mon that walks away, and it
+> brings Garchomp in clean on the next turn — unflinchable, because Fake Out is
+> spent. **Do NOT lead Garchomp: it is your only mon fast enough to beat the
+> singer, so their Fake Out will be aimed at exactly it.**
+
+The rule: lead a **denier** (Taunt/Soundproof) if you have one, else an **escaper**;
+hold the **sole racer** back. Returns nothing when they cannot deny a turn — then
+lead the racer and let it kill the singer on turn 1.
+
 ### What ACTUALLY happened, 2026‑07‑28 (`perish-real-game.ts`, 6/6)
 
 Reconstructed from `matches/1785221959416.json` + the vision banner log. The first
