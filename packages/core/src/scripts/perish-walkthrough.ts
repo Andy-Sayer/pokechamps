@@ -92,6 +92,36 @@ function narrate(b: any, from: number): string[] {
   });
 }
 
+/** Full state of EVERY mon on both sides — active and bench. Printed at turn 0 and
+ *  after every turn, so nothing is inferred from the event log alone. */
+function board(b: any): string {
+  const rows: string[] = [];
+  const hdr = '    ' + 'mon'.padEnd(18) + 'where'.padEnd(10) + 'HP'.padEnd(16) + 'perish'.padEnd(8) +
+              'trapped'.padEnd(9) + 'locked into'.padEnd(13) + 'boosts'.padEnd(10) + 'item'.padEnd(14) + 'status';
+  rows.push(hdr, '    ' + '-'.repeat(hdr.length - 4));
+  for (const [tag, side] of [['ME ', b.sides[0]], ['OPP', b.sides[1]]] as const) {
+    for (const p of side.pokemon) {
+      const activeIdx = side.active.indexOf(p);
+      const where = p.fainted ? 'FAINTED' : activeIdx === 0 ? 'active L' : activeIdx === 1 ? 'active R' : 'bench';
+      const hp = p.fainted ? '0' : `${p.hp}/${p.maxhp} (${Math.round(p.hp / p.maxhp * 100)}%)`;
+      const perish = p.volatiles?.perishsong ? String(p.volatiles.perishsong.duration) : '-';
+      const t = p.trapped;
+      const trapped = activeIdx < 0 || p.fainted ? '-' : (t === true || t === 'hidden') ? 'YES' : 'no';
+      const bo = Object.entries(p.boosts as Record<string, number>)
+        .filter(([, v]) => v).map(([k, v]) => `${k}${v > 0 ? '+' : ''}${v}`).join(',') || '-';
+      const st = [p.status || '', p.volatiles?.trapped ? 'meanlook' : '', p.volatiles?.taunt ? 'taunt' : '']
+        .filter(Boolean).join(',') || '-';
+      // A Choice item locks the mon into the first move it used — the single most
+      // consequential piece of hidden state in this matchup, so it gets a column.
+      const locked = p.volatiles?.choicelock?.move
+        ? String(p.volatiles.choicelock.move) : (p.lastMove && /choice/.test(p.item || '') ? p.lastMove.id : '-');
+      rows.push(`    ${(tag + ' ' + p.species.name).padEnd(18)}${where.padEnd(10)}${hp.padEnd(16)}${perish.padEnd(8)}` +
+                `${trapped.padEnd(9)}${String(locked).padEnd(13)}${bo.padEnd(10)}${(p.item || '-').padEnd(14)}${st}`);
+    }
+  }
+  return rows.join(String.fromCharCode(10));
+}
+
 interface Turn { title: string; mine: string; theirs: string; note?: string }
 
 function play(title: string, p1team: SimMon[], p2team: SimMon[], turns: Turn[]) {
@@ -99,6 +129,9 @@ function play(title: string, p1team: SimMon[], p2team: SimMon[], turns: Turn[]) 
   const b: any = buildBattle({ p1team, p2team, p1active: [0, 1], p2active: [0, 1], seed: [5, 5, 5, 5] });
   console.log(`  Mine:   ${p1team.slice(0, 2).map(m => m.species).join(' + ')}   (bench: ${p1team.slice(2).map(m => m.species).join(', ')})`);
   console.log(`  Theirs: ${p2team.slice(0, 2).map(m => m.species).join(' + ')}`);
+  console.log(`
+  TURN 0 — starting board (leads already sent out, no move made yet)`);
+  console.log(board(b));
   for (const t of turns) {
     const n = b.log.length;
     try {
@@ -117,6 +150,7 @@ function play(title: string, p1team: SimMon[], p2team: SimMon[], turns: Turn[]) 
     }
     console.log(`\n  ${t.title}`);
     for (const l of narrate(b, n)) console.log(l);
+    console.log(board(b));
     if (t.note) console.log(`    -> ${t.note}`);
   }
   const dead = b.sides[0].pokemon.filter((p: any) => p.fainted).map((p: any) => p.species.name);
