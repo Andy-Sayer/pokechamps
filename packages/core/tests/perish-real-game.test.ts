@@ -24,7 +24,7 @@ const find = (fragment: string): RealFinding => {
 describe('the real 2026-07-28 perish game', () => {
   test('every expectation holds against the real engine', () => {
     expect(findings.filter(f => !f.ok).map(f => `${f.headline} -> ${f.detail}`)).toEqual([]);
-    expect(findings.length).toBeGreaterThanOrEqual(6);
+    expect(findings.length).toBeGreaterThanOrEqual(11);
   });
 
   test.each([
@@ -34,6 +34,11 @@ describe('the real 2026-07-28 perish game', () => {
     ['outspeeds the Destiny Bond'],
     ['T3 switch out — nobody dies'],
     ['Switching on the song turn does NOT dodge it'],
+    ['a T2 Protect blanks the Earthquake'],
+    ['When they withdraw the Gengar, the door opens'],
+    ['Protect T2, Protect T3, withdraw T4'],
+    ['A Protect BLOCKS the U-turn escape'],
+    ['BETTER LEAD'],
   ])('%s', (fragment) => {
     const f = find(fragment);
     expect(f.ok, `${f.headline}\n  engine said: ${f.detail}`).toBe(true);

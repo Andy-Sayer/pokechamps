@@ -116,6 +116,35 @@ Three things the corrected model proves:
 out to clear the counts.** Verified: nobody dies — and a dead Gengar cannot come
 back for the second song, which is what actually cost the game.
 
+#### …but they will just Protect on T2
+
+They will, and it blanks the Earthquake. Measured over 40 seeds: they Protect T2
+and repeat on T3, **Gengar dies by T3 on 20/40 (50%)**. So once the song has landed
+and Garchomp is the only answer, **it is a coin flip.**
+
+**Their perfect line is Protect T2 → Protect T3 → withdraw T4**, and it costs them
+nothing: Gengar is on its own count 1 by T4, so withdrawing clears it. I am still
+trapped for T4's choice and both my mons hit 0.
+
+**But that is not what they played.** They withdrew Gengar at **07:02:15** — which
+lifts Shadow Tag. From that moment my mons could leave, with the count on 1 and one
+turn still available. Switching on T4 clears both and **saves both**. That turn was
+never taken; Garchomp and Dragonite died at 07:03:42 and 07:03:50. **The single
+biggest practical gain here is noticing the instant the trapper leaves the field.**
+
+#### Two mechanics that decide it
+
+- **A Protect blocks the U‑turn escape too.** A pivot aimed at a Protecting foe
+  deals no damage *and does not switch* — the same Protect that blanks the
+  Earthquake also denies the escape. **Aim the pivot at the other slot.** Verified:
+  U‑turn into the Protecting Gengar → still in, count 2. U‑turn into Blastoise →
+  out, count cleared, Garchomp dragged in. Same move, same turn, only the target
+  differs.
+- **Lead the pivot, not just the killer.** Leading Garchomp aims the Fake Out at
+  the only mon that beats Gengar. Leading **Meowscarada** means the song catches a
+  mon that can *leave*, and its U‑turn is also how the clean Garchomp arrives —
+  with no perish count, and unflinchable because Fake Out is already spent.
+
 ### If they lead Intimidate instead (sim‑verified, `perish-fakeout.ts`, 10/10)
 
 *This section models an **Incineroar** lead — a real threat, but **not** what

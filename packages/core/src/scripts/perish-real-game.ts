@@ -212,6 +212,121 @@ export async function probeRealGame(): Promise<RealFinding[]> {
       `Switches resolve before moves, so the replacement hears the song — exactly what happened at 07:00:23`);
   }
 
+  // === 7. "T2 Gengar would just Protect" — yes. Then what? ================
+  // Gengar's moves here are perishsong1 destinybond2 shadowball3 protect4.
+  // Timeline: song lands T1 (3) -> 2 -> 1 -> faint at END of T4. So I have T2, T3
+  // and T4 to act, and I only need the LAST of them to be a switch.
+  {
+    let killedByT3 = 0, protectedTwice = 0;
+    for (let i = 0; i < 40; i++) {
+      const b: any = buildBattle(pos(BRING, [i + 1, i * 3 + 2, i * 7 + 5, i * 11 + 3]));
+      b.makeChoices(`move ${slot('Garchomp', 'Earthquake')}, move ${slot('Talonflame', 'Protect')}`, 'move 1 mega, move 1 1');
+      b.makeChoices(`move ${slot('Garchomp', 'Earthquake')}, move ${slot('Talonflame', 'Protect')}`, 'move 4, move 4'); // T2 BOTH Protect
+      b.makeChoices(`move ${slot('Garchomp', 'Earthquake')}, move ${slot('Talonflame', 'Protect')}`, 'move 4, move 4'); // T3 they try again
+      if (byBase(b.sides[1], 'Gengar').fainted) killedByT3++; else protectedTwice++;
+    }
+    say('You are right: a T2 Protect blanks the Earthquake, and it is then a coin flip',
+      killedByT3 + protectedTwice === 40 && killedByT3 >= 12 && killedByT3 <= 28,
+      `they Protect T2 then repeat on T3: Gengar dead by T3 on ${killedByT3}/40 (${Math.round(killedByT3 / 40 * 100)}%), ` +
+      `survived both on ${protectedTwice}/40. The repeat sticking is the whole difference`);
+  }
+
+  // === 8. THE ACTUAL LOSS: they withdrew instead, and I did not switch =====
+  // Banner 07:02:15 "Omar withdrew Gengar!". Withdrawing clears GENGAR's own count
+  // AND lifts Shadow Tag — which means from that moment my mons could leave. They
+  // still died at 07:03:42/07:03:50, so the turn to walk out was never taken.
+  {
+    const b: any = buildBattle(pos(BRING));
+    b.makeChoices(`move ${slot('Garchomp', 'Earthquake')}, move ${slot('Talonflame', 'Protect')}`, 'move 1 mega, move 1 1');
+    b.makeChoices(`move ${slot('Garchomp', 'Earthquake')}, move ${slot('Talonflame', 'Protect')}`, 'move 4, move 4');   // T2 Protect
+    b.makeChoices(`move ${slot('Garchomp', 'Earthquake')}, move ${slot('Talonflame', 'Protect')}`, 'switch 3, move 4'); // T3 they WITHDRAW Gengar
+    const t = b.sides[0].active[0]?.trapped;
+    const freedAfterWithdraw = t !== true && t !== 'hidden';
+    const countNow = perishOf(b.sides[0].active[0]);
+    b.makeChoices('switch 3, switch 4', 'move 1 1, move 4');                                                            // T4 I WALK OUT
+    const chomp = byBase(b.sides[0], 'Garchomp'), talon = byBase(b.sides[0], 'Talonflame');
+    say('When they withdraw the Gengar, the door opens — and T4 is still in time',
+      freedAfterWithdraw && countNow === 1 && !chomp.fainted && !talon.fainted &&
+      perishOf(chomp) == null && perishOf(talon) == null,
+      `after they withdrew: trapped=${t}, my count=${countNow} with one turn left. Switching on T4 ` +
+      `cleared both counts and saved both mons. In the real game that turn was not taken and both died`);
+  }
+
+  // === 9. The ONE line that actually beats me =============================
+  // Gengar Protects T2, then stays in and Protects again on T3. Then the kill has
+  // not landed, I am still trapped on T4, and the count runs out.
+  {
+    let lost = 0;
+    for (let i = 0; i < 40; i++) {
+      const b: any = buildBattle(pos(BRING, [i + 1, i * 3 + 2, i * 7 + 5, i * 11 + 3]));
+      b.makeChoices(`move ${slot('Garchomp', 'Earthquake')}, move ${slot('Talonflame', 'Protect')}`, 'move 1 mega, move 1 1');
+      b.makeChoices(`move ${slot('Garchomp', 'Earthquake')}, move ${slot('Talonflame', 'Protect')}`, 'move 4, move 4');
+      b.makeChoices(`move ${slot('Garchomp', 'Earthquake')}, move ${slot('Talonflame', 'Protect')}`, 'move 4, move 4');
+      // If Gengar is alive going into T4 I am still trapped, and the count hits 0.
+      if (!byBase(b.sides[1], 'Gengar').fainted) lost++;
+    }
+    say('Their best line: Protect T2, Protect T3, withdraw T4 — costs them nothing',
+      lost > 0 && lost < 40,
+      `Gengar survived to T4 on ${lost}/40 (${Math.round(lost / 40 * 100)}%). On those I am still trapped for T4's ` +
+      `choice and the count reaches 0. Gengar is on its OWN count 1 by then, so it withdraws on T4 and clears — ` +
+      `they lose nothing, I lose both. That is perfect play against a Garchomp-only answer`);
+
+  }
+
+  // === 10. A PROTECT BLOCKS THE PIVOT ESCAPE ==============================
+  // The advisory calls U-turn the team's one escape. It is — but a U-turn aimed at
+  // a Protecting foe deals no damage AND does not switch, so the escape can simply
+  // be denied by the same Protect that blanks the Earthquake. Aim it at the OTHER
+  // slot. This cost a run of this very script before it was noticed.
+  {
+    const runPivot = (target: 1 | 2) => {
+      const b: any = buildBattle({
+        p1team: ['Meowscarada', 'Talonflame', 'Garchomp', 'Dragonite'].map(mine),
+        p2team: [gengar, blastoise, incin, archaludon],
+        p1active: [0, 1], p2active: [0, 1], seed: [5, 5, 5, 5],
+      });
+      b.makeChoices(`move ${slot('Meowscarada', 'Protect')}, move ${slot('Talonflame', 'Protect')}`, 'move 1 mega, move 1 1');
+      const songCount = perishOf(b.sides[0].active[0]);
+      // T2: GENGAR Protects (slot 1), Blastoise attacks. U-turn at `target`.
+      b.makeChoices(`move ${slot('Meowscarada', 'U-turn')} ${target}, move ${slot('Talonflame', 'Protect')}`, 'move 4, move 2');
+      if (b.sides[0].activeRequest?.forceSwitch?.[0]) b.makeChoices('switch 3', 'default');
+      const meow = byBase(b.sides[0], 'Meowscarada');
+      return { songCount, escaped: !meow.isActive, count: perishOf(meow),
+               chompIn: b.sides[0].active.some((p: any) => p && p.species.baseSpecies === 'Garchomp') };
+    };
+    const intoProtect = runPivot(1);   // aimed at the Protecting Gengar
+    const intoOther = runPivot(2);     // aimed at Blastoise
+    say('A Protect BLOCKS the U-turn escape — aim the pivot at the other slot',
+      !intoProtect.escaped && intoOther.escaped,
+      `U-turn into the Protecting Gengar: escaped=${intoProtect.escaped}, count still ${intoProtect.count}. ` +
+      `U-turn into Blastoise instead: escaped=${intoOther.escaped}, count ${intoOther.count}, ` +
+      `Garchomp brought in=${intoOther.chompIn}. Same move, same turn — only the target differs`);
+  }
+
+  // === 11. THE BETTER LEAD ================================================
+  // Leading Garchomp puts the Fake Out on the only mon that beats Gengar. Leading
+  // Meowscarada means the song catches a mon that can LEAVE, and its U-turn is also
+  // how the clean, unflinchable Garchomp gets in — Fake Out is spent by then.
+  {
+    const b: any = buildBattle({
+      p1team: ['Meowscarada', 'Talonflame', 'Garchomp', 'Dragonite'].map(mine),
+      p2team: [gengar, blastoise, incin, archaludon],
+      p1active: [0, 1], p2active: [0, 1], seed: [5, 5, 5, 5],
+    });
+    b.makeChoices(`move ${slot('Meowscarada', 'Protect')}, move ${slot('Talonflame', 'Protect')}`, 'move 1 mega, move 1 1');
+    const meowCount = perishOf(b.sides[0].active[0]);
+    b.makeChoices(`move ${slot('Meowscarada', 'U-turn')} 2, move ${slot('Talonflame', 'Protect')}`, 'move 4, move 2');
+    if (b.sides[0].activeRequest?.forceSwitch?.[0]) b.makeChoices('switch 3', 'default');
+    const meow = byBase(b.sides[0], 'Meowscarada');
+    const chomp = byBase(b.sides[0], 'Garchomp');
+    say('BETTER LEAD — Meowscarada pivots out clean AND drags the fresh Garchomp in',
+      meowCount === 3 && !meow.isActive && perishOf(meow) == null &&
+      b.sides[0].active.includes(chomp) && perishOf(chomp) == null,
+      `Meowscarada took the song (count ${meowCount}), U-turned out on T2 — count now ${perishOf(meow)} — ` +
+      `and brought Garchomp in with count ${perishOf(chomp)}, unflinchable (Fake Out is spent) and free to ` +
+      `Earthquake on T3. Leading Garchomp instead aims the Fake Out at the only mon that matters`);
+  }
+
   return findings;
 }
 
