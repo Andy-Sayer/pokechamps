@@ -286,8 +286,29 @@ gets wrong:
   PERISH COUNT to the incoming mon, so it trades one dead mon for a different one. It is
   surfaced as an explicit ✗.
 - **A move-trap dies with its trapper** (Mean Look releases when the user leaves or
-  faints), so KOing the trapper genuinely frees the switch — but only when the clock has
-  ≥2 turns left, which the advice states.
+  faints), so KOing the trapper frees the switch — but only when the clock has ≥2 turns
+  left, which the advice states, AND only when nobody is left to re-trap. See below.
+
+**A KO OPENS A SLOT THE OPPONENT CHOOSES TO FILL** (user catch, second version; the single
+most important correction in this feature). The live board was Mega Gengar + Blastoise:
+Gengar sang, Blastoise held with Mean Look. Killing Blastoise looks like the escape and is
+in fact how the opponent got Gengar back in to re-apply **Shadow Tag** — the "out" handed
+them a free rotation. `ko-trapper` is therefore only `saves: true` when their remaining
+live team has no other trapper. Two weaker states are reported honestly rather than
+silently dropped:
+- **known re-trapper** ("Do NOT bank on KOing X — it just opens the slot for Y") when a
+  live mon on their side already shows a trapping move or ability;
+- **suspected re-trapper** ("Y can mega into a trapping ability") when a mon's item is
+  still unknown and one of its mega formes traps. This is the case that actually lost the
+  game: nothing observable says "trapper" until the mega lands, at which point it's over.
+  Kept as a separate, softer sentence so a suspicion is never printed as a fact.
+
+**Trapping abilities are read through the mega**, not off the base forme. Gengar shows
+Cursed Body while holding Gengarite; reading `ability` alone hides Shadow Tag until the
+mega has already happened, which is too late for every counter on this list. `isTrapper()`
+unions the current ability, the mega-forme ability implied by a held stone, and trapping
+moves — and when a single mon holds both halves, the headline says so ("both sings and
+traps"), because that one mon is the whole combo.
 **The Choice lock gates the pivot** (user catch, first version): a Choice-Scarf mon locked
 into Earthquake CANNOT click U-turn, so offering it is illegal advice — worse than silence,
 because it sends the player hunting an escape that isn't there. A pivot is only offered

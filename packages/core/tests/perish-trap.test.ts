@@ -8,7 +8,7 @@ import { analyzePerishTrap, type PerishSide } from '../src/domain/perishTrap.js'
 const mon = (p: Partial<PerishSide> & { species: string }): PerishSide =>
   ({ moves: [], active: true, hpPercent: 100, ...p });
 
-const gengar = mon({ species: 'Gengar', moves: ['Perish Song', 'Shadow Ball'] });
+const gengar = mon({ species: 'Gengar', item: 'Focus Sash', moves: ['Perish Song', 'Shadow Ball'] });
 const meanLooker = mon({ species: 'Blastoise', moves: ['Mean Look', 'Surf'] });
 
 describe('perish trap — ACTIVE (clock running)', () => {
@@ -139,7 +139,7 @@ describe('perish advice rides the SearchResult at any depth', () => {
 // into Earthquake cannot click U-turn, so offering it is ILLEGAL advice — worse than
 // silence, because it sends the player looking for an escape that isn't there.
 describe('perish trap respects the Choice lock', () => {
-  const gengar2 = mon({ species: 'Gengar', moves: ['Perish Song', 'Shadow Ball'] });
+  const gengar2 = mon({ species: 'Gengar', item: 'Focus Sash', moves: ['Perish Song', 'Shadow Ball'] });
   const looker = mon({ species: 'Blastoise', moves: ['Mean Look', 'Surf'] });
 
   test('a mon LOCKED into a non-pivot is never told to pivot', () => {
@@ -204,5 +204,69 @@ describe('perish trap respects the Choice lock', () => {
     const a = analyzePerishTrap([plain, partner], [gengar2, looker])!;
     expect(a.headline).toContain('only out: KO Blastoise');
     expect(a.outs.some(o => o.kind === 'partner-switch')).toBe(true);
+  });
+});
+
+// THE REAL BOARD (live, 2026-07-28). Reported by the user after the first version told
+// them to KO the trapper: "KO Blastoise was how Gengar managed to switch back in and keep
+// me trapped." Mega Gengar's ability is SHADOW TAG, so Gengar is the singer AND the real
+// trapper; Blastoise was a body. KOing it opened the slot for Gengar to return and
+// re-apply the tag — the advice actively helped the opponent.
+describe('a KO opens a slot the OPPONENT fills', () => {
+  test('a Gengarite Gengar is recognised as a trapper BEFORE it megas', () => {
+    // Base ability is Cursed Body; reading only that hides Shadow Tag until too late.
+    const gengar = mon({ species: 'Gengar', ability: 'Cursed Body', item: 'Gengarite', moves: ['Perish Song', 'Shadow Ball'] });
+    const chomp = mon({ species: 'Garchomp', moves: ['Earthquake'] });
+    const a = analyzePerishTrap([chomp], [gengar, mon({ species: 'Blastoise', moves: ['Surf'] })])!;
+    expect(a.phase).toBe('armed');
+    expect(a.trapper).toBe('Gengar');       // not "no trapper found"
+    // One mon holds both halves of the combo, so removing it removes the whole trap.
+    expect(a.headline).toContain('both sings and traps');
+  });
+
+  test('the spend-it line stops telling me to hit the trapper when that opens the slot', () => {
+    const gengar = mon({ species: 'Gengar', ability: 'Cursed Body', item: 'Gengarite', moves: ['Perish Song'], active: false });
+    const blastoise = mon({ species: 'Blastoise', moves: ['Mean Look', 'Surf'] });
+    const chomp = mon({ species: 'Garchomp', item: 'Choice Scarf', choiceLockedMove: 'Earthquake',
+      moves: ['Earthquake', 'U-turn'], perishCount: 2, trappedByFoe: 0 });
+    const a = analyzePerishTrap([chomp], [blastoise, gengar])!;
+    const spend = a.outs.find(o => o.label.includes('CANNOT escape'))!;
+    expect(spend.label).not.toContain('hit the trapper');
+    expect(spend.label).toContain('Gengar');
+  });
+
+  test('KOing the front trapper is NOT offered while another trapper can return', () => {
+    const gengar = mon({ species: 'Gengar', ability: 'Cursed Body', item: 'Gengarite', moves: ['Perish Song'], active: false });
+    const blastoise = mon({ species: 'Blastoise', moves: ['Mean Look', 'Surf'] });
+    const chomp = mon({ species: 'Garchomp', moves: ['Earthquake'], perishCount: 2, trappedByFoe: 1 });
+    // Board: Blastoise front (index 1 is the Mean Look holder), Gengar waiting on the bench.
+    const filler = mon({ species: 'Milotic', moves: ['Scald'] });
+    const a = analyzePerishTrap([chomp], [filler, blastoise, gengar])!;
+    const ko = a.outs.find(o => o.kind === 'ko-trapper')!;
+    expect(ko.saves).toBe(false);
+    expect(ko.label).toContain('Do NOT bank on');
+    expect(ko.label).toContain('Gengar');
+  });
+
+  test('an UNREVEALED Gengar downgrades the KO — the stone is the thing we cannot see', () => {
+    // No item known, no Shadow Tag showing: nothing in the observed data says "trapper"
+    // until the mega lands. That is precisely how the live game was lost.
+    const gengar = mon({ species: 'Gengar', moves: ['Shadow Ball'], active: false });
+    const blastoise = mon({ species: 'Blastoise', moves: ['Mean Look', 'Surf'] });
+    const chomp = mon({ species: 'Garchomp', moves: ['Earthquake'], perishCount: 2, trappedByFoe: 0 });
+    const a = analyzePerishTrap([chomp], [blastoise, gengar])!;
+    const ko = a.outs.find(o => o.kind === 'ko-trapper')!;
+    expect(ko.saves).toBe(false);
+    expect(ko.label).toContain('can mega into a trapping ability');
+  });
+
+  test('with nobody left to re-trap, the KO IS the out', () => {
+    const blastoise = mon({ species: 'Blastoise', moves: ['Mean Look', 'Surf'] });
+    const milotic = mon({ species: 'Milotic', moves: ['Scald'], active: false });
+    const chomp = mon({ species: 'Garchomp', moves: ['Earthquake'], perishCount: 2, trappedByFoe: 0 });
+    const a = analyzePerishTrap([chomp], [blastoise, milotic])!;
+    const ko = a.outs.find(o => o.kind === 'ko-trapper')!;
+    expect(ko.saves).toBe(true);
+    expect(ko.label).toContain('nothing left on their side re-traps');
   });
 });

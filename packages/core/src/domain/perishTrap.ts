@@ -26,6 +26,7 @@
  *     KO but can't be escaped by outliving the volatile.
  */
 import { getMove, getSpecies, toId } from './data.js';
+import { getMegaOptions, megaFormeAbility } from './gimmicks/mega.js';
 
 /** Moves that pin a foe in place (the volatile kind). */
 const TRAP_MOVES: ReadonlySet<string> = new Set([
@@ -80,6 +81,38 @@ export interface PerishSide {
 }
 
 const has = (m: PerishSide, id: string) => m.moves.some(x => toId(x) === id);
+
+/** The ability this mon will have if it megas — Mega GENGAR gets SHADOW TAG, which is
+ *  the whole trap in the Reg M-B perish core. Reading the base forme's ability alone
+ *  ("Cursed Body") hides it completely until the mega has already happened. */
+function megaAbilityOf(m: PerishSide): string | null {
+  if (!m.item) return null;
+  const opt = getMegaOptions(m.species).find(o => toId(o.stone) === toId(m.item ?? ''));
+  return opt ? (megaFormeAbility(opt.forme) ?? null) : null;
+}
+
+/** Every trapping ability this mon can present — now, or after it megas. */
+function trapAbilitiesOf(m: PerishSide): string[] {
+  return [m.ability, megaAbilityOf(m)]
+    .map(a => toId(a ?? ''))
+    .filter(a => TRAP_ABILITIES.has(a));
+}
+
+/** Can this mon trap at all — by move or by ability (including its mega's)? */
+function isTrapper(m: PerishSide): boolean {
+  return trapAbilitiesOf(m).length > 0 || m.moves.some(mv => TRAP_MOVES.has(toId(mv)));
+}
+
+/** A species that COULD trap once it megas, even though we haven't seen the stone. An
+ *  unrevealed bench Gengar is exactly the shape of the live 2026-07-28 loss: nothing in
+ *  the observed data says "trapper" until the mega lands, at which point it's too late.
+ *  Kept separate from isTrapper so a suspicion is never reported as a fact. */
+function couldMegaTrap(m: PerishSide): boolean {
+  if (isTrapper(m)) return false;             // already known — not a suspicion
+  if (m.item) return false;                   // item known and it isn't the stone
+  return getMegaOptions(m.species)
+    .some(o => TRAP_ABILITIES.has(toId(megaFormeAbility(o.forme) ?? '')));
+}
 const CHOICE_ITEMS: ReadonlySet<string> = new Set(['choiceband', 'choicespecs', 'choicescarf']);
 const holdsChoice = (m: PerishSide) => CHOICE_ITEMS.has(toId(m.item ?? ''));
 /** The escape pivot this mon can ACTUALLY click, honouring any Choice lock. */
@@ -101,10 +134,11 @@ function abilityTrapper(me: PerishSide, foes: readonly PerishSide[]): PerishSide
   if (toId(me.item ?? '') === 'shedshell') return null;
   for (const f of foes) {
     if (!f.active || f.hpPercent <= 0) continue;
-    const ab = toId(f.ability ?? '');
-    if (ab === 'shadowtag' && toId(me.ability ?? '') !== 'shadowtag') return f;
-    if (ab === 'arenatrap' && isGrounded(me)) return f;
-    if (ab === 'magnetpull' && isType(me.species, 'Steel')) return f;
+    for (const ab of trapAbilitiesOf(f)) {
+      if (ab === 'shadowtag' && toId(me.ability ?? '') !== 'shadowtag') return f;
+      if (ab === 'arenatrap' && isGrounded(me)) return f;
+      if (ab === 'magnetpull' && isType(me.species, 'Steel')) return f;
+    }
   }
   return null;
 }
@@ -144,6 +178,14 @@ export function analyzePerishTrap(mine: readonly PerishSide[], opp: readonly Per
     const victims = (stuck.length ? stuck : onClock).map(m => m.species);
     const trapper = stuck.length ? trapperOf(stuck[0]!) : null;
     const outs: PerishOut[] = [];
+    // Anyone else on their team who could re-trap once a slot opens (see the KO branch).
+    const reliefTrappers = trapper
+      ? opp.filter(o => o !== trapper && (o.hpPercent ?? 0) > 0 && isTrapper(o))
+      : [];
+    // Softer signal: unrevealed mons whose mega forme traps.
+    const suspects = trapper
+      ? opp.filter(o => o !== trapper && (o.hpPercent ?? 0) > 0 && couldMegaTrap(o))
+      : [];
 
     for (const m of stuck) {
       const pivot = usablePivot(m);
@@ -163,8 +205,22 @@ export function analyzePerishTrap(mine: readonly PerishSide[], opp: readonly Per
     }
     if (trapper) {
       const viaMove = stuck.some(m => m.trappedByFoe != null && m.trappedByFoe >= 0);
-      outs.push({ kind: 'ko-trapper', saves: turnsLeft >= 2,
-        label: `KO ${trapper.species}${viaMove ? '' : ` (${trapper.ability})`} — the trap dies with it, freeing the switch${turnsLeft >= 2 ? '' : ' (too late this turn: the clock hits 0 first)'}` });
+      // A KO OPENS A SLOT THE OPPONENT CHOOSES TO FILL. Live 2026-07-28: KOing the
+      // Mean Look Blastoise is exactly how the Mega Gengar got back in and re-applied
+      // Shadow Tag — the "escape" handed them the swap for free. So a relief KO is only
+      // an out when their remaining team has nobody left to re-trap with.
+      const relief = reliefTrappers;
+      const inTime = turnsLeft >= 2;
+      if (relief.length) {
+        outs.push({ kind: 'ko-trapper', saves: false,
+          label: `Do NOT bank on KOing ${trapper.species} — it just opens the slot for ${relief.map(r => r.species).join('/')} to come back and re-trap` });
+      } else if (suspects.length) {
+        outs.push({ kind: 'ko-trapper', saves: false,
+          label: `KOing ${trapper.species} frees the switch — but ${suspects.map(r => r.species).join('/')} can mega into a trapping ability, so the slot may just be refilled` });
+      } else {
+        outs.push({ kind: 'ko-trapper', saves: inTime,
+          label: `KO ${trapper.species}${viaMove ? '' : ` (${trapper.ability ?? megaAbilityOf(trapper) ?? 'trapping ability'})`} — nothing left on their side re-traps, so the switch opens${inTime ? '' : ' (too late: the clock hits 0 first)'}` });
+      }
     }
     for (const m of myActive) {
       if ((m.perishCount ?? 0) > 0 && canWalkAway(m, opp) && !stuck.includes(m)) {
@@ -185,8 +241,15 @@ export function analyzePerishTrap(mine: readonly PerishSide[], opp: readonly Per
       const why = m.choiceLockedMove
         ? `Choice-locked into ${m.choiceLockedMove}, no pivot available`
         : 'no pivot, no Shed Shell';
+      // What to do with a mon that is already dead. NOT "hit the trapper" when a spare
+      // trapper is waiting — that KO is how they rotate the real one back in.
+      const spend = reliefTrappers.length
+        ? `Spend it on the mon you actually need dead — do NOT clear the trapper's slot for ${reliefTrappers.map(r => r.species).join('/')}`
+        : suspects.length
+          ? `Spend it on the mon you actually need dead — ${suspects.map(r => r.species).join('/')} may mega into a trap and refill the slot`
+          : 'Spend it: hit the trapper, and get the partner out.';
       outs.unshift({ kind: 'pivot', saves: false,
-        label: `${m.species} CANNOT escape (${why}) — it faints in ${turnsLeft}. Spend it: hit the trapper, and get the partner out.` });
+        label: `${m.species} CANNOT escape (${why}) — it faints in ${turnsLeft}. ${spend}` });
     }
 
     const suffix = certain ? ' and cannot leave'
@@ -200,8 +263,9 @@ export function analyzePerishTrap(mine: readonly PerishSide[], opp: readonly Per
 
   // --- ARMED: the pieces are on the field but no song has landed yet.
   if (!singer) return null;
-  const trapPiece = oppActive.find(o =>
-    o.moves.some(mv => TRAP_MOVES.has(toId(mv))) || TRAP_ABILITIES.has(toId(o.ability ?? '')));
+  // isTrapper, not a raw ability read: a Gengarite Gengar shows "Cursed Body" until it
+  // megas, and by then the tag is already on.
+  const trapPiece = oppActive.find(isTrapper);
   if (!trapPiece) return null;
 
   const outs: PerishOut[] = [];
@@ -218,8 +282,15 @@ export function analyzePerishTrap(mine: readonly PerishSide[], opp: readonly Per
       outs.push({ kind: 'pivot', saves: true, label: `${m.species}: keep ${pivot} available as the escape` });
     }
   }
-  outs.push({ kind: 'ko-trapper', saves: true,
-    label: `KO ${trapPiece.species} before the song lands — without the trap the song is just a shared clock` });
+  const soloCombo = trapPiece === singer;
+  const spares = oppActive.filter(o => o !== trapPiece && isTrapper(o))
+    .concat(opp.filter(o => !o.active && (o.hpPercent ?? 0) > 0 && isTrapper(o)));
+  outs.push({ kind: 'ko-trapper', saves: !spares.length,
+    label: soloCombo
+      ? `KO ${trapPiece.species} before the song lands — it sings AND traps, so it is the whole combo`
+      : spares.length
+        ? `KO ${trapPiece.species} before the song lands — but ${spares.map(s2 => s2.species).join('/')} can trap too, so the slot must not just be handed over`
+        : `KO ${trapPiece.species} before the song lands — without the trap the song is just a shared clock` });
 
   return {
     phase: 'armed',
@@ -227,7 +298,9 @@ export function analyzePerishTrap(mine: readonly PerishSide[], opp: readonly Per
     singer: singer.species,
     trapper: trapPiece.species,
     outs,
-    headline: `⚠ Perish trap on the field — ${singer.species} sings, ${trapPiece.species} traps`,
+    headline: soloCombo
+      ? `⚠ Perish trap on the field — ${singer.species} both sings and traps`
+      : `⚠ Perish trap on the field — ${singer.species} sings, ${trapPiece.species} traps`,
   };
 }
 
