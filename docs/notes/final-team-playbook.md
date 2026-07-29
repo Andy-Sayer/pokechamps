@@ -110,9 +110,55 @@ carry one and blocks the Fake Out, but Protect does nothing about the *song*.
 | **T3** | **Switch the perished mons out** — Shadow Tag died with its owner, so the door is open and switching wipes the count |
 
 Verified end to end: song T1, trapper dead T2, both counts cleared on T3, **nobody
-dies**. The clock allows exactly **two turns of slack**, so **a single Protect from
-Gengar on T2 spends the entire margin** — if that happens, the kill slips to T3 and
-the switch no longer fits.
+dies**.
+
+#### The stall line — and the exact odds
+
+Assume they play it properly and **Protect the trapper on T2** to burn the kill turn.
+The clock is: song lands T1 (count 3) → 2 → 1 → **faint at end of T4**. Survival is
+therefore *exactly* "was the trapper dead by T3" — if it is alive at the start of T4 I
+am still trapped for that turn's choice, and the count runs out.
+
+| Their T3 | Trapper dead by T3 | I lose the mon |
+|---|---|---|
+| Protect again | **28/40 (70%)** | **30%** |
+| anything else | 40/40 (100%) | 0% |
+
+So a T2 Protect does **not** beat the plan, but it spends the whole margin: the kill has
+to land on T3, and their repeat‑Protect succeeding is a straight **30% loss**. Consecutive
+Protect is what saves this — it fails most of the time, which is the only reason 70%
+rather than 0%.
+
+**Practical read: the moment the song lands, the trapper's Protect is the only thing that
+can still kill you. Kill it on T2 if it is exposed; never spend T2 on anything else.**
+
+#### Priority order — Sucker Punch does NOT beat Fake Out
+
+| Move | Priority |
+|---|---|
+| Protect | **+4** |
+| Fake Out | **+3** |
+| Sucker Punch | +1 |
+| Acrobatics (Gale Wings) | +1 |
+| Perish Song / Earthquake / U‑turn | 0 |
+
+Kingambit's Sucker Punch is **two brackets below** Fake Out, so it gets flinched before
+it ever resolves (`Incineroar:Fake Out → Kingambit:flinch → Gengar:Perish Song`). And it
+would fail into the song anyway, being a status move. **Protect at +4 is the only thing
+on this team that outruns a Fake Out.**
+
+#### If the partner gets Fake Outed — what Talonflame does alone
+
+Talonflame at −1 from Intimidate, hitting Mega Gengar by itself:
+
+| Move | KO | Gengar left on |
+|---|---|---|
+| Acrobatics | 2/40 | **51–60%** |
+| Flare Blitz | 1/40 | **41–56%** |
+
+Neither is close. Flare Blitz hits harder but costs recoil and loses Gale Wings priority
+once Talonflame is off full HP. **A flinched partner means the song lands — do not try to
+race it; go to the T2 kill / T3 switch plan instead.**
 
 **Rule of thumb:** if a Gengar is on the field, Garchomp clicks Earthquake with a
 Flying partner out. Do **not** spend the turn KOing the body in front of it — the
