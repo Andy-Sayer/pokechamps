@@ -268,7 +268,7 @@ export function BringPicker({ stores, myTeam, opponent, teamName, onConfirm, onC
                     ))}
                     {i === cursor && leads && (
                       <Box flexDirection="column" marginTop={1}>
-                        <Text color="magenta">       ▸ lead tiebreak: {leads.lead.join(' + ')}   <Text dimColor>(hold {leads.hold.join(', ')}) — a consideration, not a call</Text></Text>
+                        <Text color="magenta">       ▸ lead {leads.lead.join(' + ')}   <Text dimColor>(hold {leads.hold.join(', ')})</Text></Text>
                         {leads.reasons.map((r, k) => (
                           <Text key={`lr-${k}`} dimColor>         {r}</Text>
                         ))}

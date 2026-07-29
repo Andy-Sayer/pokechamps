@@ -111,36 +111,41 @@ NONE  Talonflame,Kingambit,Pelipper,Dragonite     answers=[]
 
 Of the 15 brings: **6 covered, 8 thin, 1 with nothing.**
 
-**3. New — which two to LEAD** (`leadAdvice`, shown in the bring picker). This is
-deliberately **generic**: it reads every detected opponent combo through the same
-`PATTERN_COUNTERS` table the bring score uses, so nothing about the perish trap is
-special-cased. It was the case that exposed the rule, not the rule itself.
+**3. New — which two to LEAD** (`leadAdvice`, shown in the bring picker), generic
+across every detected combo via the same `PATTERN_COUNTERS` table.
 
-Three rules, in order:
-1. **Hold a sole answer back.** If a mon is the only thing in the bring that answers
-   some combo, and they can take a turn away (Fake Out, Prankster Taunt), leading it
-   aims that denial at exactly the mon you cannot afford to lose.
-2. **Lead a denier** — Inner Focus / Covert Cloak / Soundproof / Taunt refuses the
-   opener outright.
-3. **Else lead a resilient mon** — one that can leave (pivot / Ghost / Shed Shell)
-   takes the turn‑1 hit and walks away from it, and its pivot is how the held‑back
-   answer arrives clean.
+**The rule is "lead your answers", and it was arrived at the hard way.** The first
+version did the *opposite* — it held a sole answer back, on the single‑turn logic
+that leading your only answer aims their Fake Out at the mon you cannot lose. That
+is correct about the turn and **wrong about the game**. Full battles
+(`perish-lead-gauntlet.ts`: 5 opponent trap plans × 16 seeds, searching policy):
 
-Plus a general preference: **keep answers off the field when they cannot leave**,
-even when they are not the only one. On this board:
+| lead | A | B | C | D | E | avg |
+|---|---|---|---|---|---|---|
+| played Garchomp + Talonflame | 10 | 15 | 13 | 11 | 14 | 79% |
+| **held back** Meowscarada + Dragonite | 15 | 15 | 16 | **1** | 13 | **75%** |
+| Meowscarada + Talonflame | 16 | 16 | 14 | 9 | 15 | 88% |
+| **both answers** Garchomp + Meowscarada | 14 | 16 | 16 | 11 | 16 | **91%** |
+
+Holding the answer back came **last**, and won **1/16** against plan D — sing, then
+stall forever, never withdraw — because with the killer off the field *nothing ever
+removes the threat* and the clock simply runs out. Leading both answers was best.
+
+(Under a *greedy* policy the same grid ranks "both" **worst** at 43%. An inversion
+that large between policies means the greedy numbers say more about a player that
+never pivots on purpose than about the leads. Run `--search`.)
+
+So the rule now follows the games: **lead the mons answering the most — and the
+most severe — of their combos**, break ties toward one that can leave, and report
+deniability as a **risk**, not act on it:
 
 ```
-▸ LEAD Meowscarada + Dragonite   hold Talonflame, Garchomp
-  Hold Talonflame back — it is your ONLY answer to Tailwind core, and they can take
-    a turn away from it. Leading it aims that denial at exactly the mon you cannot lose.
-  Lead Meowscarada — it can leave (U-turn), so whatever lands on turn 1 does not
-    stick, and it is how Talonflame arrives clean once the opener is spent.
-  Lead Dragonite — it answers none of their combos, so it is the cheapest thing to
-    expose to the opener.
+▸ lead Meowscarada + Garchomp   (hold Talonflame, Dragonite)
+  Lead Meowscarada — it answers Perish trap and Stored Power snowball.
+  Lead Garchomp — it answers Perish trap.
+  Risk: they carry Fake Out/Taunt and Garchomp cannot pivot away, so expect to lose
+    its first turn — bring it in expecting that, not as a surprise.
 ```
-
-Returns nothing when they cannot deny a turn — then lead normally and let your best
-mon do its job on turn 1.
 
 ### What ACTUALLY happened, 2026‑07‑28 (`perish-real-game.ts`, 6/6)
 

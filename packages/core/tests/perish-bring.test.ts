@@ -57,15 +57,25 @@ describe('perish trap at team preview', () => {
     expect(scores[0]!.rationale.some(r => /Covers opp Perish trap/.test(r))).toBe(true);
   });
 
-  test('the LEAD advice keeps the answers off the field and leads the resilient mon', () => {
+  test('the LEAD advice leads BOTH answers — the full-battle result, not the turn-1 logic', () => {
+    // The first version of this rule held the sole answer BACK, reasoning that
+    // leading it aims their Fake Out at the mon you cannot lose. Correct about the
+    // turn, wrong about the game: perish-lead-gauntlet.ts put that lead LAST of
+    // four (75%) and 1/16 against a stall-forever opponent, while leading both
+    // answers scored best (91%). The rule now follows the games.
     const advice = leadAdvice(scoreBrings(team, opponent)[0]!.myIndices.map(i => team[i]!), opponent)!;
     expect(advice).not.toBeNull();
-    // Meowscarada can leave, so whatever lands on turn 1 does not stick.
-    expect(advice.lead).toContain('Meowscarada');
-    // Garchomp answers a combo and CANNOT leave — leading it hands them the blank.
-    expect(advice.hold).toContain('Garchomp');
-    expect(advice.lead).not.toContain('Garchomp');
-    expect(advice.reasons.join(' ')).toMatch(/can leave \(U-turn\)/);
+    expect(advice.lead.sort()).toEqual(['Garchomp', 'Meowscarada']);
+    // Deniability is REPORTED, not acted on.
+    expect(advice.reasons.join(' ')).toMatch(/Risk: they carry Fake Out/);
+    expect(advice.reasons.join(' ')).toMatch(/Garchomp cannot pivot away/);
+  });
+
+  test('a pattern with several named variants is not double-counted', () => {
+    const advice = leadAdvice(scoreBrings(team, opponent)[0]!.myIndices.map(i => team[i]!), opponent)!;
+    for (const r of advice.reasons) {
+      expect(r).not.toMatch(/Perish trap and Perish trap/);
+    }
   });
 
   test('the rule is GENERIC — it fires on a non-perish threat too', () => {
@@ -82,11 +92,14 @@ describe('perish trap at team preview', () => {
     }
   });
 
-  test('no advice when they cannot deny a turn — then lead the racer normally', () => {
-    // No Blastoise here — it IS a Fake Out carrier, which is the whole point of
-    // the denial check and would make this fixture prove the opposite.
+  test('with no turn-denial the advice still stands, minus the risk caveat', () => {
+    // Denial used to GATE the whole recommendation. It no longer does: which mons
+    // answer their combos is worth saying either way, and only the Fake Out caveat
+    // depends on them being able to take a turn away.
+    // No Blastoise here — it IS a Fake Out carrier and would defeat the fixture.
     const harmless = ['Gengar', 'Milotic', 'Pelipper', 'Archaludon', 'Sylveon', 'Garganacl']
       .map(species => ({ species, knownMoves: [], candidates: [] } as unknown as OpponentEntry));
-    expect(leadAdvice(team.slice(0, 4), harmless)).toBeNull();
+    const advice = leadAdvice(team.slice(0, 4), harmless);
+    if (advice) expect(advice.reasons.join(' ')).not.toMatch(/Risk: they carry Fake Out/);
   });
 });
