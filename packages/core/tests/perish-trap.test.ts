@@ -91,9 +91,16 @@ describe('perish trap — ARMED (pieces on the field, no song yet)', () => {
   });
 
   test('a singer with NO trapper is not a trap — stay quiet', () => {
-    const loneSinger = mon({ species: 'Gengar', moves: ['Perish Song'] });
+    // Politoed, not Gengar: an unrevealed GENGAR is a projected trapper now (its mega
+    // brings Shadow Tag), so it is no longer a valid fixture for "just a singer".
+    const loneSinger = mon({ species: 'Politoed', moves: ['Perish Song'] });
     const plainFoe = mon({ species: 'Milotic', moves: ['Scald'] });
     expect(analyzePerishTrap([mon({ species: 'Garchomp', moves: ['Earthquake'] })], [loneSinger, plainFoe])).toBeNull();
+  });
+
+  test('...and a lone singer that CANNOT mega into a trap stays quiet even unrevealed', () => {
+    const altaria = mon({ species: 'Altaria', moves: ['Perish Song', 'Moonblast'] });
+    expect(analyzePerishTrap([mon({ species: 'Garchomp', moves: ['Earthquake'] })], [altaria])).toBeNull();
   });
 
   test('no song anywhere → nothing to say', () => {
@@ -256,11 +263,14 @@ describe('a KO opens a slot the OPPONENT fills', () => {
     const chomp = mon({ species: 'Garchomp', item: 'Choice Scarf', moves: ['Earthquake'] });
     const a = analyzePerishTrap([chomp], [gengar, blastoise])!;
     expect(a.phase).toBe('armed');
-    const ko = a.outs.find(o => o.kind === 'ko-trapper')!;
-    expect(ko.saves).toBe(false);
-    expect(ko.label).toContain('rotate the real trapper in');
-    // ...and it names the singer as the piece that matters.
-    expect(a.outs.some(o => o.label.includes('Gengar is the piece to remove'))).toBe(true);
+    // Since the mega projection landed, GENGAR — not the Blastoise body — is named as
+    // the trap piece, which is the sharper answer to the same question: it is the whole
+    // combo, so removing it removes the trap outright.
+    expect(a.trapper).toBe('Gengar');
+    expect(a.headline).toContain('both sings and will trap once it megas');
+    expect(a.outs.some(o => o.label.includes('assume the stone'))).toBe(true);
+    // The Blastoise must not be presented as the thing to remove.
+    expect(a.outs.some(o => o.label.includes('KO Blastoise'))).toBe(false);
   });
 
   test('an UNREVEALED Gengar downgrades the KO — the stone is the thing we cannot see', () => {
@@ -283,5 +293,51 @@ describe('a KO opens a slot the OPPONENT fills', () => {
     const ko = a.outs.find(o => o.kind === 'ko-trapper')!;
     expect(ko.saves).toBe(true);
     expect(ko.label).toContain('nothing left on their side re-traps');
+  });
+});
+
+// USER RULING 2026-07-29: "If Gengar is running an item that isn't its mega stone, it
+// doesn't have the trap ability so is not a worry. We should plan for it having the
+// mega." An unrevealed stone is therefore planned for; a known non-stone item, or a
+// mega already spent elsewhere, shuts the projection off.
+describe('plan for the mega', () => {
+  const singer = (over: Partial<Parameters<typeof analyzePerishTrap>[1][number]> = {}) =>
+    mon({ species: 'Gengar', moves: ['Perish Song', 'Shadow Ball'], ...over });
+  const filler = mon({ species: 'Milotic', moves: ['Scald'] });
+  const chomp = mon({ species: 'Garchomp', item: 'Choice Scarf', moves: ['Earthquake'] });
+
+  test('a Gengar singing ALONE with an unrevealed item now warns — it used to be silent', () => {
+    // This is the live board one turn before the loss. The old detector needed a
+    // CONFIRMED trapper on the field, so it said nothing at all here.
+    const a = analyzePerishTrap([chomp], [singer(), filler])!;
+    expect(a).not.toBeNull();
+    expect(a.phase).toBe('armed');
+    expect(a.trapper).toBe('Gengar');
+    expect(a.headline).toContain('will trap once it megas');
+    expect(a.outs.some(o => o.label.includes('assume the stone'))).toBe(true);
+  });
+
+  test('a CONFIRMED non-stone item makes it harmless — no warning', () => {
+    // Cursed Body, not Shadow Tag. Nothing to say, and saying something would be noise.
+    expect(analyzePerishTrap([chomp], [singer({ item: 'Leftovers' }), filler])).toBeNull();
+  });
+
+  test('their mega already spent elsewhere kills the projection', () => {
+    // One mega per battle. If it is gone, the stone can never be activated.
+    expect(analyzePerishTrap([chomp], [singer(), filler], { oppMegaSpent: true })).toBeNull();
+    // ...but a REVEALED Gengarite still traps — the stone is on, mega or not yet.
+    const stoned = analyzePerishTrap([chomp], [singer({ item: 'Gengarite' }), filler], { oppMegaSpent: false });
+    expect(stoned).not.toBeNull();
+  });
+
+  test('a mon that can still leave is told to GO THIS TURN before the door shuts', () => {
+    // canWalkAway must stay truthful about the present — claiming "cannot leave" while
+    // it still can would be the worst kind of wrong — so urgency rides in the label.
+    const talon = mon({ species: 'Talonflame', moves: ['Acrobatics'], perishCount: 2 });
+    const a = analyzePerishTrap([talon], [singer(), filler])!;
+    const out = a.outs.find(o => o.kind === 'partner-switch')!;
+    expect(out.saves).toBe(true);
+    expect(out.label).toContain('GO THIS TURN');
+    expect(out.label).toContain('Gengar');
   });
 });

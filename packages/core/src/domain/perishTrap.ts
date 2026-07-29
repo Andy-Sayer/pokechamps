@@ -103,15 +103,35 @@ function isTrapper(m: PerishSide): boolean {
   return trapAbilitiesOf(m).length > 0 || m.moves.some(mv => TRAP_MOVES.has(toId(mv)));
 }
 
-/** A species that COULD trap once it megas, even though we haven't seen the stone. An
- *  unrevealed bench Gengar is exactly the shape of the live 2026-07-28 loss: nothing in
- *  the observed data says "trapper" until the mega lands, at which point it's too late.
- *  Kept separate from isTrapper so a suspicion is never reported as a fact. */
-function couldMegaTrap(m: PerishSide): boolean {
-  if (isTrapper(m)) return false;             // already known — not a suspicion
+/**
+ * A species that WILL trap once it megas, whose stone we simply haven't seen yet.
+ *
+ * USER RULING 2026-07-29: "If Gengar is running an item that isn't its mega stone, it
+ * doesn't have the trap ability so is not a worry. We should plan for it having the
+ * mega." So an unrevealed Gengar is treated as a trapper for PLANNING — it is the exact
+ * shape of the live loss, where nothing observable said "trapper" until the mega landed
+ * and every counter had expired. Two conditions cut it off, both cheap and certain:
+ *   • the item is KNOWN and is not the stone -> Cursed Body, harmless, stay quiet;
+ *   • their ONE mega per battle is already spent on something else -> it can never
+ *     transform, so the ability will never arrive.
+ */
+function couldMegaTrap(m: PerishSide, oppMegaSpent = false): boolean {
+  if (isTrapper(m)) return false;             // already known — not a projection
+  if (oppMegaSpent) return false;             // one mega per battle, and it's gone
   if (m.item) return false;                   // item known and it isn't the stone
   return getMegaOptions(m.species)
     .some(o => TRAP_ABILITIES.has(toId(megaFormeAbility(o.forme) ?? '')));
+}
+
+/** Trapper now, or trapper once it megas. What to PLAN against. */
+function plannedTrapper(m: PerishSide, oppMegaSpent = false): boolean {
+  return isTrapper(m) || couldMegaTrap(m, oppMegaSpent);
+}
+
+export interface PerishOptions {
+  /** Has the opponent already used their one mega? When true a stone-less Gengar can
+   *  never become Shadow Tag, so the projection below is dropped entirely. */
+  oppMegaSpent?: boolean;
 }
 const CHOICE_ITEMS: ReadonlySet<string> = new Set(['choiceband', 'choicespecs', 'choicescarf']);
 const holdsChoice = (m: PerishSide) => CHOICE_ITEMS.has(toId(m.item ?? ''));
@@ -156,7 +176,12 @@ function canWalkAway(me: PerishSide, foes: readonly PerishSide[]): boolean {
  * Analyse a live board for a perish trap. Returns null when there's nothing to say —
  * no song in play and no combo assembled — so callers can surface it unconditionally.
  */
-export function analyzePerishTrap(mine: readonly PerishSide[], opp: readonly PerishSide[]): PerishTrapAdvice | null {
+export function analyzePerishTrap(
+  mine: readonly PerishSide[],
+  opp: readonly PerishSide[],
+  opts: PerishOptions = {},
+): PerishTrapAdvice | null {
+  const megaSpent = !!opts.oppMegaSpent;
   const myActive = mine.filter(m => m.active && m.hpPercent > 0);
   const oppActive = opp.filter(o => o.active && o.hpPercent > 0);
   if (!myActive.length) return null;
@@ -184,7 +209,7 @@ export function analyzePerishTrap(mine: readonly PerishSide[], opp: readonly Per
       : [];
     // Softer signal: unrevealed mons whose mega forme traps.
     const suspects = trapper
-      ? opp.filter(o => o !== trapper && (o.hpPercent ?? 0) > 0 && couldMegaTrap(o))
+      ? opp.filter(o => o !== trapper && (o.hpPercent ?? 0) > 0 && couldMegaTrap(o, megaSpent))
       : [];
 
     for (const m of stuck) {
@@ -222,10 +247,17 @@ export function analyzePerishTrap(mine: readonly PerishSide[], opp: readonly Per
           label: `KO ${trapper.species}${viaMove ? '' : ` (${trapper.ability ?? megaAbilityOf(trapper) ?? 'trapping ability'})`} — nothing left on their side re-traps, so the switch opens${inTime ? '' : ' (too late: the clock hits 0 first)'}` });
       }
     }
+    // A mon that can leave RIGHT NOW but is standing next to a Gengar holding an
+    // unrevealed stone is one turn from being stuck. canWalkAway stays truthful about
+    // the present — saying "cannot leave" while it still can would be the worst kind of
+    // wrong — so the urgency is carried in the label instead.
+    const incoming = oppActive.filter(o => couldMegaTrap(o, megaSpent));
     for (const m of myActive) {
       if ((m.perishCount ?? 0) > 0 && canWalkAway(m, opp) && !stuck.includes(m)) {
         outs.push({ kind: 'partner-switch', saves: true,
-          label: `${m.species} is NOT trapped — switch it out to clear its own count` });
+          label: incoming.length
+            ? `${m.species} can still leave — GO THIS TURN: ${incoming.map(o => o.species).join('/')} megas into a trapping ability and the door shuts`
+            : `${m.species} is NOT trapped — switch it out to clear its own count` });
       }
     }
 
@@ -263,10 +295,14 @@ export function analyzePerishTrap(mine: readonly PerishSide[], opp: readonly Per
 
   // --- ARMED: the pieces are on the field but no song has landed yet.
   if (!singer) return null;
-  // isTrapper, not a raw ability read: a Gengarite Gengar shows "Cursed Body" until it
-  // megas, and by then the tag is already on.
-  const trapPiece = oppActive.find(isTrapper);
+  // plannedTrapper, not a raw ability read. Two reasons: a Gengarite Gengar shows
+  // "Cursed Body" until it megas, and an unrevealed Gengar shows nothing at all. Before
+  // this, a Gengar singing ALONE with no item known produced no warning whatsoever —
+  // silence on precisely the board that cost the live game.
+  const trapPiece = oppActive.find(o => plannedTrapper(o, megaSpent));
   if (!trapPiece) return null;
+  /** Is the trap a fact, or a projection from an unrevealed stone? */
+  const projected = !isTrapper(trapPiece);
 
   const outs: PerishOut[] = [];
   for (const m of myActive) {
@@ -283,13 +319,17 @@ export function analyzePerishTrap(mine: readonly PerishSide[], opp: readonly Per
     }
   }
   const soloCombo = trapPiece === singer;
+  if (projected) {
+    outs.unshift({ kind: 'ko-trapper', saves: false,
+      label: `${trapPiece.species}'s item is unrevealed — assume the stone: mega ${trapPiece.species} traps, and you find out only once it is too late to leave` });
+  }
   // Same lesson as the active branch, applied one turn EARLIER — which is the turn that
   // actually decides the game. A body in front of a Gengar is not the trap; killing it
   // just rotates the real trapper in. Suspicion counts here too: at this point the stone
   // is usually still unrevealed, so "could mega into a trap" is all the warning there is.
   const live = opp.filter(o => o !== trapPiece && (o.hpPercent ?? 0) > 0);
   const spares = live.filter(isTrapper);
-  const suspects = live.filter(couldMegaTrap);
+  const suspects = live.filter(o => couldMegaTrap(o, megaSpent));
   const refill = [...spares, ...suspects];
   outs.push({ kind: 'ko-trapper', saves: !refill.length,
     label: soloCombo
@@ -311,8 +351,8 @@ export function analyzePerishTrap(mine: readonly PerishSide[], opp: readonly Per
     trapper: trapPiece.species,
     outs,
     headline: soloCombo
-      ? `⚠ Perish trap on the field — ${singer.species} both sings and traps`
-      : `⚠ Perish trap on the field — ${singer.species} sings, ${trapPiece.species} traps`,
+      ? `⚠ Perish trap on the field — ${singer.species} both sings and ${projected ? 'will trap once it megas' : 'traps'}`
+      : `⚠ Perish trap on the field — ${singer.species} sings, ${trapPiece.species} ${projected ? 'traps once it megas' : 'traps'}`,
   };
 }
 

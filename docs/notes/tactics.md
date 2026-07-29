@@ -306,6 +306,25 @@ silently dropped:
   game: nothing observable says "trapper" until the mega lands, at which point it's over.
   Kept as a separate, softer sentence so a suspicion is never printed as a fact.
 
+**PLAN FOR THE MEGA** (user ruling, 2026-07-29): *"If Gengar is running an item that
+isn't its mega stone, it doesn't have the trap ability so is not a worry. We should plan
+for it having the mega."* An **unrevealed** item is therefore treated as the stone, and
+the mon counts as a trapper for planning. This closed a real silence: a Gengar singing
+ALONE with no item known produced **no warning at all**, because the detector required a
+confirmed trapper on the field — silence on exactly the board that cost the live game.
+Two cheap, certain conditions switch the projection off:
+- the item is **known and is not the stone** → Cursed Body, harmless, stay quiet;
+- their **one mega per battle is already spent** elsewhere → the stone can never be
+  activated, so the ability will never arrive (`oppMegaSpent`, threaded from the search).
+
+The projection never pretends to be a fact: the headline says "will trap once it megas",
+and a separate line says the item is unrevealed and to assume the stone.
+
+Crucially `canWalkAway` stays truthful about the PRESENT — an un-megaed Gengar does not
+trap yet, and claiming "cannot leave" while the mon still can would be the worst kind of
+wrong. The urgency rides in the label instead: *"X can still leave — GO THIS TURN: Gengar
+megas into a trapping ability and the door shuts."*
+
 **Trapping abilities are read through the mega**, not off the base forme. Gengar shows
 Cursed Body while holding Gengarite; reading `ability` alone hides Shadow Tag until the
 mega has already happened, which is too late for every counter on this list. `isTrapper()`

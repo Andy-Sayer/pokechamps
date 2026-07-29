@@ -5542,6 +5542,9 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
           perishCount: o.perishCount, trappedByFoe: o.trappedByFoe ?? null,
           choiceLockedMove: o.choiceLockedMove ?? null,
         })),
+        // One mega per battle: once theirs is spent, a stone-less Gengar can never
+        // become Shadow Tag, so the advisory must stop projecting one.
+        { oppMegaSpent: input.oppMegaSpent || input.opp.some(o => o.megaActive) },
       ) ?? undefined;
 
       const risks: SearchRisk[] = [];
