@@ -7,8 +7,8 @@
 //   npx tsx packages/control/scripts/dry-run.ts --switch 3
 //   npx tsx packages/control/scripts/dry-run.ts --mega
 import {
-  Controller, MockBackend, lowerGameAction, describeInput, MENU_NAV_CALIBRATED,
-  type GameAction, type TargetRef,
+  Controller, MockBackend, lowerGameAction, describeInput, MENU_NAV_CALIBRATED, getCodec,
+  type FirmwareId, type GameAction, type TargetRef,
 } from '../src/index.js';
 
 const arg = (flag: string): string | undefined => {
@@ -28,8 +28,18 @@ function parseAction(): GameAction {
 }
 
 const action = parseAction();
-const inputs = lowerGameAction(action);
+let inputs;
+try {
+  inputs = lowerGameAction(action);
+} catch (e) {
+  console.error(`refused: ${(e as Error).message}`);
+  process.exit(1);
+}
 
+// --firmware picks which wire format to show. 'wired-uart' is a real published
+// frame (switch-fightstick / UARTSwitchCon), so the bytes below are exactly what
+// a device would receive — worth eyeballing, not just the button names.
+const firmware = (arg('--firmware') ?? 'wired-uart') as FirmwareId;
 const backend = new MockBackend();
 const controller = new Controller({ backend, sleep: async () => {} }); // no real waits in a dry-run
 await controller.connect();
@@ -45,3 +55,21 @@ console.log(`\ninput sequence (${inputs.length} step${inputs.length === 1 ? '' :
 console.log('  ' + inputs.map(describeInput).join('  ·  '));
 console.log(`\nemitted controller frames (${backend.log.length} states):`);
 console.log(controller.transcript());
+
+// The actual bytes. A live send is refused while MENU_NAV_CALIBRATED is false
+// (menuNav.assertSendable), so this is a preview, not a rehearsal.
+try {
+  const codec = getCodec(firmware);
+  console.log(`\nwire frames — firmware "${codec.id}" (${codec.frameBytes} bytes @ ${codec.baudRate} baud):`);
+  for (const entry of backend.log) {
+    const hex = [...codec.encode(entry.state)].map(b => b.toString(16).padStart(2, '0')).join(' ');
+    console.log(`  ${entry.desc.padEnd(12)} ${hex}`);
+  }
+} catch (e) {
+  console.log(`\nwire frames unavailable for firmware "${firmware}": ${(e as Error).message}`);
+}
+console.log(
+  MENU_NAV_CALIBRATED
+    ? '\nmenuNav is calibrated; a live send would be permitted.'
+    : '\nA live send would be REFUSED by menuNav.assertSendable() until calibration — by design.',
+);

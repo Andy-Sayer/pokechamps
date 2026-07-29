@@ -2,7 +2,8 @@
 // exactly like @pokechamps/vision's input sources — the Controller doesn't care
 // whether it's driving a mock recorder or a real serial microcontroller.
 import type { ControllerState } from './types.js';
-import { encodeState, describeState } from './protocol.js';
+import { encodeState, describeState, getCodec, type FirmwareCodec, type FirmwareId } from './protocol.js';
+import { assertSendable } from './menuNav.js';
 
 export interface OutputBackend {
   readonly name: string;
@@ -28,20 +29,35 @@ export class MockBackend implements OutputBackend {
   async close(): Promise<void> { this.connected = false; }
 }
 
-/** Real backend over a serial-driven controller MCU. STUB until hardware is
- *  wired (software-first scaffold) — the interface is real so the rest of the
- *  package is built against it, but connect() refuses with an actionable
- *  message rather than pretending. The firmware-specific frame encoder
- *  (protocol.ts) and the lazy `serialport` import land here at that time. */
+/** Real backend over a serial-driven controller MCU. The frame encoding and the
+ *  safety interlock are DONE (see protocol.ts / menuNav.assertSendable); what is
+ *  still missing is only the transport — the lazy `serialport` import and the
+ *  handshake exchange, both of which need a device on the other end to write
+ *  against. connect() therefore refuses with an actionable message rather than
+ *  pretending, but it refuses only AFTER the interlock, so an uncalibrated caller
+ *  gets told the real reason it must not send. */
 export class SerialBackend implements OutputBackend {
   readonly name = 'serial';
-  constructor(_opts: { path: string; firmware: 'pabotbase2' | 'wired'; baudRate?: number }) {}
+  private readonly codec: FirmwareCodec;
+  private readonly opts: { path: string; firmware: FirmwareId; force?: boolean };
+
+  constructor(opts: { path: string; firmware: FirmwareId; force?: boolean }) {
+    this.opts = opts;
+    this.codec = getCodec(opts.firmware);   // unknown firmware fails at construction
+  }
+
+  /** Encode without a device — lets the dry-run show the exact bytes a live send
+   *  would put on the wire for the configured firmware. */
+  frameFor(state: ControllerState): Uint8Array { return this.codec.encode(state); }
+
   async connect(): Promise<void> {
+    assertSendable({ force: this.opts.force });   // calibration gate FIRST
     throw new Error(
-      'SerialBackend is not wired yet (software-first scaffold). To enable: attach a ' +
-      'serial controller MCU (ESP32 + Pokémon Automation PABotBase2, or a wired RP2040/AVR), ' +
-      'run `npm i serialport`, implement the firmware frame encoder in protocol.ts, and ' +
-      'finish connect()/sendState() here. See docs/notes/future-directions.md §2.',
+      `SerialBackend transport is not implemented (firmware=${this.codec.id}, path=${this.opts.path}, ` +
+      `${this.codec.baudRate} baud). Frame encoding and the safety interlock are done; what remains ` +
+      'is the wire: `npm i serialport`, open the port, run the firmware handshake ' +
+      '(protocol.WIRED_UART.handshake for wired-uart), then stream frames in sendState(). ' +
+      'See docs/notes/future-directions.md §2.',
     );
   }
   async sendState(): Promise<void> { throw new Error('SerialBackend not connected'); }

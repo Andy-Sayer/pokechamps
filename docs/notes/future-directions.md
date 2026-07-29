@@ -125,13 +125,25 @@ npm package). That sidesteps the Windows-BT wall entirely.
 | Path | What | Switch 2? | Latency | Effort / risk |
 |---|---|---|---|---|
 | **A. ESP32-WROOM + PABotBase2** *(recommended)* | [Pokémon Automation](https://pokemonautomation.github.io/) firmware; emulates a **wireless** Pro Controller, PC drives it over USB serial | **Yes (1 & 2, confirmed)** | a few ms (BT) | Actively maintained, documented serial protocol; ~$8 board; must port its serial framing to TS; BT range + grip-menu reconnect quirk |
-| **B. RP2040 (Pico) / Pro Micro, wired** | Minimal firmware presents a **wired USB** controller, reads 1–2 serial bytes → emits report (asottile / VinDuv lineage) | Switch 1 yes; **wired S2 unconfirmed** for hobby firmware (GP2040-CE works) | ~1 ms, deterministic | Trivial serial protocol, easiest to drive from Node; need to adapt "fixed macro" sketches to live serial |
+| **B. RP2040 / Pico W, wired** | Minimal firmware presents a **wired USB** controller, reads a 9-byte serial frame → emits report (asottile / VinDuv / UARTSwitchCon lineage) | **Yes** — Pokémon Automation supports Pico W / RP2040 / RP2350 on S2 and has tuned for its variable wired poll rate | ~1 ms, deterministic | Trivial serial protocol, easiest to drive from Node. **Its frame is published, so `protocol.ts` implements it already** — this is now the near-path, not the fallback |
 | **C. Linux box / Pi + NXBT** | Pure software BT emulation on Linux; Node talks to it over NXBT's web API / a socket bridge | Yes (v12/community branch) | <8 ms | **No hardware/soldering**, but mainline **unmaintained** (Py 3.12 breakage), BlueZ root quirks, a 2nd machine to babysit, frail handshake |
 
-**Recommendation:** start with **Path A (ESP32-WROOM + PABotBase2)** — best
-maintenance + the only path with *confirmed* Switch 2 support, and it stays on
-the Windows box via USB serial. Keep **Path B (wired Pico)** as the fallback if
-sub-frame timing on a Switch 1 ever matters. Avoid emulating from Windows
+**Recommendation — revised 2026-07-29 after a proper research pass.** Path B
+(**wired Pico W / RP2040**) is now the one to start with, reversing the earlier
+call. Two things changed: Switch 2 support for wired hobby firmware is no longer
+unconfirmed (Pokémon Automation supports the Pico family there and has tuned for
+the console's variable wired poll rate), and Path B's UART frame is **published
+and fixed**, so it could be — and has been — implemented and unit-tested with no
+hardware present. Path A's PABotBase2 framing is a versioned request/ack protocol
+that must be ported against a real board, so it buys wireless convenience at the
+cost of being unwritable until hardware lands. Keep Path A as the upgrade once a
+board exists and the wire is proven.
+
+Two further Switch-2 findings from that pass are **vision-side**, not control-side:
+Elgato capture cards wash colours out badly on S2, and HDR causes capture problems.
+Either would break colour-histogram sprite matching, so check them first if reads
+degrade after a console change. Wired polling on S2 also varies 125 Hz ↔ 62.5 Hz,
+so a controller hold must clear a 16 ms worst case, not 8 ms. Avoid emulating from Windows
 directly (impossible) and `sys-botbase`/CFW routes (require a hacked console).
 
 ### Architecture (independent of the path)
