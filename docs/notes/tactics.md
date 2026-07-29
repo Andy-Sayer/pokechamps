@@ -324,6 +324,33 @@ KO — real, but this layer has no damage numbers so it must not be dressed up a
 the headline says "only out: KO <trapper>"), and NONE (say so outright and redirect to
 spending the mon well and rescuing the partner).
 
+### Verified against the real engine (2026-07-29)
+
+Every claim above is resolved through `@pkmn/sim` by
+`packages/core/src/scripts/perish-sim-probe.ts`, with `perish-sim-truth.test.ts`
+importing the same scenarios so the report and the regression cannot drift.
+**9/9 confirmed**, including the two that rewrote the feature: KOing a move-trapper
+does free the switch *for one turn* and does hand the opponent the slot, and a
+returning Mega Gengar re-applies Shadow Tag. Reasoning had been right here, but it
+had been wrong before, and this is a position where the advice is load-bearing.
+
+**Three harness traps cost more time than the mechanics did**, and any future probe
+in this area will hit them:
+- **A self-switch is not immediate.** U-turn / Baton Pass leave a `forceSwitch`
+  request with the user *still in the active slot*. Reading `active[0]` straight
+  after the turn shows the mon "still in" and looks exactly like a failed escape.
+- **Never let the opponent Protect on the test turn.** A Protected U-turn deals no
+  damage and does not switch. The first run of the probe "proved" that trapping
+  blocks pivot moves; the log showed `|-activate|p2a: Gengar|move: Protect` and the
+  finding evaporated.
+- **`trapped` is only recomputed when a side gets a real move request**, so reading
+  it while the opponent is mid-faint-switch returns a stale value. And an attack
+  that crits can kill the returning trapper, after which "not trapped" is true for
+  a reason unrelated to the claim — so the probe Protects on the mega turn.
+
+Each claim therefore carries a CONTROL (the same line with the trap removed). When
+the control misbehaves, the harness is broken, not the mechanic.
+
 Plus the ordinary outs: escape pivots (U-turn / Volt Switch / Flip Turn / Parting Shot /
 Teleport / Chilly Reception / Shed Tail), Shed Shell, Ghost typing, and the one players
 forget — an untrapped PARTNER on the same clock should switch to clear its own count.
