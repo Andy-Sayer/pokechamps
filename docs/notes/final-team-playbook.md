@@ -79,7 +79,47 @@ The mistake was leaving it in *beside* the threat instead of pointing it *at* it
 - **Sucker Punch fails into Perish Song.** The song is a status move, so
   Kingambit's priority does nothing about it (`|-fail|p1a: Kingambit`).
 
-### …unless they Fake Out (sim‑verified, `perish-fakeout.ts`, 10/10)
+### What ACTUALLY happened, 2026‑07‑28 (`perish-real-game.ts`, 6/6)
+
+Reconstructed from `matches/1785221959416.json` + the vision banner log. The first
+analysis modelled a board **that never existed**; these are the corrections, and
+they change the answer:
+
+| I assumed | Reality |
+|---|---|
+| Blastoise = Mean Look trapper | **Blastoise = FAKE OUT.** Gengar was the *only* trapper |
+| Fake Out came from Incineroar | came from **Blastoise**; Incineroar was **not brought** |
+| Intimidate cost me the KO | **no Intimidate anywhere** — the whole −1 analysis did not apply |
+| Gengar had Shadow Ball | Gengar had **DESTINY BOND** |
+| the song was cast once | cast **twice** — they withdrew Gengar to clear its own count, brought it back, sang again |
+| Kingambit available | **not brought.** Bring was Talonflame, Garchomp, Meowscarada, Dragonite |
+
+Banner timeline: `07:00:23` song, all four on 3 · `07:02:15` **"Omar withdrew
+Gengar!"** · `07:03:42–50` **Garchomp and Dragonite faint** · `07:05:01` **second
+song** catches Talonflame + Meowscarada · `07:06:01` **Destiny Bond** trades for
+another.
+
+**The single fact the whole matchup turns on:** of the four I brought, only the
+Scarf Garchomp (231) outruns Mega Gengar (200) — Talonflame 195, Meowscarada 192,
+Dragonite 132. **The Fake Out exists to switch that one advantage off for a turn.**
+
+Three things the corrected model proves:
+- **Without Intimidate, Earthquake OHKOs Mega Gengar 40/40 on T2.** The near‑kill
+  problem was an artefact of the wrong opponent.
+- **Garchomp outspeeds Destiny Bond too.** Gengar clicked it on T2 and was KO'd
+  **40/40 with 0/40 trades** — Scarf 231 > 200, so the bond is never set.
+- **Switching on the song turn does NOT dodge it.** Switches resolve before moves,
+  so the Dragonite I brought in walked straight into perish 3 — exactly the
+  07:00:23 banner. Talonflame, which left, escaped clean.
+
+**The line: T1 eat the flinch (unavoidable). T2 Earthquake the Gengar. T3 switch
+out to clear the counts.** Verified: nobody dies — and a dead Gengar cannot come
+back for the second song, which is what actually cost the game.
+
+### If they lead Intimidate instead (sim‑verified, `perish-fakeout.ts`, 10/10)
+
+*This section models an **Incineroar** lead — a real threat, but **not** what
+happened on 2026‑07‑28. Read the section above for the actual game.*
 
 > **Re‑run any of this yourself.** Every number on this page comes from a committed
 > script, not from working it out on paper:
