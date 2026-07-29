@@ -262,6 +262,15 @@ function isDenier(s: PokemonSet): boolean {
  * no single matchup is special-cased. The perish trap that prompted it is just the
  * case that exposed the rule.
  *
+ * CALIBRATION (perish-lead-gauntlet.ts, 2026-07-29). Full games say this is a
+ * TIEBREAK, not a plan. Against a greedy player the lead choice swings results
+ * enormously (1/12 to 10/12 on the same opponent plan); against a searching player
+ * the same gaps mostly close, and "lead BOTH answers" — the opposite of rule 1 —
+ * went from worst under greedy to best under search. So the advice below is
+ * surfaced as a consideration with its reason attached, and deliberately NOT as a
+ * directive: a competent player recovers from any of these leads, and the value is
+ * in naming what is at risk, not in picking for them.
+ *
  * Three rules, in order:
  *   1. HOLD A SOLE ANSWER. If a mon is the only thing in the bring that answers some
  *      threat, and the opponent can take a turn away (Fake Out, Prankster Taunt),
