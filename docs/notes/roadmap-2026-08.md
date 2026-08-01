@@ -68,6 +68,20 @@ sits unused in CLI scripts.
 Two halves: make the fast search's calls sharper, and make `/exact` — the
 ground-truth check on a call — actually resolve the full board.
 
+> **⚡ Performance requirement (user, 2026-08-01, from live play): the live
+> search is too slow — two deepening iterations consume half the turn timer.
+> Target: reach depth ≥4 comfortably inside the turn, because depth 4 is the
+> Perish Song horizon (cast → three ticks) and anything shallower can't see the
+> trap resolve.** The audit already named the levers, in likely-payoff order:
+> **cross-pass TT reuse** (depth is baked into `ttKey`, so every deepening pass
+> re-searches the whole tree from scratch — switch gating by depth-remaining
+> would let pass N+1 start from pass N's work); **confidence-adaptive breadth**
+> (item 8 — shrink `spreadK`/switch width as inference narrows instead of
+> paying full width every ply); **root duplicate-option dedup**; plus a fresh
+> profile of matrix building vs tree walk before touching anything (the
+> mon-keyed cell cache exists — verify it's actually hitting live). Treat
+> depth-4-in-time as the acceptance test for all of it.
+
 **Sharpen the search:**
 
 7. **Joint inference wiring** — narrower opponent spreads mean truer damage
