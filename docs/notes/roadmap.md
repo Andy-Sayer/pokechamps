@@ -11,8 +11,11 @@
 > workspaces (core 1127, vision 162, server 83, tui 67, web 16, control 16).
 > Format is **Reg M-B**. The three engine layers are mature — the authoritative open
 > list is `packages/core/src/domain/unmodeled.ts`, mirrored in
-> [`mechanics-coverage.md`](mechanics-coverage.md); the only sizeable search gap left
-> is two-turn/charge moves. Since June the centre of gravity has been
+> [`mechanics-coverage.md`](mechanics-coverage.md). As of 2026-07-25 every sizeable
+> search gap is closed (two-turn/charge, redirection, team protects, move
+> restriction, self-faint moves, item removal/swap/rescale); what remains flagged is
+> deliberate policy, not gaps — accuracy/evasion drops and confusion stay
+> informational because maximin never prices dice. Since June the centre of gravity has been
 > **[`vision-plan.md`](vision-plan.md)** (screen → turn-log, now live-validated) and
 > the M-B team/gauntlet work. `packages/control` (the output half of the
 > perceive→decide→act loop) exists as a hardware-free scaffold.
@@ -523,9 +526,10 @@ plays matches live + finds bugs by doing so:
 5. **Audit completion (task #156).** ✅ Encore/Taunt/Disable volatiles
    (state lines + threat-pool effect, verified vs Bulbapedia), ✅ Fake
    Out / First Impression / Mat Block first-turn-out gating. ✅ Defog
-   screen-scope fix (opponent side only — audit finding). Remaining:
-   Trick/Switcheroo item swap, Sucker Punch fail conditions, Sand-chip →
-   no-Goggles. From the Haiku audit (all overridable today, low
+   screen-scope fix (opponent side only — audit finding). ✅ Trick/Switcheroo
+   item swap + Sucker Punch attack-conditional caveat (f7a6b4e, dual
+   finalizeTurn + predictions; the search models the exact fail conditions).
+   ✅ Sand-chip → no-Goggles (see item 11). From the Haiku audit (all overridable today, low
    priority): extended-duration items (Damp Rock / Light Clay → 8t)
    not auto-applied (we default 5t); Tailwind has no 4-turn counter yet.
    *(Knock Off removal, EOT weather/status, hazard clearing done; Snow
@@ -559,9 +563,11 @@ plays matches live + finds bugs by doing so:
     ✅ Extended-duration items (Damp/Heat/Smooth/Icy Rock → 8t weather,
     Light Clay → 8t screens); ✅ Download / Trace switch-in abilities;
     ✅ Sand-chip → no-Safety-Goggles inference signal. All mirrored into
-    the TUI finalizeTurn. **Still open:** Trick/Switcheroo item swap and
-    Sucker Punch fail conditions (both touch the dual-finalizeTurn path,
-    deferred from the parallel-agent batch).
+    the TUI finalizeTurn. ✅ Trick/Switcheroo item swap + Sucker Punch
+    attack-conditional caveat (f7a6b4e — engine.ts + BattleScreen.tsx swap
+    blocks, `isAttackConditionalMove` caveat in every prediction path,
+    exact fail conditions in the search). **The audit-leftover list is
+    empty.**
 
     *(F.1 multi-spread Pikalytics deliberately dropped from this tier —
     see pillar F. Only revisit on a clear ~50/50 two-spread split.)*
