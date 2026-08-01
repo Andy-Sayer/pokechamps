@@ -1,5 +1,13 @@
 # Training-data plan — historic games → a purpose-trained model
 
+> **⚠ TEAM TARGET (user ruling 2026-08-01): the pipeline must train against the
+> CURRENT team — `data/my-teams/TalonFlameAndyBoy.json`.** The shipped artifacts
+> are stale on this: `data/training/bring-value-model.json` was trained
+> 2026-06-29 on `anti-meta-mb` playouts, and both `gen-playout-data.ts` and
+> `sim-playout-validate.ts` hardcode `anti-meta-mb.json`; the `bring-guide` and
+> `data/prep/` sheets also still name the old team. Retrain + regenerate against
+> TalonFlameAndyBoy before trusting any of them (roadmap-2026-08 Focus A).
+
 > **PIVOT (2026-06-28): native SIMULATION replaced replay-scraping as the primary
 > data source.** The scraped gen9 replay corpus was a proxy (no Champions megas,
 > hidden EV spreads) and the baseline proved bring-quality isn't in simple features.
