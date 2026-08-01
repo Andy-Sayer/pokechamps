@@ -8,7 +8,8 @@ Long-form notes that don't belong in CLAUDE.md (which stays a tight, always-load
 - [spread-modifier.md](spread-modifier.md) — auto `isSpread` for `allAdjacent` / `allAdjacentFoes` targets
 - [champions-custom-data.md](champions-custom-data.md) — the format-custom audit: 4 custom abilities, their handling, 0 custom moves
 - [regulation-m-b.md](regulation-m-b.md) — Reg M-B (June 17 → Sept 2), **the live format**: confirmed facts (Mega Raichu X/Y), tactics implications, and the switch-day runbook (complete — reusable for the next regulation)
-- [roadmap.md](roadmap.md) — **start here for status**: strategic pillar-grouped backlog + the J north-star, with a current-state header (test counts, active track, top open item). The pillar prose below that header is historical.
+- [roadmap-2026-08.md](roadmap-2026-08.md) — **start here for status**: the current audited backlog (2026-08-01, verified against code by a three-way audit), tiered by leverage — live shakeout + the Sept 2 rotation, quick wins, engine gaps, vision grind, team/training arcs, doc hygiene
+- [roadmap.md](roadmap.md) — strategic pillar-grouped backlog + the J north-star; the priority tiers are superseded by roadmap-2026-08.md, the pillar prose is historical
 - [roadmap-2026-06.md](roadmap-2026-06.md) — ✅ CLOSED/historical: June's time-boxed execution roadmap (per-move cells, Hail-Mary outs, inference backward half, sim oracle + replay ingest, deploy validation), all shipped by 2026-06-12
 - [mechanics-coverage.md](mechanics-coverage.md) — full audit of every move/ability/item/weather/terrain across the 3 layers (calc / live engine / lookahead) + the prioritized gap backlog; the single source of truth for "what's left to model"
 - [sim-divergences.md](sim-divergences.md) — the EMPIRICAL gap list: where our search disagrees with the real `@pkmn/sim` engine, measured by the diff-harness (run `npx tsx packages/core/src/scripts/sim-diff-report.ts`)
@@ -28,6 +29,6 @@ Also here, less central but current:
 - [live-share-plan.md](live-share-plan.md) — share tokens + TUI spectator mode
 - [ui-polish-plan.md](ui-polish-plan.md) — the TUI polish backlog
 
-Package-level docs worth knowing: [`packages/vision/README.md`](../../packages/vision/README.md) (the input adapter), [`packages/control/README.md`](../../packages/control/README.md) (the output adapter — scaffold, no hardware), and [`packages/core/src/domain/gimmicks/README.md`](../../packages/core/src/domain/gimmicks/README.md) (the add-a-gimmick recipe).
+Package-level docs worth knowing: [`packages/vision/README.md`](../../packages/vision/README.md) (the input adapter), [`packages/control/README.md`](../../packages/control/README.md) (the output adapter — scaffold frozen; live path permanently shelved 2026-08-01 over ToS/ban risk), and [`packages/core/src/domain/gimmicks/README.md`](../../packages/core/src/domain/gimmicks/README.md) (the add-a-gimmick recipe).
 
 Update these alongside the code that backs them. A note that disagrees with the code is worse than no note at all.

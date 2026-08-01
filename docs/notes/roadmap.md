@@ -1,5 +1,9 @@
 # PokeChamps roadmap
 
+> **⏱ SUPERSEDED for priorities (2026-08-01):** the current, code-audited
+> backlog is [`roadmap-2026-08.md`](roadmap-2026-08.md) — start there. This doc
+> remains the strategic/pillar reference + the J north-star record.
+>
 > **⏱ Read this first (updated 2026-07-24).** This doc is the strategic/pillar
 > reference + the J north-star. The per-pillar prose below is a **historical record**
 > — treat git log and the two living gap docs as the truth, not the tiers here.
