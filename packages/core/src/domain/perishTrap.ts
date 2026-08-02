@@ -70,6 +70,9 @@ export interface PerishSide {
   moves: readonly string[];
   active: boolean;
   hpPercent: number;
+  /** Already mega-evolved: the forme's ability applies even if the item was
+   *  never seen (Gengar-Mega IS Shadow Tag — vision can't read the stone). */
+  megaActive?: boolean;
   perishCount?: number;
   /** Index of the foe holding this mon with a trapping MOVE, if any. */
   trappedByFoe?: number | null;
@@ -84,8 +87,17 @@ const has = (m: PerishSide, id: string) => m.moves.some(x => toId(x) === id);
 
 /** The ability this mon will have if it megas — Mega GENGAR gets SHADOW TAG, which is
  *  the whole trap in the Reg M-B perish core. Reading the base forme's ability alone
- *  ("Cursed Body") hides it completely until the mega has already happened. */
+ *  ("Cursed Body") hides it completely until the mega has already happened.
+ *  ALREADY-mega'd mons resolve WITHOUT the item: the forme fixes the ability, and
+ *  requiring the (vision-invisible) stone made the advisory forget the trapper the
+ *  moment the mega landed — the exact 2026-07-28 board. */
 function megaAbilityOf(m: PerishSide): string | null {
+  if (m.megaActive) {
+    const opts = getMegaOptions(m.species.replace(/-Mega(-[A-Za-z])?$/i, ''));
+    const opt = opts.length === 1 ? opts[0]
+      : m.item ? opts.find(o => toId(o.stone) === toId(m.item ?? '')) : undefined;
+    if (opt) return megaFormeAbility(opt.forme) ?? null;
+  }
   if (!m.item) return null;
   const opt = getMegaOptions(m.species).find(o => toId(o.stone) === toId(m.item ?? ''));
   return opt ? (megaFormeAbility(opt.forme) ?? null) : null;

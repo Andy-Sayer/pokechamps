@@ -1859,6 +1859,24 @@ export function koBoostForSet(set: PokemonSet, abilityHint?: string | null): Boo
   return onKoBoost(statSet, ability);
 }
 
+// The mega forme an ALREADY-MEGA'D opponent is fighting as. A transformed mon's
+// ability is fixed by its forme — Gengar-Mega IS Shadow Tag — and must never
+// depend on whether we happened to see the stone (vision can't read items; the
+// 2026-07-28 board had megaUsed=true, item unknown, and every layer concluded
+// "not trapped"). Resolution order: a candidate already remapped to the mega
+// forme (the /mega action does this) → the species' single mega option → the
+// known item's matching forme (X/Y disambiguation) → null (ambiguous X/Y with
+// no item seen — the one honestly unknowable case).
+function oppActiveMegaForme(o: SearchOppMon): string | null {
+  if (!o.megaActive) return null;
+  const cand = o.entry.candidates?.[0]?.species;
+  if (cand && /-Mega/i.test(cand)) return cand;
+  const opts = getMegaOptions(o.entry.species);
+  if (opts.length === 1) return opts[0]!.forme;
+  if (o.entry.item) return opts.find(x => toId(x.stone) === toId(o.entry.item!))?.forme ?? null;
+  return null;
+}
+
 // The opponent's (assumed worst-case) mega forme + its stone, or null if the
 // species has no mega. We don't know the opp's real item, so for the
 // adversarial "could they mega" branch we assume they hold the stone.
@@ -2262,8 +2280,17 @@ function buildTables(input: SearchInput, plan: MegaPlan): Tables {
     oppResidual: opp.map(o => residualInfo(o.entry.species, o.entry.ability, o.entry.item, o.status)),
     myStatusMove: mine.map(m => findStatusMove(m.set.moves ?? [])),
     oppStatusMove: opp.map(o => findStatusMove(o.entry.knownMoves)),
-    myAbility: mine.map(m => m.set.ability),
-    oppAbility: opp.map(o => o.entry.ability),
+    // A mega'd mon fights with its FORME's ability (fixed, item not required) —
+    // these arrays feed trap gating, status immunity and residuals, so leaving
+    // the base ability let mons walk out of a Mega Gengar's Shadow Tag.
+    myAbility: mine.map(m => {
+      const forme = m.megaActive ? myMegaForme(m.set) : null;
+      return forme ? (megaFormeAbility(forme) ?? m.set.ability) : m.set.ability;
+    }),
+    oppAbility: opp.map(o => {
+      const forme = oppActiveMegaForme(o);
+      return forme ? (megaFormeAbility(forme) ?? o.entry.ability) : o.entry.ability;
+    }),
     myRecover: mine.map(m => findRecoverMove(m.set.moves ?? [])),
     oppRecover: opp.map(o => findRecoverMove(o.entry.knownMoves)),
     myItem: mine.map(m => m.set.item ?? undefined),
@@ -5696,6 +5723,7 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
           moves: o.entry.knownMoves ?? [], active: !!o.active, hpPercent: o.hpPercent,
           perishCount: o.perishCount, trappedByFoe: o.trappedByFoe ?? null,
           choiceLockedMove: o.choiceLockedMove ?? null,
+          megaActive: !!o.megaActive,   // forme ability applies item-unseen
         })),
         // One mega per battle: once theirs is spent, a stone-less Gengar can never
         // become Shadow Tag, so the advisory must stop projecting one.
