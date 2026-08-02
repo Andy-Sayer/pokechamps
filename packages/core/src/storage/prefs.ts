@@ -22,6 +22,9 @@ export interface UiPrefs {
   /** Matchup grid: per-move damage rows (/moves). 'auto' collapses them to the compact
    *  one-line form when the terminal is too short to hold the expanded grid. */
   moveDetail?: 'auto' | 'on' | 'off';
+  /** Background search: opponent foresight plies (/foresight). null/undefined =
+   *  full maximin (exact). See SearchBreadth.oppForesight in core. */
+  oppForesight?: number | null;
 }
 
 const FILE = 'prefs.json';

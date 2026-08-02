@@ -300,7 +300,7 @@ export interface SearchResult {
   /** Restriction breadth this pass ran at (Step C widening). `full` is true for an
    *  un-restricted pass (default knobs); a restricted pass is a fast, TENTATIVE
    *  deep read and can never claim `forced`. */
-  breadth?: { spreadK: number; switchPlyLimit: number; full: boolean };
+  breadth?: { spreadK: number; switchPlyLimit: number; full: boolean; oppForesight?: number };
   /** True when the opponent's spread/item has been refined from observed damage
    *  (inference produced candidates) — surfaced so the user knows the read is
    *  data-driven, not a prior. */
@@ -639,6 +639,9 @@ interface Tables {
   // Deeper plies that still enumerate bench/phantom switches (Step B/C breadth
   // knob). Defaults to SWITCH_PLY_LIMIT; the widening driver dials it per pass.
   switchPlyLimit?: number;
+  // Opponent foresight plies (see SearchBreadth.oppForesight). Constant per
+  // createSearch — the TT lives per-Tables, so entries never mix models.
+  oppForesight?: number;
   // Transposition table for value(): keyed by (full state, depth, maxDepth, pass)
   // → fail-soft alpha-beta bound. Per-Tables so mega combos + breadth never share
   // entries; persists across toDepth() calls (the key's maxDepth keeps trees apart).
@@ -4616,18 +4619,44 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
   let best = -Infinity;
   let bestMy: Map<number, number> | null = null;   // argmax my-joint — stored for TT-move ordering
   let bestOpp: Map<number, number> | null = null;  // its argmin opp reply
+  // Foresight-limited opponent model (user knob, SearchBreadth.oppForesight):
+  // instead of minimising over full-depth continuations, the opponent COMMITS to
+  // the reply that looks best within its foresight window (a value() call at
+  // depth foresight−1 — exact maximin inside the window), and only that
+  // committed line is searched at full depth. The shallow chooser gets its own
+  // maxDepth so plyFromRoot stays the REAL ply (TT buckets and switch gating
+  // consistent with the main tree; the entries are mutually valid because both
+  // computations are the same foresight-model value function). When foresight
+  // already covers the remaining depth this branch is skipped — the classic
+  // loop below IS the foresight-≥-horizon model, so `undefined` = exact.
+  const fSight = t.oppForesight;
+  const foresightLimited = fSight != null && fSight >= 1 && fSight < depth;
   for (const my of myOrdered) {
     let worst = Infinity;
     let worstOpp: Map<number, number> | null = null;
     const floor = Math.max(alpha, best);   // below this, this my-joint is moot
     const replies = oppOrdered.length ? oppOrdered : [new Map<number, number>()];
-    for (const opp of replies) {
-      const child = resolveTurn(t, s, my, opp, pass);
-      // The child only matters if its value lands in (floor, worst); hand it that
-      // window so it can fail-high/low without a full expansion.
-      const v = value(t, child, depth - 1, floor, Math.min(beta, worst), pass, maxDepth);
-      if (v < worst) { worst = v; worstOpp = opp; }
-      if (worst <= floor) break;   // this my-joint can't lift the node above floor — prune
+    if (foresightLimited) {
+      let pick: Map<number, number> | null = null;
+      let pickChild: State | null = null;
+      let pickV = Infinity;
+      for (const opp of replies) {
+        const child = resolveTurn(t, s, my, opp, pass);
+        // Full window: the opponent's own choice isn't narrowed by MY α/β context.
+        const sv = value(t, child, fSight - 1, -Infinity, Infinity, pass, plyFromRoot + fSight);
+        if (sv < pickV) { pickV = sv; pick = opp; pickChild = child; }
+      }
+      worst = value(t, pickChild!, depth - 1, floor, beta, pass, maxDepth);
+      worstOpp = pick;
+    } else {
+      for (const opp of replies) {
+        const child = resolveTurn(t, s, my, opp, pass);
+        // The child only matters if its value lands in (floor, worst); hand it that
+        // window so it can fail-high/low without a full expansion.
+        const v = value(t, child, depth - 1, floor, Math.min(beta, worst), pass, maxDepth);
+        if (v < worst) { worst = v; worstOpp = opp; }
+        if (worst <= floor) break;   // this my-joint can't lift the node above floor — prune
+      }
     }
     if (worst > best) { best = worst; bestMy = my; bestOpp = worstOpp; }
     if (best >= beta) break;       // fail-high: the parent MIN rejects this node — cut
@@ -5286,6 +5315,20 @@ export interface SearchBreadth {
   /** Deeper plies that still enumerate switches (Step B). 0 = no switches past the
    *  root (narrowest); default SWITCH_PLY_LIMIT. */
   switchPlyLimit?: number;
+  /** OPPONENT FORESIGHT (user knob): how many plies ahead the opponent looks when
+   *  choosing each turn's reply. 1 = "best move considering just the current
+   *  turn"; omitted = full maximin (they see as far as we search — the exact
+   *  model). A rolling horizon: they re-choose every turn with fresh foresight,
+   *  and within their window both sides are assumed optimal. My continuation
+   *  after their committed reply is still searched at FULL depth, so opponent
+   *  branching collapses to ~1 beyond the foresight boundary. Soundness: value
+   *  vs a foresight-limited opponent ≥ true maximin, so a forced LOSS it finds
+   *  is real, but a "forced win" is NOT (gated off in the verdict). The perish
+   *  clock stays visible even at foresight 1 — resolveTurn ticks the clock and
+   *  applies the faint, so "stay = die, switch = live" is in the 1-ply child.
+   *  Foresight ≥ 2 is recommended once a Perish Song is CAST, so the reply that
+   *  merely delays (Protect) is distinguished from the one that escapes. */
+  oppForesight?: number;
 }
 
 export function createSearch(input: SearchInput, breadth?: SearchBreadth): PositionSearch {
@@ -5335,11 +5378,18 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
   // A pass is "full breadth" only when neither knob is restricted below the
   // defaults — i.e. it's a genuine worst-case search that may claim `forced`.
   const fullBreadth = spreadK >= SEARCH_PROFILE_K && switchPlyLimit >= SWITCH_PLY_LIMIT;
+  // Opponent-foresight knob: a deliberate USER model choice, so it does not
+  // demote the pass to "restricted" (breadth.full stays structural) — but a
+  // win proved only against a foresight-limited opponent is not forced, so it
+  // gates forcedWin below. Sanitised to a positive integer or off.
+  const oppForesight = breadth?.oppForesight != null && Number.isInteger(breadth.oppForesight) && breadth.oppForesight >= 1
+    ? breadth.oppForesight : undefined;
   const tables = new Map<string, Tables>();
   for (const myMega of myPlans) {
     for (const oppMega of oppPlans) {
       const tbl = buildTables(input, { myMega, oppMega });
       tbl.switchPlyLimit = switchPlyLimit;
+      tbl.oppForesight = oppForesight;
       tables.set(`${myMega},${oppMega}`, tbl);
     }
   }
@@ -5461,7 +5511,12 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
         return pc && (!lk || toId(pc.move) === toId(lk)) ? pc : null;
       };
 
-      const forcedWin = pess.score >= WIN && allOppRevealed;
+      // A win proved against a foresight-LIMITED opponent model is not a proof
+      // against the real one (they might play the refutation we assumed they
+      // can't see) — so forcedWin requires full foresight. A forced LOSS
+      // stands: value vs any modelled opponent ≥ true maximin, so "I lose even
+      // against this weaker model" implies "I lose against optimal" a fortiori.
+      const forcedWin = pess.score >= WIN && allOppRevealed && oppForesight == null;
       let forcedLoss = opt.score <= -WIN;
 
       // Forced-loss DEMOTION. `opt` (my best rolls, opp worst rolls) ignores move
@@ -6074,7 +6129,7 @@ export function createSearch(input: SearchInput, breadth?: SearchBreadth): Posit
         assumptions: assumptions.length ? assumptions : undefined,
         breakpoints: breakpoints.length ? breakpoints : undefined,
         explored,
-        breadth: { spreadK, switchPlyLimit, full: fullBreadth },
+        breadth: { spreadK, switchPlyLimit, full: fullBreadth, oppForesight },
         adapted,
         hailMary,
         unmodeled: unmodeled.length ? unmodeled : undefined,

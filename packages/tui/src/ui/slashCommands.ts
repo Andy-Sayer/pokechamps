@@ -31,6 +31,7 @@ export type BattleCommandId =
   | 'export'
   | 'ask'
   | 'endgame'
+  | 'foresight'
   | 'exact'
   | 'override'
   | 'share'
@@ -64,6 +65,7 @@ export const BATTLE_COMMANDS: readonly BattleCommand[] = [
   { id: 'export',   aliases: ['export', 'x'],         description: 'Show the current team as a Showdown export' },
   { id: 'ask',      aliases: ['ask'],                 description: 'Predict a hypothetical matchup: /ask m1 vs o3  or  /ask Delphox-Mega vs Sneasler' },
   { id: 'endgame',  aliases: ['endgame', 'eg'],       description: 'Best-play recommendation for the current actives (1-ply endgame solver)' },
+  { id: 'foresight', aliases: ['foresight', 'fs'],    description: 'Opponent lookahead model for the background search: /foresight N = they pick each turn\'s move seeing N plies ahead (search runs MUCH deeper; never claims a forced win), /foresight off = full maximin (exact, default). Use ≥2 when a Perish Song is in play. Sticky.' },
   { id: 'exact',    aliases: ['exact', 'sim'],        description: 'Resolve the recommended line through the REAL Showdown engine (@pkmn/sim) — ground-truth outcome over 16 RNG seeds' },
   { id: 'override', aliases: ['override', 'ov'],      description: 'Open the manual state editor (field / HP / status / boosts / positions)' },
   { id: 'share',    aliases: ['share', 'sh'],         description: 'Live-share this match (remote mode): /share for a spectator link, /share off to revoke' },

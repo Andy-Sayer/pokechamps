@@ -35,6 +35,9 @@ const TEAM = argS('--team', 'TalonFlameAndyBoy');
 const META_N = arg('--meta', 1);
 const MAX_DEPTH = arg('--depth', 5);
 const BUDGET_MS = arg('--budget', 120_000);
+// Opponent foresight plies (SearchBreadth.oppForesight); 0/omitted = full maximin.
+const FORESIGHT = arg('--foresight', 0);
+const BREADTH = FORESIGHT >= 1 ? { oppForesight: FORESIGHT } : undefined;
 
 /** Turn-1 Match: my bring picked, both leads out, opp = leads revealed only. */
 function turnOneMatch(mine: PokemonSet[], oppSets: PokemonSet[]): { match: Match; active: ActiveSlots } {
@@ -59,18 +62,19 @@ function turnOneMatch(mine: PokemonSet[], oppSets: PokemonSet[]): { match: Match
 
 function benchInput(label: string, input: SearchInput): void {
   const t0 = performance.now();
-  createSearch(input);                          // isolate table/matrix build cost
+  createSearch(input, BREADTH);                 // isolate table/matrix build cost
   const buildMs = performance.now() - t0;
-  console.log(`\n  [${label}] table build ${buildMs.toFixed(0)}ms`);
+  const fsLabel = FORESIGHT >= 1 ? ` · opp foresight ${FORESIGHT}` : '';
+  console.log(`\n  [${label}${fsLabel}] table build ${buildMs.toFixed(0)}ms`);
 
   let lastT = performance.now(); let lastNodes = 0;
   const rows: string[] = [];
   searchBudgeted(input, MAX_DEPTH, BUDGET_MS, r => {
     const now = performance.now();
     const nodes = (r.nodes ?? 0) - lastNodes;
-    rows.push(`    depth ${r.depth}: ${(now - lastT).toFixed(0)}ms · ${nodes} nodes · score ${r.score} · ${r.verdict}`);
+    rows.push(`    depth ${r.depth}: ${(now - lastT).toFixed(0)}ms · ${nodes} nodes · score ${r.score} · ${r.verdict}${r.forced ? ' (forced)' : ''}`);
     lastT = now; lastNodes = r.nodes ?? 0;
-  });
+  }, BREADTH);
   for (const row of rows) console.log(row);
 
   // The production experience: the widening tiers the TUI actually runs.
@@ -78,7 +82,8 @@ function benchInput(label: string, input: SearchInput): void {
   const liveTotal = input.mine.filter(m => m.hpPercent > 0).length + input.opp.filter(o => o.hpPercent > 0).length;
   for (const tier of wideningSchedule(liveTotal)) {
     const t = performance.now();
-    const r = searchBudgeted(input, tier.maxDepth, tier.budgetMs, undefined, tier.breadth);
+    const tierBreadth = BREADTH ? { ...tier.breadth, ...BREADTH } : tier.breadth;
+    const r = searchBudgeted(input, tier.maxDepth, tier.budgetMs, undefined, tierBreadth);
     console.log(`    tier "${tier.label}" (cap d${tier.maxDepth}, ${tier.budgetMs}ms): reached depth ${r.depth} in ${(performance.now() - t).toFixed(0)}ms`);
   }
 }

@@ -773,6 +773,12 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
   // approximating); off by default so the box stays a glanceable recommendation —
   // only the play + risks + (when losing) the only-out are always shown.
   const [showWhy, setShowWhy] = useState(!!stickyPrefs.showWhy);
+  // /foresight N — opponent lookahead model for the background search (sticky).
+  // null = full maximin (exact, the default). See SearchBreadth.oppForesight.
+  const [oppForesight, setOppForesight] = useState<number | null>(
+    typeof stickyPrefs.oppForesight === 'number' && stickyPrefs.oppForesight >= 1
+      ? Math.floor(stickyPrefs.oppForesight) : null,
+  );
   // /grid expands the matchup grid to ALL 6 opponents; off by default so the grid
   // is just the live/brought board you're actually playing.
   const [showFullGrid, setShowFullGrid] = useState(!!stickyPrefs.showFullGrid);
@@ -897,10 +903,15 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     // own matrices at its breadth and deepens cooperatively (one ply per macrotask
     // so Ink stays responsive). See wideningSchedule / endgame-search-plan.md.
     const tiers = wideningSchedule(liveMine + liveOpp);
+    // The /foresight knob rides on every tier's breadth: same widening shape,
+    // opponent replies committed at N-ply lookahead (core collapses their
+    // branching past that horizon, which is what buys the extra depth).
+    const withFs = (b: (typeof tiers)[number]['breadth']): (typeof tiers)[number]['breadth'] =>
+      oppForesight != null ? { ...b, oppForesight } : b;
     setDeepProbe(null);
     let cancelled = false;
     let ti = 0;
-    let search = createSearch(input, tiers[0]!.breadth);
+    let search = createSearch(input, withFs(tiers[0]!.breadth));
     let depth = 1;
     let prevVerdict: SearchResult['verdict'] | null = null;
     let stableFor = 0;
@@ -914,7 +925,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       const next = tiers[ti + 1];
       if (next && next.breadth.spreadK != null && prevVerdict !== 'even') return false;
       if (++ti >= tiers.length) return false;
-      search = createSearch(input, tiers[ti]!.breadth);
+      search = createSearch(input, withFs(tiers[ti]!.breadth));
       depth = 1; prevVerdict = null; stableFor = 0; lastMs = 0; prevMs = 0;
       tierStart = Date.now();
       return true;
@@ -949,7 +960,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     };
     const handle = setTimeout(step, 0);
     return () => { cancelled = true; clearTimeout(handle); };
-  }, [posSig]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [posSig, oppForesight]); // eslint-disable-line react-hooks/exhaustive-deps
   const bringTeam = match.bring.map(i => match.myTeam[i]!);
   // Grows over the match — starts as the 2 leads, each opp switch may add
   // a new index up to a cap of 4 distinct mons.
@@ -2924,6 +2935,22 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         else startWatch(args.trim() === 'full' ? 'full' : args.trim() === 'share' || args.trim() === 'gameshare' ? 'share' : undefined);
         return true;
       }
+      case 'foresight': {
+        const a = args.toLowerCase();
+        if (a === 'off' || a === 'full' || a === '0') {
+          setOppForesight(null); savePrefs({ oppForesight: null });
+          setMessage('Opponent model: full maximin (exact) — they see as deep as the search does.');
+          return true;
+        }
+        const n = Number.parseInt(a, 10);
+        if (!Number.isInteger(n) || n < 1 || n > 9) {
+          setMessage(`/foresight N (1-9) or /foresight off — currently ${oppForesight ?? 'off (full maximin)'}. N = plies the opp sees when picking each move; lets the search run much deeper, but a "forced win" is never claimed under it. Use ≥2 with a Perish Song in play.`);
+          return true;
+        }
+        setOppForesight(n); savePrefs({ oppForesight: n });
+        setMessage(`Opponent model: sees ${n} ${n === 1 ? 'ply' : 'plies'} ahead${n === 1 ? ' (their best move for just the current turn)' : ''} — search will deepen further; forced wins are not claimed under this model.`);
+        return true;
+      }
       case 'crit': setShowCrits(c => { savePrefs({ showCrits: !c }); return !c; }); return true;
       case 'allmoves': setShowAllMoves(a => { savePrefs({ showAllMoves: !a }); return !a; }); return true;
       case 'why': setShowWhy(w => { savePrefs({ showWhy: !w }); setMessage(`Search detail ${!w ? 'on' : 'off'}.`); return !w; }); return true;
@@ -3715,6 +3742,9 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
         // combos, and the non-attack action kinds ACTUALLY in the tree — so it
         // never claims "switches" until they're real nodes).
         let conf = `${turns} turn${turns === 1 ? '' : 's'} ahead`;
+        // Foresight-limited opponent model: say so right in the chip — the verdict
+        // is conditional on them not out-planning the modelled horizon.
+        if (bestSearch.breadth?.oppForesight != null) conf += ` · opp sees ${bestSearch.breadth.oppForesight}`;
         const ex = bestSearch.explored;
         if (ex) {
           const parts: string[] = [];
