@@ -81,6 +81,11 @@ ground-truth check on a call — actually resolve the full board.
 > profile of matrix building vs tree walk before touching anything (the
 > mon-keyed cell cache exists — verify it's actually hitting live). Treat
 > depth-4-in-time as the acceptance test for all of it.
+> **Baseline measured (`search-bench.ts`, 2026-08-01):** live turn-1 = depth 1
+> in 0.7s, depth 2 in 8.1s, depth 3 DNF at 120s; ~35× nodes/ply. The full plan
+> of record — chess-engine toolkit mapped to our simultaneous-move maximin
+> (TT rebuild → ordering stack → aspiration → LMR → Lazy SMP on the 16-core
+> box → DOαβ) — is [`search-perf-chess-research.md`](search-perf-chess-research.md).
 
 **Sharpen the search:**
 
