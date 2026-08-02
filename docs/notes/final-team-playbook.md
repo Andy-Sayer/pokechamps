@@ -186,6 +186,19 @@ back for the second song, which is what actually cost the game.
 
 #### …but they will just Protect on T2
 
+> **CORRECTION (2026‑08‑02, user review):** the double‑Protect below was OUR
+> scripted stress‑test (`perish-real-game.ts:224` hard‑codes Gengar's T2 *and*
+> T3 choices), not observed play and **not established perish‑trap piloting** —
+> a consecutive Protect is a 1/3‑success gamble that good pilots avoid, and the
+> real opponent never clicked it (they single‑Protected at most and rotated).
+> Read the 50% below as "the worst case if they gamble", not their plan. A
+> realistic pilot's post‑song line is **one Protect at most, then withdraw** —
+> which means (a) staying in with Garchomp is stronger than the coin‑flip
+> framing suggested, since T3 Earthquake lands on any Gengar that stays, and
+> (b) the whole exchange converges on the **rotation war** either way — see the
+> deep‑search re‑analysis above, whose no‑consecutive‑protect model turns out
+> to match good piloting, not just policy.
+
 They will, and it blanks the Earthquake. Measured over 40 seeds: they Protect T2
 and repeat on T3, **Gengar dies by T3 on 20/40 (50%)**. So once the song has landed
 and Garchomp is the only answer, **it is a coin flip.**
