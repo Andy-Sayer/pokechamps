@@ -213,6 +213,45 @@ biggest practical gain here is noticing the instant the trapper leaves the field
   mon that can *leave*, and its U‑turn is also how the clean Garchomp arrives —
   with no perish count, and unflinchable because Fake Out is already spent.
 
+### Deep-search re-analysis (2026‑08‑02, `perish-counter-deep.ts`)
+
+The foresight search built 2026‑08‑01/02 can now hold the whole perish cycle
+(depth 4‑5 = cast → three ticks) in one read. Run against the reconstructed
+2026‑07‑28 opponents with all sets known, it **agrees with everything above and
+adds one refinement**:
+
+- **Turn 1 (advised leads, exact model d3):** chip Blastoise with Flower Trick +
+  spread Earthquake; verdict *even*. The deeper foresight‑2 read (d4) expects the
+  song and answers it by **pre‑rotating Garchomp out for Dragonite** — keeping
+  the one mon that outruns Mega Gengar clean of any count. Still *even*: the
+  matchup is balanced when both sides play it right, which matches the 50%
+  measured above.
+- **The post‑song turn (the "coin flip"):** the shallow exact read (d3) picks the
+  T2 Earthquake — the coin flip above. The **foresight‑2 depth‑4 read instead
+  rotates Garchomp → Dragonite and chips Blastoise, and scores it ~+1 mon**
+  (`winning`, +1072): don't flip the coin at all. The logic mirrors what the
+  real opponent did to us — **count management**. Their Gengar's best line is to
+  leave (clearing its count for song #2); if my Scarf Garchomp ALSO leaves, its
+  count clears, the Fake Out is already spent, and when Gengar returns for the
+  second song the fresh Garchomp comes back with it — now the 40/40 Earthquake
+  is available *without* a ticking clock behind it. Staying in to EQ risks the
+  Protect dance with my own count running; rotating loses nothing against
+  Protect and wins the reset war.
+- **Model caveats, stated honestly:** the +1072 is against a foresight‑2 pilot
+  (who withdraws Gengar out of the Earthquake threat rather than Protecting —
+  plausible, and what Omar actually did, but not proven optimal); a foresight‑1
+  read claims an outright win but only because a 1‑ply opponent abandons the
+  trap — **never trust foresight‑1 verdicts against setup teams**. The rotate
+  line has NOT yet had the 40‑seed sim treatment the Earthquake line got —
+  that's the outstanding validation. This study also flushed out and fixed two
+  engine bugs (the foresight chooser's unbounded window; Knock Off stripping
+  mega stones), so it earned its keep either way.
+
+**Net playbook update: on the post‑song turn, prefer the rotation (Garchomp out,
+target any pivot at the non‑Protecting slot) over the immediate Earthquake
+unless Gengar is already locked into staying. The Earthquake is not the plan —
+it's the punish for a Gengar that stays in.**
+
 ### If they lead Intimidate instead (sim‑verified, `perish-fakeout.ts`, 10/10)
 
 *This section models an **Incineroar** lead — a real threat, but **not** what
