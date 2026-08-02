@@ -27,7 +27,7 @@ import {
   createSearch, searchBudgeted, searchInputFromMatch, wideningSchedule,
   type ActiveSlots, type SearchInput,
 } from '../domain/endgameSearch.js';
-import { NEUTRAL_FIELD, type Match, type OpponentEntry, type PokemonSet } from '../domain/types.js';
+import { NEUTRAL_FIELD, type Match, type OpponentEntry, type PokemonSet, type TeamSlot } from '../domain/types.js';
 
 const arg = (f: string, d: number) => { const i = process.argv.indexOf(f); return i >= 0 ? Number(process.argv[i + 1]) : d; };
 const argS = (f: string, d: string) => { const i = process.argv.indexOf(f); return i >= 0 ? String(process.argv[i + 1]) : d; };
@@ -39,18 +39,20 @@ const BUDGET_MS = arg('--budget', 120_000);
 /** Turn-1 Match: my bring picked, both leads out, opp = leads revealed only. */
 function turnOneMatch(mine: PokemonSet[], oppSets: PokemonSet[]): { match: Match; active: ActiveSlots } {
   const opponentTeam: OpponentEntry[] = oppSets.map(s => ({ species: s.species, knownMoves: [] }));
-  const bring = scoreBrings(mine, opponentTeam)[0]!.myIndices;
+  const bring = scoreBrings(mine, opponentTeam)[0]!.myIndices as TeamSlot[];
   // Opp leads: their bring heuristic's first two (a stand-in for their preview
   // choice — the cost profile only cares that exactly two are revealed).
   const oppBring = scoreBrings(oppSets, mine.map(s => ({ species: s.species, knownMoves: [] })))[0]!.myIndices;
-  const leads = oppBring.slice(0, 2);
+  const leads = oppBring.slice(0, 2) as TeamSlot[];
   const match: Match = {
     id: 'bench', startedAt: '2026-08-01T00:00:00.000Z',
     myTeam: mine, opponentTeam, bring,
     opponentBrought: leads,               // turn 1: only the leads are revealed
     turns: [], field: NEUTRAL_FIELD,
-    active: { mine: [bring[0]!, bring[1]!], theirs: [leads[0]!, leads[1]!] },
-  } as Match;
+    // Rich per-slot state is irrelevant here — searchInputFromMatch takes the
+    // slot INDICES as its own `active` parameter below.
+    active: { mine: [null, null], theirs: [null, null] },
+  };
   const active: ActiveSlots = { mine: [bring[0]!, bring[1]!], theirs: [leads[0]!, leads[1]!] };
   return { match, active };
 }

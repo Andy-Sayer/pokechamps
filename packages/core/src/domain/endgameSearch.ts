@@ -645,7 +645,10 @@ interface Tables {
   // + myKey/oppKey: canonical keys of the argmax my-joint and its argmin opp reply,
   // used to try the best move FIRST on a transposition hit (sharper alpha-beta, same
   // result — exact). Absent on nodes that never stored a best joint (cutoffs).
-  tt?: Map<string, { value: number; flag: 0 | 1 | 2; myKey?: string; oppKey?: string }>;   // flag: 0 exact · 1 lower · 2 upper
+  // flag: 0 exact · 1 lower · 2 upper. `depth` = remaining search depth the entry
+  // was computed with — an entry serves any query needing ≤ that depth (win-scores
+  // rebased, see the probe), and its best-joint keys serve ORDERING at any depth.
+  tt?: Map<string, { depth: number; value: number; flag: 0 | 1 | 2; myKey?: string; oppKey?: string }>;
   mySpecies: string[];
   oppSpecies: string[];
   mySpeed: number[];           // effective base speed incl. Spe stage (pre-field)
@@ -4448,19 +4451,23 @@ function orderJoints(joints: Array<Map<number, number>>, off: Cell[][], spread: 
 }
 
 // Complete transposition key for value(): every State field that can change the
-// result, PLUS depth + maxDepth (switch availability is gated by plyFromRoot =
-// maxDepth − depth) + the pass (regime + opp-survival vector flip the damage/KO
-// model). Missing ANY value-affecting field would serve a stale value, so this is
-// exhaustive over State. Built per node; a hit skips the whole subtree, so the
-// build cost is amortised.
-function ttKey(s: State, depth: number, maxDepth: number, pass: Pass): string {
+// result, PLUS the ply-from-root BUCKET + the pass (regime + opp-survival vector
+// flip the damage/KO model). Depth is deliberately NOT in the key — it lives on
+// the entry, so one deepening pass's work is visible to the next (value reuse
+// where the stored depth suffices, best-joint ORDERING everywhere). The bucket is
+// min(plyFromRoot, switchPlyLimit): below the limit the exact ply gates switch
+// availability, at/past it every descendant is switch-free too, so all deeper
+// plies share entries — which is where the exponential mass lives. Missing ANY
+// value-affecting field would serve a stale value, so this is exhaustive over
+// State.
+function ttKey(s: State, pfrBucket: number, pass: Pass): string {
   const nb = (a: number[]) => a.join('.');
   const bl = (a: boolean[]) => a.map(x => (x ? 1 : 0)).join('');
   const nn = (a: (number | null)[]) => a.map(x => (x == null ? 'n' : x)).join('.');
   const bk = (b: BoostMap) => `${b.atk ?? 0},${b.def ?? 0},${b.spa ?? 0},${b.spd ?? 0},${b.spe ?? 0}`;
   const bs = (a: BoostMap[]) => a.map(bk).join(';');
   return [
-    depth, maxDepth, pass.regime, bl(pass.survOpp), bl(pass.survMy),
+    pfrBucket, pass.regime, bl(pass.survOpp), bl(pass.survMy),
     nb(s.myHp), nb(s.oppHp), nb(s.myActive), nb(s.oppActive), bl(s.oppSeen),
     s.myStatus.join(''), s.oppStatus.join(''), nb(s.myToxicN), nb(s.oppToxicN), nb(s.mySleepTurns), nb(s.oppSleepTurns), nb(s.myYawn), nb(s.oppYawn), nb(s.myPerish), nb(s.oppPerish), nn(s.myTrappedBy), nn(s.oppTrappedBy),
     bs(s.myBoost), bs(s.oppBoost), nn(s.mySeeded), nn(s.oppSeeded),
@@ -4493,6 +4500,11 @@ function ttKey(s: State, depth: number, maxDepth: number, pass: Pass): string {
 // that FULLY completed. No try/catch sits between value() and the driver in the
 // hot path (verified), so the throw always propagates. Unbudgeted callers leave
 // the deadline at Infinity → the check never fires → zero behaviour change.
+// TT insert cap (entries, not bytes). String keys run ~300-600B; 4M entries ≈
+// a couple of GB — fine on the 64GB home box, and hits are still served past
+// the cap, only inserts stop. Existing keys may still deepen in place.
+const TT_MAX_ENTRIES = 4_000_000;
+
 const SEARCH_TIMEOUT = { searchTimeout: true } as const;
 let searchDeadline = Infinity;
 let searchNodes = 0;
@@ -4525,18 +4537,34 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
   if (term !== null) return term;
   if (depth === 0) return leafScore(t, s);
 
-  // Transposition-table probe (~half of internal nodes recur — measured). A cached
-  // bound serves the whole subtree: EXACT returns outright; a LOWER bound that
-  // already clears beta is a fail-high; an UPPER bound at/below alpha is a fail-low.
-  // Otherwise we search and overwrite. Keyed exhaustively (see ttKey) so a hit is
-  // always for an identical state at this depth/ply/pass — no stale reuse.
+  // Ply arithmetic BEFORE the probe — the key needs the switch-gate bucket.
+  const plyFromRoot = maxDepth - depth;
+  const ttLim = t.switchPlyLimit ?? SWITCH_PLY_LIMIT;
+  // Transposition-table probe (~half of internal nodes recur — measured). An entry
+  // computed at depth ≥ ours serves the whole subtree: EXACT returns outright; a
+  // LOWER bound that already clears beta is a fail-high; an UPPER bound at/below
+  // alpha is a fail-low. Win-magnitude scores encode distance-to-win in remaining
+  // depth (terminal = ±(WIN + depth)), so a deeper entry's win-score is REBASED by
+  // the depth difference; if that drops it below WIN magnitude the winning line
+  // doesn't fit our horizon — the entry then serves ordering only. A too-shallow
+  // entry also serves ordering only: its best joints are still the best guess, and
+  // trying them first is what makes iterative deepening pay for itself.
   const tt = t.tt;
-  const ttk = tt ? ttKey(s, depth, maxDepth, pass) : '';
+  const ttk = tt ? ttKey(s, Math.min(plyFromRoot, ttLim), pass) : '';
   const e = tt ? tt.get(ttk) : undefined;
-  if (e) {
-    if (e.flag === 0) return e.value;
-    if (e.flag === 1 && e.value >= beta) return e.value;
-    if (e.flag === 2 && e.value <= alpha) return e.value;
+  if (e && e.depth >= depth) {
+    let v = e.value;
+    const dd = e.depth - depth;
+    let usable = true;
+    if (dd > 0 && Math.abs(v) >= WIN) {
+      v = v > 0 ? v - dd : v + dd;
+      if (Math.abs(v) < WIN) usable = false;   // win/loss beyond this horizon
+    }
+    if (usable) {
+      if (e.flag === 0) return v;
+      if (e.flag === 1 && v >= beta) return v;
+      if (e.flag === 2 && v <= alpha) return v;
+    }
   }
 
   // Deeper plies: no root-only actions (field/setup/…), but Taunt/Encore
@@ -4552,8 +4580,7 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
   // damage cells are already built at the root — so this only enables enumeration.
   // Lets the lookahead see "I switch my wall in next turn" and "they pivot to their
   // answer (incl. an unrevealed mon)", while the deep tail stays switch-free.
-  const plyFromRoot = maxDepth - depth;
-  const switchesAllowed = plyFromRoot < (t.switchPlyLimit ?? SWITCH_PLY_LIMIT);
+  const switchesAllowed = plyFromRoot < ttLim;
   const myBench = switchesAllowed ? benchSwitchTargets(s.myActive, s.myHp, t.myN) : U;
   const oppBench = switchesAllowed ? benchSwitchTargets(s.oppActive, s.oppHp, t.oppN) : U;
   const myRestrict = { taunt: s.myTaunt.map(x => x > 0), encore: s.myEncore.map(x => x > 0), encoreAct: s.myEncoreAct, choice: t.myChoice, locked: s.myLocked.map(x => x > 0), choiceLock: choiceLockFor(s.myChoiceMove, t.offMoves, t.mySpread, t.myPivotMove, s.oppActive, s.oppHp, s.myCharging) };
@@ -4607,8 +4634,13 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
   }
   // Store the fail-soft bound: below alpha ⇒ upper bound, at/above beta ⇒ lower
   // bound, strictly inside the window ⇒ exact maximin value. + the best joint keys
-  // for TT-move ordering on future transposition hits.
-  if (tt) tt.set(ttk, { value: best, flag: best <= alpha ? 2 : best >= beta ? 1 : 0, myKey: bestMy ? jointKey(bestMy) : undefined, oppKey: bestOpp ? jointKey(bestOpp) : undefined });
+  // for TT-move ordering on future transposition hits. Depth-preferred: never
+  // clobber a deeper entry with a shallower result (the deeper one serves both
+  // value AND ordering better). Soft-capped so a long session can't grow the
+  // table without bound — past the cap we keep serving hits but stop inserting.
+  if (tt && (e ? depth >= e.depth : tt.size < TT_MAX_ENTRIES)) {
+    tt.set(ttk, { depth, value: best, flag: best <= alpha ? 2 : best >= beta ? 1 : 0, myKey: bestMy ? jointKey(bestMy) : undefined, oppKey: bestOpp ? jointKey(bestOpp) : undefined });
+  }
   return best;
 }
 
