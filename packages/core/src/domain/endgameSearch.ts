@@ -4990,17 +4990,44 @@ function rootSearch(t: Tables, s0: State, depth: number, pass: Pass): { score: n
   // among equal-value ties (ordering them would only change tie-breaking, not the
   // score). value()'s internal ordering is fully safe since only the score propagates.
   const oppJoints = orderJoints(rootOppJoints(t, s0), t.thr, t.oppSpread, t.oppPrioCell);
+  // ROOT-COMMIT under the foresight model: originally the root kept exact-min
+  // over every opponent reply even when oppForesight was set ("conservative
+  // v1"), but that left each of my root joints paying ~15-20 FULL-depth reply
+  // subtrees — measured as THE depth-4 wall (foresight-1 d4 completed in 110s
+  // with the root exact; the deep tree was no longer dominant). Under the
+  // knob the opponent's turn-1 reply now commits exactly like every deeper
+  // ply: chosen by a foresight-deep chooser, only the committed child gets
+  // the full-depth search. The explanation layers are unaffected — oppLine /
+  // risks / obviousOppPlay derive from oppBestReply() and the threat cells,
+  // not from this loop. Monotonicity and the forcedWin gate carry over
+  // unchanged. fSight ≥ depth ⇒ the chooser sees the whole horizon ⇒ take
+  // the classic exact path (bit-identical, and cheaper than choosing twice).
+  const fSight = t.oppForesight;
+  const commitRoot = fSight != null && fSight >= 1 && fSight < depth;
   for (const my of myJoints) {
     let worst = Infinity;
     const replies = oppJoints.length ? oppJoints : [new Map<number, number>()];
-    for (const opp of replies) {
-      const child = resolveTurn(t, s0, my, opp, pass);
-      // floor = bestScore (root has no inherited alpha); ceiling = the running min
-      // for this my-joint, so a reply that can't drop below what we already have is
-      // cut. A fail-low/high return is still enough to accept or reject the joint.
-      const v = value(t, child, depth - 1, bestScore, worst, pass, depth - 1);
-      if (v < worst) worst = v;
-      if (worst <= bestScore) break;
+    if (commitRoot) {
+      let pickChild: State | null = null;
+      let pickV = Infinity;
+      for (const opp of replies) {
+        const child = resolveTurn(t, s0, my, opp, pass);
+        // Chooser maxDepth = fSight-1 keeps the child at plyFromRoot 0, same
+        // as the full call below — TT buckets and switch gating stay real.
+        const sv = value(t, child, fSight - 1, -Infinity, Infinity, pass, fSight - 1);
+        if (sv < pickV) { pickV = sv; pickChild = child; }
+      }
+      worst = value(t, pickChild!, depth - 1, bestScore, Infinity, pass, depth - 1);
+    } else {
+      for (const opp of replies) {
+        const child = resolveTurn(t, s0, my, opp, pass);
+        // floor = bestScore (root has no inherited alpha); ceiling = the running min
+        // for this my-joint, so a reply that can't drop below what we already have is
+        // cut. A fail-low/high return is still enough to accept or reject the joint.
+        const v = value(t, child, depth - 1, bestScore, worst, pass, depth - 1);
+        if (v < worst) worst = v;
+        if (worst <= bestScore) break;
+      }
     }
     if (worst > bestScore) { bestScore = worst; bestJoint = my; }
   }
