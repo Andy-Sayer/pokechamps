@@ -260,10 +260,36 @@ adds one refinement**:
   engine bugs (the foresight chooser's unbounded window; Knock Off stripping
   mega stones), so it earned its keep either way.
 
-**Net playbook update: on the post‑song turn, prefer the rotation (Garchomp out,
-target any pivot at the non‑Protecting slot) over the immediate Earthquake
-unless Gengar is already locked into staying. The Earthquake is not the plan —
-it's the punish for a Gengar that stays in.**
+> **RETRACTION (2026‑08‑02, same day):** the "rotate Garchomp out" line above
+> was **illegal** — Mega Gengar's Shadow Tag pins Garchomp, and the model only
+> allowed the switch because of a since‑fixed bug (every layer resolved a
+> mega'd mon's ability from its BASE forme, or demanded the vision‑invisible
+> stone item; fixed in `7469363`, found by running the search on the real
+> saved game). Pre‑song rotation (P1, before the mega) stays legal and right.
+
+**Corrected doctrine (2026‑08‑02, validated on the REAL saved board,
+`analyze-snapshot.ts --match 1785221959416`):**
+
+1. **Kill the trapper FIRST — kill order decides the game.** On the actual
+   post‑song board (Dragonite + Garchomp trapped, clocks on 3) the corrected
+   engine reads **winning** (+2195 exact, win‑level at foresight‑2 depth 5):
+   Earthquake → **Gengar**, Draco Meteor → Blastoise. It covers both replies:
+   a Gengar that stays dies (40/40) and the trap opens permanently; a Gengar
+   that switches lifts Shadow Tag and my mons walk free with the counts
+   clearing. The advisory now states the out directly: *"KO Gengar (Shadow
+   Tag) — nothing left on their side re‑traps, so the switch opens."*
+2. **Never open the OTHER slot while the trapper lives.** The real loss:
+   Blastoise died first, the empty slot let Gengar cycle out (clearing its own
+   count, switches resolve before moves) and straight back in to re‑trap and
+   re‑sing. Killing Blastoise before Gengar hands them the cycle.
+3. **Mid‑tag, the only escapes are a pivot (U‑turn bypasses trapping — aim it
+   at the non‑Protecting slot) or a Gengar absence.** Raw switches are not
+   moves you have.
+4. *Model caveat on deep reads:* the search only enumerates switches in the
+   first two plies, so an opponent's DEEP re‑entry (the second‑song return)
+   sits beyond a single read's horizon — reads that rely on "they cycle back
+   later" undercount that threat. The trapper‑first line is robust to it; any
+   line that deliberately opens a slot is not, and needs the sim treatment.
 
 ### If they lead Intimidate instead (sim‑verified, `perish-fakeout.ts`, 10/10)
 
