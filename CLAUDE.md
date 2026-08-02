@@ -17,7 +17,8 @@ Node TUI assistant for Pokémon Champions doubles:
 ## Commands
 
 - `npm install`
-- `npm start` — launch the TUI
+- `npm start` — launch the TUI (tsx; fine for UI work)
+- `npm run start:fast` — launch the TUI **compiled** (esbuild → node; ~1.7× faster live search — use for real matches; see [`docs/notes/compiled-run.md`](docs/notes/compiled-run.md))
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run refresh-data` — dump `@pkmn/dex` into `data/*.json`. Preserves `format.champions.json`.
 - `npm run validate-format` — confirm every id in the format allow-lists resolves in `@pkmn/dex`. Run after hand-editing the format file.

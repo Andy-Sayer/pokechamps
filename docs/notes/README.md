@@ -2,6 +2,7 @@
 
 Long-form notes that don't belong in CLAUDE.md (which stays a tight, always-loaded project guide). Each file here covers one topic in enough depth to onboard a new contributor — or a fresh Claude session.
 
+- [compiled-run.md](compiled-run.md) — `npm run start:fast`: running the TUI compiled (esbuild) for the ~1.7× live-search speedup; the keepNames finding, the data-path rule, and the two-runtime equivalence check
 - [battle-syntax.md](battle-syntax.md) — every action / state line / slash command the BattleScreen parser accepts
 - [speed-inference-brackets.md](speed-inference-brackets.md) — how `effectivePriority` decides which action pairs generate speed signals (Quick Claw, Prankster, Gale Wings, Triage, Stall, pivot switches)
 - [dual-forme-predictions.md](dual-forme-predictions.md) — pre-mega base + post-mega display contract; `resolveSpecies(active)` semantics
