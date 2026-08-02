@@ -4647,8 +4647,13 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
       let pickV = Infinity;
       for (const opp of replies) {
         const child = resolveTurn(t, s, my, opp, pass);
-        // Full window: the opponent's own choice isn't narrowed by MY α/β context.
-        const sv = value(t, child, fSight - 1, -Infinity, Infinity, pass, plyFromRoot + fSight);
+        // The chooser is a pure argmin, so the running minimum is a sound β:
+        // a reply that fails high above pickV can't win the argmin, and the
+        // fail-soft return still orders it correctly. (It must NOT inherit
+        // MY α/β context — only its own.) Without this bound the chooser cost
+        // exceeded the pruned exact min-loop on wide boards — measured 180s
+        // vs 21s at d3 on the perish-team position.
+        const sv = value(t, child, fSight - 1, -Infinity, pickV, pass, plyFromRoot + fSight);
         if (sv < pickV) { pickV = sv; pick = opp; pickChild = child; }
       }
       return { worst: value(t, pickChild!, childDepth, floor, beta, pass, maxD), worstOpp: pick };
@@ -5047,7 +5052,8 @@ function rootSearch(t: Tables, s0: State, depth: number, pass: Pass): { score: n
         const child = resolveTurn(t, s0, my, opp, pass);
         // Chooser maxDepth = fSight-1 keeps the child at plyFromRoot 0, same
         // as the full call below — TT buckets and switch gating stay real.
-        const sv = value(t, child, fSight - 1, -Infinity, Infinity, pass, fSight - 1);
+        // Running-min as β: sound for a pure argmin (see the value() chooser).
+        const sv = value(t, child, fSight - 1, -Infinity, pickV, pass, fSight - 1);
         if (sv < pickV) { pickV = sv; pickChild = child; }
       }
       worst = value(t, pickChild!, depth - 1, bestScore, Infinity, pass, depth - 1);
