@@ -105,6 +105,13 @@ never has to pay.
 7. Experiments as time allows: null-move analog, futility margins, KO-trade
    quiescence extension.
 
+**Progress 2026-08-01 (post-research):** the opponent-foresight knob
+(`/foresight N`, SearchBreadth.oppForesight — the user-directed variant of
+opponent modelling, commit c5cdad1) got **depth 4 completing for the first
+time**: 110s at foresight 1 on the live bench (d3 33s). The root keeps
+exact-min over opponent replies by design — committing the root reply too
+under foresight is the next multiplicative lever, ahead of LMR/aspiration.
+
 **Acceptance test, unchanged:** `search-bench.ts` live turn-1 scenario
 completes **depth 4 comfortably inside the turn timer**. Expected stacking:
 ordering+TT (~5-20×) × LMR (~2-3×) × 12 workers (~8-10×) ≫ the ~1000× the
