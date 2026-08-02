@@ -902,7 +902,7 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
     // wide board → fast full pass, then a narrow+deep probe). Each tier builds its
     // own matrices at its breadth and deepens cooperatively (one ply per macrotask
     // so Ink stays responsive). See wideningSchedule / endgame-search-plan.md.
-    const tiers = wideningSchedule(liveMine + liveOpp);
+    const tiers = wideningSchedule(liveMine + liveOpp, oppForesight != null);
     // The /foresight knob rides on every tier's breadth: same widening shape,
     // opponent replies committed at N-ply lookahead (core collapses their
     // branching past that horizon, which is what buys the extra depth).

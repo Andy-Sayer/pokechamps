@@ -4508,6 +4508,10 @@ function ttKey(s: State, pfrBucket: number, pass: Pass): string {
 // the cap, only inserts stop. Existing keys may still deepen in place.
 const TT_MAX_ENTRIES = 4_000_000;
 
+// My-side LMR: this many best-ordered joints always get full depth; the rest
+// are probed a ply shallower and re-searched only on a fail-high surprise.
+const LMR_FULL_JOINTS = 3;
+
 const SEARCH_TIMEOUT = { searchTimeout: true } as const;
 let searchDeadline = Infinity;
 let searchNodes = 0;
@@ -4631,11 +4635,12 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
   // loop below IS the foresight-≥-horizon model, so `undefined` = exact.
   const fSight = t.oppForesight;
   const foresightLimited = fSight != null && fSight >= 1 && fSight < depth;
-  for (const my of myOrdered) {
-    let worst = Infinity;
-    let worstOpp: Map<number, number> | null = null;
-    const floor = Math.max(alpha, best);   // below this, this my-joint is moot
+  // Evaluate one of my joints against the opponent model, with the children
+  // searched `childDepth` deep. Shared by the full-depth path and the LMR
+  // reduced probe below. `maxD` keeps ply arithmetic real for the child calls.
+  const evalJoint = (my: Map<number, number>, childDepth: number, floor: number): { worst: number; worstOpp: Map<number, number> | null } => {
     const replies = oppOrdered.length ? oppOrdered : [new Map<number, number>()];
+    const maxD = maxDepth - ((depth - 1) - childDepth);   // child ply == plyFromRoot+1 at any reduction
     if (foresightLimited) {
       let pick: Map<number, number> | null = null;
       let pickChild: State | null = null;
@@ -4646,19 +4651,47 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
         const sv = value(t, child, fSight - 1, -Infinity, Infinity, pass, plyFromRoot + fSight);
         if (sv < pickV) { pickV = sv; pick = opp; pickChild = child; }
       }
-      worst = value(t, pickChild!, depth - 1, floor, beta, pass, maxDepth);
-      worstOpp = pick;
-    } else {
-      for (const opp of replies) {
-        const child = resolveTurn(t, s, my, opp, pass);
-        // The child only matters if its value lands in (floor, worst); hand it that
-        // window so it can fail-high/low without a full expansion.
-        const v = value(t, child, depth - 1, floor, Math.min(beta, worst), pass, maxDepth);
-        if (v < worst) { worst = v; worstOpp = opp; }
-        if (worst <= floor) break;   // this my-joint can't lift the node above floor — prune
-      }
+      return { worst: value(t, pickChild!, childDepth, floor, beta, pass, maxD), worstOpp: pick };
     }
-    if (worst > best) { best = worst; bestMy = my; bestOpp = worstOpp; }
+    let worst = Infinity;
+    let worstOpp: Map<number, number> | null = null;
+    for (const opp of replies) {
+      const child = resolveTurn(t, s, my, opp, pass);
+      // The child only matters if its value lands in (floor, worst); hand it that
+      // window so it can fail-high/low without a full expansion.
+      const v = value(t, child, childDepth, floor, Math.min(beta, worst), pass, maxD);
+      if (v < worst) { worst = v; worstOpp = opp; }
+      if (worst <= floor) break;   // this my-joint can't lift the node above floor — prune
+    }
+    return { worst, worstOpp };
+  };
+  // MY-side Late Move Reductions: after the first LMR_FULL_JOINTS ordered
+  // joints, probe the rest ONE PLY SHALLOWER; only a probe that beats the
+  // current floor is re-searched at full depth, so a surprise late joint is
+  // always verified before it can become the answer. Two contract guards:
+  //   • the OPTIMISTIC pass is excluded — it owns forced-LOSS detection, and a
+  //     reduced probe under-estimating my saving move is exactly the failure
+  //     the Hail-Mary machinery exists to prevent;
+  //   • a node whose result rests on UNVERIFIED reduced probes (every joint
+  //     failed low at reduced depth) is NOT stored in the TT — its "upper
+  //     bound" isn't sound at this depth, and serving it would poison callers.
+  // The pessimistic pass may only UNDER-claim a forced win under LMR — the
+  // conservative direction — so it keeps the reduction.
+  const lmrEligible = depth >= 3 && pass.regime !== 'optimistic' && myOrdered.length > LMR_FULL_JOINTS + 1;
+  let bestUnverified = false;
+  for (let mi = 0; mi < myOrdered.length; mi++) {
+    const my = myOrdered[mi]!;
+    const floor = Math.max(alpha, best);   // below this, this my-joint is moot
+    let r: { worst: number; worstOpp: Map<number, number> | null };
+    let verified = true;
+    if (lmrEligible && mi >= LMR_FULL_JOINTS) {
+      r = evalJoint(my, depth - 2, floor);            // reduced probe
+      if (r.worst > floor) r = evalJoint(my, depth - 1, floor);   // surprise → verify full
+      else verified = false;
+    } else {
+      r = evalJoint(my, depth - 1, floor);
+    }
+    if (r.worst > best) { best = r.worst; bestMy = my; bestOpp = r.worstOpp; bestUnverified = !verified; }
     if (best >= beta) break;       // fail-high: the parent MIN rejects this node — cut
   }
   // Store the fail-soft bound: below alpha ⇒ upper bound, at/above beta ⇒ lower
@@ -4667,7 +4700,7 @@ function value(t: Tables, s: State, depth: number, alpha: number, beta: number, 
   // clobber a deeper entry with a shallower result (the deeper one serves both
   // value AND ordering better). Soft-capped so a long session can't grow the
   // table without bound — past the cap we keep serving hits but stop inserting.
-  if (tt && (e ? depth >= e.depth : tt.size < TT_MAX_ENTRIES)) {
+  if (tt && !bestUnverified && (e ? depth >= e.depth : tt.size < TT_MAX_ENTRIES)) {
     tt.set(ttk, { depth, value: best, flag: best <= alpha ? 2 : best >= beta ? 1 : 0, myKey: bestMy ? jointKey(bestMy) : undefined, oppKey: bestOpp ? jointKey(bestOpp) : undefined });
   }
   return best;
@@ -6252,9 +6285,23 @@ export interface WideningTier { breadth: SearchBreadth; maxDepth: number; budget
  * The driver runs these in order, deepening within each under its budget, and
  * advances to the next when a tier hits its depth cap or can't afford another ply.
  */
-export function wideningSchedule(liveTotal: number): WideningTier[] {
+export function wideningSchedule(liveTotal: number, foresight = false): WideningTier[] {
   if (liveTotal <= 5) {
     return [{ breadth: {}, maxDepth: 10, budgetMs: 4000, label: 'full · deep' }];
+  }
+  if (foresight) {
+    // The /foresight model collapses opponent branching (measured ~3.7×/ply
+    // after root-commit + my-side LMR, vs ~35× exact), so a genuinely DEEP
+    // tier is affordable on a wide board: reference machine ≈ d3 12s, d4 45s,
+    // d5 160s. The driver publishes every completed depth as it lands, so the
+    // user sees the shallow reads immediately and the deep ones stream in as
+    // the clock allows; the affordability estimator still cuts a ply that
+    // can't fit the remaining budget. The narrow spread-probe tier is dropped
+    // — the foresight tier IS the deep probe, at full spread breadth.
+    return [
+      { breadth: {}, maxDepth: 3, budgetMs: 1500, label: 'full' },
+      { breadth: {}, maxDepth: 6, budgetMs: 120_000, label: 'deep · foresight' },
+    ];
   }
   return [
     { breadth: {}, maxDepth: 3, budgetMs: 1500, label: 'full' },

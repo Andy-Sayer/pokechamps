@@ -80,7 +80,7 @@ function benchInput(label: string, input: SearchInput): void {
   // The production experience: the widening tiers the TUI actually runs.
   console.log(`    — production widening schedule —`);
   const liveTotal = input.mine.filter(m => m.hpPercent > 0).length + input.opp.filter(o => o.hpPercent > 0).length;
-  for (const tier of wideningSchedule(liveTotal)) {
+  for (const tier of wideningSchedule(liveTotal, FORESIGHT >= 1)) {
     const t = performance.now();
     const tierBreadth = BREADTH ? { ...tier.breadth, ...BREADTH } : tier.breadth;
     const r = searchBudgeted(input, tier.maxDepth, tier.budgetMs, undefined, tierBreadth);
