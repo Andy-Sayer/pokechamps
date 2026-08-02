@@ -253,7 +253,17 @@ export function listItems(): string[] {
   return gen.items.all().map(i => i.id as string);
 }
 
+// Memoized: profiling showed loadFormat re-reading + re-parsing the JSON from
+// disk on EVERY call — and activeGimmick() routes every damageRange() through
+// it, so table builds were ~7% file I/O. The format file never changes inside
+// a process (regulation edits happen between sessions; refresh scripts are
+// separate processes). Callers treat the result as read-only.
+let formatCache: ChampionsFormat | null = null;
 export function loadFormat(): ChampionsFormat {
+  if (formatCache) return formatCache;
+  return (formatCache = loadFormatUncached());
+}
+function loadFormatUncached(): ChampionsFormat {
   const p = join(dataDir, 'format.champions.json');
   if (!existsSync(p)) {
     return {

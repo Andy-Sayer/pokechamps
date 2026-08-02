@@ -6,14 +6,13 @@
 // Trigger pattern: fire-and-forget. UI re-renders pick up new entries when
 // the in-flight resolution lands.
 import { writeFileSync, readFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { parseEntry, type PikalyticsEntry, type PikalyticsFile } from '../scripts/refresh-pikalytics.js';
 import { mergeEntry } from './pikalytics.js';
-import { CHAMPIONS_PIKA_FORMAT } from './data.js';
+import { CHAMPIONS_PIKA_FORMAT, dataDirPath } from './data.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const dataDir = join(__dirname, '..', '..', '..', '..', 'data');
+// Probed resolver, not a private import.meta-relative path — see pikalytics.ts.
+const dataDir = dataDirPath();
 const BASE = 'https://www.pikalytics.com/ai/pokedex';
 const FORMAT = CHAMPIONS_PIKA_FORMAT;
 

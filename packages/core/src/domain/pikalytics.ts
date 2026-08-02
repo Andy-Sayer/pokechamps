@@ -1,11 +1,14 @@
 import { readFileSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import type { PikalyticsFile, PikalyticsEntry, PikalyticsRanking } from '../scripts/refresh-pikalytics.js';
-import { loadFormat, toId, CHAMPIONS_PIKA_FORMAT } from './data.js';
+import { dataDirPath, loadFormat, toId, CHAMPIONS_PIKA_FORMAT } from './data.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const dataDir = join(__dirname, '..', '..', '..', '..', 'data');
+// Resolve through data.ts's probing (env override / source tree / bundle-
+// adjacent / cwd) — a private import.meta-relative path here silently loses
+// the priors file in ANY bundled build (found via search-bench: the bundled
+// live scenario collapsed to default spreads while the source-tree run had
+// real priors — and the shipped TUI bundle had the same latent hole).
+const dataDir = dataDirPath();
 
 let cache: { format: string; data: PikalyticsFile | null } | null = null;
 

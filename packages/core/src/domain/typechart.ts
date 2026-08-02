@@ -1,10 +1,11 @@
 import { readFileSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { getSpecies, getMove } from './data.js';
+import { join } from 'node:path';
+import { dataDirPath, getSpecies, getMove } from './data.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const typesPath = join(__dirname, '..', '..', '..', '..', 'data', 'types.json');
+// Through data.ts's probing resolver — a private import.meta-relative path
+// here loads an EMPTY type chart in any bundled build (every matchup reads
+// neutral). Same bug class as pikalytics.ts; see search-bench find 2026-08-01.
+const typesPath = join(dataDirPath(), 'types.json');
 
 // damageTaken encoding (Showdown's @pkmn/dex dump): 0=neutral, 1=WEAK (2×),
 // 2=RESIST (0.5×), 3=IMMUNE (0×). Verified against data/types.json (Fire's

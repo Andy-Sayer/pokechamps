@@ -1,12 +1,14 @@
 import { mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { PokemonSet, Match } from './types.js';
+import { dataDirPath } from './data.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const rootDir = join(__dirname, '..', '..', '..', '..');
-const teamsDir = join(rootDir, 'data', 'my-teams');
-const matchesDir = join(rootDir, 'matches');
+// Anchor on the probed data dir (env / source tree / bundle-adjacent / cwd)
+// rather than a private import.meta-relative root: teams live INSIDE data/,
+// and matches/ sits beside it (repo root in the source tree, the bundle dir
+// in a bundled TUI). Same bug class as pikalytics.ts.
+const teamsDir = join(dataDirPath(), 'my-teams');
+const matchesDir = join(dirname(dataDirPath()), 'matches');
 
 mkdirSync(teamsDir, { recursive: true });
 mkdirSync(matchesDir, { recursive: true });
