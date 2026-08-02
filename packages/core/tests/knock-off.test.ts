@@ -120,3 +120,47 @@ describe('item damage scaling after a change', () => {
     expect(stolen).toBeLessThan(kept);   // no more x1.3
   });
 });
+
+// A holder's own mega stone is unremovable — pre- or post-mega. Found via the
+// perish-team deep-search study: the search valued knocking Gengarite off a
+// Mega Gengar, a line that cannot exist. Helper-level here; the engine path is
+// covered in the same commit via finalizeTurn's exemption.
+import { isOwnMegaStone } from '../src/domain/gimmicks/mega.js';
+import { finalizeTurn } from '../src/match/engine.js';
+import type { Match, MoveAction, TeamSlot } from '../src/domain/types.js';
+
+describe('own mega stone is unremovable', () => {
+  test('helper: matching stone (base + mega forme names) vs non-matching', () => {
+    expect(isOwnMegaStone('Gengar', 'Gengarite')).toBe(true);
+    expect(isOwnMegaStone('Gengar-Mega', 'Gengarite')).toBe(true);
+    expect(isOwnMegaStone('Gengar', 'Leftovers')).toBe(false);
+    expect(isOwnMegaStone('Garchomp', 'Gengarite')).toBe(false);   // Tricked-on stone stays removable
+    expect(isOwnMegaStone(undefined, 'Gengarite')).toBe(false);
+  });
+
+  function knockMatch(oppItem: string): Match {
+    const myTeam = [mon({ species: 'Incineroar', ability: 'Intimidate', item: 'Safety Goggles', moves: ['Knock Off'] })];
+    const opponentTeam: OpponentEntry[] = [{ species: 'Gengar', knownMoves: [], item: oppItem }];
+    return {
+      id: 'knock-stone', startedAt: '2026-08-02T00:00:00.000Z',
+      myTeam, opponentTeam, bring: [0] as TeamSlot[], opponentBrought: [0] as TeamSlot[],
+      turns: [], field: { ...NEUTRAL_FIELD },
+      active: { mine: [null, null], theirs: [null, null] },
+    } as Match;
+  }
+
+  function knockedFlag(oppItem: string): unknown {
+    const match = knockMatch(oppItem);
+    const a: MoveAction = {
+      kind: 'move', order: 1, side: 'mine', attackerTeamIndex: 0, attacker: { side: 'mine', slot: 0 },
+      move: 'Knock Off', target: { side: 'theirs', slot: 0 }, targetTeamIndex: 0, damagePercent: 20,
+    };
+    const r = finalizeTurn({ match, turn: { actions: [a], field: match.field }, activeIdx: { mine: [0, null], theirs: [0, null] } });
+    return r.match.opponentTeam[0]!.itemConsumed;
+  }
+
+  test('engine: Knock Off marks Leftovers consumed but never a matching stone', () => {
+    expect(knockedFlag('Leftovers')).toBeTruthy();
+    expect(knockedFlag('Gengarite')).toBeUndefined();
+  });
+});

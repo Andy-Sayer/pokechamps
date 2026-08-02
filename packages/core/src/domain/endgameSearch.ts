@@ -29,7 +29,7 @@ import { analyzePerishTrap, type PerishTrapAdvice } from './perishTrap.js';
 import { representativeSpreadIndices } from './inference.js';
 import { actualSpeed, actualStat, effectiveSpeedRange } from './speed.js';
 import { getMove, getSpecies, getNature, toId, isSpreadMove, moveFlinchChance, isTrappingMove, isLevitateAbility } from './data.js';
-import { getMegaOptions, megaFormeAbility } from './gimmicks/mega.js';
+import { getMegaOptions, isOwnMegaStone, megaFormeAbility } from './gimmicks/mega.js';
 import { defaultOpponentSet } from './bring.js';
 import { maxHpFor } from './damage.js';
 import { getPikalytics } from './pikalytics.js';
@@ -3193,7 +3193,9 @@ function resolveTurn(
       // gave (Life Orb x1.3, type boosters, Expert Belt) is baked into the cells and
       // can't be un-baked mid-tree — a documented approximation, and one that errs
       // toward the foe keeping its damage rather than inventing a swing.
-      if (oDealt > 0 && removesItem(oc.move)) oppItemNow[oTgt] = null;
+      // …except a holder's own mega stone, which is unremovable (found via the
+      // perish-team study: the search valued knocking Gengarite off Mega Gengar).
+      if (oDealt > 0 && removesItem(oc.move) && !isOwnMegaStone(t.oppSpecies[oTgt], oppHeld(oTgt))) oppItemNow[oTgt] = null;
       // Spicy Spray on the DEFENDER burns my attacker (if the hit actually landed and
       // the attacker is still standing — a KO'd attacker can't carry a burn).
       if (oDealt > 0 && spicySpray(t.oppAbility[oTgt]) && (myHp[act.actor] ?? 0) > 0) myPunishStatus.set(act.actor, 'brn');
@@ -3355,7 +3357,7 @@ function resolveTurn(
         if (tc.recoil > 0 && !t.oppResidual[act.actor]!.magicGuard && !t.oppRockHead[act.actor]) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - tc.recoil * mDealt * (t.myMaxHp[mTgt]! / (t.oppMaxHp[act.actor] || 1)));
         if (t.oppLifeOrb[act.actor] && !oppItemGone(act.actor)) oppHp[act.actor] = Math.max(0, oppHp[act.actor]! - 10);
       }
-      if (mDealt > 0 && removesItem(tc.move)) myItemNow[mTgt] = null;
+      if (mDealt > 0 && removesItem(tc.move) && !isOwnMegaStone(t.mySpecies[mTgt], myHeld(mTgt))) myItemNow[mTgt] = null;
       // Spicy Spray mirror: MY Scovillain-Mega burns the opp attacker that hit it. The
       // opp side reads the RESOLVED ability, so this only fires for a known/mega'd holder.
       if (mDealt > 0 && spicySpray(t.myAbility[mTgt]) && (oppHp[act.actor] ?? 0) > 0) oppPunishStatus.set(act.actor, 'brn');

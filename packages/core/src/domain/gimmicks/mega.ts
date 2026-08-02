@@ -109,6 +109,19 @@ export function getMegaOptions(speciesName: string): readonly MegaOption[] {
   return megaOptionsBySpecies.get(toId(speciesName)) ?? [];
 }
 
+/** True when `item` is the mega stone MATCHING the holder — Knock Off / Thief /
+ *  Covet / Corrosive Gas cannot remove a holder's own stone (pre- or post-mega),
+ *  so every item-removal layer must exempt it. Accepts the mega forme name too
+ *  (a transformed holder's species reads "X-Mega[-Y]"): the suffix is stripped
+ *  to find the base's stone list. A stone held by a NON-matching species (Trick
+ *  shenanigans) stays removable, per the real rule. */
+export function isOwnMegaStone(speciesName: string | null | undefined, item: string | null | undefined): boolean {
+  if (!speciesName || !item) return false;
+  const itemId = toId(item);
+  const base = speciesName.replace(/-Mega(-[A-Za-z])?$/i, '');
+  return getMegaOptions(base).some(o => toId(o.stone) === itemId);
+}
+
 // Public: pick the right mega forme given a variant hint. variant === ''
 // means "auto" — if only one option exists return it, else null (caller
 // must surface a disambiguation error). If variant is 'x' / 'y' / etc.

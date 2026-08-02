@@ -38,6 +38,7 @@ import {
 import { fieldMoveEffect, applyFieldMove } from '../domain/fieldMoves.js';
 import { defaultOpponentSet } from '../domain/bring.js';
 import { applyMegaAction } from '../domain/megaResolve.js';
+import { isOwnMegaStone } from '../domain/gimmicks/mega.js';
 import {
   switchInAbilityEffect,
   intimidateReaction,
@@ -1298,11 +1299,16 @@ export function finalizeTurn(input: FinalizeTurnInput): FinalizeTurnResult {
     if (tIdx == null) continue;
     if (a.target.side === 'theirs') {
       const o = next.opponentTeam[tIdx];
-      if (o && !o.itemConsumed) o.itemConsumed = `knocked off (${a.move})`;
+      // A holder's own mega stone is unremovable — only exempt when the item is
+      // KNOWN to be the matching stone (an unknown item still marks consumed:
+      // truthy is all the calc needs, and we can't exempt what we can't see).
+      if (o && !o.itemConsumed && !isOwnMegaStone(o.species, o.item)) o.itemConsumed = `knocked off (${a.move})`;
     } else {
       if (next.myItemConsumed?.[tIdx] == null) {
         const lost = next.myTeam[tIdx]?.item;
-        next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: lost ?? `knocked off (${a.move})` };
+        if (!isOwnMegaStone(next.myTeam[tIdx]?.species, lost)) {
+          next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: lost ?? `knocked off (${a.move})` };
+        }
       }
     }
   }

@@ -48,7 +48,7 @@ import { startWatch as startWatcher, stopWatch as stopWatcher, isWatching as wat
 import { reconcileOccupancy, freshReconcileState, planOpeningSeats } from './occupancyReconcile.js';
 import { deriveActiveIdx, snapshotTurn } from '@pokechamps/core/match/engine.js';
 import { applyMegaAction } from '@pokechamps/core/domain/megaResolve.js';
-import { getMegaOptions } from '@pokechamps/core/domain/gimmicks/mega.js';
+import { getMegaOptions, isOwnMegaStone } from '@pokechamps/core/domain/gimmicks/mega.js';
 import { solveEndgame } from '@pokechamps/core/domain/endgame.js';
 import type { EndgamePosition } from '@pokechamps/core/domain/endgame.js';
 import { createSearch, searchInputFromMatch, oppCanMega, wideningSchedule, type SearchResult } from '@pokechamps/core/domain/endgameSearch.js';
@@ -1749,10 +1749,13 @@ export function BattleScreen({ stores, match: initial, onEnd, spectator = false,
       if (tIdx == null) continue;
       if (a.target.side === 'theirs') {
         const o = next.opponentTeam[tIdx];
-        if (o && !o.itemConsumed) o.itemConsumed = `knocked off (${a.move})`;
+        // Own mega stone is unremovable — mirror of engine.ts.
+        if (o && !o.itemConsumed && !isOwnMegaStone(o.species, o.item)) o.itemConsumed = `knocked off (${a.move})`;
       } else if (next.myItemConsumed?.[tIdx] == null) {
         const lost = next.myTeam[tIdx]?.item;
-        next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: lost ?? `knocked off (${a.move})` };
+        if (!isOwnMegaStone(next.myTeam[tIdx]?.species, lost)) {
+          next.myItemConsumed = { ...(next.myItemConsumed ?? {}), [tIdx]: lost ?? `knocked off (${a.move})` };
+        }
       }
     }
     // Item-swap moves (Trick / Switcheroo) — exchange held items. Mirror of
