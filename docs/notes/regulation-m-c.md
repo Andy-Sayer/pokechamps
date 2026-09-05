@@ -197,9 +197,16 @@ The six new megas mostly land **even**: Lucario Z +42, Golisopod +10, Rillaboom
 existing bad matchups (the M-B meta Garchomp teams at −1044…−1108 and Mega
 Swampert rain at −1071). Note the Golisopod team runs the *same* Trick Room
 shell and scores +10, so it is Baxcalibur's 175 Atk doing the damage, not Trick
-Room by itself. Caveats: these are maximin scores with a top-1 heuristic bring
-(a searched bring may rescue the matchup), and Baxcalibur-Mega's ability is a
-placeholder, so its set is provisional.
+Room by itself.
+
+**No bring rescues it.** Re-run with EXHAUSTIVE brings (all 15 of C(6,4)) against
+a searched opp-3 response at 45 s/board: **−1074**, best bring Talonflame /
+Meowscarada / Pelipper / Dragonite. So the heuristic bring was giving up only ~16
+points — the matchup is genuinely bad, not a bring-selection artifact, and the
+searched answer swaps Kingambit + Garchomp out for Meowscarada + Pelipper (both
+of our Trick-Room-relevant slow-ish attackers are the ones that get punished).
+Caveat that remains: Baxcalibur-Mega's ability is a placeholder, so its set is
+provisional — re-measure on switch-day once the real ability is known.
 
 **Not done / deliberately deferred**: no team re-tune. The rain team was built
 against an M-B field and the honest re-tune needs real M-C usage, which is ~2

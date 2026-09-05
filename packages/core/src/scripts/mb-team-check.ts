@@ -71,10 +71,16 @@ rows.sort((a, b) => a.score - b.score);
 for (const r of rows) {
   console.log(`  ${r.anchor.padEnd(28)} ${String(Math.round(r.score)).padStart(6)}  ${r.verdict.padEnd(7)}  bring: ${r.bring.join(', ')}`);
 }
-const stat = (xs: number[]) => ({ floor: Math.min(...xs), avg: Math.round(xs.reduce((s, x) => s + x, 0) / xs.length) });
+// Guard the empty case: --only can filter a whole bucket away, and Math.min()
+// of nothing is Infinity (with a NaN average), which reads like a real score.
+const stat = (xs: number[]) => xs.length
+  ? { floor: Math.min(...xs), avg: Math.round(xs.reduce((s, x) => s + x, 0) / xs.length) }
+  : null;
 const handScores = rows.filter(r => r.anchor.startsWith('[hand]')).map(r => r.score);
 const metaScores = rows.filter(r => r.anchor.startsWith('[meta]')).map(r => r.score);
-const all = stat(rows.map(r => r.score));
-console.log(`\nMETA  floor ${Math.round(stat(metaScores).floor)}  avg ${stat(metaScores).avg}`);
-console.log(`HAND  floor ${Math.round(stat(handScores).floor)}  avg ${stat(handScores).avg}`);
-console.log(`ALL   floor ${Math.round(all.floor)}  avg ${all.avg}`);
+const line = (label: string, st: ReturnType<typeof stat>) =>
+  console.log(st ? `${label}  floor ${Math.round(st.floor)}  avg ${st.avg}` : `${label}  (none in this run)`);
+console.log('');
+line('META', stat(metaScores));
+line('HAND', stat(handScores));
+line('ALL ', stat(rows.map(r => r.score)));
