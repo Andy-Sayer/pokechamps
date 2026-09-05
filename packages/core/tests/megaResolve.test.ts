@@ -63,9 +63,12 @@ describe('resolveMegaForme (raw — no legality filter)', () => {
 });
 
 describe('applyMegaAction — opp side', () => {
-  test('Lucario opp + "o1 mega" sets megaForme + confirms held stone', () => {
+  // Reg M-C legalised Lucarionite Z, so a bare "o1 mega" on a Lucario whose item
+  // is still unknown is genuinely ambiguous (plain vs -Mega-Z) — the suffix-less
+  // forme is named "base".
+  test('Lucario opp + "o1 mega base" sets megaForme + confirms held stone', () => {
     const m = makeMatch([mon({ species: 'Sneasler' })], ['Lucario']);
-    const err = applyMegaAction(m, megaAction('theirs', 0, ''));
+    const err = applyMegaAction(m, megaAction('theirs', 0, 'base'));
     expect(err).toBeNull();
     const opp = m.opponentTeam[0]!;
     expect(opp.megaUsed).toBe(true);
@@ -73,6 +76,29 @@ describe('applyMegaAction — opp side', () => {
     expect(opp.item).toBe('Lucarionite');
     // species stays as the base — we look up mega-options off it later.
     expect(opp.species).toBe('Lucario');
+  });
+
+  test('Lucario opp + "o1 mega z" picks the Legends Z-A forme', () => {
+    const m = makeMatch([mon({ species: 'Sneasler' })], ['Lucario']);
+    expect(applyMegaAction(m, megaAction('theirs', 0, 'z'))).toBeNull();
+    expect(m.opponentTeam[0]!.megaForme).toBe('Lucario-Mega-Z');
+    expect(m.opponentTeam[0]!.item).toBe('Lucarionite Z');
+  });
+
+  test('Lucario opp + bare "o1 mega" errors, listing only typeable variants', () => {
+    const m = makeMatch([mon({ species: 'Sneasler' })], ['Lucario']);
+    const err = applyMegaAction(m, megaAction('theirs', 0, ''));
+    expect(err).toMatch(/multiple mega formes/);
+    expect(err).toMatch(/base\/z|z\/base/);
+    expect(err).not.toMatch(/\(default\)/);
+    expect(m.opponentTeam[0]!.megaUsed).toBeFalsy();
+  });
+
+  test('a KNOWN held stone still resolves a bare "o1 mega" with no suffix', () => {
+    const m = makeMatch([mon({ species: 'Sneasler' })], ['Lucario']);
+    m.opponentTeam[0]!.item = 'Lucarionite Z';
+    expect(applyMegaAction(m, megaAction('theirs', 0, ''))).toBeNull();
+    expect(m.opponentTeam[0]!.megaForme).toBe('Lucario-Mega-Z');
   });
 
   test('Charizard opp + "o1 mega y" picks Y forme', () => {

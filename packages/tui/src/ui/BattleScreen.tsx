@@ -544,7 +544,7 @@ function resolveAskSide(
   activeIdx: { mine: [number | null, number | null]; theirs: [number | null, number | null] },
 ): AskSide | string {
   if (!raw) return 'missing token';
-  const megaMatch = raw.match(/\+mega(?:[xy])?$/i);
+  const megaMatch = raw.match(/\+mega(?:[xyz])?$/i);
   const megaActive = !!megaMatch;
   const token = megaActive ? raw.slice(0, megaMatch!.index).trim() : raw;
 
@@ -568,7 +568,7 @@ function resolveAskSide(
 
   // Species name. Strip any "-Mega"/"-Mega-X" suffix; the gimmick layer
   // re-resolves the forme via the held stone + megaActive flag.
-  const speciesName = token.replace(/-Mega(?:-[XY])?$/i, '');
+  const speciesName = token.replace(/-Mega(?:-[XYZ])?$/i, '');
   const sp: any = getSpecies(speciesName);
   if (!sp?.exists) return `unknown species: ${token}`;
   // For mine-side raw species: synthesize a strong default set (max offence).

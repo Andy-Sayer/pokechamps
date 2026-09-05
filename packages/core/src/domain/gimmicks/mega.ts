@@ -30,6 +30,15 @@ export const MEGA_ABILITY_OVERRIDES: Record<string, string> = {
   'Barbaracle-Mega': 'Tough Claws',
   'Dragalge-Mega': 'Regenerator',
   'Falinks-Mega': 'Defiant',
+  // Reg M-C (Sept 8 2026). The three Legends Z-A "Z" formes ship with the MAINLINE
+  // mega's ability as a placeholder — all three wrong. Abilities revealed 2026-08-31.
+  'Absol-Mega-Z': 'Sharpness',         // standard — calc applies the ×1.5 to slicing moves
+  'Garchomp-Mega-Z': 'Levitate',       // standard — Ground/hazard immunity, handled natively
+  'Lucario-Mega-Z': 'Aura Guard',      // custom effect — contact damage TAKEN ×0.5, emulated in damage.ts
+  // 'Salamence-Mega' is NOT here: the dump's canonical Aerilate is already right.
+  // 'Golisopod-Mega' / 'Baxcalibur-Mega': Champions-invented, abilities unrevealed at
+  // 2026-09-05 — they fall through to the dex's placeholder (the BASE forme's ability)
+  // until switch-day. See docs/notes/regulation-m-c.md.
 };
 
 // The ability a mega forme fights with — our override (for the customs @pkmn/dex
@@ -122,10 +131,24 @@ export function isOwnMegaStone(speciesName: string | null | undefined, item: str
   return getMegaOptions(base).some(o => toId(o.stone) === itemId);
 }
 
+/** Words that select the SUFFIX-LESS mega when a species has more than one.
+ *  Reg M-C legalised the Legends Z-A "Z" formes for Absol / Garchomp / Lucario,
+ *  so those three now have BOTH a plain mega and a -Mega-Z — and the plain one
+ *  has no letter to type. "mega base" (or plain/std/normal) names it. */
+const BASE_VARIANT_WORDS = new Set(['base', 'plain', 'std', 'standard', 'normal', 'og']);
+
+/** The token a user types to select this option — its variant letter, or `base`
+ *  for the suffix-less forme. Used in disambiguation errors so every listed
+ *  choice is actually typeable. */
+export function megaVariantToken(o: MegaOption): string {
+  return o.variant || 'base';
+}
+
 // Public: pick the right mega forme given a variant hint. variant === ''
 // means "auto" — if only one option exists return it, else null (caller
-// must surface a disambiguation error). If variant is 'x' / 'y' / etc.
-// match the option whose variant tag agrees.
+// must surface a disambiguation error). If variant is 'x' / 'y' / 'z' match
+// the option whose variant tag agrees; 'base' (and its synonyms) matches the
+// suffix-less forme.
 export function resolveMegaForme(
   speciesName: string,
   variant: string,
@@ -137,6 +160,7 @@ export function resolveMegaForme(
     if (opts.length === 1) return opts[0]!;
     return null;
   }
+  if (BASE_VARIANT_WORDS.has(v)) return opts.find(o => o.variant === '') ?? null;
   return opts.find(o => o.variant === v) ?? null;
 }
 

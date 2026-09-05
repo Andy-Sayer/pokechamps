@@ -1,10 +1,12 @@
 // Does the BRING layer catch the perish trap at team preview, on the real board?
 //   npx tsx packages/core/src/scripts/perish-bring-check.ts
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { dataDirPath } from '../domain/data.js';
 import { scoreBrings } from '../domain/bring.js';
 import type { OpponentEntry, PokemonSet } from '../domain/types.js';
 
-const team: PokemonSet[] = JSON.parse(readFileSync('data/my-teams/TalonFlameAndyBoy.json', 'utf8'));
+const team: PokemonSet[] = JSON.parse(readFileSync(join(dataDirPath(), 'my-teams', 'TalonFlameAndyBoy.json'), 'utf8'));
 // Their preview six, exactly as the match snapshot recorded it.
 const OPP = ['Archaludon', 'Blastoise', 'Pelipper', 'Gengar', 'Meowscarada', 'Incineroar'];
 const opponent: OpponentEntry[] = OPP.map(species => ({ species, knownMoves: [], candidates: [] } as unknown as OpponentEntry));

@@ -144,10 +144,15 @@ ground-truth check on a call — actually resolve the full board.
 
 ## Hard date — regulation rotation
 
-20. **Reg M-B ends Sept 2, 2026 (~4 weeks).** The runbook in
-    `regulation-m-b.md` is proven; the tooling exists (`stage-roster`,
-    `validate-format`, `refresh-data`, `refresh-pikalytics`,
-    `tactics-catalog`). Block the switch-day. Watch item: the Pikalytics `/ai`
+20. **Reg M-B ends Sept 8, 2026, 19:00 PDT — M-C starts immediately** (this
+    entry originally said Sept 2; the official window is Sept 8). **Partially
+    handled 2026-09-05**: the 4 named new species + all 6 new stones are staged,
+    the three Z-mega abilities are patched, and Lucario-Mega-Z's custom contact
+    halving is emulated in `damage.ts`. What remains on switch-day is the ~20
+    unnamed species (`stage-roster --mode replace` against the in-game roster),
+    the two unrevealed mega abilities, and the Pikalytics repoint to
+    `gen9championsvgc2026regmc`. Full runbook in
+    [`regulation-m-c.md`](regulation-m-c.md). Watch item: the Pikalytics `/ai`
     export layout has degraded once already; no monitoring exists for a third
     change. *(small per step, scheduled)*
 

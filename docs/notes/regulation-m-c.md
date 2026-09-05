@@ -1,0 +1,208 @@
+# Regulation Set M-C — what we know + switch-day runbook
+
+> **STATUS 2026-09-05: PARTIALLY STAGED, not yet live.** M-B runs to **Sept 8, 2026
+> 19:00 PDT**; M-C takes over immediately after and runs to **Dec 1, 2026 17:59 PST**
+> (= Sept 9 02:00 UTC → Dec 2 01:59 UTC). Everything that is *publicly named*
+> pre-launch is already in the app: 4 new base species, all 6 new mega stones, and
+> 3 of the 6 new mega abilities (one of which needed engine emulation). The other
+> ~20 species and 2 abilities are **unpublished** — they drop with the in-game
+> roster on switch-day, and step 2 of the runbook below is the whole job.
+>
+> **Our earlier note said M-B ended Sept 2. That was wrong** — the official window
+> is Sept 8 (Victory Road / pokemon.com / Serebii all agree). Dates corrected
+> repo-wide 2026-09-05.
+
+Researched 2026-09-05. This note follows the proven
+[`regulation-m-b.md`](regulation-m-b.md) shape: confirmed facts, engine
+implications, then the exact steps to flip the app over.
+
+## Confirmed (official announcements)
+
+- **Window**: Sept 8, 2026 19:00 PDT → Dec 1, 2026 17:59 PST. Applies to the 2027
+  Latin America International Championships.
+- **Gimmick stays Mega Evolution** — one per side per battle, multiple stones may
+  be *held*. Species Clause + Item Clause unchanged, Lv50 flat, Doubles bring 4 of 6
+  (Singles 3 of 6). Nothing in the rules layer changes: `gimmick: "mega"` carries over.
+- **24 newly battle-eligible Pokémon + 6 new Mega Evolutions.** Only four species
+  are named in the announcements: **Rillaboom, Salamence, Golisopod, Baxcalibur**
+  (the latter three are the bases of new megas). The remaining ~20 are visible only
+  in-game (Recruit → Recruit Pokémon → Roster Info → Pokémon Featured in This Roster).
+- **No removals.** "Pokémon that were eligible for Ranked Battles in previous
+  regulation sets remain eligible." MetaVGC's M-C roster is a strict superset of our
+  M-B list (`stage-roster --mode replace` reported **0 removals**). Re-verify against
+  the in-game list on switch-day anyway — M-B taught us aggregators lag.
+
+### The six new megas
+
+| Mega | Stone (id) | Typing | Ability | Status in the app |
+| --- | --- | --- | --- | --- |
+| Salamence-Mega | `salamencite` | Dragon/Flying | Aerilate | ✅ canonical, dump already correct |
+| Golisopod-Mega | `golisopite` | Bug/**Steel** | **UNREVEALED** | ⚠️ placeholder (Emergency Exit) |
+| Baxcalibur-Mega | `baxcalibrite` | Dragon/Ice | **UNREVEALED** | ⚠️ placeholder (Thermal Exchange) |
+| Absol-Mega-Z | `absolitez` | Dark/**Ghost** | Sharpness | ✅ patched (standard ability) |
+| Garchomp-Mega-Z | `garchompitez` | Dragon (mono) | Levitate | ✅ patched (standard ability) |
+| Lucario-Mega-Z | `lucarionitez` | Fighting/Steel | Aura Guard (custom) | ✅ patched + **emulated** |
+
+All six formes and all six stones were **already in the `@pkmn/dex` dump** with
+correct stats/types (`isNonstandard: 'Future'`, except the canonical Salamencite at
+`'Past'`), and `@smogon/calc` builds every one of them — verified 2026-09-05. As with
+M-A/M-B, the only data gap was the **abilities**.
+
+Base stats as dumped (all verified against RotomLabs' Z-A dex):
+
+```
+Absol-Mega-Z      65 / 154 /  60 /  75 /  60 / 151   Dark/Ghost
+Garchomp-Mega-Z  108 / 130 /  85 / 141 /  85 / 151   Dragon
+Lucario-Mega-Z    70 / 100 /  70 / 164 /  70 / 151   Fighting/Steel
+Salamence-Mega    95 / 145 / 130 / 120 /  90 / 120   Dragon/Flying
+Golisopod-Mega    75 / 150 / 175 /  70 / 120 /  40   Bug/Steel
+Baxcalibur-Mega  115 / 175 / 117 / 105 / 101 /  87   Dragon/Ice
+```
+
+### The Z-mega ability reveal (2026-08-31)
+
+- **Mega Absol Z — Sharpness** (×1.5 on slicing moves). Standard Gen 9 ability; the
+  calc applies it natively once the forme's ability is right. Night Slash / Psycho
+  Cut / Sacred Sword on a 154 Atk / 151 Spe frame.
+- **Mega Garchomp Z — Levitate**. Mono-Dragon that is now **immune to Ground** and to
+  grounded hazards. `isLevitateAbility` + `hazards.ts` handle it with no new code;
+  Earthquake into an active Garchomp-Mega-Z correctly returns the calc's immunity
+  throw. Note the trade: it loses Ground STAB and becomes a 141 SpA special attacker.
+- **Mega Lucario Z — a NEW ability that halves damage from contact moves.** The name
+  is reported **two ways**: RotomLabs says **"Aura Guard"**, Victory Road says
+  **"Wave Shield"**; both give the identical effect text. We pin `Aura Guard` in the
+  data and accept **both** names in the engine (`isAuraGuardAbility`) until the
+  in-game string settles. **Confirm the name on switch-day.**
+
+## Engine work already done (2026-09-05)
+
+1. **`SPECIES_PATCHES`** (`refresh-data.ts`) + `data/species.json`: `absolmegaz →
+   Sharpness`, `garchompmegaz → Levitate`, `lucariomegaz → Aura Guard`. The dump
+   ships all three with the *mainline* mega's ability (Magic Bounce / Sand Force /
+   Adaptability) — all three wrong — so a bare `refresh-data` would silently revert
+   them without the patch table.
+2. **`MEGA_ABILITY_OVERRIDES`** (`gimmicks/mega.ts`): the same three, so
+   `megaFormeAbility()` — which the calc *and* the search read — resolves correctly.
+3. **Aura Guard emulation** (`damage.ts`). `@smogon/calc` knows neither name, so the
+   reduction would be silently dropped. The defender's ability is aliased, per move,
+   to a calc-native ability with exactly the ×0.5 we want:
+   - contact + non-Fire → **Fluffy** (a FINAL modifier ⇒ exact `floor(roll/2)`, and
+     Long Reach / Punching Glove / Mold Breaker interactions come free);
+   - contact + Fire → **Heatproof** (Fluffy alone would cancel: ×0.5 contact × ×2 Fire
+     = ×1). Gen 9 Heatproof halves the *attack stat*, so this path lands within ~2 HP
+     **above** an exact halving. Documented limitation; the real ability's own
+     implementation is unpublished, so the "exact" target is itself a guess.
+   - non-contact → untouched (an unknown ability name is inert in the calc = ×1).
+4. **Format staged additively**: `legality.allow` 208 → **212**, `items.allow`
+   148 → **154**. `npm run validate-format` is green (212/154, 0 unknown).
+5. **Mega-variant input**, forced by the Z formes: Absol / Garchomp / Lucario now
+   have **two** legal megas each (plain + `-Mega-Z`), so a bare `o1 mega` on one of
+   them is genuinely ambiguous while the held stone is unknown. The suffix-less
+   forme had no typeable token, so `resolveMegaForme` now accepts
+   **`base`** (/`plain`/`std`/`standard`/`normal`/`og`), the turn parser takes a
+   word-length variant (`o1 mega base`, `o1 mega z`), the disambiguation error lists
+   only typeable choices (`base/z`, no more `(default)`), and the TUI's `/ask`
+   `+mega` suffix and `-Mega-*` strip both accept `z`. A KNOWN held stone still
+   resolves a bare `o1 mega` with no suffix — that path is unchanged.
+6. **`tests/regulation-m-c.test.ts`** — 19 tests: stones/species legal, every stone
+   resolving to the right forme *and* ability, the Aura Guard halving on all three
+   move classes, Garchomp-Z's Ground immunity, Absol-Z's Sharpness jump. Plus new
+   `megaResolve` cases for the base/z tokens and a `champions-sim-ready` tripwire
+   (below). Whole suite green: **1727 tests / 156 files**.
+7. **`/exact` sim oracle gap (accepted)**: `@pkmn/sim` 0.10.11 — still the latest —
+   predates the 2026-08-31 reveal, so it resolves the three Z formes with the
+   MAINLINE abilities (Magic Bounce / Sand Force / Adaptability). Our calc path is
+   correct; only the sim oracle is stale. Pinned as a `PENDING_UPSTREAM` set in
+   `champions-sim-ready.test.ts` with a tripwire that fails when upstream ships the
+   fix (the signal to delete the entries). Bump `@pkmn/sim` on switch-day and check.
+8. **Unrelated fix caught by this work**: six `data/my-teams/TalonFlameAndyBoy.json`
+   reads used a cwd-relative path, so four test files failed under `npm test` (which
+   runs vitest per workspace) while passing from the repo root. They now go through
+   `dataDirPath()`.
+
+**Caveat on the early staging**: it lands while M-B is still live (to Sept 8), so the
+4 new species and 6 new stones validate as legal a few days early. Same trade M-B took
+(the Raichunites were pre-staged the day before) — additive-only, so nothing that *was*
+legal stopped being legal.
+
+## Tactics / meta implications
+
+- **Rillaboom** is the headline non-mega add: Grassy Surge + Grassy Glide priority.
+  The `terrain` tactic detector picks it up automatically; the Grassy Terrain
+  interaction with Earthquake (−50%) and the priority-Glide speed tier both already
+  exist in the engine. It is a *direct* answer to the M-B rain core
+  (Pelipper/Archaludon/Swampert-Mega) — expect our rain team's matchup spread to move.
+- **Mega Garchomp Z vs. our Scarf Garchomp perish counter**: the Z forme is mono-Dragon
+  and Levitating, so a Ground-immune Garchomp now exists on the *other* side of the
+  table. The [Talonflame perish counter](final-team-playbook.md) line (Scarf Chomp EQ
+  OHKOs Mega Gengar) is unaffected — it is our own Chomp, un-mega'd — but "EQ hits
+  everything grounded" reads in the playbook need re-checking against a Chomp-Z.
+- **Mega Lucario Z** is a 164 SpA / 151 Spe special attacker that halves contact
+  damage — physical priority (Grassy Glide, Sucker Punch, Fake Out) gets much worse
+  into it. Our Talonflame/Kingambit pressure is largely *contact*; check the bring
+  matrix once real usage data lands.
+- **Mega Golisopod** (Bug/**Steel**, 175 Def / 120 SpD, 40 Spe) is a Trick Room-shaped
+  wall with a 4× Fire weakness. **Its ability is the open question** — Emergency Exit
+  on a mega would be self-defeating, so assume it changes.
+- **Mega Baxcalibur** 175 Atk / 115 HP Dragon/Ice — Glaive Rush + Icicle Crash off a
+  87 Spe frame; another TR-friendly breaker.
+
+## Switch-day runbook (Sept 8, 2026, 19:00 PDT)
+
+Steps 1, 3–7 are the M-B runbook verbatim; **step 2 is the real work.**
+
+1. `npm run refresh-data` — pull the updated `@pkmn/dex` (bump first if needed:
+   `npm i @pkmn/dex@latest -w @pokechamps/core`). Verify the `patched species.json/…`
+   lines print for all six mega patches (three M-C + the M-B set).
+2. **Stage the full roster.** Open the in-game list (Recruit → Recruit Pokémon →
+   Roster Info → Pokémon Featured in This Roster), paste it into the staging helper,
+   and paste its output between the `[ ]` of `"legality": { "allow": [ … ] }`:
+
+   ```
+   npx tsx packages/core/src/scripts/stage-roster.ts --mode replace
+   ```
+
+   `--mode replace` also reports **removals** — expect none, but check. The ~20
+   unnamed additions land here. Then confirm `items.allow` (the 6 stones are already
+   in; add anything else the official item list introduces) and update `__notes`.
+3. **Pin the two unrevealed mega abilities** — Golisopod-Mega and Baxcalibur-Mega —
+   in BOTH `SPECIES_PATCHES` (`refresh-data.ts`) and `MEGA_ABILITY_OVERRIDES`
+   (`gimmicks/mega.ts`), then re-run `refresh-data` (or hand-patch
+   `data/species.json` to match). If either is a *custom* effect that touches damage,
+   it needs an emulation in `damage.ts` like Aura Guard / Fire Mane / Dragonize.
+   **Also confirm Lucario-Mega-Z's real ability NAME** and, if it is "Wave Shield",
+   flip the pinned name (the engine already accepts both).
+4. `npm run validate-format` — every id must resolve.
+5. Pikalytics: repoint `CHAMPIONS_PIKA_FORMAT` in `packages/core/src/domain/data.ts`
+   to `gen9championsvgc2026regmc` (the server's `pikalytics/cache.ts` mirrors the
+   constant — update both), then `npm run refresh-pikalytics`. **Expect no usage data
+   for ~2 weeks** post-launch; until then the gauntlet keeps running on the M-B dump.
+   Re-verify the `/ai` export layout — it has degraded once already (M-B: usage `N/A`,
+   teammates `undefined%`, blank nature).
+6. `npx tsx packages/core/src/scripts/tactics-catalog.ts` — regenerate the combo
+   catalog over the new legal lists (Rillaboom grassy cores, the new megas).
+7. `npx tsx packages/core/src/scripts/smoketest.ts` + `npm test`. Then sanity-check a
+   Mega Lucario Z contact halving and a Mega Absol Z Night Slash against the
+   Pikalytics calc.
+8. **Team re-tune** — the M-B final team (`rain-mb-final`) was built against an
+   M-B field. Re-run `npx tsx packages/core/src/scripts/mb-hill-climb.ts` / the gauntlet once M-C usage data
+   exists; Rillaboom into our rain core is the specific thing to measure.
+
+## Open questions (resolve on switch-day)
+
+- The ~20 unnamed new species.
+- Golisopod-Mega + Baxcalibur-Mega abilities.
+- Lucario-Mega-Z's ability NAME ("Aura Guard" vs "Wave Shield") and whether its
+  halving is a final modifier or a BP/attack modifier.
+- Whether the announced Garchomp-Mega-Z typing is really mono-Dragon: our dump,
+  Serebii and RotomLabs' dex all say **Dragon**; RotomLabs' *article* says
+  "Dragon/Ground". Ground-immune-via-Levitate only makes sense on the mono read, and
+  that is what the app uses.
+
+Sources: [pokemon.com — Get Ready for Regulation Set M-C](https://www.pokemon.com/us/news/get-ready-for-regulation-set-m-c-in-pokemon-champions),
+[Serebii M-C](https://www.serebii.net/pokemonchampions/rankedbattle/regulationm-c.shtml),
+[Victory Road — Champions regulations](https://victoryroad.pro/champions-regulations/),
+[MetaVGC M-C](https://metavgc.com/regulations/regulationm-c),
+[RotomLabs — Z mega abilities revealed](https://rotomlabs.net/article/abilities-revealed-for-mega-absol-z-mega-lucario-z-and-mega-garchomp-z),
+[RotomLabs dex — Mega Garchomp Z](https://rotomlabs.net/dex/mega-dimension/garchomp/mega-z),
+[Game8 — M-C roster and schedule](https://game8.co/games/Pokemon-Champions/archives/618064).

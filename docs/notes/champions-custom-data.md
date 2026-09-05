@@ -123,6 +123,36 @@ in both finalizeTurn mirrors; `damageRange` prices it via a basePower override
 sim oracle (real @pkmn/sim) still implements the mainline persist-across-switch
 rule internally — watch for a sim-diff tail on Annihilape switch lines.
 
+## Reg M-C custom-mega audit (2026-09-05, pre-launch)
+
+M-C adds six megas; **one** of them lands on the custom surface.
+
+| Forme | Ability | Custom? | Where it lives |
+| --- | --- | --- | --- |
+| Salamence-Mega | Aerilate | no | dex-native, dump already correct |
+| Absol-Mega-Z | Sharpness | no | `SPECIES_PATCHES` + `MEGA_ABILITY_OVERRIDES` (dump ships Magic Bounce) |
+| Garchomp-Mega-Z | Levitate | no | same (dump ships Sand Force); `isLevitateAbility`/`hazards.ts` need no change |
+| Lucario-Mega-Z | **Aura Guard** | **YES** | same, **plus emulation in `damage.ts`** |
+| Golisopod-Mega | **UNREVEALED** | ? | placeholder (Emergency Exit) until switch-day |
+| Baxcalibur-Mega | **UNREVEALED** | ? | placeholder (Thermal Exchange) until switch-day |
+
+**Aura Guard** (contact damage taken ×0.5; also reported as "Wave Shield" — both
+names accepted by `isAuraGuardAbility`) is the fifth entry on the custom surface,
+after Dragonize / Mega Sol / Spicy Spray / Piercing Drill (Eelevate and Fire Mane
+are now upstream). `@smogon/calc` knows neither name, so the defender's ability is
+aliased per move to a calc-native ×0.5: **Fluffy** for contact non-Fire (a final
+modifier — exact), **Heatproof** for contact Fire (Fluffy would cancel with its ×2
+Fire clause; gen 9 Heatproof halves the attack stat instead, so this path lands
+within ~2 HP above an exact halving). Non-contact moves are untouched.
+
+**`/exact` sim caveat**: `@pkmn/sim` 0.10.11 (still the latest on 2026-09-05, and
+the reveal was 2026-08-31) carries the MAINLINE ability for all three Z formes —
+Magic Bounce / Sand Force / Adaptability. The calc path is right; only the sim
+oracle is stale for those three. `champions-sim-ready.test.ts` pins this as a
+PENDING_UPSTREAM set with a tripwire test that fires when upstream ships the fix.
+
+See [`regulation-m-c.md`](regulation-m-c.md) for the full switch-day runbook.
+
 ## Caveats / accepted simplifications
 
 - Piercing Drill is modeled in the **search** only. The forward damage calc

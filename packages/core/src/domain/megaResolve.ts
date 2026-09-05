@@ -14,7 +14,7 @@
 //
 // Returns an error string when ambiguous; nothing is mutated.
 import type { Match, MoveAction, PokemonSet } from './types.js';
-import { getMegaOptions, resolveMegaForme, type MegaOption } from './gimmicks/mega.js';
+import { getMegaOptions, resolveMegaForme, megaVariantToken, type MegaOption } from './gimmicks/mega.js';
 import { isLegalItem, toId, getSpecies } from './data.js';
 
 function pickOption(
@@ -32,11 +32,11 @@ function pickOption(
     if (byItem) return { option: byItem, error: null };
   }
 
-  // 2. Explicit variant suffix from the parser ("mega x" / "mega y").
+  // 2. Explicit variant suffix from the parser ("mega x" / "mega z" / "mega base").
   if (variant) {
     const byVariant = resolveMegaForme(speciesName, variant);
     if (byVariant) return { option: byVariant, error: null };
-    const have = all.map(o => o.variant || '(default)').join('/');
+    const have = all.map(megaVariantToken).join('/');
     return { option: null, error: `${speciesName} has no "${variant}" mega — available variants: ${have}` };
   }
 
@@ -47,12 +47,14 @@ function pickOption(
   if (legal.length === 1) return { option: legal[0]!, error: null };
   if (legal.length === 0 && all.length === 1) return { option: all[0]!, error: null };
 
-  // 4. Still ambiguous.
+  // 4. Still ambiguous. Every listed choice must be TYPEABLE — Reg M-C's Z formes
+  // (Absol / Garchomp / Lucario) pair a lettered mega with a suffix-less one, and
+  // the suffix-less one is selected by the word "base".
   const pool = legal.length > 0 ? legal : all;
-  const variants = pool.map(o => o.variant || '(default)').join('/');
+  const variants = pool.map(megaVariantToken).join('/');
   return {
     option: null,
-    error: `${speciesName} has multiple mega formes — disambiguate, e.g. "mega ${pool[0]!.variant || 'y'}" (available: ${variants})`,
+    error: `${speciesName} has multiple mega formes — disambiguate, e.g. "mega ${megaVariantToken(pool[0]!)}" (available: ${variants})`,
   };
 }
 

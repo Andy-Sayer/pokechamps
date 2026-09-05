@@ -32,7 +32,9 @@ m1 > switch > Garchomp                     ← switch by species name
 m1 > switch > my4                          ← switch by team-index ref
 o2 > switch > op3                          ← opp switch
 m1 mega                                    ← standalone mega declaration (separate action, +5 bracket)
-m1 mega y                                  ← mega variant disambiguator (Charizard X/Y, Lucario, etc.)
+m1 mega y                                  ← mega variant disambiguator (Charizard X/Y, Raichu X/Y)
+m1 mega z                                  ← the Legends Z-A forme (Reg M-C: Absol/Garchomp/Lucario)
+m1 mega base                               ← the SUFFIX-LESS mega when the species also has a Z forme
 ```
 
 **Attacker self-HP (`/ <attackerHP> [source]`).** A trailing `/ <hp>` after the target's damage slot records the **attacker's own HP after the move** — its bar's unit (raw for mine, % for opp). The engine knows which moves recoil/drain and that those hit the attacker, so a bare `/ <hp>` is attributed to the move's recoil/drain. The **only** thing that needs a word is a contact-item chip — `helmet` (1/6), `orb` (1/10), `barbs`/`rough` (1/8) — because the opponent's item is unknown; the engine peels that fixed fraction off before reading the recoil. Recoil and drain are `frac × damage-dealt`, which lives on the *other* mon's HP scale, so the reading **solves the opponent's max HP defense-independently** (`inference.ts` `recoilDrainHpEvs` → pins `OpponentEntry.hpEvLock` → the HP EV is fixed for all later inference). Works both directions (opp recoils into me / I recoil into them) and abstains when the attacker fainted or a drain overhealed. Contact-item chips (Helmet/Orb/Barbs) carry no HP-stat info — they're flat fractions of the attacker's own bar — so they're only used to keep the chip out of the defensive solve.

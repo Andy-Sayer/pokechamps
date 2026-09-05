@@ -34,6 +34,14 @@ export interface DamageRange {
   desc: string;
 }
 
+/** Lucario-Mega-Z's Champions-custom ability: contact damage taken is halved.
+ *  Two names are in circulation for the same reveal ("Aura Guard" / "Wave Shield")
+ *  — accept both until the in-game string is confirmed on switch-day. */
+export function isAuraGuardAbility(ability: string | undefined): boolean {
+  const id = (ability ?? '').toLowerCase().replace(/[^a-z]/g, '');
+  return id === 'auraguard' || id === 'waveshield';
+}
+
 function toCalcPokemon(set: PokemonSet, opts: {
   curHpPercent?: number;
   status?: string;
@@ -216,6 +224,29 @@ export function damageRange(args: {
   if (timesHit > 0 && toId(args.move) === 'ragefist') {
     const bp = Math.min(350, 50 * (1 + timesHit));
     move = new CalcMove(GEN, args.move, { ...moveOpts, overrides: { basePower: bp } } as any);
+  }
+  // Aura Guard (custom Champions ability, Lucario-Mega-Z): damage from moves that
+  // make CONTACT is halved. The reveal (2026-08-31) is reported under two names —
+  // "Aura Guard" (RotomLabs) and "Wave Shield" (Victory Road) — with the SAME
+  // effect text, so both are recognised until the in-game string settles.
+  // @smogon/calc knows neither name, so the reduction would be silently dropped.
+  // Emulate by aliasing the DEFENDER's ability to a calc-native ability whose
+  // multiplier is exactly ×0.5 for THIS move:
+  //   contact + non-Fire -> Fluffy    (×0.5 on contact; its ×2 Fire clause can't apply)
+  //   contact + Fire     -> Heatproof (×0.5 on Fire; Fluffy alone would cancel to ×1.0,
+  //                                    since it stacks ×0.5 contact with ×2 Fire)
+  // Aliasing keeps the reduction inside the calc's own damage chain and gets the
+  // Long Reach / Punching Glove / Mold Breaker interactions for free. Fluffy is a
+  // FINAL modifier, so the non-Fire path is exact (floor(roll/2)). Heatproof in gen 9
+  // halves the ATTACK STAT instead (gen789.ts:1436), so the contact-Fire path lands
+  // within ~2 HP above an exact halving — the closest calc-native ×0.5 available for
+  // a Fire move, and the real ability's own implementation is unpublished anyway.
+  // Non-contact moves need no alias: an unknown ability name is inert = the correct ×1.
+  const defAbility = (def as unknown as { ability?: string }).ability ?? '';
+  if (isAuraGuardAbility(defAbility) && moveData?.flags?.contact && moveData?.category !== 'Status') {
+    // Use the move's EFFECTIVE type (Dragonize/-ate may have retyped it above).
+    const effType = ((move as unknown as { type?: string }).type) ?? moveData?.type;
+    (def as unknown as { ability?: string }).ability = effType === 'Fire' ? 'Heatproof' : 'Fluffy';
   }
   const field = toCalcField(effField, args.attackerSide, args.helpingHand);
   const result = calculate(GEN, atk, def, move, field);

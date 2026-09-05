@@ -14,12 +14,13 @@
  *   npx tsx packages/core/src/scripts/perish-lead-gauntlet.ts
  */
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { playGame, greedyPolicy, makeSearchPolicy, type Policy } from '../domain/simPlayout.js';
 import { ensureSimLoaded } from '../domain/simBridge.js';
-import { toId } from '../domain/data.js';
+import { dataDirPath, toId } from '../domain/data.js';
 import type { PokemonSet } from '../domain/types.js';
 
-const team: PokemonSet[] = JSON.parse(readFileSync('data/my-teams/TalonFlameAndyBoy.json', 'utf8'));
+const team: PokemonSet[] = JSON.parse(readFileSync(join(dataDirPath(), 'my-teams', 'TalonFlameAndyBoy.json'), 'utf8'));
 const mine = (species: string): PokemonSet => {
   const m = team.find(t => t.species === species);
   if (!m) throw new Error(`${species} not on the team`);

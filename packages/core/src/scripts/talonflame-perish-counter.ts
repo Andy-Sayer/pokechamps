@@ -14,14 +14,15 @@
  *   npx tsx packages/core/src/scripts/talonflame-perish-counter.ts
  */
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { buildBattle, ensureSimLoaded, type SimMon, type SimPosition } from '../domain/simBridge.js';
-import { toId } from '../domain/data.js';
+import { dataDirPath, toId } from '../domain/data.js';
 
 interface TeamMon {
   species: string; item?: string | null; ability?: string | null; nature?: string;
   moves: string[]; evs?: Record<string, number>; ivs?: Record<string, number>;
 }
-const team: TeamMon[] = JSON.parse(readFileSync('data/my-teams/TalonFlameAndyBoy.json', 'utf8'));
+const team: TeamMon[] = JSON.parse(readFileSync(join(dataDirPath(), 'my-teams', 'TalonFlameAndyBoy.json'), 'utf8'));
 const mine = (species: string, over: Partial<SimMon> = {}): SimMon => {
   const m = team.find(t => t.species === species);
   if (!m) throw new Error(`${species} not on the team`);

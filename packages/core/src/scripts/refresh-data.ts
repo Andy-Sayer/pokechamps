@@ -38,6 +38,18 @@ const SPECIES_PATCHES: Record<string, { abilities?: Record<string, string> }> = 
   barbaraclemega: { abilities: { 0: 'Tough Claws' } },
   dragalgemega: { abilities: { 0: 'Regenerator' } },
   falinksmega: { abilities: { 0: 'Defiant' } },
+  // Reg M-C (Sept 8 2026) megas. The three Legends Z-A "Z" formes ship with the
+  // MAINLINE mega's ability as a placeholder (Absol-Mega-Z=Magic Bounce,
+  // Garchomp-Mega-Z=Sand Force, Lucario-Mega-Z=Adaptability) — all three wrong.
+  // Official reveal 2026-08-31 (RotomLabs / Victory Road).
+  absolmegaz: { abilities: { 0: 'Sharpness' } },       // standard — calc handles slicing ×1.5
+  garchompmegaz: { abilities: { 0: 'Levitate' } },     // standard — Ground immunity + hazard immunity
+  lucariomegaz: { abilities: { 0: 'Aura Guard' } },    // CUSTOM effect (contact damage taken ×0.5) — emulated in damage.ts
+  // Salamence-Mega already dumps with the correct canonical Aerilate — no patch.
+  // Golisopod-Mega + Baxcalibur-Mega are Champions-INVENTED megas whose abilities
+  // were NOT revealed pre-launch (2026-09-05); the dump carries their base-forme
+  // abilities (Emergency Exit / Thermal Exchange) as placeholders. Pin them here
+  // on switch-day once the in-game roster shows them. See docs/notes/regulation-m-c.md.
 };
 
 // Champions move-DATA rebalances @pkmn/dex doesn't have (mainline data ≠

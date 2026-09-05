@@ -37,16 +37,43 @@ describe('Champions sim readiness (@pkmn/sim 0.10.11+)', () => {
     expect(formes.filter(f => !simHasSpecies(f))).toEqual([]);
   });
 
-  test('custom mega formes carry the correct Champions ability', () => {
+  // Reg M-C's three Legends Z-A formes were revealed 2026-08-31 — AFTER @pkmn/sim
+  // 0.10.11 (still the latest as of 2026-09-05), so the sim carries the MAINLINE
+  // mega's ability for them. Our dex-side override is right and the calc path is
+  // correct; only the /exact sim oracle is stale for these three. Delete an entry
+  // here the moment upstream ships it — the second test below is the tripwire.
+  // Documented in docs/notes/sim-divergences.md.
+  const PENDING_UPSTREAM: Record<string, string> = {
+    'Absol-Mega-Z': 'Magic Bounce',
+    'Garchomp-Mega-Z': 'Sand Force',
+    'Lucario-Mega-Z': 'Adaptability',
+  };
+  const simAbility = () => {
     const battle = buildBattle({
       p1team: [{ species: 'Garchomp', moves: ['Earthquake'], level: 50 }, { species: 'Dragonite', moves: ['Outrage'], level: 50 }],
       p2team: [{ species: 'Talonflame', moves: ['Brave Bird'], level: 50 }, { species: 'Sableye', moves: ['Knock Off'], level: 50 }],
       p1active: [0, 1], p2active: [0, 1],
     });
     const dx = (battle as unknown as { dex: { species: { get(n: string): { abilities?: Record<string, string> } } } }).dex;
+    return (forme: string) => dx.species.get(forme)?.abilities?.['0'];
+  };
+
+  test('custom mega formes carry the correct Champions ability', () => {
+    const get = simAbility();
     for (const forme of Object.keys(MEGA_ABILITY_OVERRIDES)) {
-      const got = dx.species.get(forme)?.abilities?.['0'];
-      expect(norm(got), `${forme} sim ability vs our verified override`).toBe(norm(megaFormeAbility(forme)));
+      if (forme in PENDING_UPSTREAM) continue;
+      expect(norm(get(forme)), `${forme} sim ability vs our verified override`).toBe(norm(megaFormeAbility(forme)));
+    }
+  });
+
+  test('the M-C Z-mega abilities are STILL missing upstream (drop them here when they land)', () => {
+    const get = simAbility();
+    for (const [forme, stale] of Object.entries(PENDING_UPSTREAM)) {
+      // Sanity: our side is patched...
+      expect(norm(megaFormeAbility(forme))).not.toBe(norm(stale));
+      // ...and the sim still isn't. When this flips, remove the entry above so the
+      // main assertion covers the forme again.
+      expect(norm(get(forme)), `${forme}: upstream may have shipped the real ability`).toBe(norm(stale));
     }
   });
 

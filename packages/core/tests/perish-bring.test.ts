@@ -7,10 +7,12 @@
 // all, and the lead rule that keeps it off the field on turn 1.
 import { describe, test, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { dataDirPath } from '../src/domain/data.js';
 import { scoreBrings, leadAdvice, PATTERN_COUNTERS, effectiveSpeed } from '../src/domain/bring.js';
 import type { OpponentEntry, PokemonSet } from '../src/domain/types.js';
 
-const team: PokemonSet[] = JSON.parse(readFileSync('data/my-teams/TalonFlameAndyBoy.json', 'utf8'));
+const team: PokemonSet[] = JSON.parse(readFileSync(join(dataDirPath(), 'my-teams', 'TalonFlameAndyBoy.json'), 'utf8'));
 const OPP = ['Archaludon', 'Blastoise', 'Pelipper', 'Gengar', 'Meowscarada', 'Incineroar'];
 const opponent = OPP.map(species =>
   ({ species, knownMoves: [], candidates: [] } as unknown as OpponentEntry));

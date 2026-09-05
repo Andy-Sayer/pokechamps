@@ -12,7 +12,7 @@ Node TUI assistant for Pokémon Champions doubles:
 2. Log moves + damage turn-by-turn during a manual match.
 3. Infer opponent EV spreads/items/natures from observed damage and predict damage ranges for my moves.
 
-**Format**: Regulation Set M-B (Jun 17 – Sep 2, 2026) — 208 legal species, 148 legal items, **Mega Evolution** (not Tera), item + species clauses on, one mega per battle. (M-A ran Apr 8 – Jun 17; the M-B additions were staged + audited 2026-06-16, see [`docs/notes/regulation-m-b.md`](docs/notes/regulation-m-b.md).) Allow-lists live in `data/format.champions.json`. `PokemonSet` has no mega flag — a held mega stone is sufficient signal at the **team validation** layer. For **in-battle damage calcs**, the mega gimmick's `resolveSpecies({set, active})` hook only swaps the base forme for the mega forme name (e.g. Charizard + Charizardite Y -> `Charizard-Mega-Y`) when `active === true`. Pre-mega (stone held, not yet activated) uses base-forme stats. After `/mega` is logged, `applyMegaAction` remaps candidate species names directly. See [`docs/notes/dual-forme-predictions.md`](docs/notes/dual-forme-predictions.md).
+**Format**: Regulation Set M-B (Jun 17 – **Sep 8**, 2026) — 208 legal species, 148 legal items, **Mega Evolution** (not Tera), item + species clauses on, one mega per battle. (M-A ran Apr 8 – Jun 17; the M-B additions were staged + audited 2026-06-16, see [`docs/notes/regulation-m-b.md`](docs/notes/regulation-m-b.md).) **Reg M-C takes over Sep 8, 2026 19:00 PDT** — the publicly-named part is already staged, so the allow-lists in the repo are M-B's 208/148 **plus** the 4 named M-C species and all 6 new mega stones (212 species / 154 items), the rest lands on switch-day: see [`docs/notes/regulation-m-c.md`](docs/notes/regulation-m-c.md). Allow-lists live in `data/format.champions.json`. `PokemonSet` has no mega flag — a held mega stone is sufficient signal at the **team validation** layer. For **in-battle damage calcs**, the mega gimmick's `resolveSpecies({set, active})` hook only swaps the base forme for the mega forme name (e.g. Charizard + Charizardite Y -> `Charizard-Mega-Y`) when `active === true`. Pre-mega (stone held, not yet activated) uses base-forme stats. After `/mega` is logged, `applyMegaAction` remaps candidate species names directly. See [`docs/notes/dual-forme-predictions.md`](docs/notes/dual-forme-predictions.md).
 
 ## Commands
 
@@ -23,7 +23,7 @@ Node TUI assistant for Pokémon Champions doubles:
 - `npm run refresh-data` — dump `@pkmn/dex` into `data/*.json`. Preserves `format.champions.json`.
 - `npm run validate-format` — confirm every id in the format allow-lists resolves in `@pkmn/dex`. Run after hand-editing the format file.
 - `npx tsx packages/core/src/scripts/smoketest.ts` — forward damage + inverse inference sanity check.
-- `npm test` — vitest suite across all six workspaces (**1471 tests / 127 files green, 2026-07-24**: core 1127, vision 162, server 83, tui 67, web 16, control 16). Also verify against Pikalytics calc and the smoketest for damage changes.
+- `npm test` — vitest suite across all six workspaces (**1727 tests / 156 files green, 2026-09-05**: core 1319, vision 188, server 83, tui 82, web 16, control 39). Also verify against Pikalytics calc and the smoketest for damage changes.
 
 Vision (needs the capture dongle or a VOD; see the package README):
 

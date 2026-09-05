@@ -794,7 +794,9 @@ export function parseTurnLine(rawLine: string, ctx: ParseContext, order: number)
   // the variant ('mega', 'mega-x', 'mega-y') so finalizeTurn can resolve
   // the actual forme name + mega-stone item via @pokechamps/core/domain/
   // gimmicks/mega's resolveMegaForme().
-  const megaMatch = line.trim().match(/^([mo])([1-6])\s+mega(?:[-\s]+([a-z]))?$/i);
+  // Variant token: a letter (x/y/z) or a word — "base"/"plain" name the
+  // suffix-less mega when a species has both (Reg M-C's Absol/Garchomp/Lucario Z).
+  const megaMatch = line.trim().match(/^([mo])([1-6])\s+mega(?:[-\s]+([a-z]+))?$/i);
   if (megaMatch) {
     const side: FieldSide = megaMatch[1]!.toLowerCase() === 'm' ? 'mine' : 'theirs';
     const slot = (parseInt(megaMatch[2]!, 10) - 1) as FieldSlot;

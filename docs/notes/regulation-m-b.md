@@ -4,11 +4,12 @@
 > 2026-07-16). The app runs M-B: 208 legal species / 148 items, mega gimmick, real
 > Pikalytics M-B usage ingested, mega abilities verified, and the M-B move changes
 > (removals + Make It Rain acc 95 / self SpA −2 + Rage Fist reset-on-switch) shipped.
-> Read on for the research trail and the per-step record. M-B runs to **Sept 2, 2026** —
-> the next switch-day reuses this runbook.
+> Read on for the research trail and the per-step record. M-B runs to **Sept 8, 2026,
+> 19:00 PDT** (an earlier draft of this note said Sept 2 — wrong; corrected 2026-09-05).
+> The next switch-day reuses this runbook: see **[`regulation-m-c.md`](regulation-m-c.md)**.
 
 Researched 2026-06-12. Reg M-A ends **June 17, 2026**; Regulation Set M-B runs
-**June 17 → September 2, 2026** (Season M-3). The full legal roster is NOT
+**June 17 → September 8, 2026** (Season M-3). The full legal roster is NOT
 published yet — it drops with the update on the 17th. This note holds the
 confirmed facts and the exact steps to flip the app over on day one.
 
