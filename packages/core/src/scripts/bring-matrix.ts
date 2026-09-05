@@ -12,7 +12,7 @@
 //
 // <opp> — WHAT to fight (the gauntlet). One of:
 //   all   — hand-built threats (mbThreats.ts) + grounded real teams (groundedTeams)
-//   hand  — just the hand-built MB_THREATS archetypes (anti-meta coverage)
+//   hand  — just the hand-built ALL_THREATS archetypes (anti-meta coverage)
 //   meta  — real top teams reconstructed from Pikalytics featured teams (records-weighted)
 //   <anchor>       — a single opponent by name substring, e.g. "Metagross"
 //   Sp1,Sp2,...    — a custom opponent 6, built on the fly from real usage sets
@@ -24,7 +24,7 @@ import { loadPikaData, groundedTeams, buildSet } from '../domain/metaTeams.js';
 import { PlayoutPool, cachedBringWinRate } from '../domain/playoutPool.js';
 import { maximin, solveMatrixGame } from '../domain/bringMatrixGame.js';
 import { CellCache } from '../domain/cellCache.js';
-import { MB_THREATS } from './mbThreats.js';
+import { ALL_THREATS } from './mcThreats.js';   // M-B archetypes + the M-C additions
 import type { PokemonSet } from '../domain/types.js';
 
 const argNum = (f: string, d: number) => { const i = process.argv.indexOf(f); return i >= 0 ? Number(process.argv[i + 1]) : d; };
@@ -56,7 +56,7 @@ const OPP_MODE = argStr('--opp', 'worst');
 
 const myTeam = JSON.parse(readFileSync(join(dataDirPath(), 'my-teams', TEAM), 'utf8')) as PokemonSet[];
 const pika = loadPikaData();
-const hand = MB_THREATS.map(m => ({ anchor: m.anchor, sets: m.sets }));
+const hand = ALL_THREATS.map(m => ({ anchor: m.anchor, sets: m.sets }));
 // GROUNDED: real top teams reconstructed from Pikalytics featured teams (records-
 // weighted, coherent), not usage-rank filler. minCore=4 keeps ≥4 real mons per team.
 const meta = groundedTeams(pika, { minCore: 4 }).map(m => ({ anchor: m.anchor, sets: m.sets }));

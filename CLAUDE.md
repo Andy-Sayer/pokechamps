@@ -22,8 +22,9 @@ Node TUI assistant for Pokémon Champions doubles:
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run refresh-data` — dump `@pkmn/dex` into `data/*.json`. Preserves `format.champions.json`.
 - `npm run validate-format` — confirm every id in the format allow-lists resolves in `@pkmn/dex`. Run after hand-editing the format file.
+- `npx tsx packages/core/src/scripts/regulation-readiness.ts` — switch-day readiness report: dex+calc resolution, mega formes running **unrevealed** abilities, `@pkmn/sim` ability parity (what `/exact` gets wrong), Pikalytics slug freshness, threat-gauntlet legality. Exits 1 on a blocker.
 - `npx tsx packages/core/src/scripts/smoketest.ts` — forward damage + inverse inference sanity check.
-- `npm test` — vitest suite across all six workspaces (**1727 tests / 156 files green, 2026-09-05**: core 1319, vision 188, server 83, tui 82, web 16, control 39). Also verify against Pikalytics calc and the smoketest for damage changes.
+- `npm test` — vitest suite across all six workspaces (**1765 tests / 158 files green, 2026-09-05**: core 1357, vision 188, server 83, tui 82, web 16, control 39). Also verify against Pikalytics calc and the smoketest for damage changes.
 
 Vision (needs the capture dongle or a VOD; see the package README):
 

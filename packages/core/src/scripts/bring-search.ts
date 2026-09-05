@@ -14,7 +14,7 @@ import { entryOf } from '../domain/teamSim.js';
 import { PlayoutPool } from '../domain/playoutPool.js';
 import { CellCache } from '../domain/cellCache.js';
 import { bestBringVsOpponent } from '../domain/bringEval.js';
-import { MB_THREATS } from './mbThreats.js';
+import { ALL_THREATS } from './mcThreats.js';   // M-B archetypes + the M-C additions
 import type { PokemonSet } from '../domain/types.js';
 
 const argNum = (f: string, d: number) => { const i = process.argv.indexOf(f); return i >= 0 ? Number(process.argv[i + 1]) : d; };
@@ -31,7 +31,7 @@ const truth: { anchor: string; brings: { species: string[]; maximinWr: number }[
 
 const myTeam = JSON.parse(readFileSync(join(dataDirPath(), 'my-teams', TEAM), 'utf8')) as PokemonSet[];
 const pika = loadPikaData();
-const hand = MB_THREATS.map(m => ({ anchor: m.anchor, sets: m.sets }));
+const hand = ALL_THREATS.map(m => ({ anchor: m.anchor, sets: m.sets }));
 const meta = metaTeams(pika, 12, 4).map(m => ({ anchor: m.anchor, sets: m.sets }));
 const all = [...hand, ...meta];
 const lower = OPP.toLowerCase();

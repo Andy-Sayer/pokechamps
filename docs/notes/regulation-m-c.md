@@ -108,7 +108,7 @@ Baxcalibur-Mega  115 / 175 / 117 / 105 / 101 /  87   Dragon/Ice
    resolving to the right forme *and* ability, the Aura Guard halving on all three
    move classes, Garchomp-Z's Ground immunity, Absol-Z's Sharpness jump. Plus new
    `megaResolve` cases for the base/z tokens and a `champions-sim-ready` tripwire
-   (below). Whole suite green: **1727 tests / 156 files**.
+   (below). Whole suite green: **1765 tests / 158 files** after the second prep pass below.
 7. **`/exact` sim oracle gap (accepted)**: `@pkmn/sim` 0.10.11 — still the latest —
    predates the 2026-08-31 reveal, so it resolves the three Z formes with the
    MAINLINE abilities (Magic Bounce / Sand Force / Adaptability). Our calc path is
@@ -124,6 +124,87 @@ Baxcalibur-Mega  115 / 175 / 117 / 105 / 101 /  87   Dragon/Ice
 4 new species and 6 new stones validate as legal a few days early. Same trade M-B took
 (the Raichunites were pre-staged the day before) — additive-only, so nothing that *was*
 legal stopped being legal.
+
+## Prep done 2026-09-05 (second pass) — the field, the tooling, the gauntlet
+
+Staging the format made M-C *representable*. This pass made it *playable*: the
+things bring-picking needs on day one, when Pikalytics still has no M-C usage.
+
+**1. A Reg M-C threat gauntlet** (`scripts/mcThreats.ts`). Seven hand-built
+archetypes — one per new mega plus Rillaboom — using the same support cast as the
+M-B threats (Incineroar / Whimsicott / Scarf Garchomp) so the two halves stay
+comparable. `ALL_THREATS` = M-B's five (all still legal) + these seven, and
+`mb-team-check`, `bring-matrix` and `bring-search` now run on it.
+
+**2. A real defect the pool was hiding.** Eight of the M-B threat sets held
+**Assault Vest / Choice Band / Choice Specs / Safety Goggles** — none legal in
+Champions Reg M (73 non-stone items; Choice Scarf is the only Choice item). The
+gauntlet had been scoring us against opponents that *cannot exist*, and that were
+stronger than the real thing (AV Archaludon, Specs Gholdengo, Band Dragapult).
+Substituted for legal items that keep each set's intent; `threats-legal.test.ts`
+now checks species/item legality, both clauses, learnsets, abilities and EV
+totals for every team in both pools. **Gauntlet baselines from before 2026-09-05
+are not comparable to later ones.**
+
+**3. `regulation-readiness.ts`** — one command, format-agnostic, for switch-day:
+
+```
+npx tsx packages/core/src/scripts/regulation-readiness.ts
+```
+
+It reports (and exits 1 on a blocker): every legal species/item resolving and
+building in `@smogon/calc`; any mega forme running an **unrevealed** ability
+(driven by the explicit `MEGA_ABILITY_UNREVEALED` registry in `gimmicks/mega.ts`,
+not a guess — a mega keeping its base ability is common and usually correct);
+`@pkmn/sim` ability parity, i.e. exactly what `/exact` will get wrong; Pikalytics
+slug freshness; and threat-gauntlet legality. Today: **0 blockers, 6 warnings**,
+all of them the known-pending items (2 unrevealed abilities, 3 sim divergences,
+1 Pikalytics repoint).
+
+**4. Dossier fixes — the biggest accuracy win of the pass.** `mon-dossier` is
+what bring-picking reasons about for any mon without usage data, which after a
+rotation is most of the field. Rebuilt to 309 entries (from 299) and fixed three
+classes of defect, all pinned by `dossier-inference.test.ts`:
+
+- **Ability biases were ignored**, so signature moves went missing entirely.
+  Aerilate Salamence had *no* Double-Edge (the generic Normal-coverage penalty
+  buried it), No Guard Raichu-Y had no Zap Cannon, Sharpness Absol-Z no Night
+  Slash, Grassy Surge Rillaboom no Grassy Glide (dedup collapsed it into Wood
+  Hammer — priority moves now get their own bucket). Added: `-ate` retyping
+  (incl. Champions' Dragonize), No Guard, Sharpness / Tough Claws / Iron Fist /
+  Strong Jaw / Mega Launcher / Punk Rock, Technician, auto-terrain and
+  auto-weather type boosts.
+- **Utilities flooded the sets.** Lucario-Mega-Z came out as six setup moves and
+  one attack; Salamence-Mega ran Rest + Roost + Wish together. Sets now allow at
+  most one recovery / setup / speed-control / pivot move, reserve slots for
+  attacks, and rank Rest below instant recovery.
+- **Megas inherited the wrong usage.** Pikalytics keys megas under the base name,
+  so Garchomp-Mega-Z — a 141 SpA Levitating mono-Dragon — was being handed
+  physical Garchomp's Earthquake / Rock Slide. A mega now inherits base usage
+  only when its offensive orientation matches; otherwise it infers.
+
+**5. Gauntlet baseline** (`TalonFlameAndyBoy` = the rain team, 8 meta + 12 hand,
+deepen 1→5, 20 s/board, heuristic bring):
+
+| | floor | avg |
+| --- | --- | --- |
+| meta (M-B usage teams) | −1108 | −411 |
+| hand (M-B + M-C archetypes) | −1090 | −217 |
+
+The six new megas mostly land **even**: Lucario Z +42, Golisopod +10, Rillaboom
+−80, Garchomp Z −113, Absol Z −115, Salamence −115. The exception is
+**Mega Baxcalibur under Trick Room at −1090**, a new worst-case on par with our
+existing bad matchups (the M-B meta Garchomp teams at −1044…−1108 and Mega
+Swampert rain at −1071). Note the Golisopod team runs the *same* Trick Room
+shell and scores +10, so it is Baxcalibur's 175 Atk doing the damage, not Trick
+Room by itself. Caveats: these are maximin scores with a top-1 heuristic bring
+(a searched bring may rescue the matchup), and Baxcalibur-Mega's ability is a
+placeholder, so its set is provisional.
+
+**Not done / deliberately deferred**: no team re-tune. The rain team was built
+against an M-B field and the honest re-tune needs real M-C usage, which is ~2
+weeks out. `--only <anchor substring>` was added to `mb-team-check` for focused
+deep dives on a single matchup at a bigger budget.
 
 ## Tactics / meta implications
 

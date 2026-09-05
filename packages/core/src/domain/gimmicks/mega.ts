@@ -41,6 +41,23 @@ export const MEGA_ABILITY_OVERRIDES: Record<string, string> = {
   // until switch-day. See docs/notes/regulation-m-c.md.
 };
 
+/** Mega formes whose REAL Champions ability is still unpublished, so the dex's
+ *  value (its BASE forme's ability) is a placeholder we are knowingly running
+ *  on. Damage, the search and /exact are all wrong for these to the extent the
+ *  real ability differs — pin them in MEGA_ABILITY_OVERRIDES (and
+ *  refresh-data's SPECIES_PATCHES) the moment Champions publishes them.
+ *
+ *  This is deliberately NOT inferred. A mega legitimately keeping its base
+ *  ability is common (Blaziken/Speed Boost, Medicham/Pure Power, Scizor/
+ *  Technician, and among the Champions-invented set Barbaracle/Tough Claws,
+ *  Malamar/Contrary, Scrafty/Intimidate, Falinks/Defiant — all confirmed
+ *  2026-06-18), so "matches the base" alone proves nothing. Only unverified
+ *  formes belong here. */
+export const MEGA_ABILITY_UNREVEALED = new Set<string>([
+  'Golisopod-Mega',    // Reg M-C, Sept 8 2026 — Emergency Exit would be self-defeating on a mega
+  'Baxcalibur-Mega',   // Reg M-C, Sept 8 2026
+]);
+
 // The ability a mega forme fights with — our override (for the customs @pkmn/dex
 // still ships as placeholders) else the dex's slot-0. Shared by enrichCalcPokemon
 // (calc) and the search (Beast Boost / Eelevate snowball off the resolved ability).

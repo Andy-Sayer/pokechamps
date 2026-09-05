@@ -3,7 +3,9 @@
 // a LIKELY MOVESET. Moves are AUTHORITATIVE from Pikalytics usage (every move run
 // ≥25% of the time) where we have it; elsewhere they're inferred from a rational
 // heuristic that only captures stat/ability-DERIVABLE patterns (STAB by orientation,
-// spread coverage, Fake Out, priority, weather-context, Trick Room by speed, recovery)
+// spread coverage, Fake Out, priority, weather/terrain context, Trick Room by speed,
+// recovery, and the ability biases below: -ate retyping, No Guard, Sharpness / Tough
+// Claws / Iron Fist / Strong Jaw / Mega Launcher / Punk Rock, Technician)
 // — never a fabricated exact set. Mega-capable mons get an entry per legal mega forme
 // (mega stats/types/ability + base learnset), since that's how they're played.
 // Generated offline by scripts/build-dossier.ts; read at preview time.
@@ -35,6 +37,40 @@ for (const id of ['selfdestruct', 'explosion', 'mistyexplosion', 'finalgambit'])
 for (const id of ['solarbeam', 'solarblade', 'skullbash', 'skyattack', 'freezeshock', 'iceburn', 'razorwind', 'meteorbeam', 'electroshot', 'dig', 'fly', 'bounce', 'dive', 'phantomforce', 'shadowforce', 'skydrop']) DMG_PENALTY[toId(id)] = 0.5;
 for (const id of ['outrage', 'thrash', 'petaldance', 'ragingfury']) DMG_PENALTY[toId(id)] = 0.82;
 for (const id of ['focuspunch', 'lastresort', 'dreameater', 'synchronoise', 'bide', 'spitup']) DMG_PENALTY[toId(id)] = 0.25;
+
+// ---- ability -> move-choice biases -----------------------------------------
+// The generic scorer prices a move by BP x stat x STAB x accuracy. Several
+// abilities move that ranking so far that ignoring them yields a set the mon
+// would never run — Mega Salamence's signature is Aerilate Double-Edge, which
+// the plain Normal-coverage penalty buries entirely. These are all
+// stat/ability-DERIVABLE, so they stay inside this note's "never fabricate an
+// exact set" contract.
+
+/** Abilities that retype the holder's NORMAL moves (and add x1.2). The "-ate"
+ *  family plus Champions' custom Dragonize (Feraligatr-Mega). */
+const ATE_ABILITY: Record<string, string> = {
+  aerilate: 'Flying', pixilate: 'Fairy', refrigerate: 'Ice', galvanize: 'Electric', dragonize: 'Dragon',
+};
+/** Ability -> the move flag it powers up, and by how much. */
+const FLAG_BOOST: Record<string, { flag: string; mult: number }> = {
+  sharpness: { flag: 'slicing', mult: 1.5 },      // Absol-Mega-Z: Night Slash / Psycho Cut
+  toughclaws: { flag: 'contact', mult: 1.3 },     // Barbaracle-Mega
+  ironfist: { flag: 'punch', mult: 1.2 },
+  strongjaw: { flag: 'bite', mult: 1.5 },
+  megalauncher: { flag: 'pulse', mult: 1.5 },
+  punkrock: { flag: 'sound', mult: 1.3 },
+};
+/** Auto-terrain abilities: the terrain's own x1.3 on that type. Rillaboom's
+ *  Grassy Glide is the case this exists for. */
+const TERRAIN_ABIL_TYPE: Record<string, string> = {
+  grassysurge: 'Grass', electricsurge: 'Electric', psychicsurge: 'Psychic',
+};
+/** Auto-weather abilities: x1.5 on the favoured type, x0.5 on the opposed one. */
+const WEATHER_ABIL_TYPES: Record<string, { up: string; down: string }> = {
+  drizzle: { up: 'Water', down: 'Fire' }, primordialsea: { up: 'Water', down: 'Fire' },
+  drought: { up: 'Fire', down: 'Water' }, desolateland: { up: 'Fire', down: 'Water' },
+  orichalcumpulse: { up: 'Fire', down: 'Water' },
+};
 
 export type RoleTag = 'weather' | 'speedControl' | 'trickRoom' | 'redirect' | 'intimidate' | 'fakeOut' | 'pivot' | 'priority' | 'setup' | 'wall';
 export type Orientation = 'physical' | 'special' | 'mixed';
@@ -91,7 +127,9 @@ function inferLikelyMoves(baseName: string, forme: string | undefined, types: st
       else if (SETUP.has(id)) s = Math.max(b.atk, b.spa) >= 120 ? 65 : Math.max(b.atk, b.spa) >= 100 ? 38 : 12;
       else if (SCREENS.has(id)) s = supportLean ? 60 : 20;
       else if (WEATHER_MV.has(id)) s = hasWeatherAbil ? 15 : supportLean ? 60 : 35;
-      else if (RECOVERY.has(id)) s = (b.hp + b.def + b.spd >= 300) ? 78 : 30;
+      // Rest is a real recovery move but a bad VGC one (two turns asleep), so it
+      // should never outrank Roost/Recover/Synthesis for the one recovery slot.
+      else if (RECOVERY.has(id)) s = ((b.hp + b.def + b.spd >= 300) ? 78 : 30) * (id === 'rest' ? 0.6 : 1);
       else if (STATUS_CTRL.has(id)) s = supportLean ? 70 : 35;
       else if (id === 'wideguard' || id === 'quickguard') s = 45;
       else if (PIVOT.has(id)) s = supportLean ? 90 : 45;
@@ -100,29 +138,51 @@ function inferLikelyMoves(baseName: string, forme: string | undefined, types: st
     } else {
       if (id === 'fakeout') { cands.push({ id, name: m.name, score: 95, kind: 'util' }); continue; }
       const stat = cat === 'Physical' ? b.atk : b.spa;
-      const stab = types.map(toId).includes(toId(mtype)) ? 1.5 : 1;
+      // -ate retype FIRST: it changes the move's TYPE, so STAB and the
+      // Normal-coverage penalty both follow from the new type, plus x1.2 power.
+      const ateType = abils.map(a => ATE_ABILITY[a]).find(Boolean);
+      const retyped = !!ateType && toId(mtype) === 'normal';
+      const effType = retyped ? ateType! : mtype;
+      const stab = types.map(toId).includes(toId(effType)) ? 1.5 : 1;
       const mh = (m as any).multihit;
       const hits = Array.isArray(mh) ? (mh[0] + mh[1]) / 2 : (typeof mh === 'number' ? mh : 1);
       const eff = bp * hits;
       const filler = stab === 1 && eff <= 60 && !PIVOT.has(id) && !PRIORITY_MV.has(id) ? 0.55 : 1;
-      const normalCov = toId(mtype) === 'normal' && stab === 1 && !PRIORITY_MV.has(id) ? 0.35 : 1;
+      const normalCov = toId(effType) === 'normal' && stab === 1 && !PRIORITY_MV.has(id) ? 0.35 : 1;
+      // Ability biases. No Guard pins accuracy at 100 (a 50%-accurate nuke stops
+      // being a gamble and becomes the best move); the flag / terrain / weather
+      // tables reprice the move classes the holder's ability actually rewards.
+      const noGuard = abils.includes('noguard');
+      const flagBoost = abils.map(a => FLAG_BOOST[a])
+        .filter((x): x is { flag: string; mult: number } => !!x)
+        .reduce((acc2, x) => acc2 * ((m as any).flags?.[x.flag] ? x.mult : 1), 1);
+      const technician = abils.includes('technician') && bp <= 60 ? 1.5 : 1;
+      const ateBoost = retyped ? 1.2 : 1;
+      const terrainType = abils.map(a => TERRAIN_ABIL_TYPE[a]).find(Boolean);
+      const terrainBoost = terrainType && toId(effType) === toId(terrainType) ? 1.3 : 1;
+      const wx = abils.map(a => WEATHER_ABIL_TYPES[a]).find(Boolean);
+      const weatherBoost = !wx ? 1 : toId(effType) === toId(wx.up) ? 1.5 : toId(effType) === toId(wx.down) ? 0.5 : 1;
+      const abilityMult = flagBoost * technician * ateBoost * terrainBoost * weatherBoost;
       const tgt = (m as any).target;
       const spread = (tgt === 'allAdjacentFoes' || tgt === 'allAdjacent') ? 1.4 : 1;
-      let s = eff * (stat / 100) * stab * acc * (DMG_PENALTY[id] ?? 1) * filler * normalCov * spread;
+      let s = eff * (stat / 100) * stab * (noGuard ? 1 : acc) * (DMG_PENALTY[id] ?? 1) * filler * normalCov * spread * abilityMult;
       if (hasWeatherAbil && (id === 'weatherball' || id === 'solarbeam' || id === 'solarblade')) s = Math.max(s, 125);
       if (PRIORITY_MV.has(id)) s += 40;
       if (id === 'knockoff') s += 30;
       if (PIVOT.has(id)) s += 25;
-      cands.push({ id, name: m.name, score: s, kind: stab > 1 ? 'stab' : 'coverage', type: mtype, cat });
+      cands.push({ id, name: m.name, score: s, kind: stab > 1 ? 'stab' : 'coverage', type: effType, cat });
     }
   }
 
-  // Dedup attacks by type+category (keeps Draco Meteor AND Dragon Claw), keep it generous.
+  // Dedup attacks by type+category (keeps Draco Meteor AND Dragon Claw), keep it
+  // generous. PRIORITY moves get their own bucket: Grassy Glide and Wood Hammer
+  // are both Grass/Physical, but they are different tools and Rillaboom runs
+  // both — collapsing them loses the priority that makes the mon.
   const CAP = 8;
   const bestPerTC = new Map<string, Cand>();
   for (const c of cands) {
     if (c.kind !== 'stab' && c.kind !== 'coverage') continue;
-    const key = `${toId(c.type ?? '')}|${c.cat ?? ''}`;
+    const key = `${toId(c.type ?? '')}|${c.cat ?? ''}|${PRIORITY_MV.has(c.id) ? 'prio' : ''}`;
     const cur = bestPerTC.get(key);
     if (!cur || cur.score < c.score) bestPerTC.set(key, c);
   }
@@ -132,11 +192,43 @@ function inferLikelyMoves(baseName: string, forme: string | undefined, types: st
   const utils = cands.filter(c => c.kind === 'util').sort((a, b2) => b2.score - a.score);
   const protect = cands.find(c => c.id === 'protect') ?? cands.find(c => c.kind === 'protect');
 
+  // COMPOSITION. Scores alone let utilities flood the list: a 164 SpA mega
+  // scores every setup move it learns above the bar, so Lucario-Mega-Z came out
+  // as six setup moves and one attack — not a set anyone would bring. Two rules
+  // fix it: a real set runs at most ONE move from each of these classes, and
+  // attacks are guaranteed slots before utilities can take them all.
+  const CLASS_CAP: Array<[Set<string>, number]> = [
+    [RECOVERY, 1],      // rest + roost + wish is never a real set
+    [SETUP, 1],
+    [SPEED_CTRL, 1],    // Tailwind and Trick Room are mutually exclusive anyway
+    [PIVOT, 1],
+    [SCREENS, 2],       // Light Screen + Reflect do get paired
+  ];
+  const classCount = new Map<Set<string>, number>();
+  const classAllows = (c: Cand) => {
+    for (const [set, cap] of CLASS_CAP) {
+      if (!set.has(c.id)) continue;
+      if ((classCount.get(set) ?? 0) >= cap) return false;
+    }
+    return true;
+  };
+  const noteClasses = (c: Cand) => {
+    for (const [set] of CLASS_CAP) if (set.has(c.id)) classCount.set(set, (classCount.get(set) ?? 0) + 1);
+  };
+
   const picks: Cand[] = [];
-  const push = (c?: Cand) => { if (c && picks.length < CAP && !picks.some(p => p.id === c.id)) picks.push(c); };
+  const push = (c?: Cand, limit = CAP) => {
+    if (!c || picks.length >= limit || picks.some(p => p.id === c.id)) return;
+    if (c.kind === 'util' && !classAllows(c)) return;
+    noteClasses(c);
+    picks.push(c);
+  };
   push(protect);
+  // Reserve room for attacks so the utility pass can't consume the whole set.
+  const minAttacks = Math.min(supportLean ? 2 : 3, stabs.length + cover.length);
+  const utilLimit = Math.max(1, CAP - minAttacks);
   const utilBar = supportLean ? 40 : 55;
-  for (const x of utils) if (x.score >= utilBar) push(x);
+  for (const x of utils) if (x.score >= utilBar) push(x, utilLimit);
   for (const a of stabs) push(a);
   let nc = 0; const coverTarget = supportLean ? 1 : 3;
   for (const c of cover) { if (nc >= coverTarget) break; push(c); nc++; }
@@ -182,8 +274,19 @@ export function buildDossier(format: ChampionsFormat = loadFormat()): DossierEnt
     const b = sp.baseStats as Stats;
     const types: string[] = sp.types ?? [];
     const abils = forme ? [toId(megaFormeAbility(forme) ?? '')].filter(Boolean) : (Object.values(sp.abilities ?? {}) as string[]).map(toId);
-    // Pikalytics keys megas under the base name, so both base and mega map to the same usage list.
-    const usage = usageById.get(toId(baseName));
+    // Pikalytics keys megas under the base name, so the base's usage list would
+    // otherwise be pinned onto EVERY one of its mega formes. That is right when
+    // the mega plays the same way (Charizard-Mega-Y is the special attacker the
+    // Charizard usage describes) and wrong when it doesn't: Garchomp's usage is
+    // a physical Scarf/Sash set, but Garchomp-Mega-Z is a 141 SpA Levitating
+    // mono-Dragon — inheriting Earthquake/Rock Slide there is a fabricated set,
+    // and it is the NEW megas (no usage of their own for weeks after a rotation)
+    // that get it most wrong. So a mega only inherits usage when its offensive
+    // orientation matches the base's; otherwise it falls back to inference.
+    const rawUsage = usageById.get(toId(baseName));
+    const orientationMatches = !forme
+      || orientationOf(b) === orientationOf(getSpecies(baseName).baseStats as Stats);
+    const usage = rawUsage && orientationMatches ? rawUsage : undefined;
     const moves = usage ?? inferLikelyMoves(baseName, forme, types, b, abils);
     return {
       species: getSpecies(baseName).name, forme, label: forme ?? getSpecies(baseName).name,

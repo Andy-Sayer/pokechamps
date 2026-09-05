@@ -5,6 +5,7 @@
 // megas: Mawile / Metagross / Swampert-rain / Raichu-X / Blaziken).
 //
 //   npx tsx packages/core/src/scripts/mb-team-check.ts [team.json] [--depth N] [--meta N]
+//                                                       [--only <anchor substring>]
 //
 // Reports each matchup's maximin score (under mutual best play; + favors us),
 // the floor + average over the real meta gauntlet and over the hand threats
@@ -16,7 +17,10 @@ import { loadPikaData, groundedTeams } from '../domain/metaTeams.js';
 import { loadCreatorThreats } from '../domain/creatorIntel.js';
 import { MatchupPool } from '../domain/matchupPool.js';
 import type { PokemonSet } from '../domain/types.js';
-import { MB_THREATS } from './mbThreats.js';
+// ALL_THREATS = the M-B archetypes (all still legal in M-C) + the six new M-C
+// megas + Rillaboom. Swapped in 2026-09-05 so the stress-test samples the field
+// we are actually about to play. See mcThreats.ts.
+import { ALL_THREATS } from './mcThreats.js';
 
 const argNum = (f: string, d: number) => { const i = process.argv.indexOf(f); return i >= 0 ? Number(process.argv[i + 1]) : d; };
 const DEPTH = argNum('--depth', 5);
@@ -42,14 +46,21 @@ const team: PokemonSet[] = JSON.parse(readFileSync(teamPath, 'utf8'));
 const pika = loadPikaData();
 const meta = groundedTeams(pika, { minCore: 4, limit: META_N });
 const creator = loadCreatorThreats(); // emerging threats harvested from creator videos
+// --only <substring> narrows the gauntlet to matching anchors (case-insensitive),
+// for a focused deep dive on one bad matchup at a bigger budget / exhaustive
+// brings without re-scoring the whole field.
+const onlyIdx = process.argv.indexOf('--only');
+const ONLY = onlyIdx >= 0 ? (process.argv[onlyIdx + 1] ?? '').toLowerCase() : '';
 const gauntlet = [
   ...meta.map(m => ({ anchor: `[meta] ${m.anchor}`, sets: m.sets })),
-  ...MB_THREATS.map(m => ({ anchor: `[hand] ${m.anchor}`, sets: m.sets })),
+  ...ALL_THREATS.map(m => ({ anchor: `[hand] ${m.anchor}`, sets: m.sets })),
   ...creator, // already tagged "[creator] <name>"
-];
+].filter(g => !ONLY || g.anchor.toLowerCase().includes(ONLY));
+if (!gauntlet.length) { console.error(`no gauntlet team matches --only "${ONLY}"`); process.exit(1); }
 
 console.log(`team: ${teamPath.split(/[\\/]/).pop()} — ${team.map(s => s.species).join(', ')}`);
-console.log(`gauntlet: ${meta.length} real M-B meta teams + ${MB_THREATS.length} hand threats${creator.length ? ` + ${creator.length} creator threats` : ''} · deepen 1→${DEPTH}${BUDGET ? ` · ${BUDGET / 1000}s/board` : ' (fixed)'} · bring ${BRING_K >= 15 ? 'EXHAUSTIVE (all 15)' : `top-${BRING_K}`}×opp-${OPP_BRING_K}${BRING_K > 1 ? ' searched' : ' heuristic'}\n`);
+const nBy = (tag: string) => gauntlet.filter(g => g.anchor.startsWith(tag)).length;
+console.log(`gauntlet: ${nBy('[meta]')} real meta teams + ${nBy('[hand]')} hand threats${nBy('[creator]') ? ` + ${nBy('[creator]')} creator threats` : ''}${ONLY ? ` (filtered by --only "${ONLY}")` : ''} · deepen 1→${DEPTH}${BUDGET ? ` · ${BUDGET / 1000}s/board` : ' (fixed)'} · bring ${BRING_K >= 15 ? 'EXHAUSTIVE (all 15)' : `top-${BRING_K}`}×opp-${OPP_BRING_K}${BRING_K > 1 ? ' searched' : ' heuristic'}\n`);
 
 const pool = new MatchupPool();
 const results = await pool.run(gauntlet.map(g => ({ mine: team, oppSets: g.sets, oppAnchor: g.anchor, depth: DEPTH, budgetMs: BUDGET || undefined, bringK: BRING_K, oppBringK: OPP_BRING_K })));
