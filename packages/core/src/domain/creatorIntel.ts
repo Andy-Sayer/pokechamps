@@ -9,7 +9,9 @@
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadFormat, isLegalSpecies, getSpecies, toId, dataDirPath } from './data.js';
-import { loadPikaData, buildSet } from './metaTeams.js';
+import { getMegaOptions } from './gimmicks/mega.js';
+import { loadPikaData } from './metaTeams.js';
+import { buildSetOrInfer, describeSources, type SourcedSet } from './inferredSets.js';
 import type { PokemonSet } from './types.js';
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -45,24 +47,44 @@ export function extractMentionedSpecies(text: string): { species: string; count:
   return out.sort((a, b) => b.count - a.count);
 }
 
-export interface ThreatTeam { anchor: string; sets: PokemonSet[]; source: string; species: string[] }
+export interface ThreatTeam {
+  anchor: string; sets: PokemonSet[]; source: string; species: string[];
+  /** How the sets were built — "N from usage · M analog-spread (X~Y)". Present
+   *  from 2026-09-07; absent on threat files saved before that, which were
+   *  100% usage-built by construction (the builder could not do anything else). */
+  provenance?: string;
+}
 
 /** Build a gauntlet-ready threat team from a CONFIRMED species list (≤6). Validates
- *  legality, builds real sets (Pikalytics, item-clause-respecting). */
+ *  legality, builds real sets (Pikalytics, item-clause-respecting), and falls back
+ *  to dossier inference for species with no usage yet — the rotation window this
+ *  tool exists for. `team.provenance` says which sets were which; surface it. */
 export function buildThreatTeam(species: string[], source: string): { team: ThreatTeam } | { error: string } {
   const legal = species.filter(s => isLegalSpecies(toId(s)));
   const illegal = species.filter(s => !isLegalSpecies(toId(s)));
   if (legal.length < 4) return { error: `only ${legal.length} legal species (need ≥4)${illegal.length ? `; illegal: ${illegal.join(', ')}` : ''}` };
   const pika = loadPikaData();
   const used = new Set<string>();
-  const sets: PokemonSet[] = [];
+  const sourced: SourcedSet[] = [];
   const failed: string[] = [];
+  // A newly-legal mon has no usage for ~2 weeks after a rotation, which is exactly
+  // the window creator intel exists to cover — so fall back to the dossier rather
+  // than dropping the mon the video is about. Item clause and the one-mega rule are
+  // tracked across the six as we go.
+  let megaAvailable = true;
   for (const sp of legal.slice(0, 6)) {
-    const set = buildSet(pika, (getSpecies(toId(sp)) as { name?: string } | undefined)?.name ?? sp, used);
-    if (set) { sets.push(set); if (set.item) used.add(set.item); } else failed.push(sp);
+    const name = (getSpecies(toId(sp)) as { name?: string } | undefined)?.name ?? sp;
+    const s = buildSetOrInfer(pika, name, used, { megaAvailable });
+    if (!s) { failed.push(sp); continue; }
+    sourced.push(s);
+    if (s.set.item) {
+      used.add(s.set.item);
+      if (getMegaOptions(s.set.species).some(m => toId(m.stone) === toId(s.set.item!))) megaAvailable = false;
+    }
   }
-  if (sets.length < 4) return { error: `built only ${sets.length} sets (no Pikalytics data for: ${failed.join(', ')})` };
-  return { team: { anchor: source, sets, source, species: sets.map(s => s.species) } };
+  if (sourced.length < 4) return { error: `built only ${sourced.length} sets (no usage and no dossier entry for: ${failed.join(', ')}) — run npm run build-dossier` };
+  const sets = sourced.map(s => s.set);
+  return { team: { anchor: source, sets, source, species: sets.map(s => s.species), provenance: describeSources(sourced) } };
 }
 
 /** Load saved creator threat teams (data/threats/*.json) as gauntlet entries,

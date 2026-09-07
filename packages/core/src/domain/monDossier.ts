@@ -236,8 +236,12 @@ function inferLikelyMoves(baseName: string, forme: string | undefined, types: st
   return picks.slice(0, CAP).map(p => p.id);
 }
 
-/** Role tags from a moveset (usage or inferred) + ability + stats. */
-function rolesFrom(moveIds: string[], abils: string[], b: Stats): RoleTag[] {
+/** Role tags from a moveset (usage or inferred) + ability + stats.
+ *  Exported so a set BUILDER can check that the 4 moves it picked actually
+ *  express the roles the dossier assigned the mon — `moves` here is a candidate
+ *  POOL (8-ish), not a chosen set, so a naive first-4 can silently drop the
+ *  signature move (Rillaboom losing Grassy Glide). See domain/inferredSets.ts. */
+export function rolesFrom(moveIds: string[], abils: string[], b: Stats): RoleTag[] {
   const mv = new Set(moveIds.map(toId));
   const has = (set: Set<string>) => [...mv].some(m => set.has(m));
   const roles: RoleTag[] = [];

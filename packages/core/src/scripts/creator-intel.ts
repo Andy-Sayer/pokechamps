@@ -32,6 +32,10 @@ const res = buildThreatTeam(species, name);
 if ('error' in res) { console.error(`✗ ${res.error}`); process.exit(1); }
 const t = res.team;
 console.log(`threat team "${t.anchor}": ${t.sets.map(s => `${s.species}@${s.item || '-'}`).join(', ')}`);
+// Say which sets are real and which were inferred. A synthetic opponent that
+// silently passes for a real one is how a gauntlet quietly starts lying.
+if (t.provenance) console.log(`  provenance: ${t.provenance}`);
+if (/analog|derived/.test(t.provenance ?? '')) console.log('  ⚠ some sets are INFERRED (no usage yet) — treat this team as provisional until usage lands');
 
 const outDir = join(dataDirPath(), 'threats'); mkdirSync(outDir, { recursive: true });
 const outPath = join(outDir, `${name.replace(/[^a-z0-9-]/gi, '_')}.json`);
