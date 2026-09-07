@@ -14,8 +14,8 @@
 //
 // Returns an error string when ambiguous; nothing is mutated.
 import type { Match, MoveAction, PokemonSet } from './types.js';
-import { getMegaOptions, resolveMegaForme, megaVariantToken, type MegaOption } from './gimmicks/mega.js';
-import { isLegalItem, toId, getSpecies } from './data.js';
+import { getMegaOptions, resolveMegaForme, megaVariantToken, megaFormeAbility, type MegaOption } from './gimmicks/mega.js';
+import { isLegalItem, toId } from './data.js';
 
 function pickOption(
   speciesName: string,
@@ -108,11 +108,3 @@ export function applyMegaAction(match: Match, a: MoveAction): string | null {
   return null;
 }
 
-// Mega formes have a single ability slot in the dex (`abilities['0']`).
-// Returns undefined if the dex lookup fails — caller falls back to the
-// candidate's existing ability so we don't accidentally wipe it.
-function megaFormeAbility(formeName: string): string | undefined {
-  const sp = getSpecies(formeName) as any;
-  const abilities = sp?.abilities as Record<string, string> | undefined;
-  return abilities?.['0'];
-}

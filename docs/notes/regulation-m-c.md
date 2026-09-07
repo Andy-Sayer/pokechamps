@@ -196,6 +196,14 @@ deepen 1→5, 20 s/board, heuristic bring):
 | meta (M-B usage teams) | −1108 | −411 |
 | hand (M-B + M-C archetypes) | −1090 | −217 |
 
+> **CORRECTION 2026-09-07: the per-mega numbers immediately below are not
+> measuring those megas.** Seven of the twelve gauntlet teams bench their own
+> mega at the heuristic top-1 bring, including Salamence, Lucario Z, Absol Z and
+> Golisopod — so those four rows scored a generic goodstuff four instead. Only
+> Baxcalibur, Garchomp Z, Metagross and Swampert actually brought their anchor.
+> See "The benched-anchor defect" below; re-score with `--oppBringK 15` before
+> quoting any of them.
+
 The six new megas mostly land **even**: Lucario Z +42, Golisopod +10, Rillaboom
 −80, Garchomp Z −113, Absol Z −115, Salamence −115. The exception is
 **Mega Baxcalibur under Trick Room at −1090**, a new worst-case on par with our
@@ -274,6 +282,102 @@ the two unrevealed abilities are still unrevealed.**
   reconciles to 208 + 24 = 232, which is exactly why step 2 reads the game itself.
 - No removals reported anywhere; the "previous sets remain eligible" line holds.
 
+## Prep done 2026-09-07 (day before switch)
+
+### One table, not two
+
+A mega's Champions ability used to be pinned in TWO places with no mechanical
+link: `MEGA_ABILITY_OVERRIDES` (`gimmicks/mega.ts`), which the domain reads, and
+`SPECIES_PATCHES` (`refresh-data.ts`), which writes `data/species.json`. Runbook
+step 3 said "pin in BOTH" — a hand-maintained invariant, on the one night of the
+quarter when there is time pressure. **`MEGA_ABILITY_OVERRIDES` is now the single
+source of truth**: refresh-data derives its mega patches from it, so switch-day is
+one edit plus `npm run refresh-data`. Three tripwires back it up:
+
+- `regulation-readiness` now BLOCKS when `data/species.json` disagrees with the
+  table (i.e. someone pinned an ability and never re-ran refresh-data). Verified
+  by deliberately breaking a pin — it fired, naming the forme and the fix.
+- `tests/mega-ability-table.test.ts` pins the same invariant, plus "no forme is
+  both pinned and marked unrevealed" and "refresh-data derives rather than lists".
+- `megaResolve.ts` had its own private copy of `megaFormeAbility` that read the
+  dump directly and ignored the override table. They agreed today only because
+  the dump happened to be current. It now calls the canonical one.
+
+Also folded the Raichu X/Y pins in, so every mega ability in the app is in that
+one table, and armed `Heatran-Mega` in `MEGA_ABILITY_UNREVEALED` — inert while
+Heatran is illegal, and it starts warning the moment Heatran joins the roster.
+
+### The benched-anchor defect (found by the sensitivity sweep)
+
+**Seven of the twelve gauntlet teams never bring the mega they are named after.**
+
+`evaluateMatchup` does not force the anchor into the opponent's four; it takes
+`scoreBrings`' top-1 bring for that side. And `scoreBrings` scores a stone holder
+on its **base forme** — `bring.ts` only swaps in the mega forme once
+`entry.megaUsed` is set, which happens when `/mega` is LOGGED in a live battle,
+never at preview time. A held stone is a guaranteed mega, so for a side scoring
+its OWN bring that is simply wrong, and it is wrong in a predictable direction:
+the mons whose entire point is the mega get benched. Mega Mawile is the clearest
+case — base Mawile without Huge Power really is a weak 50/85/85 mon.
+
+```
+npx tsx packages/core/src/scripts/gauntlet-anchor-check.ts
+  Mega Mawile          BENCHED (rank 2/15)   Mega Metagross     BROUGHT
+  Mega Raichu-X        BENCHED (rank 5/15)   Mega Swampert      BROUGHT
+  Mega Blaziken        BENCHED (rank 2/15)   Mega Garchomp Z    BROUGHT
+  Mega Salamence       BENCHED (rank 2/15)   Mega Baxcalibur    BROUGHT
+  Mega Lucario Z       BENCHED (rank 2/15)   Rillaboom/Swampert BROUGHT
+  Mega Absol Z         BENCHED (rank 6/15)
+  Mega Golisopod       BENCHED (rank 2/15)
+```
+
+The failure is silent and reads like a result: a sweep over a benched mon returns
+a perfectly flat line, indistinguishable from "the ability does not matter".
+
+**NOT FIXED, deliberately.** The fix is to make `scoreBrings` resolve a held
+stone to the mega forme, but that is the scorer behind OUR bring picking too —
+the priority-one feature — with calibration baselines behind it
+(`bring-truth*.regmb.json`, `calibrate-bring`, `analyze-bring-models`). Changing
+it invalidates those and needs a re-calibration pass, not a midnight edit. What
+shipped instead is detection: `gauntlet-anchor-check.ts` reports it and exits 1,
+and the sensitivity sweep escalates the opponent to an exhaustive 15-bring
+maximin whenever its anchor is benched, so it always measures the real mega.
+
+### Ability sensitivity: what the two unknowns are worth
+
+`mc-ability-sensitivity.ts` sweeps a spanning set of ability EFFECT CLASSES over
+the unrevealed formes (driven by `MEGA_ABILITY_UNREVEALED`, so a forme drops out
+the moment it is pinned) and reports how far our score moves. The point is to
+make switch-day a lookup rather than a re-derivation. **The probe list is not a
+set of predictions** — the classes are chosen to span what an ability can
+mechanically do, using calc-native abilities so every number is a real search
+result. And the threat SET is held fixed, so each row isolates the ability and
+excludes the archetype re-tune a real reveal would enable (Speed Boost on a Trick
+Room shell is the clearest case: a floor on its true impact, not an estimate).
+
+SENSITIVITY_RESULTS_PLACEHOLDER
+
+### Also shipped
+
+- `switch-regulation.ts` — runs the five mechanical runbook steps in order,
+  stopping at the first failure and gating the verdict on `regulation-readiness`
+  exiting 0. It prints the three judgement steps it deliberately does NOT do
+  (roster paste, ability pin, Pikalytics repoint) rather than pretending to.
+- A cloud routine (`trig_01UfqkR9Luyi365bwcfDACVq`) fires every 6h from Sept 9
+  03:00 UTC through Sept 14, researches the two abilities under explicit sourcing
+  rules, and opens a PR if and only if it clears the bar. It bails early once the
+  formes leave `MEGA_ABILITY_UNREVEALED`.
+
+### Checked, nothing to do
+
+- `@pkmn/dex`, `@pkmn/sim`, `@pkmn/data` are all on 0.10.11 (latest) and
+  `@smogon/calc` on 0.11.0. The sim still predates the 2026-08-31 Z-mega reveal,
+  so the three `/exact` divergences stand — bump and re-check on switch-day.
+- Upstream `@pkmn/dex` HAS caught up on the M-B abilities (Electric Surge, No
+  Guard, Fire Mane, Eelevate, Shell Armor all come from the raw dex now), so the
+  M-B half of the override table is redundant today. Keeping it: it costs nothing
+  and a dump regression would otherwise be silent.
+
 ## Switch-day runbook (Sept 8, 2026, 19:00 PDT)
 
 Steps 1, 3–7 are the M-B runbook verbatim; **step 2 is the real work.**
@@ -294,11 +398,15 @@ Steps 1, 3–7 are the M-B runbook verbatim; **step 2 is the real work.**
    `heatran` + `heatranite` + a mega-ability pin if it is in). Then confirm `items.allow`
    in; add anything else the official item list introduces) and update `__notes`.
 3. **Pin the two unrevealed mega abilities** — Golisopod-Mega and Baxcalibur-Mega —
-   in BOTH `SPECIES_PATCHES` (`refresh-data.ts`) and `MEGA_ABILITY_OVERRIDES`
-   (`gimmicks/mega.ts`), then re-run `refresh-data` (or hand-patch
-   `data/species.json` to match). If either is a *custom* effect that touches damage,
-   it needs an emulation in `damage.ts` like Aura Guard / Fire Mane / Dragonize.
-   Lucario-Mega-Z's name is settled (`Aura Guard`, official) - no action there.
+   in `MEGA_ABILITY_OVERRIDES` (`gimmicks/mega.ts`) and drop them from
+   `MEGA_ABILITY_UNREVEALED` in the same edit. **That is now the ONLY table** —
+   refresh-data derives `data/species.json`'s patches from it (changed 2026-09-07),
+   so step 1 materializes the pin and `regulation-readiness` blocks if you skip it.
+   If either ability is a *custom* effect that touches damage, it needs an emulation
+   in `damage.ts` like Aura Guard / Fire Mane / Dragonize — a name @smogon/calc does
+   not know is silently inert, so the pin alone does nothing.
+   Lucario-Mega-Z's name is settled (`Aura Guard`, official) — no action there.
+   Then re-measure that matchup: the sensitivity envelope says how much it moves.
 4. `npm run validate-format` — every id must resolve.
 5. Pikalytics: repoint `CHAMPIONS_PIKA_FORMAT` in `packages/core/src/domain/data.ts`
    to `gen9championsvgc2026regmc` (the server's `pikalytics/cache.ts` mirrors the
@@ -308,6 +416,8 @@ Steps 1, 3–7 are the M-B runbook verbatim; **step 2 is the real work.**
    teammates `undefined%`, blank nature).
 6. `npx tsx packages/core/src/scripts/tactics-catalog.ts` — regenerate the combo
    catalog over the new legal lists (Rillaboom grassy cores, the new megas).
+   (steps 1, 4, 6, 7 and the readiness gate all run in order via
+   `npx tsx packages/core/src/scripts/switch-regulation.ts --with-tests`.)
 7. `npx tsx packages/core/src/scripts/smoketest.ts` + `npm test`. Then sanity-check a
    Mega Lucario Z contact halving and a Mega Absol Z Night Slash against the
    Pikalytics calc.

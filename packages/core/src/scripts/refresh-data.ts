@@ -2,6 +2,7 @@ import { Dex } from '@pkmn/dex';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MEGA_ABILITY_OVERRIDES } from '../domain/gimmicks/mega.js';
 
 // Materialize Gen 9 data from @pkmn/dex into editable JSON files under data/.
 // Re-running this overwrites species/moves/items/abilities/natures/types but
@@ -13,43 +14,26 @@ mkdirSync(dataDir, { recursive: true });
 
 const gen = Dex.forGen(9).includeData();
 
-// Champions corrections @pkmn/dex doesn't have (yet). Upstream ships the
-// custom megas tagged isNonstandard:'Future', occasionally with placeholder
-// abilities; the OFFICIAL announcements win. Applied after every dump so a
-// refresh never silently regresses them. Verified 2026-06: Mega Raichu X =
-// Electric Surge, Mega Raichu Y = No Guard (pokemon.com, 2026-06-03 news).
+// Champions corrections @pkmn/dex does not have (yet), for species that are NOT
+// mega formes. Every mega ability pin lives in MEGA_ABILITY_OVERRIDES and is
+// merged in below — do not add one here, it would be shadowed by the derived
+// half and drift out of sync with what the engine actually reads.
+const EXTRA_SPECIES_PATCHES: Record<string, { abilities?: Record<string, string> }> = {
+  // (empty — all current patches are mega abilities)
+};
+
+// The mega half of the patch table is DERIVED, not hand-maintained. Pinning a
+// mega's real Champions ability used to mean editing two tables that had no
+// mechanical link (this one and MEGA_ABILITY_OVERRIDES in gimmicks/mega.ts) —
+// the domain read one, the dump carried the other, and forgetting either half
+// left them silently disagreeing. MEGA_ABILITY_OVERRIDES is now the single
+// source of truth: pin there, run refresh-data, done. regulation-readiness
+// BLOCKS if data/species.json and the table ever drift apart.
+const megaIdOf = (forme: string) => forme.toLowerCase().replace(/[^a-z0-9]/g, "");
 const SPECIES_PATCHES: Record<string, { abilities?: Record<string, string> }> = {
-  raichumegax: { abilities: { 0: 'Electric Surge' } },
-  raichumegay: { abilities: { 0: 'No Guard' } },
-  // Reg M-B custom megas: the @pkmn/dex dump ships these with PLACEHOLDER
-  // base-forme abilities, so pin the real Champions ability (a single-slot
-  // object collapses the forme to one ability, like raichumegay above). Only
-  // two are publicly named pre-launch; effect emulation is tracked separately
-  // in docs/notes/champions-custom-data.md.
-  eelektrossmega: { abilities: { 0: 'Eelevate' } },    // CUSTOM effect (Levitate + Beast Boost) — emulated in damage.ts/search
-  pyroarmega: { abilities: { 0: 'Fire Mane' } },       // CUSTOM effect (×1.5 Fire) — emulated in damage.ts
-  // The remaining M-B megas use STANDARD abilities (no emulation needed). All
-  // confirmed 2026-06-18 (The Game Haus / Pokéos / PLDH); Staraptor independently
-  // seen in live footage. Full set now pinned — no blanks remain.
-  staraptormega: { abilities: { 0: 'Contrary' } },
-  scolipedemega: { abilities: { 0: 'Shell Armor' } },
-  scraftymega: { abilities: { 0: 'Intimidate' } },
-  malamarmega: { abilities: { 0: 'Contrary' } },
-  barbaraclemega: { abilities: { 0: 'Tough Claws' } },
-  dragalgemega: { abilities: { 0: 'Regenerator' } },
-  falinksmega: { abilities: { 0: 'Defiant' } },
-  // Reg M-C (Sept 8 2026) megas. The three Legends Z-A "Z" formes ship with the
-  // MAINLINE mega's ability as a placeholder (Absol-Mega-Z=Magic Bounce,
-  // Garchomp-Mega-Z=Sand Force, Lucario-Mega-Z=Adaptability) — all three wrong.
-  // Official reveal 2026-08-31 (RotomLabs / Victory Road).
-  absolmegaz: { abilities: { 0: 'Sharpness' } },       // standard — calc handles slicing ×1.5
-  garchompmegaz: { abilities: { 0: 'Levitate' } },     // standard — Ground immunity + hazard immunity
-  lucariomegaz: { abilities: { 0: 'Aura Guard' } },    // CUSTOM effect (contact damage taken ×0.5) — emulated in damage.ts
-  // Salamence-Mega already dumps with the correct canonical Aerilate — no patch.
-  // Golisopod-Mega + Baxcalibur-Mega are Champions-INVENTED megas whose abilities
-  // were NOT revealed pre-launch (2026-09-05); the dump carries their base-forme
-  // abilities (Emergency Exit / Thermal Exchange) as placeholders. Pin them here
-  // on switch-day once the in-game roster shows them. See docs/notes/regulation-m-c.md.
+  ...EXTRA_SPECIES_PATCHES,
+  ...Object.fromEntries(Object.entries(MEGA_ABILITY_OVERRIDES)
+    .map(([forme, ability]) => [megaIdOf(forme), { abilities: { 0: ability } }])),
 };
 
 // Champions move-DATA rebalances @pkmn/dex doesn't have (mainline data ≠

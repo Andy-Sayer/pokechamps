@@ -105,6 +105,18 @@ async function main() {
   }
   if (![...MEGA_ABILITY_UNREVEALED].some(f => formes.some(x => x.forme === f))) ok('no legal mega forme is running an unrevealed ability');
 
+  // DUMP DRIFT. MEGA_ABILITY_OVERRIDES is the single source of truth and
+  // refresh-data derives data/species.json's patches from it — but the dump is a
+  // committed artifact, so pinning an ability without re-running refresh-data
+  // leaves the engine and the dump disagreeing. That is precisely the switch-day
+  // mistake this report exists to catch, so it BLOCKS rather than warns.
+  const drift = formes
+    .map(({ forme }) => ({ forme, ours: megaFormeAbility(forme), dumped: (getSpecies(forme) as SpeciesEntry | undefined)?.abilities?.['0'] }))
+    .filter(d => norm(d.ours) !== norm(d.dumped));
+  if (drift.length) {
+    for (const d of drift) block(`${d.forme}: MEGA_ABILITY_OVERRIDES says "${d.ours}" but data/species.json has "${d.dumped}" — run: npm run refresh-data`);
+  } else ok(`data/species.json agrees with the ability table for all ${formes.length} legal mega formes`);
+
   // ---- 3. sim parity -------------------------------------------------------
   console.log('\n=== 3. @pkmn/sim parity (drives /exact) ===');
   if (!(await ensureSimLoaded())) {

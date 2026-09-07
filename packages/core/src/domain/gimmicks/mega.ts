@@ -15,9 +15,16 @@ const getItem = (name: string) => dex.items.get(name);
 // data layer) and the emulation in damage.ts. Fire Mane → ×1.5 Fire override;
 // Eelevate → aliased to Levitate by the calc for the Ground immunity; Contrary
 // (Mega Staraptor) is a STANDARD ability needing no emulation — the search already
-// inverts self-stat-drops via hasContrary (so Close Combat boosts its Def/SpD). (The
-// Raichu X/Y customs are NOT here — Electric Surge / No Guard don't affect damage.)
+// inverts self-stat-drops via hasContrary (so Close Combat boosts its Def/SpD).
+// Raichu X/Y are listed too — Electric Surge / No Guard don't affect damage, but
+// this table is now the SINGLE source of truth for every mega ability pin
+// (refresh-data derives data/species.json's patches from it), so nothing is
+// allowed to live only in the dump.
 export const MEGA_ABILITY_OVERRIDES: Record<string, string> = {
+  // Reg M-B (pokemon.com, 2026-06-03). Upstream @pkmn/dex has since caught up on
+  // both, so these are belt-and-braces against a dump regression.
+  'Raichu-Mega-X': 'Electric Surge',
+  'Raichu-Mega-Y': 'No Guard',
   'Pyroar-Mega': 'Fire Mane',          // custom effect — emulated in damage.ts (×1.5 Fire)
   'Eelektross-Mega': 'Eelevate',       // custom effect — Levitate immunity + Beast Boost snowball
   // The rest are STANDARD abilities (effects handled natively by calc/search); pinned
@@ -44,8 +51,11 @@ export const MEGA_ABILITY_OVERRIDES: Record<string, string> = {
 /** Mega formes whose REAL Champions ability is still unpublished, so the dex's
  *  value (its BASE forme's ability) is a placeholder we are knowingly running
  *  on. Damage, the search and /exact are all wrong for these to the extent the
- *  real ability differs — pin them in MEGA_ABILITY_OVERRIDES (and
- *  refresh-data's SPECIES_PATCHES) the moment Champions publishes them.
+ *  real ability differs — pin them in MEGA_ABILITY_OVERRIDES the moment
+ *  Champions publishes them. That table is the SINGLE source of truth:
+ *  refresh-data derives its species-dump patches from it, so one edit plus a
+ *  `npm run refresh-data` is the whole job (regulation-readiness blocks if the
+ *  dump and the table ever disagree).
  *
  *  This is deliberately NOT inferred. A mega legitimately keeping its base
  *  ability is common (Blaziken/Speed Boost, Medicham/Pure Power, Scizor/
@@ -56,6 +66,12 @@ export const MEGA_ABILITY_OVERRIDES: Record<string, string> = {
 export const MEGA_ABILITY_UNREVEALED = new Set<string>([
   'Golisopod-Mega',    // Reg M-C, Sept 8 2026 — Emergency Exit would be self-defeating on a mega
   'Baxcalibur-Mega',   // Reg M-C, Sept 8 2026
+  // Teased in the 2026-08-31 update trailer ("stay tuned for more details") and
+  // NOT one of the four named M-C species, so it is either an unnamed M-C
+  // addition or a later drop. Neither `heatran` nor `heatranite` is in the
+  // allow-lists today, so the readiness report skips it — this entry is armed
+  // and waiting for the moment it becomes legal. See docs/notes/regulation-m-c.md.
+  'Heatran-Mega',      // Reg M-C? teased 2026-08-31 — dump carries the base Flash Fire
 ]);
 
 // The ability a mega forme fights with — our override (for the customs @pkmn/dex
