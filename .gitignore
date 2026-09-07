@@ -59,3 +59,6 @@ Thumbs.db
 # Scratch/probe scripts (prefix _) — never committed; see docs/notes for the keepers
 packages/*/src/scripts/_*.ts
 packages/*/scripts/_*.ts
+
+# Local regulation-research reports (scripts/regulation-research.ps1)
+research/

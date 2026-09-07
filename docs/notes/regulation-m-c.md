@@ -400,10 +400,17 @@ the sweep is a relative A/B at a fixed budget, which is the only claim it makes.
   stopping at the first failure and gating the verdict on `regulation-readiness`
   exiting 0. It prints the three judgement steps it deliberately does NOT do
   (roster paste, ability pin, Pikalytics repoint) rather than pretending to.
-- A cloud routine (`trig_01UfqkR9Luyi365bwcfDACVq`) fires every 6h from Sept 9
-  03:00 UTC through Sept 14, researches the two abilities under explicit sourcing
-  rules, and opens a PR if and only if it clears the bar. It bails early once the
-  formes leave `MEGA_ABILITY_UNREVEALED`.
+- `scripts/regulation-research.ps1` + a Windows scheduled task ("PokeChamps
+  regulation research") run the switch-day research LOCALLY every 6h from Sept 8
+  20:00 PDT through Sept 14, read-only (Read/Grep/Glob/WebSearch/WebFetch — no Edit,
+  Write or Bash), writing a `HEADLINE:`-led report into the gitignored `research/`.
+  A cloud routine was built first (`trig_01UfqkR9Luyi365bwcfDACVq`) and is now
+  **DISABLED**: the cloud sandbox egress proxy blocks every source we rely on
+  (serebii, pokemon.com, x.com, bulbapedia, victoryroad, metavgc, rotomlabs, game8,
+  pokeos, pikalytics — all EGRESS_BLOCKED / curl 000, as org policy). WebSearch
+  survives there but returns only snippets, which the sourcing rules forbid acting
+  on — and its very first search re-asserted the Shell Armor conflation. The prompt
+  was fine; the environment was not.
 
 ### Checked, nothing to do
 
@@ -414,6 +421,57 @@ the sweep is a relative A/B at a fixed budget, which is the only claim it makes.
   Guard, Fire Mane, Eelevate, Shell Armor all come from the raw dex now), so the
   M-B half of the override table is redundant today. Keeping it: it costs nothing
   and a dump regression would otherwise be silent.
+
+## Research sweep 2026-09-07 01:46 PDT (automated, read-only)
+
+First run of `scripts/regulation-research.ps1`. Nothing met the evidence bar, so
+nothing changed — but four things are worth recording.
+
+**1. Heatran now looks like Reg M-D (Dec 1), not M-C.** It is absent from the
+official M-C article, Serebii's M-C page, Game8's M-C page and MetaVGC's 234-entry
+list, and [Game Rant 2026-09-02](https://gamerant.com/pokemon-legends-z-a-champions-mega-heatran-release-when/)
+states Mega Heatran returns 2026-12-01 with M-D, citing the Worlds closing-ceremony
+trailer plus Centro Leaks. **That is an inference, not an official statement** —
+absence from an announcement that named only 4 of 24 species proves nothing on its
+own. `Heatran-Mega` stays armed in `MEGA_ABILITY_UNREVEALED`; its switch-day
+priority just drops from "watch for it" to "confirm it is absent".
+
+**2. A leak exists. It was refused, correctly.**
+[Vice, 2026-04-02](https://www.vice.com/en/article/pokemon-champions-mega-abilities-leak-reveals-overpowered-new-forms/)
+claims Golisopod-Mega = Tough Claws and Baxcalibur-Mega = Thermal Exchange, sourced
+to a Chinese forum post from someone claiming localisation work. Single source,
+unofficial, five months stale, and the Baxcalibur value is *identical to the
+base-forme placeholder* — which is exactly what a lazy fabrication also looks like.
+Recorded here so nobody "rediscovers" it and pins it. Note the sensitivity sweep
+already priced that world: Tough Claws on Golisopod scored −86, the Thermal
+Exchange placeholder on Baxcalibur −1090 — both equal to the baselines. Even if the
+leak is right, nothing needs re-scoring.
+
+**3. Items are corroborated; the roster still is not.** MetaVGC now reads
+"154 Held Items (+6 new Mega Stones)" and names exactly our six stones — matching
+our staged 154, second source, no action. Its species header is now self-consistent
+at 234/234 (yesterday it rendered 234 under a "248" header), but only 10 entries
+carry a NEW badge and six of those are megas, so it is still the announcement-derived
+partial list, not the roster. Bulbapedia is still on the M-B state (208 species / 75
+megas). **The roster remains in-game only.** Also: ValoSettings' "26 new Pokémon" is
+a miscount — they count three Z-megas as base species. Official is 24.
+
+**4. Stats confirmed, rebalances UNVERIFIED (not clean).** Golisopod-Mega
+75/150/175/70/120/40 and Baxcalibur-Mega 115/175/117/105/101/87 both match our dump
+exactly across two independent dexes, and Serebii independently confirms all six
+typings — including **Garchomp-Mega-Z as mono-Dragon**, which settles that open
+question in favour of our reading (RotomLabs' article text remains the lone outlier).
+Pikalytics `gen9championsvgc2026regmc` returns **404**, with `regmb` returning 200 and
+real data as a control — so the 404 is meaningful and `CHAMPIONS_PIKA_FORMAT` stays put.
+But no balance-change tracker is current: ChampsDex's patch-notes hub is stale at
+2026-06-11 and never even carried the M-B Make It Rain change we already patch. So
+treat "no M-C rebalances" as **unverified rather than clean** — the in-game patch
+notes on switch-day are the real source.
+
+**Two things the automation could not do**, for a human tomorrow: read
+[Pokéos](https://www.pokeos.com/p/champions/new-mega-evolution-abilities) (it 403s
+every fetcher, and it is the one dedicated mega-ability page), and check the in-game
+roster for Heatran to close out the M-D question.
 
 ## Switch-day runbook (Sept 8, 2026, 19:00 PDT)
 
@@ -431,9 +489,10 @@ Steps 1, 3–7 are the M-B runbook verbatim; **step 2 is the real work.**
    ```
 
    `--mode replace` also reports **removals** — expect none, but check. The ~20
-   unnamed additions land here — **watch for Heatran** (teased 2026-08-31; needs
-   `heatran` + `heatranite` + a mega-ability pin if it is in). Then confirm `items.allow`
-   in; add anything else the official item list introduces) and update `__notes`.
+   unnamed additions land here — **confirm Heatran is ABSENT** (evidence now points
+   to Reg M-D, Dec 1; if it IS in, it needs `heatran` + `heatranite` + a mega-ability
+   pin). Then confirm `items.allow` (MetaVGC corroborates our 154 and the same six stones;
+   add anything else the official item list introduces) and update `__notes`.
 3. **Pin the two unrevealed mega abilities** — Golisopod-Mega and Baxcalibur-Mega —
    in `MEGA_ABILITY_OVERRIDES` (`gimmicks/mega.ts`) and drop them from
    `MEGA_ABILITY_UNREVEALED` in the same edit. **That is now the ONLY table** —
@@ -470,7 +529,9 @@ Steps 1, 3–7 are the M-B runbook verbatim; **step 2 is the real work.**
   correctness, but neither reveal forces a re-tune. See the sensitivity table above.
 - Whether Aura Guard's halving is a final modifier or a BP/attack modifier (we
   assume final, via the Fluffy alias).
-- Whether the announced Garchomp-Mega-Z typing is really mono-Dragon: our dump,
+- ~~Whether the announced Garchomp-Mega-Z typing is really mono-Dragon~~ **RESOLVED
+  2026-09-07**: Serebii independently confirms mono-Dragon, so our reading stands and
+  RotomLabs' article text is the lone outlier. Original note: our dump,
   Serebii and RotomLabs' dex all say **Dragon**; RotomLabs' *article* says
   "Dragon/Ground". Ground-immune-via-Levitate only makes sense on the mono read, and
   that is what the app uses.
