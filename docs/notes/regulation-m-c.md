@@ -7,6 +7,8 @@
 > 3 of the 6 new mega abilities (one of which needed engine emulation). The other
 > ~20 species and 2 abilities are **unpublished** — they drop with the in-game
 > roster on switch-day, and step 2 of the runbook below is the whole job.
+> **Re-swept 2026-09-07** — see the research update below: Aura Guard confirmed
+> official, the other two abilities still unrevealed, Mega Heatran now on the watch list.
 >
 > **Our earlier note said M-B ended Sept 2. That was wrong** — the official window
 > is Sept 8 (Victory Road / pokemon.com / Serebii all agree). Dates corrected
@@ -41,7 +43,7 @@ implications, then the exact steps to flip the app over.
 | Baxcalibur-Mega | `baxcalibrite` | Dragon/Ice | **UNREVEALED** | ⚠️ placeholder (Thermal Exchange) |
 | Absol-Mega-Z | `absolitez` | Dark/**Ghost** | Sharpness | ✅ patched (standard ability) |
 | Garchomp-Mega-Z | `garchompitez` | Dragon (mono) | Levitate | ✅ patched (standard ability) |
-| Lucario-Mega-Z | `lucarionitez` | Fighting/Steel | Aura Guard (custom) | ✅ patched + **emulated** |
+| Lucario-Mega-Z | `lucarionitez` | Fighting/Steel | Aura Guard (custom) | ✅ patched + **emulated**, name **CONFIRMED** 2026-09-07 |
 
 All six formes and all six stones were **already in the `@pkmn/dex` dump** with
 correct stats/types (`isNonstandard: 'Future'`, except the canonical Salamencite at
@@ -68,11 +70,14 @@ Baxcalibur-Mega  115 / 175 / 117 / 105 / 101 /  87   Dragon/Ice
   grounded hazards. `isLevitateAbility` + `hazards.ts` handle it with no new code;
   Earthquake into an active Garchomp-Mega-Z correctly returns the calc's immunity
   throw. Note the trade: it loses Ground STAB and becomes a 141 SpA special attacker.
-- **Mega Lucario Z — a NEW ability that halves damage from contact moves.** The name
-  is reported **two ways**: RotomLabs says **"Aura Guard"**, Victory Road says
-  **"Wave Shield"**; both give the identical effect text. We pin `Aura Guard` in the
-  data and accept **both** names in the engine (`isAuraGuardAbility`) until the
-  in-game string settles. **Confirm the name on switch-day.**
+- **Mega Lucario Z — a NEW ability that halves damage from contact moves.** The
+  name was briefly reported **three ways** (RotomLabs "Aura Guard", Victory Road
+  "Wave Shield", Future Sight "Aura Barrier" - all renderings of the same Japanese
+  string). **The official @Pokemon_Champs account settled it 2026-09-06: `Aura
+  Guard`**, which is what we already pinned; Bulbapedia now carries an Aura Guard
+  page. The engine keeps accepting both names (`isAuraGuardAbility`) - harmless.
+  Serebii adds one mechanical detail we get for free from the Fluffy alias:
+  **Long Reach moves bypass it** and deal normal damage.
 
 ## Engine work already done (2026-09-05)
 
@@ -235,6 +240,40 @@ deep dives on a single matchup at a bigger budget.
 - **Mega Baxcalibur** 175 Atk / 115 HP Dragon/Ice — Glaive Rush + Icicle Crash off a
   87 Spe frame; another TR-friendly breaker.
 
+## Research update 2026-09-07 (day before switch)
+
+Swept the official channels, Serebii, Victory Road, RotomLabs, MetaVGC, Game8 and
+the community-tool dexes. Net: **one open question closed, one new watch item, and
+the two unrevealed abilities are still unrevealed.**
+
+- **Aura Guard is official.** @Pokemon_Champs posted the English name and effect on
+  2026-09-06 ("halving the damage of incoming attacks that make contact"). Victory
+  Road's "Wave Shield" and Future Sight's "Aura Barrier" were fan translations. Our
+  pin was already right; **no switch-day action**. Serebii adds that **Long Reach**
+  moves bypass it — the Fluffy alias gives us that for free.
+- **Golisopod-Mega / Baxcalibur-Mega abilities: STILL UNREVEALED.** Every outlet
+  says the same thing ("announced on Sept 8"), and the community dexes
+  (gamewith.ai, PokéBase) render their ability fields **blank** while listing the
+  correct stats — which independently re-confirms our dumped lines (Golisopod-Mega
+  75/150/175/70/120/40 Bug/Steel, Baxcalibur-Mega 115/175/117/105/101/87
+  Dragon/Ice). Beware: search-engine summaries keep asserting **"Mega Golisopod:
+  Shell Armor"** — that is a conflation with **Mega Scolipede**, which really did
+  get Shell Armor in M-B. No primary source. Runbook step 3 stands unchanged.
+- **NEW: Mega Heatran was teased** in the 2026-08-31 update trailer ("stay tuned for
+  more details") and is *not* one of the four named species — so it is either one of
+  the ~20 unnamed M-C additions or a later drop. We are not ready for it: `heatran`
+  is **not** in `legality.allow` and `heatranite` is **not** in `items.allow`,
+  though both exist in the dump (`heatranmega` 91/120/106/175/141/67 Fire/Steel,
+  `isNonstandard: 'Future'`) carrying the **base** abilities (Flash Fire / Flame
+  Body) — i.e. the same "dump ships the wrong ability" trap as every other mega.
+  **Switch-day: check the in-game roster for Heatran specifically**; if it is in,
+  add species + stone and pin the mega ability in both patch tables.
+- **Roster counts still disagree, so trust only the in-game list.** MetaVGC now
+  renders 234 entries under a "Total Pokémon: 248" header, with only the same four
+  marked new; it counts formes, we count base species (212 staged). Neither number
+  reconciles to 208 + 24 = 232, which is exactly why step 2 reads the game itself.
+- No removals reported anywhere; the "previous sets remain eligible" line holds.
+
 ## Switch-day runbook (Sept 8, 2026, 19:00 PDT)
 
 Steps 1, 3–7 are the M-B runbook verbatim; **step 2 is the real work.**
@@ -251,15 +290,15 @@ Steps 1, 3–7 are the M-B runbook verbatim; **step 2 is the real work.**
    ```
 
    `--mode replace` also reports **removals** — expect none, but check. The ~20
-   unnamed additions land here. Then confirm `items.allow` (the 6 stones are already
+   unnamed additions land here — **watch for Heatran** (teased 2026-08-31; needs
+   `heatran` + `heatranite` + a mega-ability pin if it is in). Then confirm `items.allow`
    in; add anything else the official item list introduces) and update `__notes`.
 3. **Pin the two unrevealed mega abilities** — Golisopod-Mega and Baxcalibur-Mega —
    in BOTH `SPECIES_PATCHES` (`refresh-data.ts`) and `MEGA_ABILITY_OVERRIDES`
    (`gimmicks/mega.ts`), then re-run `refresh-data` (or hand-patch
    `data/species.json` to match). If either is a *custom* effect that touches damage,
    it needs an emulation in `damage.ts` like Aura Guard / Fire Mane / Dragonize.
-   **Also confirm Lucario-Mega-Z's real ability NAME** and, if it is "Wave Shield",
-   flip the pinned name (the engine already accepts both).
+   Lucario-Mega-Z's name is settled (`Aura Guard`, official) - no action there.
 4. `npm run validate-format` — every id must resolve.
 5. Pikalytics: repoint `CHAMPIONS_PIKA_FORMAT` in `packages/core/src/domain/data.ts`
    to `gen9championsvgc2026regmc` (the server's `pikalytics/cache.ts` mirrors the
@@ -280,8 +319,8 @@ Steps 1, 3–7 are the M-B runbook verbatim; **step 2 is the real work.**
 
 - The ~20 unnamed new species.
 - Golisopod-Mega + Baxcalibur-Mega abilities.
-- Lucario-Mega-Z's ability NAME ("Aura Guard" vs "Wave Shield") and whether its
-  halving is a final modifier or a BP/attack modifier.
+- Whether Aura Guard's halving is a final modifier or a BP/attack modifier (we
+  assume final, via the Fluffy alias).
 - Whether the announced Garchomp-Mega-Z typing is really mono-Dragon: our dump,
   Serebii and RotomLabs' dex all say **Dragon**; RotomLabs' *article* says
   "Dragon/Ground". Ground-immune-via-Levitate only makes sense on the mono read, and
@@ -294,3 +333,6 @@ Sources: [pokemon.com — Get Ready for Regulation Set M-C](https://www.pokemon.
 [RotomLabs — Z mega abilities revealed](https://rotomlabs.net/article/abilities-revealed-for-mega-absol-z-mega-lucario-z-and-mega-garchomp-z),
 [RotomLabs dex — Mega Garchomp Z](https://rotomlabs.net/dex/mega-dimension/garchomp/mega-z),
 [Game8 — M-C roster and schedule](https://game8.co/games/Pokemon-Champions/archives/618064).
+Added 2026-09-07: [@Pokemon_Champs — Aura Guard](https://x.com/Pokemon_Champs/status/2095572534347301014),
+[Nintendo Life — Mega Heatran teased](https://www.nintendolife.com/news/2026/08/pokemon-champions-update-adds-z-mega-evolutions-this-september),
+[Game Rant — Golisopod/Baxcalibur abilities announced Sept 8](https://gamerant.com/pokemon-mega-golisopod-baxcalibur-september-8/).
