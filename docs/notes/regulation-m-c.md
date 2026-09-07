@@ -355,7 +355,44 @@ result. And the threat SET is held fixed, so each row isolates the ability and
 excludes the archetype re-tune a real reveal would enable (Speed Boost on a Trick
 Room shell is the clearest case: a floor on its true impact, not an estimate).
 
-SENSITIVITY_RESULTS_PLACEHOLDER
+Run 2026-09-07 vs `TalonFlameAndyBoy`, deepen 1->5, 5 s/board, opponent bring
+exhaustive where the anchor was benched. Score is OURS, + favours us.
+
+| effect class | probe | Golisopod-Mega | Baxcalibur-Mega |
+| --- | --- | --- | --- |
+| *placeholder* | Emergency Exit / Thermal Exchange | **-86** | **-1090** |
+| combat-inert | Shell Armor | -86 | -1090 |
+| offense x1.3 contact | Tough Claws | -86 | -1090 |
+| offense x1.3 secondary | Sheer Force | -86 | -1090 |
+| defense x0.75 vs SE | Filter | **-94** | **-1106** |
+| defense x0.5 Fire/Ice | Thick Fat | **-94** | -1090 |
+| entry disruption | Intimidate | -86 | -1090 |
+| speed plan | Speed Boost | -86 | -1090 |
+| | **envelope** | -94 .. -86 (spread 8) | -1106 .. -1090 (spread 16) |
+
+**Both are ability-INSENSITIVE.** Whatever Champions reveals, neither matchup
+moves more than ~16 points, so the placeholder baselines stand and neither needs
+an emergency re-score on switch-day. Mega Baxcalibur under Trick Room stays our
+worst matchup for reasons that have nothing to do with its ability — 175 Atk off
+a 115 HP frame — and Mega Golisopod stays near-even because Talonflame's Flare
+Blitz does 112-134% to it (4x Fire on a 75 HP frame) through almost anything.
+
+The only class that moves either row is **damage reduction** (Filter, and Thick
+Fat on Golisopod, which halves that Flare Blitz from a guaranteed OHKO to a
+2HKO). If the reveal is a bulk ability, expect a small negative move; every other
+class is worth nothing here.
+
+READ THE FLAT ROWS CAREFULLY. A row at +0 means that class does not change the
+searched line's OUTCOME at this budget — not that the override was ignored. The
+harness was verified two ways: the non-zero Filter/Thick Fat rows prove the
+mutation reaches the search, and a direct calc probe confirmed the swap
+(Talonflame Flare Blitz into Golisopod-Mega: 204-244 plain, 100-124 with Thick
+Fat, 153-183 with Filter). The first version of this sweep returned a perfectly
+flat line for Golisopod for a completely different reason — the mon was benched
+and never played — which is what turned up the defect above.
+
+Absolute scores here are NOT comparable to the 20 s/board gauntlet baselines;
+the sweep is a relative A/B at a fixed budget, which is the only claim it makes.
 
 ### Also shipped
 
@@ -428,7 +465,9 @@ Steps 1, 3–7 are the M-B runbook verbatim; **step 2 is the real work.**
 ## Open questions (resolve on switch-day)
 
 - The ~20 unnamed new species.
-- Golisopod-Mega + Baxcalibur-Mega abilities.
+- Golisopod-Mega + Baxcalibur-Mega abilities. **Measured 2026-09-07 as low-stakes**
+  for us either way (envelopes of 8 and 16 points) — pin them on switch-day for
+  correctness, but neither reveal forces a re-tune. See the sensitivity table above.
 - Whether Aura Guard's halving is a final modifier or a BP/attack modifier (we
   assume final, via the Fluffy alias).
 - Whether the announced Garchomp-Mega-Z typing is really mono-Dragon: our dump,
