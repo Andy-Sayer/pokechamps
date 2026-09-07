@@ -10,6 +10,7 @@ Long-form notes that don't belong in CLAUDE.md (which stays a tight, always-load
 - [champions-custom-data.md](champions-custom-data.md) — the format-custom audit: 4 custom abilities, their handling, 0 custom moves
 - [regulation-m-b.md](regulation-m-b.md) — Reg M-B (June 17 → **Sept 8**), **the live format until switch-day**: confirmed facts (Mega Raichu X/Y), tactics implications, and the switch-day runbook (complete — reused by M-C)
 - [regulation-m-c.md](regulation-m-c.md) — Reg M-C (**Sept 8 → Dec 1, 2026**), **the next format, partially staged**: the six new megas (incl. the Legends Z-A "Z" formes), the Aura Guard emulation, what is still unpublished, and the switch-day runbook
+- [regulation-switch-research-prompt.md](regulation-switch-research-prompt.md) — the reusable switch-day research prompt (abilities, roster, patch notes) and the guardrails each failure earned
 - [roadmap-2026-08.md](roadmap-2026-08.md) — **start here for status**: the current audited backlog (2026-08-01, verified against code by a three-way audit), tiered by leverage — live shakeout + the Sept 8 rotation, quick wins, engine gaps, vision grind, team/training arcs, doc hygiene
 - [roadmap.md](roadmap.md) — strategic pillar-grouped backlog + the J north-star; the priority tiers are superseded by roadmap-2026-08.md, the pillar prose is historical
 - [roadmap-2026-06.md](roadmap-2026-06.md) — ✅ CLOSED/historical: June's time-boxed execution roadmap (per-move cells, Hail-Mary outs, inference backward half, sim oracle + replay ingest, deploy validation), all shipped by 2026-06-12
